@@ -1,0 +1,33 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_sap_backend_manager,sap.backend manager,model_sap_backend,sap_integration.group_sap_manager,1,1,1,1
+access_sap_backend_user,sap.backend user,model_sap_backend,sap_integration.group_sap_user,1,0,0,0
+access_sap_connector_manager,sap.connector manager,model_sap_connector,sap_integration.group_sap_manager,1,1,1,1
+access_sap_connector_user,sap.connector user,model_sap_connector,sap_integration.group_sap_user,1,0,0,0
+access_sap_customer_sync_manager,sap.customer.sync manager,model_sap_customer_sync,sap_integration.group_sap_manager,1,1,1,1
+access_sap_customer_sync_user,sap.customer.sync user,model_sap_customer_sync,sap_integration.group_sap_user,1,1,0,0
+access_sap_product_sync_manager,sap.product.sync manager,model_sap_product_sync,sap_integration.group_sap_manager,1,1,1,1
+access_sap_product_sync_user,sap.product.sync user,model_sap_product_sync,sap_integration.group_sap_user,1,1,0,0
+access_sap_quotation_sync_manager,sap.quotation.sync manager,model_sap_quotation_sync,sap_integration.group_sap_manager,1,1,1,1
+access_sap_quotation_sync_user,sap.quotation.sync user,model_sap_quotation_sync,sap_integration.group_sap_user,1,1,0,0
+access_sap_sale_sync_manager,sap.sale.sync manager,model_sap_sale_sync,sap_integration.group_sap_manager,1,1,1,1
+access_sap_sale_sync_user,sap.sale.sync user,model_sap_sale_sync,sap_integration.group_sap_user,1,1,0,0
+access_sap_invoice_sync_manager,sap.invoice.sync manager,model_sap_invoice_sync,sap_integration.group_sap_manager,1,1,1,1
+access_sap_invoice_sync_user,sap.invoice.sync user,model_sap_invoice_sync,sap_integration.group_sap_user,1,1,0,0
+access_sap_uom_sync_manager,sap.uom.sync manager,model_sap_uom_sync,sap_integration.group_sap_manager,1,1,1,1
+access_sap_uom_sync_user,sap.uom.sync user,model_sap_uom_sync,sap_integration.group_sap_user,1,1,0,0
+access_sap_pricelist_sync_manager,sap.pricelist.sync manager,model_sap_pricelist_sync,sap_integration.group_sap_manager,1,1,1,1
+access_sap_pricelist_sync_user,sap.pricelist.sync user,model_sap_pricelist_sync,sap_integration.group_sap_user,1,1,0,0
+access_sap_res_partner_manager,sap.res.partner manager,model_sap_res_partner,sap_integration.group_sap_manager,1,1,1,1
+access_sap_res_partner_user,sap.res.partner user,model_sap_res_partner,sap_integration.group_sap_user,1,1,0,0
+access_sap_product_product_manager,sap.product.product manager,model_sap_product_product,sap_integration.group_sap_manager,1,1,1,1
+access_sap_product_product_user,sap.product.product user,model_sap_product_product,sap_integration.group_sap_user,1,1,0,0
+access_sap_sale_order_manager,sap.sale.order manager,model_sap_sale_order,sap_integration.group_sap_manager,1,1,1,1
+access_sap_sale_order_user,sap.sale.order user,model_sap_sale_order,sap_integration.group_sap_user,1,1,0,0
+access_sap_account_move_manager,sap.account.move manager,model_sap_account_move,sap_integration.group_sap_manager,1,1,1,1
+access_sap_account_move_user,sap.account.move user,model_sap_account_move,sap_integration.group_sap_user,1,1,0,0
+access_sap_import_wizard_manager,sap.import.wizard manager,model_sap_import_wizard,sap_integration.group_sap_manager,1,1,1,1
+access_sap_import_wizard_user,sap.import.wizard user,model_sap_import_wizard,sap_integration.group_sap_user,1,1,1,1
+access_sap_dashboard_manager,sap.dashboard manager,model_sap_dashboard,sap_integration.group_sap_manager,1,1,1,0
+access_sap_dashboard_user,sap.dashboard user,model_sap_dashboard,sap_integration.group_sap_user,1,0,0,0
+
+

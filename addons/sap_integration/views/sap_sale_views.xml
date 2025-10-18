@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Menu Item -->
+    <menuitem id="menu_sap_sale_sync"
+              name="Sale Sync"
+              parent="menu_sap_integration"
+              action="action_sap_sale_sync"
+              sequence="60"/>
+</odoo>
+
+
+
+
+

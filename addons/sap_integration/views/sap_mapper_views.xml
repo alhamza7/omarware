@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- UOM Mapping Views -->
+    <record id="view_sap_uom_sync_list" model="ir.ui.view">
+        <field name="name">sap.uom.sync.list</field>
+        <field name="model">sap.uom.sync</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="sap_uom_id"/>
+                <field name="sap_uom_name"/>
+                <field name="odoo_uom_id"/>
+                <field name="backend_id"/>
+                <field name="sync_status"/>
+                <field name="last_sync"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_sap_uom_sync_form" model="ir.ui.view">
+        <field name="name">sap.uom.sync.form</field>
+        <field name="model">sap.uom.sync</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button name="sync_from_sap" string="Sync from SAP" type="object" class="btn-primary"/>
+                    <button name="sync_to_sap" string="Sync to SAP" type="object" class="btn-secondary"/>
+                    <field name="sync_status" widget="statusbar"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group string="SAP Information">
+                            <field name="backend_id"/>
+                            <field name="connector_id"/>
+                            <field name="sap_uom_id"/>
+                            <field name="sap_uom_name"/>
+                        </group>
+                        <group string="Odoo Information">
+                            <field name="odoo_uom_id"/>
+                            <field name="sync_direction"/>
+                            <field name="last_sync"/>
+                        </group>
+                    </group>
+                    <group string="Sync Settings">
+                        <field name="retry_count"/>
+                        <field name="max_retries"/>
+                    </group>
+                    <group string="Error Log" invisible="not error_message">
+                        <field name="error_message" nolabel="1"/>
+                    </group>
+                    <notebook>
+                        <page string="SAP Data">
+                            <field name="sap_data"/>
+                        </page>
+                        <page string="Odoo Data">
+                            <field name="odoo_data"/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_sap_uom_sync" model="ir.actions.act_window">
+        <field name="name">UOM Mapping</field>
+        <field name="res_model">sap.uom.sync</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <menuitem id="menu_sap_uom_sync"
+              name="UOM Mapping"
+              parent="menu_sap_integration"
+              action="action_sap_uom_sync"
+              sequence="40"/>
+
+    <!-- Pricelist Mapping Views -->
+    <record id="view_sap_pricelist_sync_list" model="ir.ui.view">
+        <field name="name">sap.pricelist.sync.list</field>
+        <field name="model">sap.pricelist.sync</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="sap_pricelist_id"/>
+                <field name="sap_pricelist_name"/>
+                <field name="odoo_pricelist_id"/>
+                <field name="backend_id"/>
+                <field name="sync_status"/>
+                <field name="last_sync"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_sap_pricelist_sync_form" model="ir.ui.view">
+        <field name="name">sap.pricelist.sync.form</field>
+        <field name="model">sap.pricelist.sync</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button name="sync_from_sap" string="Sync from SAP" type="object" class="btn-primary"/>
+                    <button name="sync_to_sap" string="Sync to SAP" type="object" class="btn-secondary"/>
+                    <field name="sync_status" widget="statusbar"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group string="SAP Information">
+                            <field name="backend_id"/>
+                            <field name="connector_id"/>
+                            <field name="sap_pricelist_id"/>
+                            <field name="sap_pricelist_name"/>
+                        </group>
+                        <group string="Odoo Information">
+                            <field name="odoo_pricelist_id"/>
+                            <field name="sync_direction"/>
+                            <field name="last_sync"/>
+                        </group>
+                    </group>
+                    <group string="Sync Settings">
+                        <field name="retry_count"/>
+                        <field name="max_retries"/>
+                    </group>
+                    <group string="Error Log" invisible="not error_message">
+                        <field name="error_message" nolabel="1"/>
+                    </group>
+                    <notebook>
+                        <page string="SAP Data">
+                            <field name="sap_data"/>
+                        </page>
+                        <page string="Odoo Data">
+                            <field name="odoo_data"/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_sap_pricelist_sync" model="ir.actions.act_window">
+        <field name="name">Pricelist Mapping</field>
+        <field name="res_model">sap.pricelist.sync</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <menuitem id="menu_sap_pricelist_sync"
+              name="Pricelist Mapping"
+              parent="menu_sap_integration"
+              action="action_sap_pricelist_sync"
+              sequence="50"/>
+</odoo>
+

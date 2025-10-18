@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- SAP Import Wizard Form View -->
+    <record id="view_sap_import_wizard_form" model="ir.ui.view">
+        <field name="name">sap.import.wizard.form</field>
+        <field name="model">sap.import.wizard</field>
+        <field name="arch" type="xml">
+            <form string="SAP Bulk Import">
+                <header>
+                    <button name="action_start_import" 
+                            string="Start Import" 
+                            type="object" 
+                            class="btn-primary"
+                            invisible="state != 'draft'"/>
+                    <button name="action_view_imported" 
+                            string="View Imported Records" 
+                            type="object" 
+                            class="btn-secondary"
+                            invisible="state != 'done'"/>
+                    <button name="action_close" 
+                            string="Close" 
+                            type="object" 
+                            class="btn-secondary"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,importing,done"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="entity_type" invisible="1"/>
+                            <span invisible="state != 'draft'">📥 SAP Bulk Import</span>
+                            <span invisible="state != 'importing'">⏳ Importing...</span>
+                            <span invisible="state != 'done'">✅ Import Complete!</span>
+                            <span invisible="state != 'error'">❌ Import Failed</span>
+                        </h1>
+                    </div>
+                    
+                    <group name="configuration" invisible="state not in ['draft']">
+                        <group>
+                            <field name="backend_id" options="{'no_create': True}"/>
+                            <field name="entity_type" widget="radio"/>
+                        </group>
+                        <group>
+                            <field name="import_mode" widget="radio"/>
+                            <field name="batch_size"/>
+                        </group>
+                    </group>
+                    
+                    <group name="filter_options" invisible="state not in ['draft']">
+                        <group string="Filter Options" invisible="import_mode != 'filter'">
+                            <field name="filter_query" nolabel="1" placeholder="CardType eq 'cCustomer' and Active eq 'Y'"/>
+                            <div class="alert alert-info">
+                                <strong>💡 OData Filter Examples:</strong><br/>
+                                - Partners: <code>CardType eq 'cCustomer'</code><br/>
+                                - Products: <code>ItemsGroupCode eq 100</code><br/>
+                                - Active Only: <code>Active eq 'Y'</code>
+                            </div>
+                        </group>
+                        
+                        <group string="Specific IDs" invisible="import_mode != 'specific'">
+                            <field name="specific_ids" nolabel="1" placeholder="C00001, C00002, C00003"/>
+                            <div class="alert alert-info">
+                                <strong>💡 Enter SAP IDs separated by commas</strong><br/>
+                                - Partners: CardCode (e.g., C00001)<br/>
+                                - Products: ItemCode (e.g., ITEM001)<br/>
+                                - Orders: DocEntry (e.g., 123)
+                            </div>
+                        </group>
+                    </group>
+                    
+                    <group name="options" invisible="state not in ['draft']">
+                        <group string="Import Options">
+                            <field name="skip_existing"/>
+                            <field name="update_existing" invisible="skip_existing"/>
+                        </group>
+                    </group>
+                    
+                    <group name="progress" invisible="state not in ['importing', 'done', 'error']">
+                        <group string="Import Results">
+                            <field name="progress" widget="progressbar"/>
+                            <field name="imported_count" string="✅ Imported"/>
+                            <field name="skipped_count" string="⏭️ Skipped"/>
+                            <field name="error_count" string="❌ Errors"/>
+                        </group>
+                    </group>
+                    
+                    <notebook invisible="state not in ['done', 'error']">
+                        <page string="Error Log" invisible="not error_log">
+                            <field name="error_log" nolabel="1" widget="text"/>
+                        </page>
+                    </notebook>
+                    
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Action -->
+    <record id="action_sap_import_wizard" model="ir.actions.act_window">
+        <field name="name">Bulk Import from SAP</field>
+        <field name="res_model">sap.import.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+        <field name="binding_model_id" ref="model_sap_backend"/>
+        <field name="binding_view_types">form</field>
+    </record>
+
+    <!-- Menu Item -->
+    <menuitem id="menu_sap_import_wizard"
+              name="Bulk Import"
+              parent="menu_sap_integration"
+              action="action_sap_import_wizard"
+              sequence="5"/>
+</odoo>
+

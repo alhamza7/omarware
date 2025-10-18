@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <!-- SAP Integration Categories -->
+        <record id="module_category_sap_integration" model="ir.module.category">
+            <field name="name">SAP Integration</field>
+            <field name="description">Manage SAP Integration access rights</field>
+            <field name="sequence">20</field>
+        </record>
+
+        <!-- SAP Privileges for Odoo 19+ -->
+        <record model="res.groups.privilege" id="res_groups_privilege_sap_user">
+            <field name="name">SAP User</field>
+            <field name="category_id" ref="module_category_sap_integration"/>
+        </record>
+        
+        <record model="res.groups.privilege" id="res_groups_privilege_sap_manager">
+            <field name="name">SAP Manager</field>
+            <field name="category_id" ref="module_category_sap_integration"/>
+        </record>
+
+        <!-- SAP User Group: Can view and sync -->
+        <record id="group_sap_user" model="res.groups">
+            <field name="name">SAP User</field>
+            <field name="privilege_id" ref="res_groups_privilege_sap_user"/>
+            <field name="comment">Can view SAP data and trigger synchronization</field>
+        </record>
+
+        <!-- SAP Manager Group: Full access -->
+        <record id="group_sap_manager" model="res.groups">
+            <field name="name">SAP Manager</field>
+            <field name="privilege_id" ref="res_groups_privilege_sap_manager"/>
+            <field name="implied_ids" eval="[(4, ref('group_sap_user'))]"/>
+            <field name="comment">Full access to SAP Integration configuration and data</field>
+        </record>
+
+        <!-- Record Rules: Users can only read -->
+        <record id="sap_backend_user_rule" model="ir.rule">
+            <field name="name">SAP Backend: User Read Only</field>
+            <field name="model_id" ref="model_sap_backend"/>
+            <field name="domain_force">[(1, '=', 1)]</field>
+            <field name="groups" eval="[(4, ref('group_sap_user'))]"/>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="False"/>
+            <field name="perm_create" eval="False"/>
+            <field name="perm_unlink" eval="False"/>
+        </record>
+
+        <!-- Record Rules: Managers have full access -->
+        <record id="sap_backend_manager_rule" model="ir.rule">
+            <field name="name">SAP Backend: Manager Full Access</field>
+            <field name="model_id" ref="model_sap_backend"/>
+            <field name="domain_force">[(1, '=', 1)]</field>
+            <field name="groups" eval="[(4, ref('group_sap_manager'))]"/>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="True"/>
+            <field name="perm_create" eval="True"/>
+            <field name="perm_unlink" eval="True"/>
+        </record>
+
+        <!-- Binding Models: Users can read and write their synced data -->
+        <record id="sap_binding_user_rule" model="ir.rule">
+            <field name="name">SAP Bindings: User Access</field>
+            <field name="model_id" ref="model_sap_res_partner"/>
+            <field name="domain_force">[(1, '=', 1)]</field>
+            <field name="groups" eval="[(4, ref('group_sap_user'))]"/>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="True"/>
+            <field name="perm_create" eval="False"/>
+            <field name="perm_unlink" eval="False"/>
+        </record>
+
+        <!-- Binding Models: Managers can do everything -->
+        <record id="sap_binding_manager_rule" model="ir.rule">
+            <field name="name">SAP Bindings: Manager Full Access</field>
+            <field name="model_id" ref="model_sap_res_partner"/>
+            <field name="domain_force">[(1, '=', 1)]</field>
+            <field name="groups" eval="[(4, ref('group_sap_manager'))]"/>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="True"/>
+            <field name="perm_create" eval="True"/>
+            <field name="perm_unlink" eval="True"/>
+        </record>
+
+        <!-- Similar rules for other binding models -->
+        <record id="sap_product_binding_user_rule" model="ir.rule">
+            <field name="name">SAP Product Bindings: User Access</field>
+            <field name="model_id" ref="model_sap_product_product"/>
+            <field name="domain_force">[(1, '=', 1)]</field>
+            <field name="groups" eval="[(4, ref('group_sap_user'))]"/>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="True"/>
+            <field name="perm_create" eval="False"/>
+            <field name="perm_unlink" eval="False"/>
+        </record>
+
+        <record id="sap_product_binding_manager_rule" model="ir.rule">
+            <field name="name">SAP Product Bindings: Manager Full Access</field>
+            <field name="model_id" ref="model_sap_product_product"/>
+            <field name="domain_force">[(1, '=', 1)]</field>
+            <field name="groups" eval="[(4, ref('group_sap_manager'))]"/>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="True"/>
+            <field name="perm_create" eval="True"/>
+            <field name="perm_unlink" eval="True"/>
+        </record>
+
+        <record id="sap_order_binding_user_rule" model="ir.rule">
+            <field name="name">SAP Order Bindings: User Access</field>
+            <field name="model_id" ref="model_sap_sale_order"/>
+            <field name="domain_force">[(1, '=', 1)]</field>
+            <field name="groups" eval="[(4, ref('group_sap_user'))]"/>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="True"/>
+            <field name="perm_create" eval="False"/>
+            <field name="perm_unlink" eval="False"/>
+        </record>
+
+        <record id="sap_order_binding_manager_rule" model="ir.rule">
+            <field name="name">SAP Order Bindings: Manager Full Access</field>
+            <field name="model_id" ref="model_sap_sale_order"/>
+            <field name="domain_force">[(1, '=', 1)]</field>
+            <field name="groups" eval="[(4, ref('group_sap_manager'))]"/>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="True"/>
+            <field name="perm_create" eval="True"/>
+            <field name="perm_unlink" eval="True"/>
+        </record>
+
+    </data>
+</odoo>
+

@@ -1,0 +1,377 @@
+2025-10-16 07:04:07,522 25628 DEBUG ? odoo.netsvc: logger level set: "odoo.http.rpc.request:INFO" 
+2025-10-16 07:04:07,522 25628 DEBUG ? odoo.netsvc: logger level set: "odoo.http.rpc.response:INFO" 
+2025-10-16 07:04:07,522 25628 DEBUG ? odoo.netsvc: logger level set: ":INFO" 
+2025-10-16 07:04:07,522 25628 DEBUG ? odoo.netsvc: logger level set: "odoo:DEBUG" 
+2025-10-16 07:04:07,522 25628 DEBUG ? odoo.netsvc: logger level set: "odoo.sql_db:INFO" 
+2025-10-16 07:04:07,522 25628 DEBUG ? odoo.netsvc: logger level set: ":INFO" 
+2025-10-16 07:04:07,522 25628 WARNING ? odoo.tools.config: unknown option 'db_filter' in the config file at l:\odoo\odoo.conf, option stored as-is, without parsing 
+2025-10-16 07:04:07,522 25628 WARNING ? odoo.tools.config: unknown option 'db_filter' in the config file at l:\odoo\odoo.conf, option stored as-is, without parsing 
+2025-10-16 07:04:07,528 25628 INFO ? odoo: Odoo version 19.0 
+2025-10-16 07:04:07,528 25628 INFO ? odoo: Using configuration file at l:\odoo\odoo.conf 
+2025-10-16 07:04:07,528 25628 INFO ? odoo: addons paths: _NamespacePath(['L:\\odoo\\odoo\\addons', 'C:\\Users\\lenovo\\AppData\\Local\\OpenERP S.A.\\Odoo\\addons\\19.0', 'l:\\odoo\\addons', 'l:\\odoo\\odoo\\addons']) 
+2025-10-16 07:04:07,528 25628 INFO ? odoo: database: odoo_user@localhost:5432 
+2025-10-16 07:04:07,856 25628 DEBUG ? odoo.service.server: Setting signal handlers 
+2025-10-16 07:04:07,885 25628 DEBUG lugal odoo.registry: Multiprocess load registry signaling: [Registry: 39] [Cache default: 20] [Cache assets: 1] [Cache stable: 5] [Cache templates: 2] [Cache routing: 1] [Cache groups: 3] 
+2025-10-16 07:04:07,900 25628 INFO lugal odoo.modules.loading: loading 1 modules... 
+2025-10-16 07:04:07,900 25628 DEBUG lugal odoo.modules.loading: Loading module base (1/1) 
+2025-10-16 07:04:07,902 25628 DEBUG lugal odoo.modules.loading: Module base loaded in 0.00s, 0 queries 
+2025-10-16 07:04:07,902 25628 INFO lugal odoo.modules.loading: 1 modules loaded in 0.00s, 0 queries (+0 extra) 
+2025-10-16 07:04:07,916 25628 INFO lugal odoo.modules.loading: updating modules list 
+2025-10-16 07:04:07,920 25628 INFO lugal odoo.addons.base.models.ir_module: ALLOW access to module.update_list on [] to user __system__ #1 via n/a 
+2025-10-16 07:04:08,057 25628 WARNING lugal odoo.modules.module: The module component has an incompatible version, setting installable=False 
+2025-10-16 07:04:08,058 25628 WARNING lugal odoo.modules.module: The module component_event has an incompatible version, setting installable=False 
+2025-10-16 07:04:08,059 25628 WARNING lugal odoo.modules.module: The module connector has an incompatible version, setting installable=False 
+2025-10-16 07:04:08,060 25628 WARNING lugal odoo.modules.module: The module connector_base_product has an incompatible version, setting installable=False 
+2025-10-16 07:04:08,493 25628 WARNING lugal odoo.modules.module: The module test_component has an incompatible version, setting installable=False 
+2025-10-16 07:04:08,493 25628 WARNING lugal odoo.modules.module: The module test_connector has an incompatible version, setting installable=False 
+2025-10-16 07:04:08,555 25628 INFO lugal odoo.addons.base.models.ir_module: ALLOW access to module.button_install on ['SAP Integration'] to user __system__ #1 via n/a 
+2025-10-16 07:04:08,589 25628 INFO lugal odoo.modules.module_graph: module sap_integration: some depends are not loaded, skipped 
+2025-10-16 07:04:08,591 25628 DEBUG lugal odoo.modules.loading: Updating graph with 168 more modules 
+2025-10-16 07:04:08,591 25628 INFO lugal odoo.modules.loading: loading 168 modules... 
+2025-10-16 07:04:08,591 25628 DEBUG lugal odoo.modules.loading: Loading module rpc (2/168) 
+2025-10-16 07:04:08,591 25628 DEBUG lugal odoo.modules.loading: Module rpc loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,591 25628 DEBUG lugal odoo.modules.loading: Loading module social_media (3/168) 
+2025-10-16 07:04:08,592 25628 DEBUG lugal odoo.modules.loading: Module social_media loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,592 25628 DEBUG lugal odoo.modules.loading: Loading module uom (4/168) 
+2025-10-16 07:04:08,594 25628 DEBUG lugal odoo.modules.loading: Module uom loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,594 25628 DEBUG lugal odoo.modules.loading: Loading module web (5/168) 
+2025-10-16 07:04:08,595 25628 DEBUG lugal odoo.modules.loading: Module web loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,595 25628 DEBUG lugal odoo.modules.loading: Loading module api_doc (6/168) 
+2025-10-16 07:04:08,598 25628 DEBUG lugal odoo.modules.loading: Module api_doc loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,598 25628 DEBUG lugal odoo.modules.loading: Loading module auth_totp (7/168) 
+2025-10-16 07:04:08,609 25628 DEBUG lugal odoo.modules.loading: Module auth_totp loaded in 0.01s, 0 queries 
+2025-10-16 07:04:08,609 25628 DEBUG lugal odoo.modules.loading: Loading module barcodes (8/168) 
+2025-10-16 07:04:08,611 25628 DEBUG lugal odoo.modules.loading: Module barcodes loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,611 25628 DEBUG lugal odoo.modules.loading: Loading module base_import (9/168) 
+2025-10-16 07:04:08,614 25628 DEBUG lugal odoo.modules.loading: Module base_import loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,614 25628 DEBUG lugal odoo.modules.loading: Loading module base_import_module (10/168) 
+2025-10-16 07:04:08,617 25628 DEBUG lugal odoo.modules.loading: Module base_import_module loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,617 25628 DEBUG lugal odoo.modules.loading: Loading module base_setup (11/168) 
+2025-10-16 07:04:08,621 25628 DEBUG lugal odoo.modules.loading: Module base_setup loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,621 25628 DEBUG lugal odoo.modules.loading: Loading module bus (12/168) 
+2025-10-16 07:04:08,628 25628 DEBUG lugal odoo.modules.loading: Module bus loaded in 0.01s, 0 queries 
+2025-10-16 07:04:08,628 25628 DEBUG lugal odoo.modules.loading: Loading module google_address_autocomplete (13/168) 
+2025-10-16 07:04:08,628 25628 DEBUG lugal odoo.modules.loading: Module google_address_autocomplete loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,628 25628 DEBUG lugal odoo.modules.loading: Loading module http_routing (14/168) 
+2025-10-16 07:04:08,628 25628 DEBUG lugal odoo.modules.loading: Module http_routing loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,628 25628 DEBUG lugal odoo.modules.loading: Loading module iot_base (15/168) 
+2025-10-16 07:04:08,628 25628 DEBUG lugal odoo.modules.loading: Module iot_base loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,628 25628 DEBUG lugal odoo.modules.loading: Loading module onboarding (16/168) 
+2025-10-16 07:04:08,628 25628 DEBUG lugal odoo.modules.loading: Module onboarding loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,628 25628 DEBUG lugal odoo.modules.loading: Loading module resource (17/168) 
+2025-10-16 07:04:08,641 25628 DEBUG lugal odoo.modules.loading: Module resource loaded in 0.01s, 0 queries 
+2025-10-16 07:04:08,641 25628 DEBUG lugal odoo.modules.loading: Loading module utm (18/168) 
+2025-10-16 07:04:08,644 25628 DEBUG lugal odoo.modules.loading: Module utm loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,644 25628 DEBUG lugal odoo.modules.loading: Loading module web_hierarchy (19/168) 
+2025-10-16 07:04:08,646 25628 DEBUG lugal odoo.modules.loading: Module web_hierarchy loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,646 25628 DEBUG lugal odoo.modules.loading: Loading module web_tour (20/168) 
+2025-10-16 07:04:08,649 25628 DEBUG lugal odoo.modules.loading: Module web_tour loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,649 25628 DEBUG lugal odoo.modules.loading: Loading module auth_passkey (21/168) 
+2025-10-16 07:04:08,686 25628 DEBUG lugal odoo.modules.loading: Module auth_passkey loaded in 0.04s, 0 queries 
+2025-10-16 07:04:08,686 25628 DEBUG lugal odoo.modules.loading: Loading module barcodes_gs1_nomenclature (22/168) 
+2025-10-16 07:04:08,689 25628 DEBUG lugal odoo.modules.loading: Module barcodes_gs1_nomenclature loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,689 25628 DEBUG lugal odoo.modules.loading: Loading module base_geolocalize (23/168) 
+2025-10-16 07:04:08,691 25628 DEBUG lugal odoo.modules.loading: Module base_geolocalize loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,691 25628 DEBUG lugal odoo.modules.loading: Loading module google_recaptcha (24/168) 
+2025-10-16 07:04:08,692 25628 DEBUG lugal odoo.modules.loading: Module google_recaptcha loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,693 25628 DEBUG lugal odoo.modules.loading: Loading module html_editor (25/168) 
+2025-10-16 07:04:08,814 25628 DEBUG lugal odoo.modules.loading: Module html_editor loaded in 0.12s, 0 queries 
+2025-10-16 07:04:08,814 25628 DEBUG lugal odoo.modules.loading: Loading module iap (26/168) 
+2025-10-16 07:04:08,814 25628 DEBUG lugal odoo.modules.loading: Module iap loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,814 25628 DEBUG lugal odoo.modules.loading: Loading module mail (27/168) 
+2025-10-16 07:04:08,816 25628 DEBUG lugal odoo.modules.loading: Module mail loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,816 25628 DEBUG lugal odoo.modules.loading: Loading module web_unsplash (28/168) 
+2025-10-16 07:04:08,820 25628 DEBUG lugal odoo.modules.loading: Module web_unsplash loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,820 25628 DEBUG lugal odoo.modules.loading: Loading module analytic (29/168) 
+2025-10-16 07:04:08,824 25628 DEBUG lugal odoo.modules.loading: Module analytic loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,824 25628 DEBUG lugal odoo.modules.loading: Loading module auth_signup (30/168) 
+2025-10-16 07:04:08,827 25628 DEBUG lugal odoo.modules.loading: Module auth_signup loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,827 25628 DEBUG lugal odoo.modules.loading: Loading module auth_totp_mail (31/168) 
+2025-10-16 07:04:08,830 25628 DEBUG lugal odoo.modules.loading: Module auth_totp_mail loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,830 25628 DEBUG lugal odoo.modules.loading: Loading module base_install_request (32/168) 
+2025-10-16 07:04:08,832 25628 DEBUG lugal odoo.modules.loading: Module base_install_request loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,832 25628 DEBUG lugal odoo.modules.loading: Loading module calendar (33/168) 
+2025-10-16 07:04:08,845 25628 DEBUG lugal odoo.modules.loading: Module calendar loaded in 0.01s, 0 queries 
+2025-10-16 07:04:08,846 25628 DEBUG lugal odoo.modules.loading: Loading module contacts (34/168) 
+2025-10-16 07:04:08,848 25628 DEBUG lugal odoo.modules.loading: Module contacts loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,848 25628 DEBUG lugal odoo.modules.loading: Loading module fleet (35/168) 
+2025-10-16 07:04:08,858 25628 DEBUG lugal odoo.modules.loading: Module fleet loaded in 0.01s, 0 queries 
+2025-10-16 07:04:08,858 25628 DEBUG lugal odoo.modules.loading: Loading module google_gmail (36/168) 
+2025-10-16 07:04:08,863 25628 DEBUG lugal odoo.modules.loading: Module google_gmail loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,863 25628 DEBUG lugal odoo.modules.loading: Loading module html_builder (37/168) 
+2025-10-16 07:04:08,863 25628 DEBUG lugal odoo.modules.loading: Module html_builder loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,863 25628 DEBUG lugal odoo.modules.loading: Loading module iap_mail (38/168) 
+2025-10-16 07:04:08,865 25628 DEBUG lugal odoo.modules.loading: Module iap_mail loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,865 25628 DEBUG lugal odoo.modules.loading: Loading module link_tracker (39/168) 
+2025-10-16 07:04:08,868 25628 DEBUG lugal odoo.modules.loading: Module link_tracker loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,868 25628 DEBUG lugal odoo.modules.loading: Loading module mail_bot (40/168) 
+2025-10-16 07:04:08,871 25628 DEBUG lugal odoo.modules.loading: Module mail_bot loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,871 25628 DEBUG lugal odoo.modules.loading: Loading module maintenance (41/168) 
+2025-10-16 07:04:08,873 25628 DEBUG lugal odoo.modules.loading: Module maintenance loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,873 25628 DEBUG lugal odoo.modules.loading: Loading module microsoft_outlook (42/168) 
+2025-10-16 07:04:08,876 25628 DEBUG lugal odoo.modules.loading: Module microsoft_outlook loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,876 25628 DEBUG lugal odoo.modules.loading: Loading module phone_validation (43/168) 
+2025-10-16 07:04:08,882 25628 DEBUG lugal odoo.modules.loading: Module phone_validation loaded in 0.01s, 0 queries 
+2025-10-16 07:04:08,883 25628 DEBUG lugal odoo.modules.loading: Loading module privacy_lookup (44/168) 
+2025-10-16 07:04:08,885 25628 DEBUG lugal odoo.modules.loading: Module privacy_lookup loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,885 25628 DEBUG lugal odoo.modules.loading: Loading module product (45/168) 
+2025-10-16 07:04:08,901 25628 DEBUG lugal odoo.modules.loading: Module product loaded in 0.02s, 0 queries 
+2025-10-16 07:04:08,901 25628 DEBUG lugal odoo.modules.loading: Loading module rating (46/168) 
+2025-10-16 07:04:08,905 25628 DEBUG lugal odoo.modules.loading: Module rating loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,905 25628 DEBUG lugal odoo.modules.loading: Loading module resource_mail (47/168) 
+2025-10-16 07:04:08,906 25628 DEBUG lugal odoo.modules.loading: Module resource_mail loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,906 25628 DEBUG lugal odoo.modules.loading: Loading module sales_team (48/168) 
+2025-10-16 07:04:08,909 25628 DEBUG lugal odoo.modules.loading: Module sales_team loaded in 0.00s, 0 queries 
+2025-10-16 07:04:08,909 25628 DEBUG lugal odoo.modules.loading: Loading module partner_autocomplete (49/168) 
+2025-10-16 07:04:08,917 25628 DEBUG lugal odoo.modules.loading: Module partner_autocomplete loaded in 0.01s, 0 queries 
+2025-10-16 07:04:08,917 25628 DEBUG lugal odoo.modules.loading: Loading module portal (50/168) 
+2025-10-16 07:04:08,928 25628 DEBUG lugal odoo.modules.loading: Module portal loaded in 0.01s, 0 queries 
+2025-10-16 07:04:08,929 25628 DEBUG lugal odoo.modules.loading: Loading module sms (51/168) 
+2025-10-16 07:04:08,942 25628 DEBUG lugal odoo.modules.loading: Module sms loaded in 0.01s, 0 queries 
+2025-10-16 07:04:08,942 25628 DEBUG lugal odoo.modules.loading: Loading module snailmail (52/168) 
+2025-10-16 07:04:09,016 25628 DEBUG lugal odoo.modules.loading: Module snailmail loaded in 0.07s, 0 queries 
+2025-10-16 07:04:09,016 25628 DEBUG lugal odoo.modules.loading: Loading module auth_passkey_portal (53/168) 
+2025-10-16 07:04:09,016 25628 DEBUG lugal odoo.modules.loading: Module auth_passkey_portal loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,017 25628 DEBUG lugal odoo.modules.loading: Loading module auth_totp_portal (54/168) 
+2025-10-16 07:04:09,018 25628 DEBUG lugal odoo.modules.loading: Module auth_totp_portal loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,018 25628 DEBUG lugal odoo.modules.loading: Loading module calendar_sms (55/168) 
+2025-10-16 07:04:09,020 25628 DEBUG lugal odoo.modules.loading: Module calendar_sms loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,020 25628 DEBUG lugal odoo.modules.loading: Loading module digest (56/168) 
+2025-10-16 07:04:09,023 25628 DEBUG lugal odoo.modules.loading: Module digest loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,023 25628 DEBUG lugal odoo.modules.loading: Loading module payment (57/168) 
+2025-10-16 07:04:09,038 25628 DEBUG lugal odoo.modules.loading: Module payment loaded in 0.02s, 0 queries 
+2025-10-16 07:04:09,038 25628 DEBUG lugal odoo.modules.loading: Loading module portal_rating (58/168) 
+2025-10-16 07:04:09,041 25628 DEBUG lugal odoo.modules.loading: Module portal_rating loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,041 25628 DEBUG lugal odoo.modules.loading: Loading module spreadsheet (59/168) 
+2025-10-16 07:04:09,044 25628 DEBUG lugal odoo.modules.loading: Module spreadsheet loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,044 25628 DEBUG lugal odoo.modules.loading: Loading module account (60/168) 
+2025-10-16 07:04:09,135 25628 DEBUG lugal odoo.modules.loading: Module account loaded in 0.09s, 0 queries 
+2025-10-16 07:04:09,135 25628 DEBUG lugal odoo.modules.loading: Loading module crm (61/168) 
+2025-10-16 07:04:09,146 25628 DEBUG lugal odoo.modules.loading: Module crm loaded in 0.01s, 0 queries 
+2025-10-16 07:04:09,146 25628 DEBUG lugal odoo.modules.loading: Loading module hr (62/168) 
+2025-10-16 07:04:09,164 25628 DEBUG lugal odoo.modules.loading: Module hr loaded in 0.02s, 0 queries 
+2025-10-16 07:04:09,164 25628 DEBUG lugal odoo.modules.loading: Loading module payment_custom (63/168) 
+2025-10-16 07:04:09,166 25628 DEBUG lugal odoo.modules.loading: Module payment_custom loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,166 25628 DEBUG lugal odoo.modules.loading: Loading module project (64/168) 
+2025-10-16 07:04:09,184 25628 DEBUG lugal odoo.modules.loading: Module project loaded in 0.02s, 0 queries 
+2025-10-16 07:04:09,184 25628 DEBUG lugal odoo.modules.loading: Loading module spreadsheet_dashboard (65/168) 
+2025-10-16 07:04:09,187 25628 DEBUG lugal odoo.modules.loading: Module spreadsheet_dashboard loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,188 25628 DEBUG lugal odoo.modules.loading: Loading module stock (66/168) 
+2025-10-16 07:04:09,221 25628 DEBUG lugal odoo.modules.loading: Module stock loaded in 0.03s, 0 queries 
+2025-10-16 07:04:09,221 25628 DEBUG lugal odoo.modules.loading: Loading module website (67/168) 
+2025-10-16 07:04:09,249 25628 DEBUG lugal odoo.modules.loading: Module website loaded in 0.03s, 0 queries 
+2025-10-16 07:04:09,249 25628 DEBUG lugal odoo.modules.loading: Loading module account_edi_ubl_cii (68/168) 
+2025-10-16 07:04:09,262 25628 DEBUG lugal odoo.modules.loading: Module account_edi_ubl_cii loaded in 0.01s, 0 queries 
+2025-10-16 07:04:09,262 25628 DEBUG lugal odoo.modules.loading: Loading module account_fleet (69/168) 
+2025-10-16 07:04:09,268 25628 DEBUG lugal odoo.modules.loading: Module account_fleet loaded in 0.01s, 0 queries 
+2025-10-16 07:04:09,268 25628 DEBUG lugal odoo.modules.loading: Loading module account_payment (70/168) 
+2025-10-16 07:04:09,285 25628 DEBUG lugal odoo.modules.loading: Module account_payment loaded in 0.02s, 0 queries 
+2025-10-16 07:04:09,285 25628 DEBUG lugal odoo.modules.loading: Loading module board (71/168) 
+2025-10-16 07:04:09,290 25628 DEBUG lugal odoo.modules.loading: Module board loaded in 0.01s, 0 queries 
+2025-10-16 07:04:09,290 25628 DEBUG lugal odoo.modules.loading: Loading module crm_sms (72/168) 
+2025-10-16 07:04:09,290 25628 DEBUG lugal odoo.modules.loading: Module crm_sms loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,290 25628 DEBUG lugal odoo.modules.loading: Loading module hr_attendance (73/168) 
+2025-10-16 07:04:09,308 25628 DEBUG lugal odoo.modules.loading: Module hr_attendance loaded in 0.02s, 0 queries 
+2025-10-16 07:04:09,308 25628 DEBUG lugal odoo.modules.loading: Loading module hr_calendar (74/168) 
+2025-10-16 07:04:09,308 25628 DEBUG lugal odoo.modules.loading: Module hr_calendar loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,308 25628 DEBUG lugal odoo.modules.loading: Loading module hr_fleet (75/168) 
+2025-10-16 07:04:09,318 25628 DEBUG lugal odoo.modules.loading: Module hr_fleet loaded in 0.01s, 0 queries 
+2025-10-16 07:04:09,318 25628 DEBUG lugal odoo.modules.loading: Loading module hr_homeworking (76/168) 
+2025-10-16 07:04:09,327 25628 DEBUG lugal odoo.modules.loading: Module hr_homeworking loaded in 0.01s, 0 queries 
+2025-10-16 07:04:09,328 25628 DEBUG lugal odoo.modules.loading: Loading module hr_maintenance (77/168) 
+2025-10-16 07:04:09,334 25628 DEBUG lugal odoo.modules.loading: Module hr_maintenance loaded in 0.01s, 0 queries 
+2025-10-16 07:04:09,334 25628 DEBUG lugal odoo.modules.loading: Loading module hr_org_chart (78/168) 
+2025-10-16 07:04:09,338 25628 DEBUG lugal odoo.modules.loading: Module hr_org_chart loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,338 25628 DEBUG lugal odoo.modules.loading: Loading module hr_skills (79/168) 
+2025-10-16 07:04:09,358 25628 DEBUG lugal odoo.modules.loading: Module hr_skills loaded in 0.02s, 0 queries 
+2025-10-16 07:04:09,358 25628 DEBUG lugal odoo.modules.loading: Loading module iap_crm (80/168) 
+2025-10-16 07:04:09,358 25628 DEBUG lugal odoo.modules.loading: Module iap_crm loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,358 25628 DEBUG lugal odoo.modules.loading: Loading module loyalty (81/168) 
+2025-10-16 07:04:09,370 25628 DEBUG lugal odoo.modules.loading: Module loyalty loaded in 0.01s, 0 queries 
+2025-10-16 07:04:09,370 25628 DEBUG lugal odoo.modules.loading: Loading module mail_bot_hr (82/168) 
+2025-10-16 07:04:09,370 25628 DEBUG lugal odoo.modules.loading: Module mail_bot_hr loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,370 25628 DEBUG lugal odoo.modules.loading: Loading module mrp (83/168) 
+2025-10-16 07:04:09,398 25628 DEBUG lugal odoo.modules.loading: Module mrp loaded in 0.03s, 0 queries 
+2025-10-16 07:04:09,398 25628 DEBUG lugal odoo.modules.loading: Loading module project_account (84/168) 
+2025-10-16 07:04:09,405 25628 DEBUG lugal odoo.modules.loading: Module project_account loaded in 0.01s, 0 queries 
+2025-10-16 07:04:09,405 25628 DEBUG lugal odoo.modules.loading: Loading module project_sms (85/168) 
+2025-10-16 07:04:09,407 25628 DEBUG lugal odoo.modules.loading: Module project_sms loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,407 25628 DEBUG lugal odoo.modules.loading: Loading module project_stock (86/168) 
+2025-10-16 07:04:09,408 25628 DEBUG lugal odoo.modules.loading: Module project_stock loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,408 25628 DEBUG lugal odoo.modules.loading: Loading module project_todo (87/168) 
+2025-10-16 07:04:09,411 25628 DEBUG lugal odoo.modules.loading: Module project_todo loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,411 25628 DEBUG lugal odoo.modules.loading: Loading module purchase (88/168) 
+2025-10-16 07:04:09,419 25628 DEBUG lugal odoo.modules.loading: Module purchase loaded in 0.01s, 0 queries 
+2025-10-16 07:04:09,419 25628 DEBUG lugal odoo.modules.loading: Loading module snailmail_account (89/168) 
+2025-10-16 07:04:09,421 25628 DEBUG lugal odoo.modules.loading: Module snailmail_account loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,421 25628 DEBUG lugal odoo.modules.loading: Loading module spreadsheet_account (90/168) 
+2025-10-16 07:04:09,423 25628 DEBUG lugal odoo.modules.loading: Module spreadsheet_account loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,423 25628 DEBUG lugal odoo.modules.loading: Loading module spreadsheet_dashboard_account (91/168) 
+2025-10-16 07:04:09,423 25628 DEBUG lugal odoo.modules.loading: Module spreadsheet_dashboard_account loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,423 25628 DEBUG lugal odoo.modules.loading: Loading module stock_account (92/168) 
+2025-10-16 07:04:09,433 25628 DEBUG lugal odoo.modules.loading: Module stock_account loaded in 0.01s, 0 queries 
+2025-10-16 07:04:09,433 25628 DEBUG lugal odoo.modules.loading: Loading module stock_maintenance (93/168) 
+2025-10-16 07:04:09,434 25628 DEBUG lugal odoo.modules.loading: Module stock_maintenance loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,434 25628 DEBUG lugal odoo.modules.loading: Loading module stock_picking_batch (94/168) 
+2025-10-16 07:04:09,438 25628 DEBUG lugal odoo.modules.loading: Module stock_picking_batch loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,438 25628 DEBUG lugal odoo.modules.loading: Loading module stock_sms (95/168) 
+2025-10-16 07:04:09,441 25628 DEBUG lugal odoo.modules.loading: Module stock_sms loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,441 25628 DEBUG lugal odoo.modules.loading: Loading module website_crm (96/168) 
+2025-10-16 07:04:09,443 25628 DEBUG lugal odoo.modules.loading: Module website_crm loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,443 25628 DEBUG lugal odoo.modules.loading: Loading module website_links (97/168) 
+2025-10-16 07:04:09,444 25628 DEBUG lugal odoo.modules.loading: Module website_links loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,444 25628 DEBUG lugal odoo.modules.loading: Loading module website_mail (98/168) 
+2025-10-16 07:04:09,446 25628 DEBUG lugal odoo.modules.loading: Module website_mail loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,446 25628 DEBUG lugal odoo.modules.loading: Loading module website_project (99/168) 
+2025-10-16 07:04:09,448 25628 DEBUG lugal odoo.modules.loading: Module website_project loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,448 25628 DEBUG lugal odoo.modules.loading: Loading module website_sms (100/168) 
+2025-10-16 07:04:09,449 25628 DEBUG lugal odoo.modules.loading: Module website_sms loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,449 25628 DEBUG lugal odoo.modules.loading: Loading module crm_iap_enrich (101/168) 
+2025-10-16 07:04:09,451 25628 DEBUG lugal odoo.modules.loading: Module crm_iap_enrich loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,451 25628 DEBUG lugal odoo.modules.loading: Loading module crm_iap_mine (102/168) 
+2025-10-16 07:04:09,454 25628 DEBUG lugal odoo.modules.loading: Module crm_iap_mine loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,454 25628 DEBUG lugal odoo.modules.loading: Loading module hr_homeworking_calendar (103/168) 
+2025-10-16 07:04:09,454 25628 DEBUG lugal odoo.modules.loading: Module hr_homeworking_calendar loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,454 25628 DEBUG lugal odoo.modules.loading: Loading module mrp_account (104/168) 
+2025-10-16 07:04:09,462 25628 DEBUG lugal odoo.modules.loading: Module mrp_account loaded in 0.01s, 0 queries 
+2025-10-16 07:04:09,463 25628 DEBUG lugal odoo.modules.loading: Loading module point_of_sale (105/168) 
+2025-10-16 07:04:09,491 25628 DEBUG lugal odoo.modules.loading: Module point_of_sale loaded in 0.03s, 0 queries 
+2025-10-16 07:04:09,491 25628 DEBUG lugal odoo.modules.loading: Loading module project_hr_skills (106/168) 
+2025-10-16 07:04:09,493 25628 DEBUG lugal odoo.modules.loading: Module project_hr_skills loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,493 25628 DEBUG lugal odoo.modules.loading: Loading module project_mrp (107/168) 
+2025-10-16 07:04:09,495 25628 DEBUG lugal odoo.modules.loading: Module project_mrp loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,495 25628 DEBUG lugal odoo.modules.loading: Loading module project_purchase (108/168) 
+2025-10-16 07:04:09,497 25628 DEBUG lugal odoo.modules.loading: Module project_purchase loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,497 25628 DEBUG lugal odoo.modules.loading: Loading module project_stock_account (109/168) 
+2025-10-16 07:04:09,500 25628 DEBUG lugal odoo.modules.loading: Module project_stock_account loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,500 25628 DEBUG lugal odoo.modules.loading: Loading module purchase_edi_ubl_bis3 (110/168) 
+2025-10-16 07:04:09,502 25628 DEBUG lugal odoo.modules.loading: Module purchase_edi_ubl_bis3 loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,502 25628 DEBUG lugal odoo.modules.loading: Loading module purchase_stock (111/168) 
+2025-10-16 07:04:09,511 25628 DEBUG lugal odoo.modules.loading: Module purchase_stock loaded in 0.01s, 0 queries 
+2025-10-16 07:04:09,511 25628 DEBUG lugal odoo.modules.loading: Loading module sale (112/168) 
+2025-10-16 07:04:09,527 25628 DEBUG lugal odoo.modules.loading: Module sale loaded in 0.02s, 0 queries 
+2025-10-16 07:04:09,527 25628 DEBUG lugal odoo.modules.loading: Loading module spreadsheet_dashboard_stock_account (113/168) 
+2025-10-16 07:04:09,527 25628 DEBUG lugal odoo.modules.loading: Module spreadsheet_dashboard_stock_account loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,527 25628 DEBUG lugal odoo.modules.loading: Loading module stock_fleet (114/168) 
+2025-10-16 07:04:09,529 25628 DEBUG lugal odoo.modules.loading: Module stock_fleet loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,529 25628 DEBUG lugal odoo.modules.loading: Loading module website_crm_sms (115/168) 
+2025-10-16 07:04:09,530 25628 DEBUG lugal odoo.modules.loading: Module website_crm_sms loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,530 25628 DEBUG lugal odoo.modules.loading: Loading module website_payment (116/168) 
+2025-10-16 07:04:09,533 25628 DEBUG lugal odoo.modules.loading: Module website_payment loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,533 25628 DEBUG lugal odoo.modules.loading: Loading module delivery (117/168) 
+2025-10-16 07:04:09,539 25628 DEBUG lugal odoo.modules.loading: Module delivery loaded in 0.01s, 0 queries 
+2025-10-16 07:04:09,539 25628 DEBUG lugal odoo.modules.loading: Loading module pos_hr (118/168) 
+2025-10-16 07:04:09,544 25628 DEBUG lugal odoo.modules.loading: Module pos_hr loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,544 25628 DEBUG lugal odoo.modules.loading: Loading module pos_loyalty (119/168) 
+2025-10-16 07:04:09,549 25628 DEBUG lugal odoo.modules.loading: Module pos_loyalty loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,549 25628 DEBUG lugal odoo.modules.loading: Loading module pos_mrp (120/168) 
+2025-10-16 07:04:09,550 25628 DEBUG lugal odoo.modules.loading: Module pos_mrp loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,550 25628 DEBUG lugal odoo.modules.loading: Loading module pos_online_payment (121/168) 
+2025-10-16 07:04:09,554 25628 DEBUG lugal odoo.modules.loading: Module pos_online_payment loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,554 25628 DEBUG lugal odoo.modules.loading: Loading module pos_restaurant (122/168) 
+2025-10-16 07:04:09,557 25628 DEBUG lugal odoo.modules.loading: Module pos_restaurant loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,557 25628 DEBUG lugal odoo.modules.loading: Loading module project_mrp_account (123/168) 
+2025-10-16 07:04:09,560 25628 DEBUG lugal odoo.modules.loading: Module project_mrp_account loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,560 25628 DEBUG lugal odoo.modules.loading: Loading module project_purchase_stock (124/168) 
+2025-10-16 07:04:09,561 25628 DEBUG lugal odoo.modules.loading: Module project_purchase_stock loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,561 25628 DEBUG lugal odoo.modules.loading: Loading module purchase_mrp (125/168) 
+2025-10-16 07:04:09,564 25628 DEBUG lugal odoo.modules.loading: Module purchase_mrp loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,564 25628 DEBUG lugal odoo.modules.loading: Loading module sale_crm (126/168) 
+2025-10-16 07:04:09,566 25628 DEBUG lugal odoo.modules.loading: Module sale_crm loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,566 25628 DEBUG lugal odoo.modules.loading: Loading module sale_edi_ubl (127/168) 
+2025-10-16 07:04:09,569 25628 DEBUG lugal odoo.modules.loading: Module sale_edi_ubl loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,569 25628 DEBUG lugal odoo.modules.loading: Loading module sale_loyalty (128/168) 
+2025-10-16 07:04:09,574 25628 DEBUG lugal odoo.modules.loading: Module sale_loyalty loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,574 25628 DEBUG lugal odoo.modules.loading: Loading module sale_management (129/168) 
+2025-10-16 07:04:09,577 25628 DEBUG lugal odoo.modules.loading: Module sale_management loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,577 25628 DEBUG lugal odoo.modules.loading: Loading module sale_purchase (130/168) 
+2025-10-16 07:04:09,580 25628 DEBUG lugal odoo.modules.loading: Module sale_purchase loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,580 25628 DEBUG lugal odoo.modules.loading: Loading module sale_sms (131/168) 
+2025-10-16 07:04:09,581 25628 DEBUG lugal odoo.modules.loading: Module sale_sms loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,581 25628 DEBUG lugal odoo.modules.loading: Loading module sale_stock (132/168) 
+2025-10-16 07:04:09,589 25628 DEBUG lugal odoo.modules.loading: Module sale_stock loaded in 0.01s, 0 queries 
+2025-10-16 07:04:09,589 25628 DEBUG lugal odoo.modules.loading: Loading module spreadsheet_dashboard_sale (133/168) 
+2025-10-16 07:04:09,590 25628 DEBUG lugal odoo.modules.loading: Module spreadsheet_dashboard_sale loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,590 25628 DEBUG lugal odoo.modules.loading: Loading module stock_landed_costs (134/168) 
+2025-10-16 07:04:09,593 25628 DEBUG lugal odoo.modules.loading: Module stock_landed_costs loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,593 25628 DEBUG lugal odoo.modules.loading: Loading module mrp_landed_costs (135/168) 
+2025-10-16 07:04:09,594 25628 DEBUG lugal odoo.modules.loading: Module mrp_landed_costs loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,594 25628 DEBUG lugal odoo.modules.loading: Loading module pos_hr_restaurant (136/168) 
+2025-10-16 07:04:09,594 25628 DEBUG lugal odoo.modules.loading: Module pos_hr_restaurant loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,594 25628 DEBUG lugal odoo.modules.loading: Loading module pos_restaurant_loyalty (137/168) 
+2025-10-16 07:04:09,595 25628 DEBUG lugal odoo.modules.loading: Module pos_restaurant_loyalty loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,595 25628 DEBUG lugal odoo.modules.loading: Loading module pos_sale (138/168) 
+2025-10-16 07:04:09,600 25628 DEBUG lugal odoo.modules.loading: Module pos_sale loaded in 0.01s, 0 queries 
+2025-10-16 07:04:09,600 25628 DEBUG lugal odoo.modules.loading: Loading module pos_self_order (139/168) 
+2025-10-16 07:04:09,610 25628 DEBUG lugal odoo.modules.loading: Module pos_self_order loaded in 0.01s, 0 queries 
+2025-10-16 07:04:09,610 25628 DEBUG lugal odoo.modules.loading: Loading module project_stock_landed_costs (140/168) 
+2025-10-16 07:04:09,611 25628 DEBUG lugal odoo.modules.loading: Module project_stock_landed_costs loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,611 25628 DEBUG lugal odoo.modules.loading: Loading module sale_loyalty_delivery (141/168) 
+2025-10-16 07:04:09,613 25628 DEBUG lugal odoo.modules.loading: Module sale_loyalty_delivery loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,613 25628 DEBUG lugal odoo.modules.loading: Loading module sale_mrp (142/168) 
+2025-10-16 07:04:09,615 25628 DEBUG lugal odoo.modules.loading: Module sale_mrp loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,615 25628 DEBUG lugal odoo.modules.loading: Loading module sale_pdf_quote_builder (143/168) 
+2025-10-16 07:04:09,620 25628 DEBUG lugal odoo.modules.loading: Module sale_pdf_quote_builder loaded in 0.01s, 0 queries 
+2025-10-16 07:04:09,620 25628 DEBUG lugal odoo.modules.loading: Loading module sale_purchase_stock (144/168) 
+2025-10-16 07:04:09,622 25628 DEBUG lugal odoo.modules.loading: Module sale_purchase_stock loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,622 25628 DEBUG lugal odoo.modules.loading: Loading module sale_service (145/168) 
+2025-10-16 07:04:09,623 25628 DEBUG lugal odoo.modules.loading: Module sale_service loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,623 25628 DEBUG lugal odoo.modules.loading: Loading module spreadsheet_dashboard_pos_hr (146/168) 
+2025-10-16 07:04:09,623 25628 DEBUG lugal odoo.modules.loading: Module spreadsheet_dashboard_pos_hr loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,623 25628 DEBUG lugal odoo.modules.loading: Loading module spreadsheet_dashboard_pos_restaurant (147/168) 
+2025-10-16 07:04:09,623 25628 DEBUG lugal odoo.modules.loading: Module spreadsheet_dashboard_pos_restaurant loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,624 25628 DEBUG lugal odoo.modules.loading: Loading module stock_delivery (148/168) 
+2025-10-16 07:04:09,629 25628 DEBUG lugal odoo.modules.loading: Module stock_delivery loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,629 25628 DEBUG lugal odoo.modules.loading: Loading module website_sale (149/168) 
+2025-10-16 07:04:09,649 25628 DEBUG lugal odoo.modules.loading: Module website_sale loaded in 0.02s, 0 queries 
+2025-10-16 07:04:09,649 25628 DEBUG lugal odoo.modules.loading: Loading module delivery_stock_picking_batch (150/168) 
+2025-10-16 07:04:09,650 25628 DEBUG lugal odoo.modules.loading: Module delivery_stock_picking_batch loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,650 25628 DEBUG lugal odoo.modules.loading: Loading module pos_online_payment_self_order (151/168) 
+2025-10-16 07:04:09,653 25628 DEBUG lugal odoo.modules.loading: Module pos_online_payment_self_order loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,653 25628 DEBUG lugal odoo.modules.loading: Loading module pos_sale_loyalty (152/168) 
+2025-10-16 07:04:09,654 25628 DEBUG lugal odoo.modules.loading: Module pos_sale_loyalty loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,654 25628 DEBUG lugal odoo.modules.loading: Loading module pos_self_order_sale (153/168) 
+2025-10-16 07:04:09,655 25628 DEBUG lugal odoo.modules.loading: Module pos_self_order_sale loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,655 25628 DEBUG lugal odoo.modules.loading: Loading module project_mrp_stock_landed_costs (154/168) 
+2025-10-16 07:04:09,656 25628 DEBUG lugal odoo.modules.loading: Module project_mrp_stock_landed_costs loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,656 25628 DEBUG lugal odoo.modules.loading: Loading module sale_project (155/168) 
+2025-10-16 07:04:09,667 25628 DEBUG lugal odoo.modules.loading: Module sale_project loaded in 0.01s, 0 queries 
+2025-10-16 07:04:09,667 25628 DEBUG lugal odoo.modules.loading: Loading module spreadsheet_dashboard_website_sale (156/168) 
+2025-10-16 07:04:09,668 25628 DEBUG lugal odoo.modules.loading: Module spreadsheet_dashboard_website_sale loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,668 25628 DEBUG lugal odoo.modules.loading: Loading module website_sale_autocomplete (157/168) 
+2025-10-16 07:04:09,670 25628 DEBUG lugal odoo.modules.loading: Module website_sale_autocomplete loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,670 25628 DEBUG lugal odoo.modules.loading: Loading module website_sale_comparison (158/168) 
+2025-10-16 07:04:09,672 25628 DEBUG lugal odoo.modules.loading: Module website_sale_comparison loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,672 25628 DEBUG lugal odoo.modules.loading: Loading module website_sale_loyalty (159/168) 
+2025-10-16 07:04:09,677 25628 DEBUG lugal odoo.modules.loading: Module website_sale_loyalty loaded in 0.01s, 0 queries 
+2025-10-16 07:04:09,677 25628 DEBUG lugal odoo.modules.loading: Loading module website_sale_stock (160/168) 
+2025-10-16 07:04:09,683 25628 DEBUG lugal odoo.modules.loading: Module website_sale_stock loaded in 0.01s, 0 queries 
+2025-10-16 07:04:09,683 25628 DEBUG lugal odoo.modules.loading: Loading module website_sale_wishlist (161/168) 
+2025-10-16 07:04:09,685 25628 DEBUG lugal odoo.modules.loading: Module website_sale_wishlist loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,685 25628 DEBUG lugal odoo.modules.loading: Loading module project_mrp_sale (162/168) 
+2025-10-16 07:04:09,686 25628 DEBUG lugal odoo.modules.loading: Module project_mrp_sale loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,686 25628 DEBUG lugal odoo.modules.loading: Loading module sale_project_stock (163/168) 
+2025-10-16 07:04:09,689 25628 DEBUG lugal odoo.modules.loading: Module sale_project_stock loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,689 25628 DEBUG lugal odoo.modules.loading: Loading module sale_project_stock_account (164/168) 
+2025-10-16 07:04:09,690 25628 DEBUG lugal odoo.modules.loading: Module sale_project_stock_account loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,690 25628 DEBUG lugal odoo.modules.loading: Loading module sale_purchase_project (165/168) 
+2025-10-16 07:04:09,691 25628 DEBUG lugal odoo.modules.loading: Module sale_purchase_project loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,691 25628 DEBUG lugal odoo.modules.loading: Loading module website_sale_comparison_wishlist (166/168) 
+2025-10-16 07:04:09,692 25628 DEBUG lugal odoo.modules.loading: Module website_sale_comparison_wishlist loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,692 25628 DEBUG lugal odoo.modules.loading: Loading module website_sale_mrp (167/168) 
+2025-10-16 07:04:09,693 25628 DEBUG lugal odoo.modules.loading: Module website_sale_mrp loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,693 25628 DEBUG lugal odoo.modules.loading: Loading module website_sale_stock_wishlist (168/168) 
+2025-10-16 07:04:09,695 25628 DEBUG lugal odoo.modules.loading: Module website_sale_stock_wishlist loaded in 0.00s, 0 queries 
+2025-10-16 07:04:09,695 25628 INFO lugal odoo.modules.loading: 168 modules loaded in 1.10s, 0 queries (+0 extra) 
+2025-10-16 07:04:09,981 25628 ERROR lugal odoo.modules.loading: Some modules have inconsistent states, some dependencies may be missing: ['sap_integration'] 
+2025-10-16 07:04:10,533 25628 INFO lugal odoo.modules.loading: Modules loaded. 
+2025-10-16 07:04:10,565 25628 INFO lugal odoo.registry: Registry changed, signaling through the database 
+2025-10-16 07:04:10,565 25628 INFO lugal odoo.registry: Registry loaded in 2.709s 
+2025-10-16 07:04:10,566 25628 INFO lugal odoo.service.server: Initiating shutdown 
+2025-10-16 07:04:10,566 25628 INFO lugal odoo.service.server: Hit CTRL-C again or send a second signal to force the shutdown. 
+2025-10-16 07:04:10,566 25628 DEBUG lugal odoo.service.server: on_close call <bound method Event.set of <threading.Event at 0x25f28cd7650: unset>> 
+2025-10-16 07:04:10,566 25628 DEBUG lugal odoo.service.server: on_close call <function _kick_all at 0x0000025F28D5BCE0> 
+2025-10-16 07:04:10,566 25628 DEBUG lugal odoo.service.server: current thread: <_MainThread(MainThread, started 26932)> 
+2025-10-16 07:04:10,566 25628 DEBUG lugal odoo.service.server: process <_MainThread(MainThread, started 26932)> (False) 
+2025-10-16 07:04:10,566 25628 INFO lugal odoo.sql_db: ConnectionPool(read/write;used=0/count=0/max=64): Closed 1 connections  
+2025-10-16 07:04:10,566 25628 DEBUG lugal odoo.service.server: -- 

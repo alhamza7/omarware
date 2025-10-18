@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Menu Item -->
+    <menuitem id="menu_sap_quotation_sync"
+              name="Quotation Sync"
+              parent="menu_sap_integration"
+              action="action_sap_quotation_sync"
+              sequence="50"/>
+</odoo>
+
+
+
+
+

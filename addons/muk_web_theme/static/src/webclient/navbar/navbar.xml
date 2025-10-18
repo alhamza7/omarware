@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+
+<templates xml:space="preserve">
+	
+	<!-- NavBar customization disabled for Odoo 19 compatibility -->
+	<!-- The template structure in Odoo 19 is different from what this module expects -->
+	
+</templates>

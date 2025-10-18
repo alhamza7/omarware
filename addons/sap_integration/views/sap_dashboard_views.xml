@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- SAP Dashboard Form View -->
+    <record id="view_sap_dashboard_form" model="ir.ui.view">
+        <field name="name">sap.dashboard.form</field>
+        <field name="model">sap.dashboard</field>
+        <field name="arch" type="xml">
+            <form string="SAP Integration Dashboard" create="false" delete="false">
+                <header>
+                    <button name="action_refresh_stats" 
+                            string="🔄 Refresh Statistics" 
+                            type="object" 
+                            class="btn-primary"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <span>📊 SAP Integration Dashboard</span>
+                        </h1>
+                    </div>
+                    
+                    <!-- Backend Statistics -->
+                    <group name="backend_stats" string="🔌 Backend Status">
+                        <div class="row">
+                            <div class="col-4">
+                                <div class="oe_stat_button" style="background-color: #e8f5e9; padding: 15px; border-radius: 8px; text-align: center;">
+                                    <div style="font-size: 32px; font-weight: bold; color: #2e7d32;">
+                                        <field name="total_backends" readonly="1"/>
+                                    </div>
+                                    <div style="font-size: 14px; color: #666;">Total Backends</div>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="oe_stat_button" style="background-color: #e3f2fd; padding: 15px; border-radius: 8px; text-align: center;">
+                                    <div style="font-size: 32px; font-weight: bold; color: #1976d2;">
+                                        <field name="active_backends" readonly="1"/>
+                                    </div>
+                                    <div style="font-size: 14px; color: #666;">Active Backends</div>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="oe_stat_button" style="background-color: #f3e5f5; padding: 15px; border-radius: 8px; text-align: center;">
+                                    <div style="font-size: 32px; font-weight: bold; color: #7b1fa2;">
+                                        <field name="connected_backends" readonly="1"/>
+                                    </div>
+                                    <div style="font-size: 14px; color: #666;">Connected</div>
+                                </div>
+                            </div>
+                        </div>
+                    </group>
+                    
+                    <!-- Sync Statistics -->
+                    <group name="sync_stats" string="📦 Synchronized Records">
+                        <div class="row mt-3">
+                            <div class="col-3">
+                                <button name="action_view_partners" 
+                                        type="object" 
+                                        class="oe_stat_button"
+                                        style="background-color: #fff3e0; width: 100%; padding: 20px; border-radius: 8px;">
+                                    <div style="text-align: center;">
+                                        <div style="font-size: 36px; font-weight: bold; color: #f57c00;">
+                                            <field name="total_partners" readonly="1"/>
+                                        </div>
+                                        <div style="font-size: 14px; color: #666;">👥 Partners</div>
+                                        <div style="font-size: 12px; color: #999;">
+                                            <field name="partners_last_week" readonly="1"/> this week
+                                        </div>
+                                    </div>
+                                </button>
+                            </div>
+                            <div class="col-3">
+                                <button name="action_view_products" 
+                                        type="object" 
+                                        class="oe_stat_button"
+                                        style="background-color: #e0f2f1; width: 100%; padding: 20px; border-radius: 8px;">
+                                    <div style="text-align: center;">
+                                        <div style="font-size: 36px; font-weight: bold; color: #00796b;">
+                                            <field name="total_products" readonly="1"/>
+                                        </div>
+                                        <div style="font-size: 14px; color: #666;">📦 Products</div>
+                                        <div style="font-size: 12px; color: #999;">
+                                            <field name="products_last_week" readonly="1"/> this week
+                                        </div>
+                                    </div>
+                                </button>
+                            </div>
+                            <div class="col-3">
+                                <button name="action_view_orders" 
+                                        type="object" 
+                                        class="oe_stat_button"
+                                        style="background-color: #fce4ec; width: 100%; padding: 20px; border-radius: 8px;">
+                                    <div style="text-align: center;">
+                                        <div style="font-size: 36px; font-weight: bold; color: #c2185b;">
+                                            <field name="total_orders" readonly="1"/>
+                                        </div>
+                                        <div style="font-size: 14px; color: #666;">🛒 Orders</div>
+                                        <div style="font-size: 12px; color: #999;">
+                                            <field name="orders_last_week" readonly="1"/> this week
+                                        </div>
+                                    </div>
+                                </button>
+                            </div>
+                            <div class="col-3">
+                                <div class="oe_stat_button" style="background-color: #f1f8e9; padding: 20px; border-radius: 8px; text-align: center;">
+                                    <div style="font-size: 36px; font-weight: bold; color: #558b2f;">
+                                        <field name="total_invoices" readonly="1"/>
+                                    </div>
+                                    <div style="font-size: 14px; color: #666;">🧾 Invoices</div>
+                                </div>
+                            </div>
+                        </div>
+                    </group>
+                    
+                    <!-- Error Statistics -->
+                    <group name="error_stats" string="⚠️ Error Statistics">
+                        <div class="row mt-3">
+                            <div class="col-6">
+                                <button name="action_view_errors" 
+                                        type="object" 
+                                        class="oe_stat_button"
+                                        style="background-color: #ffebee; width: 100%; padding: 20px; border-radius: 8px;">
+                                    <div style="text-align: center;">
+                                        <div style="font-size: 36px; font-weight: bold; color: #d32f2f;">
+                                            <field name="total_errors" readonly="1"/>
+                                        </div>
+                                        <div style="font-size: 14px; color: #666;">❌ Total Errors</div>
+                                        <div style="font-size: 12px; color: #999;">Click to view details</div>
+                                    </div>
+                                </button>
+                            </div>
+                            <div class="col-6">
+                                <div class="oe_stat_button" style="background-color: #fff9c4; padding: 20px; border-radius: 8px; text-align: center;">
+                                    <div style="font-size: 36px; font-weight: bold; color: #f57f17;">
+                                        <field name="errors_last_week" readonly="1"/>
+                                    </div>
+                                    <div style="font-size: 14px; color: #666;">⚠️ Errors This Week</div>
+                                </div>
+                            </div>
+                        </div>
+                    </group>
+                    
+                    <!-- Performance Metrics -->
+                    <group name="performance" string="⚡ Performance Metrics">
+                        <group>
+                            <field name="last_sync_date" readonly="1"/>
+                            <field name="avg_sync_time" readonly="1" widget="float_time"/>
+                        </group>
+                    </group>
+                    
+                    <!-- Quick Actions -->
+                    <group name="quick_actions" string="⚡ Quick Actions">
+                        <div class="row mt-2">
+                            <div class="col-12">
+                                <div class="alert alert-info">
+                                    <strong>💡 Tip:</strong> Click on the statistics above to view detailed records.<br/>
+                                    Use the <strong>Bulk Import</strong> menu to import data from SAP.
+                                </div>
+                            </div>
+                        </div>
+                    </group>
+                    
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Dashboard Action -->
+    <record id="action_sap_dashboard" model="ir.actions.act_window">
+        <field name="name">SAP Dashboard</field>
+        <field name="res_model">sap.dashboard</field>
+        <field name="view_mode">form</field>
+        <field name="target">current</field>
+        <field name="context">{'create': False, 'delete': False}</field>
+    </record>
+
+    <!-- Root Menu -->
+    <menuitem id="menu_sap_integration"
+              name="SAP Integration"
+              sequence="100"/>
+
+    <!-- Dashboard Menu (First item) -->
+    <menuitem id="menu_sap_dashboard"
+              name="📊 Dashboard"
+              parent="menu_sap_integration"
+              action="action_sap_dashboard"
+              sequence="1"/>
+
+</odoo>
+
+
+

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- SAP Customer Binding Views -->
+    <record id="view_sap_customer_binding_list" model="ir.ui.view">
+        <field name="name">sap.res.partner.list</field>
+        <field name="model">sap.res.partner</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="odoo_id"/>
+                <field name="sap_id"/>
+                <field name="backend_id"/>
+                <field name="sync_date"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="action_sap_customer_binding" model="ir.actions.act_window">
+        <field name="name">SAP Customer Bindings</field>
+        <field name="res_model">sap.res.partner</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <menuitem id="menu_sap_customer_binding"
+              name="Customer Bindings"
+              parent="menu_sap_integration"
+              action="action_sap_customer_binding"
+              sequence="60"/>
+
+    <!-- SAP Product Binding Views -->
+    <record id="view_sap_product_binding_list" model="ir.ui.view">
+        <field name="name">sap.product.product.list</field>
+        <field name="model">sap.product.product</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="odoo_id"/>
+                <field name="sap_id"/>
+                <field name="backend_id"/>
+                <field name="sync_date"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="action_sap_product_binding" model="ir.actions.act_window">
+        <field name="name">SAP Product Bindings</field>
+        <field name="res_model">sap.product.product</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <menuitem id="menu_sap_product_binding"
+              name="Product Bindings"
+              parent="menu_sap_integration"
+              action="action_sap_product_binding"
+              sequence="70"/>
+</odoo>
+
