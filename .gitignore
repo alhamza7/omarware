@@ -8,24 +8,28 @@ _build/
 !.github
 !.mailmap
 !.weblate.json
+
 # compiled python files
 *.py[co]
 __pycache__/
+
 # setup.py egg_info
 *.egg-info
+
 # emacs backup files
 *~
+
 # hg stuff
 *.orig
 status
+
 # odoo filestore
 odoo/filestore
+
 # maintenance migration scripts
 odoo/addons/base/maintenance
+
 # windows installation config file
-
-
-# generated for windows installer?
 install/win32/*.bat
 install/win32/meta.py
 
@@ -42,7 +46,7 @@ package-lock.json
 package.json
 .husky
 
-# various virtualenv
+# various virtualenv folders
 /bin/
 /build/
 /dist/
@@ -51,3 +55,12 @@ package.json
 /man/
 /share/
 /src/
+
+# استثناءات ضرورية لمجلد bootstrap داخل addons
+!addons/web/static/lib/bootstrap/
+!addons/web/static/lib/bootstrap/**
+
+# استثناءات عامة للمجلدات التي قد تحتاج ترفعها في addons/web/static
+!addons/web/static/
+!addons/web/static/**
+
