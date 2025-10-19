@@ -45,6 +45,8 @@ tsconfig.json
 package-lock.json
 package.json
 .husky
+odoo.log
+odoo.conf
 
 # various virtualenv folders
 /bin/
