@@ -57,22 +57,37 @@ class SapResPartner(models.Model):
         """Import SAP Business Partners in batch"""
         # TODO: Implement with @job decorator when queue_job is available
         # @job(default_channel='root.sap')
-        with backend.work_on(self._name) as work:
-            importer = work.component(usage='batch.importer')
-            return importer.run(filters=filters)
+        from odoo.addons.component.core import WorkContext
+        
+        work = WorkContext(
+            model_name=self._name,
+            collection=backend,
+        )
+        importer = work.component(usage='batch.importer')
+        return importer.run(filters=filters)
     
     def import_record(self, backend, external_id):
         """Import a single SAP Business Partner"""
-        with backend.work_on(self._name) as work:
-            importer = work.component(usage='record.importer')
-            return importer.run(external_id)
+        from odoo.addons.component.core import WorkContext
+        
+        work = WorkContext(
+            model_name=self._name,
+            collection=backend,
+        )
+        importer = work.component(usage='record.importer')
+        return importer.run(external_id)
     
     def export_record(self, fields=None):
         """Export this partner to SAP"""
         self.ensure_one()
-        with self.backend_id.work_on(self._name) as work:
-            exporter = work.component(usage='record.exporter')
-            return exporter.run(self)
+        from odoo.addons.component.core import WorkContext
+        
+        work = WorkContext(
+            model_name=self._name,
+            collection=self.backend_id,
+        )
+        exporter = work.component(usage='record.exporter')
+        return exporter.run(self)
 
 
 class SapProductProduct(models.Model):
@@ -123,22 +138,37 @@ class SapProductProduct(models.Model):
     def import_batch(self, backend, filters=None):
         """Import SAP Items in batch"""
         # TODO: Implement with @job decorator when queue_job is available
-        with backend.work_on(self._name) as work:
-            importer = work.component(usage='batch.importer')
-            return importer.run(filters=filters)
+        from odoo.addons.component.core import WorkContext
+        
+        work = WorkContext(
+            model_name=self._name,
+            collection=backend,
+        )
+        importer = work.component(usage='batch.importer')
+        return importer.run(filters=filters)
     
     def import_record(self, backend, external_id):
         """Import a single SAP Item"""
-        with backend.work_on(self._name) as work:
-            importer = work.component(usage='record.importer')
-            return importer.run(external_id)
+        from odoo.addons.component.core import WorkContext
+        
+        work = WorkContext(
+            model_name=self._name,
+            collection=backend,
+        )
+        importer = work.component(usage='record.importer')
+        return importer.run(external_id)
     
     def export_record(self, fields=None):
         """Export this product to SAP"""
         self.ensure_one()
-        with self.backend_id.work_on(self._name) as work:
-            exporter = work.component(usage='record.exporter')
-            return exporter.run(self)
+        from odoo.addons.component.core import WorkContext
+        
+        work = WorkContext(
+            model_name=self._name,
+            collection=self.backend_id,
+        )
+        exporter = work.component(usage='record.exporter')
+        return exporter.run(self)
 
 
 class SapSaleOrder(models.Model):

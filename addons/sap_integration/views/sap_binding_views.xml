@@ -7,9 +7,10 @@
         <field name="arch" type="xml">
             <list>
                 <field name="odoo_id"/>
-                <field name="sap_id"/>
+                <field name="external_id"/>
                 <field name="backend_id"/>
-                <field name="sync_date"/>
+                <field name="sap_card_name"/>
+                <field name="sap_card_type"/>
             </list>
         </field>
     </record>
@@ -33,9 +34,10 @@
         <field name="arch" type="xml">
             <list>
                 <field name="odoo_id"/>
-                <field name="sap_id"/>
+                <field name="external_id"/>
                 <field name="backend_id"/>
-                <field name="sync_date"/>
+                <field name="sap_item_name"/>
+                <field name="sap_item_type"/>
             </list>
         </field>
     </record>

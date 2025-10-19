@@ -19,6 +19,7 @@ class SapAdapter(AbstractComponent):
     _name = 'sap.adapter'
     _inherit = 'base.backend.adapter'
     _usage = 'backend.adapter'
+    _collection = 'sap.backend'
     
     def _get_connection(self):
         """Get SAP Service Layer connection"""
@@ -38,6 +39,7 @@ class SapCRUDAdapter(AbstractComponent):
     _name = 'sap.adapter.crud'
     _inherit = 'sap.adapter'
     _usage = 'backend.adapter'
+    _collection = 'sap.backend'
     
     _sap_model = None  # Override in subclasses
     
@@ -68,6 +70,7 @@ class SapPartnerAdapter(AbstractComponent):
     """Adapter for SAP Business Partners"""
     _name = 'sap.partner.adapter'
     _inherit = 'sap.adapter.crud'
+    _collection = \'sap.backend\'
     _apply_on = 'sap.res.partner'
     _sap_model = 'BusinessPartners'
     
@@ -135,6 +138,7 @@ class SapProductAdapter(AbstractComponent):
     """Adapter for SAP Items"""
     _name = 'sap.product.adapter'
     _inherit = 'sap.adapter.crud'
+    _collection = \'sap.backend\'
     _apply_on = 'sap.product.product'
     _sap_model = 'Items'
     
@@ -202,6 +206,7 @@ class SapSaleOrderAdapter(AbstractComponent):
     """Adapter for SAP Orders"""
     _name = 'sap.sale.order.adapter'
     _inherit = 'sap.adapter.crud'
+    _collection = \'sap.backend\'
     _apply_on = 'sap.sale.order'
     _sap_model = 'Orders'
     
@@ -269,6 +274,7 @@ class SapInvoiceAdapter(AbstractComponent):
     """Adapter for SAP Invoices"""
     _name = 'sap.invoice.adapter'
     _inherit = 'sap.adapter.crud'
+    _collection = \'sap.backend\'
     _apply_on = 'sap.account.move'
     _sap_model = 'Invoices'
     

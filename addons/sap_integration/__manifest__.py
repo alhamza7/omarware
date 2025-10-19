@@ -40,6 +40,9 @@
         'component_event',
         # 'queue_job',  # TODO: Install queue_job module from OCA
     ],
+    'external_dependencies': {
+        'python': ['requests', 'cachetools'],
+    },
     'data': [
         'security/sap_security.xml',
         'security/ir.model.access.csv',
@@ -60,6 +63,5 @@
     'application': True,
     'auto_install': False,
     'license': 'LGPL-3',
+    'post_init_hook': 'post_init_hook',
 }
-
-
