@@ -97,7 +97,7 @@ class SapPartnerExporter(Component):
     """Exporter for SAP Business Partners"""
     _name = 'sap.partner.exporter'
     _inherit = 'sap.exporter'
-    _collection = \'sap.backend\'
+    _collection = 'sap.backend'
     _apply_on = 'sap.res.partner'
     
     def _extract_external_id(self, external_data):
@@ -110,7 +110,7 @@ class SapProductExporter(Component):
     """Exporter for SAP Items"""
     _name = 'sap.product.exporter'
     _inherit = 'sap.exporter'
-    _collection = \'sap.backend\'
+    _collection = 'sap.backend'
     _apply_on = 'sap.product.product'
     
     def _extract_external_id(self, external_data):
@@ -123,7 +123,7 @@ class SapSaleOrderExporter(Component):
     """Exporter for SAP Orders"""
     _name = 'sap.sale.order.exporter'
     _inherit = 'sap.exporter'
-    _collection = \'sap.backend\'
+    _collection = 'sap.backend'
     _apply_on = 'sap.sale.order'
     
     def _has_to_skip(self, binding):
@@ -170,7 +170,7 @@ class SapInvoiceExporter(Component):
     """Exporter for SAP Invoices"""
     _name = 'sap.invoice.exporter'
     _inherit = 'sap.exporter'
-    _collection = \'sap.backend\'
+    _collection = 'sap.backend'
     _apply_on = 'sap.account.move'
     
     def _has_to_skip(self, binding):

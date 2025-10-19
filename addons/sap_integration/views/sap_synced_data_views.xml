@@ -1,0 +1,393 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        
+        <!-- SAP Synced Data Tree View -->
+        <record id="view_sap_synced_data_tree" model="ir.ui.view">
+            <field name="name">sap.synced.data.tree</field>
+            <field name="model">sap.synced.data</field>
+            <field name="arch" type="xml">
+                <tree string="Synced Data" 
+                      decoration-success="sync_status == 'success'" 
+                      decoration-danger="sync_status == 'failed'"
+                      decoration-warning="sync_status in ['pending', 'needs_attention']"
+                      decoration-muted="sync_status == 'cancelled'"
+                      decoration-info="sync_status == 'in_progress'"
+                      create="false" edit="false">
+                    
+                    <!-- Basic Information -->
+                    <field name="display_name" string="Record"/>
+                    <field name="backend_id" string="Backend"/>
+                    <field name="model_name" string="Model"/>
+                    <field name="external_id" string="SAP ID"/>
+                    <field name="sap_record_name" string="SAP Name"/>
+                    
+                    <!-- Sync Status -->
+                    <field name="sync_status" string="Status" widget="badge"/>
+                    <field name="sync_direction" string="Direction"/>
+                    <field name="sync_count" string="Syncs"/>
+                    
+                    <!-- Timing -->
+                    <field name="last_sync_date" string="Last Sync"/>
+                    <field name="sync_age" string="Age (days)"/>
+                    <field name="is_stale" string="Stale" widget="boolean_toggle"/>
+                    
+                    <!-- Error Information -->
+                    <field name="error_count" string="Errors"/>
+                    <field name="last_error" string="Last Error" optional="hide"/>
+                    
+                    <!-- Conflict Information -->
+                    <field name="conflict_reason" string="Conflict" optional="hide"/>
+                    <field name="conflict_resolution" string="Resolution" optional="hide"/>
+                    
+                    <!-- Smart Buttons -->
+                    <button name="action_view_odoo_record" 
+                            type="object" 
+                            icon="fa-external-link" 
+                            string="View Odoo Record"
+                            attrs="{'invisible': [('odoo_record', '=', False)]}"/>
+                    <button name="action_view_sync_history" 
+                            type="object" 
+                            icon="fa-history" 
+                            string="Sync History"/>
+                    <button name="action_resync_record" 
+                            type="object" 
+                            icon="fa-refresh" 
+                            string="Resync"
+                            attrs="{'invisible': [('sync_status', 'in', ['in_progress', 'success'])]}"/>
+                    <button name="action_resolve_conflict" 
+                            type="object" 
+                            icon="fa-exclamation-triangle" 
+                            string="Resolve Conflict"
+                            attrs="{'invisible': [('sync_status', '!=', 'conflict')]}"/>
+                </tree>
+            </field>
+        </record>
+        
+        <!-- SAP Synced Data Form View -->
+        <record id="view_sap_synced_data_form" model="ir.ui.view">
+            <field name="name">sap.synced.data.form</field>
+            <field name="model">sap.synced.data</field>
+            <field name="arch" type="xml">
+                <form string="Synced Data Record">
+                    <header>
+                        <button name="action_view_odoo_record" 
+                                type="object" 
+                                string="View Odoo Record"
+                                class="btn-primary"
+                                attrs="{'invisible': [('odoo_record', '=', False)]}"/>
+                        <button name="action_resync_record" 
+                                type="object" 
+                                string="Resync"
+                                class="btn-secondary"
+                                attrs="{'invisible': [('sync_status', 'in', ['in_progress', 'success'])]}"/>
+                        <button name="action_resolve_conflict" 
+                                type="object" 
+                                string="Resolve Conflict"
+                                class="btn-warning"
+                                attrs="{'invisible': [('sync_status', '!=', 'conflict')]}"/>
+                        <field name="sync_status" widget="statusbar" statusbar_visible="pending,in_progress,success"/>
+                    </header>
+                    
+                    <sheet>
+                        <div class="oe_title">
+                            <h1>
+                                <field name="display_name" readonly="1"/>
+                            </h1>
+                        </div>
+                        
+                        <!-- Basic Information -->
+                        <group>
+                            <group>
+                                <field name="backend_id" readonly="1"/>
+                                <field name="model_name" readonly="1"/>
+                                <field name="odoo_id" readonly="1"/>
+                                <field name="external_id" readonly="1"/>
+                                <field name="sap_record_name" readonly="1"/>
+                                <field name="sap_model" readonly="1"/>
+                            </group>
+                            <group>
+                                <field name="sync_direction" readonly="1"/>
+                                <field name="sync_count" readonly="1"/>
+                                <field name="first_sync_date" readonly="1"/>
+                                <field name="last_sync_date" readonly="1"/>
+                                <field name="next_sync_date" readonly="1"/>
+                                <field name="sync_age" readonly="1"/>
+                            </group>
+                        </group>
+                        
+                        <!-- Status Information -->
+                        <group string="Status Information">
+                            <field name="is_stale" readonly="1"/>
+                            <field name="error_count" readonly="1"/>
+                            <field name="retry_count" readonly="1"/>
+                            <field name="max_retries"/>
+                            <field name="last_error" readonly="1"/>
+                            <field name="last_error_date" readonly="1"/>
+                        </group>
+                        
+                        <!-- Conflict Information -->
+                        <group string="Conflict Information" attrs="{'invisible': [('sync_status', '!=', 'conflict')]}">
+                            <field name="conflict_reason" readonly="1"/>
+                            <field name="conflict_resolution" readonly="1"/>
+                        </group>
+                        
+                        <!-- Data Information -->
+                        <group string="Data Information">
+                            <field name="data_hash" readonly="1"/>
+                            <field name="last_sap_data" readonly="1" widget="text" attrs="{'invisible': [('last_sap_data', '=', False)]}"/>
+                            <field name="last_odoo_data" readonly="1" widget="text" attrs="{'invisible': [('last_odoo_data', '=', False)]}"/>
+                        </group>
+                        
+                        <!-- User Information -->
+                        <group string="User Information">
+                            <field name="created_by" readonly="1"/>
+                            <field name="last_modified_by" readonly="1"/>
+                        </group>
+                        
+                        <!-- Related Records -->
+                        <notebook>
+                            <page string="Sync History" name="sync_history">
+                                <field name="id" invisible="1"/>
+                                <tree string="Sync History" create="false" edit="false">
+                                    <field name="create_date"/>
+                                    <field name="operation"/>
+                                    <field name="status"/>
+                                    <field name="message"/>
+                                    <field name="duration"/>
+                                    <field name="records_processed"/>
+                                </tree>
+                            </page>
+                            
+                            <page string="Related Records" name="related_records">
+                                <field name="id" invisible="1"/>
+                                <tree string="Related Records" create="false" edit="false">
+                                    <field name="display_name"/>
+                                    <field name="model_name"/>
+                                    <field name="sync_status"/>
+                                    <field name="last_sync_date"/>
+                                </tree>
+                            </page>
+                        </notebook>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+        
+        <!-- SAP Synced Data Search View -->
+        <record id="view_sap_synced_data_search" model="ir.ui.view">
+            <field name="name">sap.synced.data.search</field>
+            <field name="model">sap.synced.data</field>
+            <field name="arch" type="xml">
+                <search string="Synced Data">
+                    <!-- Search Fields -->
+                    <field name="display_name" string="Record"/>
+                    <field name="backend_id" string="Backend"/>
+                    <field name="model_name" string="Model"/>
+                    <field name="external_id" string="SAP ID"/>
+                    <field name="sap_record_name" string="SAP Name"/>
+                    <field name="sync_status" string="Status"/>
+                    <field name="sync_direction" string="Direction"/>
+                    <field name="last_error" string="Error Message"/>
+                    
+                    <!-- Filters -->
+                    <filter string="Success" name="success" domain="[('sync_status', '=', 'success')]"/>
+                    <filter string="Failed" name="failed" domain="[('sync_status', '=', 'failed')]"/>
+                    <filter string="Pending" name="pending" domain="[('sync_status', '=', 'pending')]"/>
+                    <filter string="In Progress" name="in_progress" domain="[('sync_status', '=', 'in_progress')]"/>
+                    <filter string="Conflicts" name="conflicts" domain="[('sync_status', '=', 'conflict')]"/>
+                    <filter string="Needs Attention" name="needs_attention" domain="[('sync_status', '=', 'needs_attention')]"/>
+                    <filter string="Stale Records" name="stale" domain="[('is_stale', '=', True)]"/>
+                    <filter string="With Errors" name="with_errors" domain="[('error_count', '>', 0)]"/>
+                    
+                    <!-- Date Filters -->
+                    <filter string="Last 24 Hours" name="last_24h" domain="[('last_sync_date', '>=', datetime.datetime.now() - datetime.timedelta(hours=24))]"/>
+                    <filter string="Last 7 Days" name="last_7d" domain="[('last_sync_date', '>=', datetime.datetime.now() - datetime.timedelta(days=7))]"/>
+                    <filter string="Last 30 Days" name="last_30d" domain="[('last_sync_date', '>=', datetime.datetime.now() - datetime.timedelta(days=30))]"/>
+                    <filter string="Never Synced" name="never_synced" domain="[('last_sync_date', '=', False)]"/>
+                    
+                    <!-- Direction Filters -->
+                    <filter string="SAP → Odoo" name="sap_to_odoo" domain="[('sync_direction', '=', 'sap_to_odoo')]"/>
+                    <filter string="Odoo → SAP" name="odoo_to_sap" domain="[('sync_direction', '=', 'odoo_to_sap')]"/>
+                    <filter string="Bidirectional" name="bidirectional" domain="[('sync_direction', '=', 'bidirectional')]"/>
+                    <filter string="Manual" name="manual" domain="[('sync_direction', '=', 'manual')]"/>
+                    
+                    <!-- Group By -->
+                    <group expand="0" string="Group By">
+                        <filter string="Backend" name="group_backend" context="{'group_by': 'backend_id'}"/>
+                        <filter string="Model" name="group_model" context="{'group_by': 'model_name'}"/>
+                        <filter string="Status" name="group_status" context="{'group_by': 'sync_status'}"/>
+                        <filter string="Direction" name="group_direction" context="{'group_by': 'sync_direction'}"/>
+                        <filter string="Sync Date" name="group_sync_date" context="{'group_by': 'last_sync_date:day'}"/>
+                        <filter string="Created By" name="group_created_by" context="{'group_by': 'created_by'}"/>
+                    </group>
+                </search>
+            </field>
+        </record>
+        
+        <!-- SAP Synced Data Kanban View -->
+        <record id="view_sap_synced_data_kanban" model="ir.ui.view">
+            <field name="name">sap.synced.data.kanban</field>
+            <field name="model">sap.synced.data</field>
+            <field name="arch" type="xml">
+                <kanban string="Synced Data" class="o_kanban_small_column">
+                    <field name="sync_status"/>
+                    <field name="display_name"/>
+                    <field name="backend_id"/>
+                    <field name="model_name"/>
+                    <field name="external_id"/>
+                    <field name="last_sync_date"/>
+                    <field name="error_count"/>
+                    <field name="is_stale"/>
+                    
+                    <templates>
+                        <t t-name="kanban-box">
+                            <div class="oe_kanban_card oe_kanban_global_click">
+                                <div class="oe_kanban_content">
+                                    <div class="o_kanban_record_top">
+                                        <div class="o_kanban_record_headings">
+                                            <strong class="o_kanban_record_title">
+                                                <field name="display_name"/>
+                                            </strong>
+                                        </div>
+                                        <div class="o_kanban_record_subtitle">
+                                            <field name="backend_id"/>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="o_kanban_record_body">
+                                        <div class="text-muted">
+                                            <field name="model_name"/> • <field name="external_id"/>
+                                        </div>
+                                        <div class="text-muted">
+                                            Last Sync: <field name="last_sync_date"/>
+                                        </div>
+                                        <div t-if="record.error_count.value > 0" class="text-danger">
+                                            <i class="fa fa-exclamation-triangle"/> <field name="error_count"/> errors
+                                        </div>
+                                        <div t-if="record.is_stale.value" class="text-warning">
+                                            <i class="fa fa-clock-o"/> Stale record
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="o_kanban_record_bottom">
+                                        <div class="oe_kanban_bottom_left">
+                                            <field name="sync_status" widget="label_selection"/>
+                                        </div>
+                                        <div class="oe_kanban_bottom_right">
+                                            <button name="action_view_odoo_record" 
+                                                    type="object" 
+                                                    class="btn btn-sm btn-primary"
+                                                    attrs="{'invisible': [('odoo_record', '=', False)]}">
+                                                <i class="fa fa-external-link"/>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </t>
+                    </templates>
+                </kanban>
+            </field>
+        </record>
+        
+        <!-- SAP Synced Data Pivot View -->
+        <record id="view_sap_synced_data_pivot" model="ir.ui.view">
+            <field name="name">sap.synced.data.pivot</field>
+            <field name="model">sap.synced.data</field>
+            <field name="arch" type="xml">
+                <pivot string="Synced Data Analysis">
+                    <field name="backend_id" type="row"/>
+                    <field name="model_name" type="col"/>
+                    <field name="sync_status" type="col"/>
+                    <field name="id" type="measure"/>
+                    <field name="sync_count" type="measure"/>
+                    <field name="error_count" type="measure"/>
+                </pivot>
+            </field>
+        </record>
+        
+        <!-- SAP Synced Data Graph View -->
+        <record id="view_sap_synced_data_graph" model="ir.ui.view">
+            <field name="name">sap.synced.data.graph</field>
+            <field name="model">sap.synced.data</field>
+            <field name="arch" type="xml">
+                <graph string="Sync Trends" type="bar">
+                    <field name="last_sync_date" type="row" interval="day"/>
+                    <field name="sync_status" type="groupBy"/>
+                    <field name="id" type="measure"/>
+                </graph>
+            </field>
+        </record>
+        
+        <!-- Actions -->
+        <record id="action_sap_synced_data" model="ir.actions.act_window">
+            <field name="name">Synced Data</field>
+            <field name="res_model">sap.synced.data</field>
+            <field name="view_mode">tree,kanban,form,pivot,graph</field>
+            <field name="search_view_id" ref="view_sap_synced_data_search"/>
+            <field name="context">{'search_default_last_7d': 1}</field>
+            <field name="help" type="html">
+                <p class="o_view_nocontent_smiling_face">
+                    No synced data found
+                </p>
+                <p>
+                    Synced data records will appear here when SAP synchronization operations are performed.
+                </p>
+            </field>
+        </record>
+        
+        <record id="action_sap_synced_data_failed" model="ir.actions.act_window">
+            <field name="name">Failed Syncs</field>
+            <field name="res_model">sap.synced.data</field>
+            <field name="view_mode">tree,form</field>
+            <field name="search_view_id" ref="view_sap_synced_data_search"/>
+            <field name="context">{'search_default_failed': 1}</field>
+            <field name="domain">[('sync_status', '=', 'failed')]</field>
+        </record>
+        
+        <record id="action_sap_synced_data_conflicts" model="ir.actions.act_window">
+            <field name="name">Sync Conflicts</field>
+            <field name="res_model">sap.synced.data</field>
+            <field name="view_mode">tree,form</field>
+            <field name="search_view_id" ref="view_sap_synced_data_search"/>
+            <field name="context">{'search_default_conflicts': 1}</field>
+            <field name="domain">[('sync_status', '=', 'conflict')]</field>
+        </record>
+        
+        <record id="action_sap_synced_data_stale" model="ir.actions.act_window">
+            <field name="name">Stale Records</field>
+            <field name="res_model">sap.synced.data</field>
+            <field name="view_mode">tree,form</field>
+            <field name="search_view_id" ref="view_sap_synced_data_search"/>
+            <field name="context">{'search_default_stale': 1}</field>
+            <field name="domain">[('is_stale', '=', True)]</field>
+        </record>
+        
+        <!-- Menu Items -->
+        <menuitem id="menu_sap_synced_data"
+                  name="Synced Data"
+                  parent="menu_sap_integration"
+                  action="action_sap_synced_data"
+                  sequence="50"/>
+        
+        <menuitem id="menu_sap_synced_data_failed"
+                  name="Failed Syncs"
+                  parent="menu_sap_synced_data"
+                  action="action_sap_synced_data_failed"
+                  sequence="10"/>
+        
+        <menuitem id="menu_sap_synced_data_conflicts"
+                  name="Sync Conflicts"
+                  parent="menu_sap_synced_data"
+                  action="action_sap_synced_data_conflicts"
+                  sequence="20"/>
+        
+        <menuitem id="menu_sap_synced_data_stale"
+                  name="Stale Records"
+                  parent="menu_sap_synced_data"
+                  action="action_sap_synced_data_stale"
+                  sequence="30"/>
+        
+    </data>
+</odoo>

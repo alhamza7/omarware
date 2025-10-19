@@ -8,7 +8,7 @@ SAP Backend Adapters
 These adapters interact with SAP Service Layer API
 """
 
-from odoo.addons.component.core import AbstractComponent
+from odoo.addons.component.core import AbstractComponent, Component
 import logging
 
 _logger = logging.getLogger(__name__)
@@ -66,11 +66,11 @@ class SapCRUDAdapter(AbstractComponent):
 
 # ===== Business Partner (Customer/Supplier) Adapter =====
 
-class SapPartnerAdapter(AbstractComponent):
+class SapPartnerAdapter(Component):
     """Adapter for SAP Business Partners"""
     _name = 'sap.partner.adapter'
     _inherit = 'sap.adapter.crud'
-    _collection = \'sap.backend\'
+    _collection = 'sap.backend'
     _apply_on = 'sap.res.partner'
     _sap_model = 'BusinessPartners'
     
@@ -134,11 +134,11 @@ class SapPartnerAdapter(AbstractComponent):
 
 # ===== Product (Item) Adapter =====
 
-class SapProductAdapter(AbstractComponent):
+class SapProductAdapter(Component):
     """Adapter for SAP Items"""
     _name = 'sap.product.adapter'
     _inherit = 'sap.adapter.crud'
-    _collection = \'sap.backend\'
+    _collection = 'sap.backend'
     _apply_on = 'sap.product.product'
     _sap_model = 'Items'
     
@@ -202,11 +202,11 @@ class SapProductAdapter(AbstractComponent):
 
 # ===== Sale Order Adapter =====
 
-class SapSaleOrderAdapter(AbstractComponent):
+class SapSaleOrderAdapter(Component):
     """Adapter for SAP Orders"""
     _name = 'sap.sale.order.adapter'
     _inherit = 'sap.adapter.crud'
-    _collection = \'sap.backend\'
+    _collection = 'sap.backend'
     _apply_on = 'sap.sale.order'
     _sap_model = 'Orders'
     
@@ -270,11 +270,11 @@ class SapSaleOrderAdapter(AbstractComponent):
 
 # ===== Invoice Adapter =====
 
-class SapInvoiceAdapter(AbstractComponent):
+class SapInvoiceAdapter(Component):
     """Adapter for SAP Invoices"""
     _name = 'sap.invoice.adapter'
     _inherit = 'sap.adapter.crud'
-    _collection = \'sap.backend\'
+    _collection = 'sap.backend'
     _apply_on = 'sap.account.move'
     _sap_model = 'Invoices'
     

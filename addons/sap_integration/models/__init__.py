@@ -12,5 +12,16 @@ from . import sap_uom
 from . import sap_pricelist
 from . import sap_service_layer
 from . import sap_dashboard
+from . import sap_dashboard_enhanced
+from . import sap_synced_data
+from . import sap_uom_mapping
+from . import sap_product_uom
+from . import sap_dashboard_control
+from . import sap_user_management
+
+# Import core models
+from ..core.sap_logger import SapSyncLog
+from ..core.sap_alert_system import SapAlertRule, SapAlert
+from ..core.sap_performance_monitor import SapPerformanceMetrics
 
 

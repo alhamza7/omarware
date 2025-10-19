@@ -26,8 +26,7 @@ class SapPartnerImportMapper(Component):
     """Mapper for importing SAP Business Partners to Odoo"""
     _name = 'sap.partner.import.mapper'
     _inherit = 'base.import.mapper'
-    _apply_on = 'sap.res.partner
-    _collection = \'sap.backend\''
+    _apply_on = 'sap.res.partner'
     _collection = 'sap.backend'
     
     @mapping
@@ -123,7 +122,7 @@ class SapPartnerExportMapper(Component):
     _name = 'sap.partner.export.mapper'
     _inherit = 'base.export.mapper'
     _apply_on = 'sap.res.partner'
-    _collection = \'sap.backend\'
+    _collection = 'sap.backend'
     
     @mapping
     def card_name(self, record):
@@ -172,7 +171,7 @@ class SapProductImportMapper(Component):
     _name = 'sap.product.import.mapper'
     _inherit = 'base.import.mapper'
     _apply_on = 'sap.product.product'
-    _collection = \'sap.backend\'
+    _collection = 'sap.backend'
     
     @mapping
     def backend_id(self, record):
@@ -239,7 +238,7 @@ class SapProductExportMapper(Component):
     _name = 'sap.product.export.mapper'
     _inherit = 'base.export.mapper'
     _apply_on = 'sap.product.product'
-    _collection = \'sap.backend\'
+    _collection = 'sap.backend'
     
     @mapping
     def item_name(self, record):
@@ -278,7 +277,7 @@ class SapSaleOrderImportMapper(Component):
     _name = 'sap.sale.order.import.mapper'
     _inherit = 'base.import.mapper'
     _apply_on = 'sap.sale.order'
-    _collection = \'sap.backend\'
+    _collection = 'sap.backend'
     
     @mapping
     def backend_id(self, record):
@@ -329,7 +328,7 @@ class SapSaleOrderExportMapper(Component):
     _name = 'sap.sale.order.export.mapper'
     _inherit = 'base.export.mapper'
     _apply_on = 'sap.sale.order'
-    _collection = \'sap.backend\'
+    _collection = 'sap.backend'
     
     @mapping
     def card_code(self, record):

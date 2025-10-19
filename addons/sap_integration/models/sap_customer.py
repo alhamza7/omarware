@@ -4,6 +4,8 @@ from odoo import models, fields, api
 from odoo.exceptions import UserError
 import logging
 
+from ..core.sap_logger import SapLogger, SapSyncError, SapValidationError
+
 _logger = logging.getLogger(__name__)
 
 
@@ -11,6 +13,7 @@ class SapCustomerSync(models.Model):
     _name = 'sap.customer.sync'
     _description = 'SAP Customer Synchronizer'
     _order = 'last_sync desc'
+    
     
     backend_id = fields.Many2one('sap.backend', 'Backend', required=True)
     connector_id = fields.Many2one('sap.connector', 'Connector')
@@ -48,32 +51,41 @@ class SapCustomerSync(models.Model):
         return super(SapCustomerSync, self).create(vals)
     
     def sync_from_sap(self):
-        """Sync customer from SAP to Odoo"""
+        """Sync customer from SAP to Odoo using service layer"""
         try:
-            connection = self.backend_id.get_connection()
-            
             # Get customer data from SAP
+            connection = self.backend_id.get_connection()
             customers = connection.get_customers(
                 filter_query=f"CardCode eq '{self.sap_customer_id}'"
             )
+            connection.close_session()
             
             if not customers.get('value'):
-                raise UserError(f"Customer {self.sap_customer_id} not found in SAP")
+                raise SapValidationError(f"Customer {self.sap_customer_id} not found in SAP")
             
             customer_data = customers['value'][0]
             self.sap_data = str(customer_data)
             
-            # Process customer data
-            partner = self._process_customer_data(customer_data)
+            # Use service layer to sync customer
+            customer_service = self.env['sap.customer.service']
+            sync_result = customer_service.sync_customer_from_sap(
+                self.backend_id.id, 
+                customer_data
+            )
             
-            self.odoo_partner_id = partner.id
-            self.sap_customer_name = customer_data.get('CardName', '')
-            self.sync_status = 'success'
-            self.last_sync = fields.Datetime.now()
-            self.error_message = False
-            self.retry_count = 0
-            
-            _logger.info(f"Successfully synced customer {self.sap_customer_id}")
+            if sync_result['status'] == 'success':
+                # Update sync record
+                partner = self.env['res.partner'].browse(sync_result['partner_id'])
+                self.odoo_partner_id = partner.id
+                self.sap_customer_name = customer_data.get('CardName', '')
+                self.sync_status = 'success'
+                self.last_sync = fields.Datetime.now()
+                self.error_message = False
+                self.retry_count = 0
+                
+                _logger.info(f"Successfully synced customer {self.sap_customer_id}")
+            else:
+                raise SapSyncError(sync_result.get('message', 'Unknown sync error'))
             
         except Exception as e:
             self.sync_status = 'error'
@@ -83,33 +95,31 @@ class SapCustomerSync(models.Model):
             raise
     
     def sync_to_sap(self):
-        """Sync customer from Odoo to SAP"""
+        """Sync customer from Odoo to SAP using service layer"""
         try:
             if not self.odoo_partner_id:
-                raise UserError("No Odoo partner linked to this sync record")
+                raise SapValidationError("No Odoo partner linked to this sync record")
             
-            connection = self.backend_id.get_connection()
+            # Use service layer to sync customer
+            customer_service = self.env['sap.customer.service']
+            sync_result = customer_service.sync_customer_to_sap(
+                self.backend_id.id, 
+                self.odoo_partner_id.id
+            )
             
-            # Prepare customer data for SAP
-            customer_data = self._prepare_customer_data_for_sap()
-            self.sap_data = str(customer_data)
-            
-            # Create or update customer in SAP
-            if self.sap_customer_id:
-                # Update existing customer
-                result = connection.update_customer(self.sap_customer_id, customer_data)
+            if sync_result['status'] == 'success':
+                # Update sync record
+                if not self.sap_customer_id:
+                    self.sap_customer_id = sync_result.get('sap_card_code')
+                
+                self.sync_status = 'success'
+                self.last_sync = fields.Datetime.now()
+                self.error_message = False
+                self.retry_count = 0
+                
+                _logger.info(f"Successfully synced customer to SAP: {self.sap_customer_id}")
             else:
-                # Create new customer
-                result = connection.create_customer(customer_data)
-                if result:
-                    self.sap_customer_id = result.get('CardCode')
-            
-            self.sync_status = 'success'
-            self.last_sync = fields.Datetime.now()
-            self.error_message = False
-            self.retry_count = 0
-            
-            _logger.info(f"Successfully synced customer to SAP: {self.sap_customer_id}")
+                raise SapSyncError(sync_result.get('message', 'Unknown sync error'))
             
         except Exception as e:
             self.sync_status = 'error'
@@ -118,89 +128,7 @@ class SapCustomerSync(models.Model):
             _logger.error(f"Error syncing customer to SAP: {str(e)}")
             raise
     
-    def _process_customer_data(self, customer_data):
-        """Process customer data from SAP and create/update Odoo partner"""
-        try:
-            # Map SAP data to Odoo format
-            partner_vals = self._map_sap_to_odoo(customer_data)
-            
-            # Check if partner already exists
-            partner = self.env['res.partner'].search([
-                ('ref', '=', customer_data['CardCode'])
-            ], limit=1)
-            
-            if partner:
-                # Update existing partner
-                partner.write(partner_vals)
-                _logger.info(f"Updated existing partner: {partner.name}")
-            else:
-                # Create new partner
-                partner = self.env['res.partner'].create(partner_vals)
-                _logger.info(f"Created new partner: {partner.name}")
-            
-            return partner
-            
-        except Exception as e:
-            _logger.error(f"Error processing customer data: {str(e)}")
-            raise
-    
-    def _map_sap_to_odoo(self, sap_data):
-        """Map SAP customer data to Odoo partner format"""
-        return {
-            'name': sap_data.get('CardName', ''),
-            'ref': sap_data.get('CardCode', ''),
-            'email': sap_data.get('EmailAddress', ''),
-            'phone': sap_data.get('Phone1', ''),
-            'mobile': sap_data.get('Cellular', ''),
-            'street': sap_data.get('Address', ''),
-            'street2': sap_data.get('Address2', ''),
-            'city': sap_data.get('City', ''),
-            'zip': sap_data.get('ZipCode', ''),
-            'state_id': self._get_state_id(sap_data.get('State', '')),
-            'country_id': self._get_country_id(sap_data.get('Country', '')),
-            'is_company': True,
-            'customer_rank': 1,
-            'supplier_rank': 0,
-            'website': sap_data.get('Website', ''),
-            'comment': f"SAP Customer: {sap_data.get('CardCode', '')}",
-        }
-    
-    def _prepare_customer_data_for_sap(self):
-        """Prepare Odoo partner data for SAP format"""
-        partner = self.odoo_partner_id
-        return {
-            'CardName': partner.name,
-            'CardCode': partner.ref or '',
-            'EmailAddress': partner.email or '',
-            'Phone1': partner.phone or '',
-            'Cellular': partner.mobile or '',
-            'Address': partner.street or '',
-            'Address2': partner.street2 or '',
-            'City': partner.city or '',
-            'ZipCode': partner.zip or '',
-            'State': partner.state_id.name or '',
-            'Country': partner.country_id.code or '',
-            'Website': partner.website or '',
-            'CardType': 'cCustomer',
-        }
-    
-    def _get_state_id(self, state_name):
-        """Get state ID by name"""
-        if not state_name:
-            return False
-        state = self.env['res.country.state'].search([
-            ('name', 'ilike', state_name)
-        ], limit=1)
-        return state.id if state else False
-    
-    def _get_country_id(self, country_code):
-        """Get country ID by code"""
-        if not country_code:
-            return False
-        country = self.env['res.country'].search([
-            ('code', '=', country_code)
-        ], limit=1)
-        return country.id if country else False
+    # Legacy methods removed - now handled by service layer
     
     def retry_sync(self):
         """Retry failed synchronization"""
@@ -214,36 +142,14 @@ class SapCustomerSync(models.Model):
     
     @api.model
     def sync_all_customers(self, backend_id):
-        """Sync all customers from SAP"""
+        """Sync all customers from SAP using service layer"""
         try:
-            backend = self.env['sap.backend'].browse(backend_id)
-            connection = backend.get_connection()
+            # Use service layer to sync all customers
+            customer_service = self.env['sap.customer.service']
+            result = customer_service.sync_all_customers_from_sap(backend_id)
             
-            # Get all customers from SAP
-            customers = connection.get_customers(top=1000)  # Adjust as needed
-            
-            synced_count = 0
-            for customer_data in customers.get('value', []):
-                # Check if sync record already exists
-                sync_record = self.search([
-                    ('backend_id', '=', backend_id),
-                    ('sap_customer_id', '=', customer_data['CardCode'])
-                ])
-                
-                if not sync_record:
-                    # Create new sync record
-                    sync_record = self.create({
-                        'backend_id': backend_id,
-                        'sap_customer_id': customer_data['CardCode'],
-                        'sync_direction': 'sap_to_odoo',
-                    })
-                
-                # Sync the customer
-                sync_record.sync_from_sap()
-                synced_count += 1
-            
-            _logger.info(f"Synced {synced_count} customers from SAP")
-            return synced_count
+            _logger.info(f"Synced {result['successful']} customers from SAP, {result['failed']} failed")
+            return result
             
         except Exception as e:
             _logger.error(f"Error syncing all customers: {str(e)}")

@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        
+        <!-- SAP Alert Check Cron Job -->
+        <record id="ir_cron_sap_alert_check" model="ir.cron">
+            <field name="name">SAP Alert Check</field>
+            <field name="model_id" ref="model_sap_alert_rule"/>
+            <field name="state">code</field>
+            <field name="code">model.check_all_rules()</field>
+            <field name="interval_number">5</field>
+            <field name="interval_type">minutes</field>
+            <field name="numbercall">-1</field>
+            <field name="active">True</field>
+            <field name="doall">False</field>
+        </record>
+        
+        <!-- SAP Performance Cleanup Cron Job -->
+        <record id="ir_cron_sap_performance_cleanup" model="ir.cron">
+            <field name="name">SAP Performance Metrics Cleanup</field>
+            <field name="model_id" ref="model_sap_performance_metrics"/>
+            <field name="state">code</field>
+            <field name="code">model.search([('timestamp', '&lt;', datetime.datetime.now() - datetime.timedelta(days=90))]).unlink()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">days</field>
+            <field name="numbercall">-1</field>
+            <field name="active">True</field>
+            <field name="doall">False</field>
+        </record>
+        
+        <!-- SAP Sync Log Cleanup Cron Job -->
+        <record id="ir_cron_sap_sync_log_cleanup" model="ir.cron">
+            <field name="name">SAP Sync Log Cleanup</field>
+            <field name="model_id" ref="model_sap_sync_log"/>
+            <field name="state">code</field>
+            <field name="code">model.cleanup_old_logs(days=30)</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">days</field>
+            <field name="numbercall">-1</field>
+            <field name="active">True</field>
+            <field name="doall">False</field>
+        </record>
+        
+        <!-- SAP Health Check Cron Job -->
+        <record id="ir_cron_sap_health_check" model="ir.cron">
+            <field name="name">SAP Health Check</field>
+            <field name="model_id" ref="model_sap_dashboard_enhanced"/>
+            <field name="state">code</field>
+            <field name="code">model.run_health_check()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">hours</field>
+            <field name="numbercall">-1</field>
+            <field name="active">True</field>
+            <field name="doall">False</field>
+        </record>
+        
+    </data>
+</odoo>

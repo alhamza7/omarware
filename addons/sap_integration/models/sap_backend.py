@@ -5,6 +5,9 @@ from odoo.exceptions import UserError
 from datetime import timedelta
 import logging
 
+from ..config.sap_config import SYNC_CONFIG, ERROR_MESSAGES
+from ..core.sap_logger import SapLogger, SapConnectionError
+
 _logger = logging.getLogger(__name__)
 
 
@@ -15,6 +18,7 @@ class SapBackend(models.Model):
     _inherit = 'connector.backend'
     _backend_type = 'sap'
     _order = 'name'
+    
     
     name = fields.Char('Name', required=True, help="Name of the SAP backend configuration")
     base_url = fields.Char('Service Layer URL', required=True, 
@@ -64,12 +68,21 @@ class SapBackend(models.Model):
     )
     
     # Advanced settings
-    batch_size = fields.Integer('Batch Size', default=100, 
-                               help="Number of records to process in each batch")
-    timeout = fields.Integer('Timeout (seconds)', default=30,
-                            help="Request timeout in seconds")
-    retry_attempts = fields.Integer('Retry Attempts', default=3,
-                                   help="Number of retry attempts on failure")
+    batch_size = fields.Integer(
+        'Batch Size', 
+        default=SYNC_CONFIG['default_batch_size'],
+        help="Number of records to process in each batch"
+    )
+    timeout = fields.Integer(
+        'Timeout (seconds)', 
+        default=SYNC_CONFIG['default_timeout'],
+        help="Request timeout in seconds"
+    )
+    retry_attempts = fields.Integer(
+        'Retry Attempts', 
+        default=SYNC_CONFIG['default_retry_attempts'],
+        help="Number of retry attempts on failure"
+    )
     
     # Incremental Sync settings
     enable_incremental_sync = fields.Boolean(
@@ -83,7 +96,7 @@ class SapBackend(models.Model):
     last_invoice_sync = fields.Datetime('Last Invoice Sync')
     incremental_sync_days = fields.Integer(
         'Incremental Sync Days',
-        default=7,
+        default=SYNC_CONFIG['incremental_sync_days'],
         help="Number of days to look back for incremental sync (fallback if no last sync)"
     )
     
@@ -109,12 +122,15 @@ class SapBackend(models.Model):
         try:
             from .sap_service_layer import SapServiceLayerConnection
             
+            _logger.info(f"Testing connection to SAP backend: {self.name}")
+            
             connection = SapServiceLayerConnection(
                 self.base_url,
                 self.username,
                 self.password,
                 self.company_db,
-                verify_ssl=self.verify_ssl
+                verify_ssl=self.verify_ssl,
+                timeout=self.timeout
             )
             
             if connection.test_connection():
@@ -122,6 +138,15 @@ class SapBackend(models.Model):
                 self.last_connection = fields.Datetime.now()
                 self.error_message = False
                 connection.close_session()
+                
+                # Log successful connection
+                self.env['sap.sync.log'].log_success(
+                    backend_id=self.id,
+                    operation='Connection Test',
+                    message=f'Successfully connected to {self.name}'
+                )
+                
+                _logger.info(f"Connection to {self.name} successful")
                 
                 return {
                     'type': 'ir.actions.client',
@@ -134,11 +159,20 @@ class SapBackend(models.Model):
                     }
                 }
             else:
-                raise Exception("Connection test failed")
+                raise SapConnectionError("Connection test failed")
                 
         except Exception as e:
             self.connection_status = 'error'
             self.error_message = str(e)
+            
+            # Log connection error
+            self.env['sap.sync.log'].log_error(
+                backend_id=self.id,
+                operation='Connection Test',
+                message=f'Failed to connect to {self.name}: {str(e)}',
+                error_type=type(e).__name__
+            )
+            
             _logger.error(f"SAP Backend connection error: {str(e)}")
             
             return {

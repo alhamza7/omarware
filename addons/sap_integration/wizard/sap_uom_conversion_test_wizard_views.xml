@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        
+        <!-- UoM Conversion Test Wizard Form View -->
+        <record id="view_sap_uom_conversion_test_wizard_form" model="ir.ui.view">
+            <field name="name">sap.uom.conversion.test.wizard.form</field>
+            <field name="model">sap.uom.conversion.test.wizard</field>
+            <field name="arch" type="xml">
+                <form string="UoM Conversion Test">
+                    <sheet>
+                        <div class="oe_title">
+                            <h1>UoM Conversion Test</h1>
+                        </div>
+                        
+                        <group>
+                            <group>
+                                <field name="product_id"/>
+                                <field name="from_uom" required="1"/>
+                                <field name="to_uom" required="1"/>
+                                <field name="quantity" required="1"/>
+                            </group>
+                            <group>
+                                <field name="usage_type"/>
+                            </group>
+                        </group>
+                        
+                        <group string="Test Results" attrs="{'invisible': [('converted_quantity', '=', 0)]}">
+                            <group>
+                                <field name="conversion_factor" readonly="1"/>
+                                <field name="converted_quantity" readonly="1"/>
+                                <field name="precision_digits" readonly="1"/>
+                                <field name="rounding_method" readonly="1"/>
+                            </group>
+                            <group>
+                                <field name="is_valid" readonly="1"/>
+                                <field name="error_message" readonly="1"/>
+                            </group>
+                        </group>
+                        
+                        <group string="Conversion Chain" attrs="{'invisible': [('conversion_chain', '=', False)]}">
+                            <field name="conversion_chain" readonly="1" widget="text"/>
+                        </group>
+                        
+                        <footer>
+                            <button name="action_test_conversion" 
+                                    string="Test Conversion" 
+                                    type="object" 
+                                    class="btn-primary"/>
+                            <button name="action_validate_mapping" 
+                                    string="Validate Mapping" 
+                                    type="object" 
+                                    class="btn-secondary"
+                                    attrs="{'invisible': [('product_id', '=', False)]}"/>
+                            <button name="action_create_conversion_rule" 
+                                    string="Create Rule" 
+                                    type="object" 
+                                    class="btn-success"
+                                    attrs="{'invisible': [('is_valid', '=', False)]}"/>
+                            <button string="Cancel" 
+                                    class="btn-secondary" 
+                                    special="cancel"/>
+                        </footer>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+        
+        <!-- UoM Conversion Test Wizard Action -->
+        <record id="action_sap_uom_conversion_test_wizard" model="ir.actions.act_window">
+            <field name="name">UoM Conversion Test</field>
+            <field name="res_model">sap.uom.conversion.test.wizard</field>
+            <field name="view_mode">form</field>
+            <field name="target">new</field>
+        </record>
+        
+    </data>
+</odoo>

@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
 
+from . import config
+from . import core
+from . import services
 from . import models
 from . import components
 from . import wizard
