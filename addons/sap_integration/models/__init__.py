@@ -18,6 +18,7 @@ from . import sap_uom_mapping
 from . import sap_product_uom
 from . import sap_dashboard_control
 from . import sap_user_management
+from . import sap_warehouse
 
 # Import core models
 from ..core.sap_logger import SapSyncLog

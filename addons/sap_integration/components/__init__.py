@@ -8,4 +8,5 @@ from . import mapper
 from . import importer
 from . import exporter
 from . import listener
+from . import warehouse_adapter
 

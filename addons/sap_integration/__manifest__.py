@@ -71,6 +71,7 @@
         'views/sap_product_views.xml',
         'views/sap_quotation_views.xml',
         'views/sap_sale_views.xml',
+        'views/sap_warehouse_views.xml',
         'wizard/sap_import_wizard_views.xml',
     ],
     'installable': True,

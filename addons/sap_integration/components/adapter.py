@@ -174,6 +174,50 @@ class SapProductAdapter(Component):
         except Exception as e:
             _logger.error(f"Error updating product {external_id} in SAP: {str(e)}")
             raise
+    
+    def get_item_uoms(self, external_id):
+        """Get all UoMs for an item from SAP"""
+        connection = self._get_connection()
+        try:
+            # SAP Service Layer endpoint for item UoMs
+            url = f"{connection.base_url}/Items('{external_id}')?$select=InventoryUOM,SalesUnit,PurchaseUnit"
+            headers = connection._get_headers()
+            response = connection.session.get(url, headers=headers, timeout=connection.timeout)
+            
+            if response.status_code == 200:
+                data = response.json()
+                uoms = []
+                
+                # Inventory UoM
+                if data.get('InventoryUOM'):
+                    uoms.append({
+                        'UoMCode': data['InventoryUOM'],
+                        'UsageType': 'inventory',
+                        'ConversionFactor': 1.0
+                    })
+                
+                # Sales UoM
+                if data.get('SalesUnit') and data['SalesUnit'] != data.get('InventoryUOM'):
+                    uoms.append({
+                        'UoMCode': data['SalesUnit'],
+                        'UsageType': 'sales',
+                        'ConversionFactor': 1.0
+                    })
+                
+                # Purchase UoM
+                if data.get('PurchaseUnit') and data['PurchaseUnit'] != data.get('InventoryUOM'):
+                    uoms.append({
+                        'UoMCode': data['PurchaseUnit'],
+                        'UsageType': 'purchase',
+                        'ConversionFactor': 1.0
+                    })
+                
+                return uoms
+            
+            return []
+        except Exception as e:
+            _logger.error(f"Error getting item UoMs from SAP: {str(e)}")
+            return []
 
 
 # ===== Sale Order Adapter =====

@@ -195,6 +195,47 @@ class SapProductImporter(Component):
         """Import product dependencies (UoM, category, etc.)"""
         # UoM and categories should be handled separately
         pass
+    
+    def _after_import(self, binding):
+        """Import additional product data after main import"""
+        super()._after_import(binding)
+        self._import_product_uoms(binding)
+    
+    def _import_product_uoms(self, binding):
+        """Import all UoMs for product from SAP"""
+        try:
+            adapter = self.component(usage='backend.adapter')
+            uoms = adapter.get_item_uoms(binding.external_id)
+            
+            for uom_data in uoms:
+                # Check if mapping exists
+                existing = self.env['sap.product.uom'].search([
+                    ('product_id', '=', binding.odoo_id.id),
+                    ('sap_uom_code', '=', uom_data['UoMCode']),
+                    ('usage_type', '=', uom_data['UsageType'])
+                ], limit=1)
+                
+                if not existing:
+                    # Find or create Odoo UoM
+                    uom_mapping = self.env['sap.uom.mapping'].search([
+                        ('sap_uom_code', '=', uom_data['UoMCode'])
+                    ], limit=1)
+                    
+                    if uom_mapping:
+                        self.env['sap.product.uom'].create({
+                            'product_id': binding.odoo_id.id,
+                            'sap_uom_code': uom_data['UoMCode'],
+                            'odoo_uom_id': uom_mapping.odoo_uom_id.id,
+                            'usage_type': uom_data['UsageType'],
+                            'conversion_factor': uom_data.get('ConversionFactor', 1.0),
+                            'active': True
+                        })
+            
+            if uoms:
+                _logger.info(f"Imported {len(uoms)} UoMs for product {binding.name}")
+                
+        except Exception as e:
+            _logger.warning(f"Could not import UoMs for product {binding.name}: {str(e)}")
 
 
 class SapProductBatchImporter(Component):
@@ -257,3 +298,45 @@ class SapInvoiceBatchImporter(Component):
     
     def _get_external_id(self, record):
         return record.get('DocEntry')
+
+
+# ===== Warehouse Importers =====
+
+class SapWarehouseImporter(Component):
+    """Importer for SAP Warehouses"""
+    _name = 'sap.warehouse.importer'
+    _inherit = 'sap.importer'
+    _apply_on = 'sap.warehouse'
+    
+    def _import_dependencies(self):
+        """No dependencies for warehouses"""
+        pass
+    
+    def _create(self, data):
+        """Create warehouse in Odoo"""
+        # Create stock.warehouse first
+        warehouse_vals = {
+            'name': data.get('sap_warehouse_name') or data.get('external_id'),
+            'code': data.get('external_id'),
+        }
+        
+        warehouse = self.env['stock.warehouse'].search([
+            ('code', '=', data.get('external_id'))
+        ], limit=1)
+        
+        if not warehouse:
+            warehouse = self.env['stock.warehouse'].create(warehouse_vals)
+        
+        data['odoo_id'] = warehouse.id
+        return super()._create(data)
+
+
+class SapWarehouseBatchImporter(Component):
+    """Batch Importer for SAP Warehouses"""
+    _name = 'sap.warehouse.batch.importer'
+    _inherit = 'sap.batch.importer'
+    _usage = 'batch.importer'
+    _apply_on = 'sap.warehouse'
+    
+    def _get_external_id(self, record):
+        return record.get('WarehouseCode')

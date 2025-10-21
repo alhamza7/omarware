@@ -241,6 +241,121 @@ class SapProductImportMapper(Component):
             'sap_item_type': record.get('ItemType', 'itItems'),
             'sap_items_group_code': record.get('ItemsGroupCode', 0),
         }
+    
+    @mapping
+    def uom_id(self, record):
+        """Map SAP inventory UoM to Odoo base UoM"""
+        sap_uom = record.get('InventoryUOM') or record.get('SalesUnit', 'EA')
+        if sap_uom:
+            uom_id = self._get_or_create_uom_mapping(sap_uom)
+            if uom_id:
+                return {'uom_id': uom_id}
+        return {}
+    
+    @mapping
+    def uom_po_id(self, record):
+        """Map SAP purchase UoM to Odoo purchase UoM"""
+        sap_uom = record.get('PurchaseUnit')
+        if sap_uom:
+            uom_id = self._get_or_create_uom_mapping(sap_uom)
+            if uom_id:
+                return {'uom_po_id': uom_id}
+        return {}
+    
+    def _get_or_create_uom_mapping(self, sap_uom_code):
+        """Get or create UoM mapping from SAP code"""
+        # Common SAP to Odoo UoM mappings
+        common_mappings = {
+            'EA': 'uom.product_uom_unit',
+            'PC': 'uom.product_uom_unit',
+            'PCS': 'uom.product_uom_unit',
+            'UNIT': 'uom.product_uom_unit',
+            'KG': 'uom.product_uom_kgm',
+            'KGM': 'uom.product_uom_kgm',
+            'G': 'uom.product_uom_gram',
+            'GRM': 'uom.product_uom_gram',
+            'L': 'uom.product_uom_litre',
+            'LTR': 'uom.product_uom_litre',
+            'M': 'uom.product_uom_meter',
+            'MTR': 'uom.product_uom_meter',
+            'DOZ': 'uom.product_uom_dozen',
+        }
+        
+        # Check existing mapping
+        mapping = self.env['sap.uom.mapping'].search([
+            ('sap_uom_code', '=', sap_uom_code),
+            ('active', '=', True)
+        ], limit=1)
+        
+        if mapping:
+            return mapping.odoo_uom_id.id
+        
+        # Try common mapping
+        xmlid = common_mappings.get(sap_uom_code.upper())
+        if xmlid:
+            try:
+                odoo_uom = self.env.ref(xmlid)
+                # Create mapping
+                self.env['sap.uom.mapping'].create({
+                    'sap_uom_code': sap_uom_code,
+                    'odoo_uom_id': odoo_uom.id,
+                    'conversion_factor': 1.0,
+                    'uom_category': self._get_uom_category(odoo_uom),
+                    'active': True
+                })
+                return odoo_uom.id
+            except:
+                pass
+        
+        # Fallback: create custom UoM
+        return self._create_custom_uom(sap_uom_code)
+    
+    def _get_uom_category(self, uom):
+        """Get UoM category type"""
+        category_name = uom.category_id.name if uom.category_id else 'Other'
+        category_mapping = {
+            'Weight': 'weight',
+            'Volume': 'volume',
+            'Length': 'length',
+            'Unit': 'count',
+        }
+        return category_mapping.get(category_name, 'other')
+    
+    def _create_custom_uom(self, sap_uom_code):
+        """Create custom UoM for unknown SAP codes"""
+        try:
+            # Check if UoM already exists
+            existing = self.env['uom.uom'].search([('name', '=', sap_uom_code)], limit=1)
+            if existing:
+                return existing.id
+            
+            # Get or create 'Other' category
+            category = self.env['uom.category'].search([('name', '=', 'Other')], limit=1)
+            if not category:
+                category = self.env['uom.category'].create({'name': 'Other'})
+            
+            # Create UoM
+            uom = self.env['uom.uom'].create({
+                'name': sap_uom_code,
+                'category_id': category.id,
+                'factor': 1.0,
+                'uom_type': 'reference',
+                'active': True
+            })
+            
+            # Create mapping
+            self.env['sap.uom.mapping'].create({
+                'sap_uom_code': sap_uom_code,
+                'odoo_uom_id': uom.id,
+                'conversion_factor': 1.0,
+                'uom_category': 'other',
+                'active': True
+            })
+            
+            return uom.id
+        except:
+            # Ultimate fallback
+            return self.env.ref('uom.product_uom_unit').id
 
 
 class SapProductExportMapper(Component):
@@ -386,3 +501,34 @@ class SapSaleOrderExportMapper(Component):
                 lines.append(line_data)
         
         return {'DocumentLines': lines}
+
+
+# ===== Warehouse Mappers =====
+
+class SapWarehouseImportMapper(Component):
+    """Mapper for importing SAP Warehouses to Odoo"""
+    _name = 'sap.warehouse.import.mapper'
+    _inherit = 'base.import.mapper'
+    _collection = 'sap.backend'
+    _apply_on = 'sap.warehouse'
+    
+    @mapping
+    def backend_id(self, record):
+        return {'backend_id': self.backend_record.id}
+    
+    @mapping
+    def external_id(self, record):
+        return {'external_id': record.get('WarehouseCode')}
+    
+    @mapping
+    def sap_warehouse_name(self, record):
+        return {'sap_warehouse_name': record.get('WarehouseName', '')}
+    
+    @mapping
+    def sap_business_place_id(self, record):
+        return {'sap_business_place_id': record.get('BusinessPlaceID', 0)}
+    
+    @mapping
+    def active(self, record):
+        inactive = record.get('Inactive', 'tNO')
+        return {'active': inactive == 'tNO'}

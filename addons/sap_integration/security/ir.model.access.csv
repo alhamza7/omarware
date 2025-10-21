@@ -65,5 +65,9 @@ access_sap_user_permission_wizard_manager,sap.user.permission.wizard manager,mod
 access_sap_user_permission_wizard_user,sap.user.permission.wizard user,model_sap_user_permission_wizard,sap_integration.group_sap_user,1,1,1,1
 access_sap_bulk_permission_wizard_manager,sap.bulk.permission.wizard manager,model_sap_bulk_permission_wizard,sap_integration.group_sap_manager,1,1,1,1
 access_sap_bulk_permission_wizard_user,sap.bulk.permission.wizard user,model_sap_bulk_permission_wizard,sap_integration.group_sap_user,1,1,1,1
+access_sap_warehouse_manager,sap.warehouse manager,model_sap_warehouse,sap_integration.group_sap_manager,1,1,1,1
+access_sap_warehouse_user,sap.warehouse user,model_sap_warehouse,sap_integration.group_sap_user,1,0,0,0
+access_sap_stock_location_manager,sap.stock.location manager,model_sap_stock_location,sap_integration.group_sap_manager,1,1,1,1
+access_sap_stock_location_user,sap.stock.location user,model_sap_stock_location,sap_integration.group_sap_user,1,0,0,0
 
 
