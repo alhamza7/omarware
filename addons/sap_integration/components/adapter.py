@@ -9,29 +9,24 @@ These adapters interact with SAP Service Layer API
 """
 
 from odoo.addons.component.core import AbstractComponent, Component
+from ..core.sap_connection_pool import get_connection_pool
 import logging
 
 _logger = logging.getLogger(__name__)
 
 
 class SapAdapter(AbstractComponent):
-    """Generic SAP Adapter"""
+    """Generic SAP Adapter with Connection Pooling"""
     _name = 'sap.adapter'
     _inherit = 'base.backend.adapter'
     _usage = 'backend.adapter'
     _collection = 'sap.backend'
     
     def _get_connection(self):
-        """Get SAP Service Layer connection"""
-        from ..models.sap_service_layer import SapServiceLayerConnection
-        
+        """Get SAP Service Layer connection from pool (reused connection)"""
+        pool = get_connection_pool()
         backend = self.backend_record
-        return SapServiceLayerConnection(
-            backend.base_url,
-            backend.username,
-            backend.password,
-            backend.company_db
-        )
+        return pool.get_connection(backend)
 
 
 class SapCRUDAdapter(SapAdapter):
@@ -85,8 +80,6 @@ class SapPartnerAdapter(Component):
         except Exception as e:
             _logger.error(f"Error searching partners in SAP: {str(e)}")
             raise
-        finally:
-            connection.close_session()
     
     def read(self, external_id):
         """Read a Business Partner from SAP"""
@@ -102,8 +95,6 @@ class SapPartnerAdapter(Component):
         except Exception as e:
             _logger.error(f"Error reading partner {external_id} from SAP: {str(e)}")
             raise
-        finally:
-            connection.close_session()
     
     def create(self, data):
         """Create a Business Partner in SAP"""
@@ -114,8 +105,6 @@ class SapPartnerAdapter(Component):
         except Exception as e:
             _logger.error(f"Error creating partner in SAP: {str(e)}")
             raise
-        finally:
-            connection.close_session()
     
     def write(self, external_id, data):
         """Update a Business Partner in SAP"""
@@ -126,8 +115,6 @@ class SapPartnerAdapter(Component):
         except Exception as e:
             _logger.error(f"Error updating partner {external_id} in SAP: {str(e)}")
             raise
-        finally:
-            connection.close_session()
 
 
 # ===== Product (Item) Adapter =====
@@ -152,8 +139,6 @@ class SapProductAdapter(Component):
         except Exception as e:
             _logger.error(f"Error searching products in SAP: {str(e)}")
             raise
-        finally:
-            connection.close_session()
     
     def read(self, external_id):
         """Read an Item from SAP"""
@@ -169,8 +154,6 @@ class SapProductAdapter(Component):
         except Exception as e:
             _logger.error(f"Error reading product {external_id} from SAP: {str(e)}")
             raise
-        finally:
-            connection.close_session()
     
     def create(self, data):
         """Create an Item in SAP"""
@@ -181,8 +164,6 @@ class SapProductAdapter(Component):
         except Exception as e:
             _logger.error(f"Error creating product in SAP: {str(e)}")
             raise
-        finally:
-            connection.close_session()
     
     def write(self, external_id, data):
         """Update an Item in SAP"""
@@ -193,8 +174,6 @@ class SapProductAdapter(Component):
         except Exception as e:
             _logger.error(f"Error updating product {external_id} in SAP: {str(e)}")
             raise
-        finally:
-            connection.close_session()
 
 
 # ===== Sale Order Adapter =====
