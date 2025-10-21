@@ -182,7 +182,7 @@ class SapWebhookEndpoint(models.Model):
             'type': 'ir.actions.act_window',
             'name': f'Logs for {self.name}',
             'res_model': 'sap.webhook.log',
-            'view_mode': 'tree,form',
+            'view_mode': 'list,form',
             'domain': [('webhook_id', '=', self.id)],
             'context': {'default_webhook_id': self.id}
         }

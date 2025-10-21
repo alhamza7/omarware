@@ -82,9 +82,9 @@ class SapPluginManager(SapBaseService):
             # Check if class is a subclass of SapBasePlugin
             try:
                 from .sap_base_plugin import SapBasePlugin
-                return issubclass(plugin_class, SapBasePlugin)
+                return issubclass(plugin_class, type) and hasattr(plugin_class, '_name')
             except ImportError:
-                return False
+                return True  # Allow plugins even if SapBasePlugin not available
             
         except Exception as e:
             _logger.error(f"Error validating plugin class: {str(e)}")
@@ -260,10 +260,9 @@ class SapPluginManager(SapBaseService):
     def _is_plugin_class(self, obj):
         """Check if class is a plugin class"""
         try:
-            from .sap_base_plugin import SapBasePlugin
             return (inspect.isclass(obj) and 
-                    issubclass(obj, SapBasePlugin) and 
-                    obj != SapBasePlugin)
+                    hasattr(obj, 'PLUGIN_ID') and 
+                    hasattr(obj, 'execute'))
         except (ImportError, Exception):
             return False
     

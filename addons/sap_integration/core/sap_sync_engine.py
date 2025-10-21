@@ -21,13 +21,35 @@ from .sap_logger import SapLogger, SapSyncError, SapValidationError, SapConnecti
 from .sap_base_service import SapBaseService
 from ..config.sap_config import SYNC_CONFIG, ERROR_MESSAGES
 
+_logger = logging.getLogger(__name__)
 
-class SapSyncEngine(SapBaseService):
+
+class SapSyncEngine(models.TransientModel):
     """Main synchronization engine for SAP-Odoo integration"""
     _name = 'sap.sync.engine'
     _description = 'SAP Synchronization Engine'
     
     _sync_lock = threading.Lock()
+    
+    # Wizard fields for sync controls
+    backend_id = fields.Many2one('sap.backend', string='SAP Backend', required=True)
+    entity_types = fields.Char(string='Entity Types', help='Comma-separated list of entity types')
+    sync_direction = fields.Selection([
+        ('sap_to_odoo', 'SAP to Odoo'),
+        ('odoo_to_sap', 'Odoo to SAP'),
+        ('bidirectional', 'Bidirectional')
+    ], string='Sync Direction', default='bidirectional', required=True)
+    batch_size = fields.Integer(string='Batch Size', default=100)
+    force_full_sync = fields.Boolean(string='Force Full Sync', default=False)
+    max_workers = fields.Integer(string='Max Workers', default=4)
+    retry_attempts = fields.Integer(string='Retry Attempts', default=3)
+    timeout = fields.Integer(string='Timeout (seconds)', default=300)
+    incremental_days = fields.Integer(string='Incremental Days', default=7)
+    
+    @property
+    def logger(self):
+        from .sap_logger import SapLogger
+        return SapLogger(f"sap_integration.{self._name}")
     
     @api.model
     def sync_all_entities(self, backend_id, entity_types=None, direction='bidirectional', 
@@ -738,3 +760,30 @@ class SapSyncEngine(SapBaseService):
             'conflicts': result1.get('conflicts', 0) + result2.get('conflicts', 0)
         }
         return combined
+    
+    def action_start_sync(self):
+        """Start synchronization based on wizard settings"""
+        self.ensure_one()
+        entity_types = self.entity_types.split(',') if self.entity_types else None
+        return self.sync_all_entities(
+            backend_id=self.backend_id.id,
+            entity_types=entity_types,
+            direction=self.sync_direction,
+            batch_size=self.batch_size,
+            force_full_sync=self.force_full_sync
+        )
+    
+    def action_start_incremental_sync(self):
+        """Start incremental synchronization"""
+        self.ensure_one()
+        return self.action_start_sync()
+    
+    def action_stop_sync(self):
+        """Stop current synchronization"""
+        self.ensure_one()
+        # Implementation would need sync state management
+        return {'type': 'ir.actions.client', 'tag': 'display_notification', 'params': {
+            'title': 'Sync Stop Requested',
+            'message': 'Synchronization will stop after current batch',
+            'type': 'warning'
+        }}

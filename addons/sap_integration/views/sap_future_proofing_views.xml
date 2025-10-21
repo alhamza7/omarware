@@ -7,14 +7,14 @@
             <field name="name">sap.plugin.manager.tree</field>
             <field name="model">sap.plugin.manager</field>
             <field name="arch" type="xml">
-                <tree string="SAP Plugin Manager" create="false" edit="false">
+                <list string="SAP Plugin Manager" create="false" edit="false">
                     <field name="name"/>
                     <field name="version"/>
                     <field name="author"/>
                     <field name="category"/>
                     <field name="status"/>
                     <field name="registered_at"/>
-                </tree>
+                </list>
             </field>
         </record>
         
@@ -23,7 +23,7 @@
             <field name="name">sap.api.endpoint.tree</field>
             <field name="model">sap.api.endpoint</field>
             <field name="arch" type="xml">
-                <tree string="SAP API Endpoints" create="true" edit="true">
+                <list string="SAP API Endpoints" create="true" edit="true">
                     <field name="sequence" widget="handle"/>
                     <field name="name"/>
                     <field name="path"/>
@@ -44,7 +44,7 @@
                             type="object" 
                             icon="fa-bar-chart" 
                             string="Statistics"/>
-                </tree>
+                </list>
             </field>
         </record>
         
@@ -125,7 +125,7 @@
             <field name="name">sap.api.key.tree</field>
             <field name="model">sap.api.key</field>
             <field name="arch" type="xml">
-                <tree string="SAP API Keys" create="true" edit="true">
+                <list string="SAP API Keys" create="true" edit="true">
                     <field name="name"/>
                     <field name="key_value"/>
                     <field name="user_id"/>
@@ -142,7 +142,7 @@
                             type="object" 
                             icon="fa-ban" 
                             string="Revoke"/>
-                </tree>
+                </list>
             </field>
         </record>
         
@@ -200,7 +200,7 @@
             <field name="name">sap.webhook.endpoint.tree</field>
             <field name="model">sap.webhook.endpoint</field>
             <field name="arch" type="xml">
-                <tree string="SAP Webhook Endpoints" create="true" edit="true">
+                <list string="SAP Webhook Endpoints" create="true" edit="true">
                     <field name="sequence" widget="handle"/>
                     <field name="name"/>
                     <field name="url"/>
@@ -219,7 +219,7 @@
                             type="object" 
                             icon="fa-list" 
                             string="View Logs"/>
-                </tree>
+                </list>
             </field>
         </record>
         
@@ -307,7 +307,7 @@
             <field name="name">sap.customization.rule.tree</field>
             <field name="model">sap.customization.rule</field>
             <field name="arch" type="xml">
-                <tree string="SAP Customization Rules" create="true" edit="true">
+                <list string="SAP Customization Rules" create="true" edit="true">
                     <field name="sequence" widget="handle"/>
                     <field name="name"/>
                     <field name="rule_type"/>
@@ -327,7 +327,7 @@
                             type="object" 
                             icon="fa-list" 
                             string="View Executions"/>
-                </tree>
+                </list>
             </field>
         </record>
         
@@ -483,3 +483,4 @@
         
     </data>
 </odoo>
+

@@ -11,14 +11,14 @@ _logger = logging.getLogger(__name__)
 class SapResPartner(models.Model):
     """Binding Model for SAP Business Partners (Customers/Suppliers)"""
     _name = 'sap.res.partner'
-    _inherit = 'external.binding'
+    _inherit = ['mail.thread', 'mail.activity.mixin']
     _inherits = {'res.partner': 'odoo_id'}
     _description = 'SAP Business Partner Binding'
     
     # Required fields for binding
     odoo_id = fields.Many2one(
         comodel_name='res.partner',
-        string='Partner',
+        string='Odoo Partner',
         required=True,
         ondelete='cascade',
         index=True,
@@ -32,6 +32,7 @@ class SapResPartner(models.Model):
     )
     external_id = fields.Char(
         string='SAP CardCode',
+        required=True,
         index=True,
     )
     
@@ -42,6 +43,9 @@ class SapResPartner(models.Model):
         ('cSupplier', 'Supplier'),
         ('cLid', 'Lead'),
     ], string='SAP Card Type', default='cCustomer')
+    
+    # Sync tracking
+    sync_date = fields.Datetime('Last Sync Date', readonly=True)
     
     # Error handling
     sync_error = fields.Text('Synchronization Error', readonly=True)
@@ -55,52 +59,82 @@ class SapResPartner(models.Model):
     @api.model
     def import_batch(self, backend, filters=None):
         """Import SAP Business Partners in batch"""
-        # TODO: Implement with @job decorator when queue_job is available
-        # @job(default_channel='root.sap')
-        from odoo.addons.component.core import WorkContext
-        
-        work = WorkContext(
-            model_name=self._name,
-            collection=backend,
-        )
-        importer = work.component(usage='batch.importer')
-        return importer.run(filters=filters)
+        try:
+            from odoo.addons.component.core import WorkContext
+            
+            _logger.info(f"Starting batch import of partners from SAP backend {backend.name}")
+            
+            with backend.work_on(self._name) as work:
+                importer = work.component(usage='batch.importer')
+                result = importer.run(filters=filters)
+                
+            _logger.info(f"Batch import completed: {result.get('imported', 0)} imported, {result.get('errors', 0)} errors")
+            return result
+            
+        except Exception as e:
+            _logger.error(f"Error in batch import for {self._name}: {str(e)}", exc_info=True)
+            return {
+                'status': 'error',
+                'message': str(e),
+                'imported': 0,
+                'errors': 1
+            }
     
     def import_record(self, backend, external_id):
         """Import a single SAP Business Partner"""
-        from odoo.addons.component.core import WorkContext
-        
-        work = WorkContext(
-            model_name=self._name,
-            collection=backend,
-        )
-        importer = work.component(usage='record.importer')
-        return importer.run(external_id)
+        try:
+            from odoo.addons.component.core import WorkContext
+            
+            _logger.info(f"Importing partner {external_id} from SAP backend {backend.name}")
+            
+            with backend.work_on(self._name) as work:
+                importer = work.component(usage='record.importer')
+                binding = importer.run(external_id)
+                
+            _logger.info(f"Partner {external_id} imported successfully")
+            return binding
+            
+        except Exception as e:
+            _logger.error(f"Error importing partner {external_id}: {str(e)}", exc_info=True)
+            raise
     
     def export_record(self, fields=None):
         """Export this partner to SAP"""
         self.ensure_one()
-        from odoo.addons.component.core import WorkContext
         
-        work = WorkContext(
-            model_name=self._name,
-            collection=self.backend_id,
-        )
-        exporter = work.component(usage='record.exporter')
-        return exporter.run(self)
+        try:
+            from odoo.addons.component.core import WorkContext
+            
+            _logger.info(f"Exporting partner {self.odoo_id.name} (ID: {self.id}) to SAP backend {self.backend_id.name}")
+            
+            with self.backend_id.work_on(self._name) as work:
+                exporter = work.component(usage='record.exporter')
+                result = exporter.run(self, fields=fields)
+                
+            _logger.info(f"Partner exported successfully to SAP with CardCode: {self.external_id}")
+            return result
+            
+        except Exception as e:
+            _logger.error(f"Error exporting partner {self.id}: {str(e)}", exc_info=True)
+            # Store error for later retry
+            self.write({
+                'sync_error': str(e),
+                'sync_retry_count': self.sync_retry_count + 1
+            })
+            raise
 
 
 class SapProductProduct(models.Model):
     """Binding Model for SAP Items (Products)"""
     _name = 'sap.product.product'
-    _inherit = 'external.binding'
+    _inherit = ['mail.thread', 'mail.activity.mixin']
     _inherits = {'product.product': 'odoo_id'}
     _description = 'SAP Product Binding'
     
     # Required fields for binding
     odoo_id = fields.Many2one(
         comodel_name='product.product',
-        string='Product',
+        string='Odoo Product',
         required=True,
         ondelete='cascade',
         index=True,
@@ -114,6 +148,7 @@ class SapProductProduct(models.Model):
     )
     external_id = fields.Char(
         string='SAP ItemCode',
+        required=True,
         index=True,
     )
     
@@ -124,6 +159,9 @@ class SapProductProduct(models.Model):
         ('itService', 'Service'),
     ], string='SAP Item Type', default='itItems')
     sap_items_group_code = fields.Integer('SAP Items Group Code')
+    
+    # Sync tracking
+    sync_date = fields.Datetime('Last Sync Date', readonly=True)
     
     # Error handling
     sync_error = fields.Text('Synchronization Error', readonly=True)
@@ -137,51 +175,82 @@ class SapProductProduct(models.Model):
     @api.model
     def import_batch(self, backend, filters=None):
         """Import SAP Items in batch"""
-        # TODO: Implement with @job decorator when queue_job is available
-        from odoo.addons.component.core import WorkContext
-        
-        work = WorkContext(
-            model_name=self._name,
-            collection=backend,
-        )
-        importer = work.component(usage='batch.importer')
-        return importer.run(filters=filters)
+        try:
+            from odoo.addons.component.core import WorkContext
+            
+            _logger.info(f"Starting batch import of products from SAP backend {backend.name}")
+            
+            with backend.work_on(self._name) as work:
+                importer = work.component(usage='batch.importer')
+                result = importer.run(filters=filters)
+                
+            _logger.info(f"Batch import completed: {result.get('imported', 0)} imported, {result.get('errors', 0)} errors")
+            return result
+            
+        except Exception as e:
+            _logger.error(f"Error in batch import for {self._name}: {str(e)}", exc_info=True)
+            return {
+                'status': 'error',
+                'message': str(e),
+                'imported': 0,
+                'errors': 1
+            }
     
     def import_record(self, backend, external_id):
         """Import a single SAP Item"""
-        from odoo.addons.component.core import WorkContext
-        
-        work = WorkContext(
-            model_name=self._name,
-            collection=backend,
-        )
-        importer = work.component(usage='record.importer')
-        return importer.run(external_id)
+        try:
+            from odoo.addons.component.core import WorkContext
+            
+            _logger.info(f"Importing product {external_id} from SAP backend {backend.name}")
+            
+            with backend.work_on(self._name) as work:
+                importer = work.component(usage='record.importer')
+                binding = importer.run(external_id)
+                
+            _logger.info(f"Product {external_id} imported successfully")
+            return binding
+            
+        except Exception as e:
+            _logger.error(f"Error importing product {external_id}: {str(e)}", exc_info=True)
+            raise
     
     def export_record(self, fields=None):
         """Export this product to SAP"""
         self.ensure_one()
-        from odoo.addons.component.core import WorkContext
         
-        work = WorkContext(
-            model_name=self._name,
-            collection=self.backend_id,
-        )
-        exporter = work.component(usage='record.exporter')
-        return exporter.run(self)
+        try:
+            from odoo.addons.component.core import WorkContext
+            
+            _logger.info(f"Exporting product {self.odoo_id.name} (ID: {self.id}) to SAP backend {self.backend_id.name}")
+            
+            with self.backend_id.work_on(self._name) as work:
+                exporter = work.component(usage='record.exporter')
+                result = exporter.run(self, fields=fields)
+                
+            _logger.info(f"Product exported successfully to SAP with ItemCode: {self.external_id}")
+            return result
+            
+        except Exception as e:
+            _logger.error(f"Error exporting product {self.id}: {str(e)}", exc_info=True)
+            # Store error for later retry
+            self.write({
+                'sync_error': str(e),
+                'sync_retry_count': self.sync_retry_count + 1
+            })
+            raise
 
 
 class SapSaleOrder(models.Model):
     """Binding Model for SAP Orders/Quotations"""
     _name = 'sap.sale.order'
-    _inherit = 'external.binding'
+    _inherit = ['mail.thread', 'mail.activity.mixin']
     _inherits = {'sale.order': 'odoo_id'}
     _description = 'SAP Sale Order Binding'
     
     # Required fields for binding
     odoo_id = fields.Many2one(
         comodel_name='sale.order',
-        string='Sale Order',
+        string='Odoo Sale Order',
         required=True,
         ondelete='cascade',
         index=True,
@@ -195,6 +264,7 @@ class SapSaleOrder(models.Model):
     )
     external_id = fields.Char(
         string='SAP DocEntry',
+        required=True,
         index=True,
     )
     
@@ -204,6 +274,9 @@ class SapSaleOrder(models.Model):
         ('quotation', 'Quotation'),
         ('order', 'Order'),
     ], string='SAP Document Type', default='order')
+    
+    # Sync tracking
+    sync_date = fields.Datetime('Last Sync Date', readonly=True)
     
     # Error handling
     sync_error = fields.Text('Synchronization Error', readonly=True)
@@ -218,14 +291,14 @@ class SapSaleOrder(models.Model):
 class SapAccountMove(models.Model):
     """Binding Model for SAP Invoices"""
     _name = 'sap.account.move'
-    _inherit = 'external.binding'
+    _inherit = ['mail.thread', 'mail.activity.mixin']
     _inherits = {'account.move': 'odoo_id'}
     _description = 'SAP Invoice Binding'
     
     # Required fields for binding
     odoo_id = fields.Many2one(
         comodel_name='account.move',
-        string='Invoice',
+        string='Odoo Invoice',
         required=True,
         ondelete='cascade',
         index=True,
@@ -239,11 +312,15 @@ class SapAccountMove(models.Model):
     )
     external_id = fields.Char(
         string='SAP DocEntry',
+        required=True,
         index=True,
     )
     
     # SAP specific fields
     sap_doc_num = fields.Char('SAP DocNum')
+    
+    # Sync tracking
+    sync_date = fields.Datetime('Last Sync Date', readonly=True)
     
     # Error handling
     sync_error = fields.Text('Synchronization Error', readonly=True)

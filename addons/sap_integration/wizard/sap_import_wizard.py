@@ -288,7 +288,7 @@ class SapImportWizard(models.TransientModel):
             'type': 'ir.actions.act_window',
             'name': _('Imported Records'),
             'res_model': model,
-            'view_mode': 'tree,form',
+            'view_mode': 'list,form',
             'domain': [('backend_id', '=', self.backend_id.id)],
             'context': dict(self.env.context),
         }

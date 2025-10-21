@@ -21,14 +21,47 @@ from .sap_logger import SapLogger, SapSyncError, SapValidationError
 from .sap_base_service import SapBaseService
 from ..config.sap_config import SYNC_CONFIG
 
+_logger = logging.getLogger(__name__)
 
-class SapBatchProcessor(SapBaseService):
+
+class SapBatchProcessor(models.TransientModel):
     """Batch processing system for SAP operations"""
     _name = 'sap.batch.processor'
     _description = 'SAP Batch Processor'
     
     _processing_jobs = {}
     _job_lock = threading.Lock()
+    
+    # Fields for batch job tracking
+    job_id = fields.Char(string='Job ID', readonly=True)
+    backend_id = fields.Many2one('sap.backend', string='Backend', readonly=True)
+    entity_type = fields.Char(string='Entity Type', readonly=True)
+    operation_type = fields.Char(string='Operation Type', readonly=True)
+    status = fields.Selection([
+        ('pending', 'Pending'),
+        ('running', 'Running'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed')
+    ], string='Status', default='pending', readonly=True)
+    total_records = fields.Integer(string='Total Records', readonly=True)
+    processed_records = fields.Integer(string='Processed Records', readonly=True)
+    progress = fields.Float(string='Progress (%)', compute='_compute_progress', readonly=True)
+    start_time = fields.Datetime(string='Start Time', readonly=True)
+    end_time = fields.Datetime(string='End Time', readonly=True)
+    duration = fields.Float(string='Duration (s)', readonly=True)
+    
+    @api.depends('total_records', 'processed_records')
+    def _compute_progress(self):
+        for record in self:
+            if record.total_records > 0:
+                record.progress = (record.processed_records / record.total_records) * 100
+            else:
+                record.progress = 0.0
+    
+    @property
+    def logger(self):
+        from .sap_logger import SapLogger
+        return SapLogger(f"sap_integration.{self._name}")
     
     @api.model
     def process_batch(self, backend_id, entity_type, records, operation_type, 

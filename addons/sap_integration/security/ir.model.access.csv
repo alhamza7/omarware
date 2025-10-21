@@ -65,21 +65,5 @@ access_sap_user_permission_wizard_manager,sap.user.permission.wizard manager,mod
 access_sap_user_permission_wizard_user,sap.user.permission.wizard user,model_sap_user_permission_wizard,sap_integration.group_sap_user,1,1,1,1
 access_sap_bulk_permission_wizard_manager,sap.bulk.permission.wizard manager,model_sap_bulk_permission_wizard,sap_integration.group_sap_manager,1,1,1,1
 access_sap_bulk_permission_wizard_user,sap.bulk.permission.wizard user,model_sap_bulk_permission_wizard,sap_integration.group_sap_user,1,1,1,1
-access_sap_plugin_manager_manager,sap.plugin.manager manager,model_sap_plugin_manager,sap_integration.group_sap_manager,1,1,1,1
-access_sap_plugin_manager_user,sap.plugin.manager user,model_sap_plugin_manager,sap_integration.group_sap_user,1,0,0,0
-access_sap_api_endpoint_manager,sap.api.endpoint manager,model_sap_api_endpoint,sap_integration.group_sap_manager,1,1,1,1
-access_sap_api_endpoint_user,sap.api.endpoint user,model_sap_api_endpoint,sap_integration.group_sap_user,1,0,0,0
-access_sap_api_key_manager,sap.api.key manager,model_sap_api_key,sap_integration.group_sap_manager,1,1,1,1
-access_sap_api_key_user,sap.api.key user,model_sap_api_key,sap_integration.group_sap_user,1,0,0,0
-access_sap_api_request_log_manager,sap.api.request.log manager,model_sap_api_request_log,sap_integration.group_sap_manager,1,1,1,1
-access_sap_api_request_log_user,sap.api.request.log user,model_sap_api_request_log,sap_integration.group_sap_user,1,0,0,0
-access_sap_webhook_endpoint_manager,sap.webhook.endpoint manager,model_sap_webhook_endpoint,sap_integration.group_sap_manager,1,1,1,1
-access_sap_webhook_endpoint_user,sap.webhook.endpoint user,model_sap_webhook_endpoint,sap_integration.group_sap_user,1,0,0,0
-access_sap_webhook_log_manager,sap.webhook.log manager,model_sap_webhook_log,sap_integration.group_sap_manager,1,1,1,1
-access_sap_webhook_log_user,sap.webhook.log user,model_sap_webhook_log,sap_integration.group_sap_user,1,0,0,0
-access_sap_customization_rule_manager,sap.customization.rule manager,model_sap_customization_rule,sap_integration.group_sap_manager,1,1,1,1
-access_sap_customization_rule_user,sap.customization.rule user,model_sap_customization_rule,sap_integration.group_sap_user,1,0,0,0
-access_sap_customization_execution_manager,sap.customization.execution manager,model_sap_customization_execution,sap_integration.group_sap_manager,1,1,1,1
-access_sap_customization_execution_user,sap.customization.execution user,model_sap_customization_execution,sap_integration.group_sap_user,1,0,0,0
 
 

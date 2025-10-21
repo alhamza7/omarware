@@ -21,6 +21,7 @@ class SapImporter(Component):
     """Base SAP Importer"""
     _name = 'sap.importer'
     _inherit = 'base.importer'
+    _collection = 'sap.backend'
     _usage = 'record.importer'
     
     def _get_external_data(self, external_id):
@@ -102,6 +103,7 @@ class SapBatchImporter(Component):
     """Base SAP Batch Importer"""
     _name = 'sap.batch.importer'
     _inherit = 'base.importer'
+    _collection = 'sap.backend'
     _usage = 'batch.importer'
     
     def run(self, filters=None):
@@ -255,4 +257,3 @@ class SapInvoiceBatchImporter(Component):
     
     def _get_external_id(self, record):
         return record.get('DocEntry')
-

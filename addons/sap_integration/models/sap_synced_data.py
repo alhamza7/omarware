@@ -456,7 +456,7 @@ class SapSyncedData(models.Model):
             'type': 'ir.actions.act_window',
             'name': f'Sync History - {self.display_name}',
             'res_model': 'sap.sync.log',
-            'view_mode': 'tree,form',
+            'view_mode': 'list,form',
             'domain': [
                 ('model_name', '=', self.model_name),
                 ('external_id', '=', self.external_id),

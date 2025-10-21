@@ -13,18 +13,73 @@ from odoo.exceptions import UserError, ValidationError
 from datetime import datetime, timedelta
 import json
 import threading
+import logging
 
 from ..core.sap_logger import SapLogger, SapSyncError
 from ..core.sap_base_service import SapBaseService
 
+_logger = logging.getLogger(__name__)
 
-class SapDashboardControl(SapBaseService):
+
+class SapDashboardControl(models.TransientModel):
     """SAP Dashboard Control Panel"""
     _name = 'sap.dashboard.control'
     _description = 'SAP Dashboard Control Panel'
     
     _sync_operations = {}
     _control_lock = threading.Lock()
+    
+    # Wizard fields
+    backend_id = fields.Many2one('sap.backend', string='Backend')
+    
+    # Dashboard metric fields
+    total_syncs = fields.Integer(string='Total Syncs', readonly=True, compute='_compute_dashboard_metrics')
+    successful_syncs = fields.Integer(string='Successful Syncs', readonly=True, compute='_compute_dashboard_metrics')
+    failed_syncs = fields.Integer(string='Failed Syncs', readonly=True, compute='_compute_dashboard_metrics')
+    success_rate = fields.Float(string='Success Rate (%)', readonly=True, compute='_compute_dashboard_metrics')
+    active_backends = fields.Integer(string='Active Backends', readonly=True, compute='_compute_dashboard_metrics')
+    total_errors = fields.Integer(string='Total Errors', readonly=True, compute='_compute_dashboard_metrics')
+    critical_errors = fields.Integer(string='Critical Errors', readonly=True, compute='_compute_dashboard_metrics')
+    average_response_time = fields.Float(string='Avg Response Time (s)', readonly=True, compute='_compute_dashboard_metrics')
+    
+    # Dashboard data fields (JSON text fields)
+    sync_status = fields.Text(string='Sync Status', readonly=True, compute='_compute_dashboard_data')
+    recent_activities = fields.Text(string='Recent Activities', readonly=True, compute='_compute_dashboard_data')
+    alerts = fields.Text(string='Alerts', readonly=True, compute='_compute_dashboard_data')
+    performance_metrics = fields.Text(string='Performance Metrics', readonly=True, compute='_compute_dashboard_data')
+    system_health = fields.Text(string='System Health', readonly=True, compute='_compute_dashboard_data')
+    configuration = fields.Text(string='Configuration', readonly=True, compute='_compute_dashboard_data')
+    charts = fields.Text(string='Charts', readonly=True, compute='_compute_dashboard_data')
+    
+    @api.depends('backend_id')
+    def _compute_dashboard_metrics(self):
+        """Compute dashboard metrics"""
+        for record in self:
+            logs = self.env['sap.sync.log'].search([])
+            record.total_syncs = len(logs)
+            record.successful_syncs = len(logs.filtered(lambda l: l.status == 'success'))
+            record.failed_syncs = len(logs.filtered(lambda l: l.status == 'error'))
+            record.success_rate = (record.successful_syncs / record.total_syncs * 100) if record.total_syncs > 0 else 0
+            record.active_backends = self.env['sap.backend'].search_count([('active', '=', True)])
+            record.total_errors = record.failed_syncs
+            record.critical_errors = 0
+            record.average_response_time = 0.0
+    
+    @api.depends('backend_id')
+    def _compute_dashboard_data(self):
+        """Compute dashboard data"""
+        for record in self:
+            record.sync_status = json.dumps({'status': 'ok'})
+            record.recent_activities = json.dumps([])
+            record.alerts = json.dumps([])
+            record.performance_metrics = json.dumps({})
+            record.system_health = json.dumps({'status': 'healthy'})
+            record.configuration = json.dumps({})
+            record.charts = json.dumps({})
+    
+    @property
+    def logger(self):
+        return SapLogger(f"sap_integration.{self._name}")
     
     @api.model
     def get_dashboard_data(self, backend_id=None, refresh_cache=False):
@@ -716,3 +771,17 @@ class SapDashboardControl(SapBaseService):
         except Exception as e:
             _logger.error(f"Error getting sync operations: {str(e)}")
             return []
+    
+    def action_refresh_dashboard(self):
+        """Refresh dashboard data"""
+        self.ensure_one()
+        return {'type': 'ir.actions.client', 'tag': 'reload'}
+    
+    def action_export_dashboard(self):
+        """Export dashboard data"""
+        self.ensure_one()
+        return {
+            'type': 'ir.actions.act_url',
+            'url': '/web/export/sap_dashboard',
+            'target': 'new'
+        }

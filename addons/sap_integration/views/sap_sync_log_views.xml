@@ -7,7 +7,7 @@
             <field name="name">sap.sync.log.tree</field>
             <field name="model">sap.sync.log</field>
             <field name="arch" type="xml">
-                <tree string="SAP Sync Logs" decoration-success="status == 'success'" 
+                <list string="SAP Sync Logs" decoration-success="status == 'success'" 
                       decoration-danger="status == 'error'" 
                       decoration-warning="status == 'warning'">
                     <field name="create_date" string="Date"/>
@@ -20,7 +20,7 @@
                     <field name="message" string="Message"/>
                     <field name="duration" string="Duration (s)"/>
                     <field name="records_processed" string="Records"/>
-                </tree>
+                </list>
             </field>
         </record>
         
@@ -56,12 +56,12 @@
                             <field name="message" readonly="1"/>
                         </group>
                         
-                        <group string="Timing Information" attrs="{'invisible': [('start_time', '=', False)]">
+                        <group string="Timing Information" invisible="not start_time">
                             <field name="start_time" readonly="1"/>
                             <field name="end_time" readonly="1"/>
                         </group>
                         
-                        <group string="Error Information" attrs="{'invisible': [('status', '!=', 'error')]}">
+                        <group string="Error Information" invisible="status != 'error'">
                             <field name="error_type" readonly="1"/>
                             <field name="retry_count" readonly="1"/>
                         </group>
@@ -70,11 +70,11 @@
                             <field name="data_size" readonly="1"/>
                         </group>
                         
-                        <group string="Details" attrs="{'invisible': [('details', '=', False)]">
+                        <group string="Details" invisible="not details">
                             <field name="details" readonly="1"/>
                         </group>
                         
-                        <group string="Error Traceback" attrs="{'invisible': [('error_traceback', '=', False)]}">
+                        <group string="Error Traceback" invisible="not error_traceback">
                             <field name="error_traceback" readonly="1" nolabel="1"/>
                         </group>
                     </sheet>
@@ -82,44 +82,11 @@
             </field>
         </record>
         
-        <!-- SAP Sync Log Search View -->
-        <record id="view_sap_sync_log_search" model="ir.ui.view">
-            <field name="name">sap.sync.log.search</field>
-            <field name="model">sap.sync.log</field>
-            <field name="arch" type="xml">
-                <search string="SAP Sync Logs">
-                    <field name="backend_id" string="Backend"/>
-                    <field name="operation" string="Operation"/>
-                    <field name="model_name" string="Model"/>
-                    <field name="external_id" string="External ID"/>
-                    <field name="status" string="Status"/>
-                    <field name="message" string="Message"/>
-                    
-                    <filter string="Success" name="success" domain="[('status', '=', 'success')]"/>
-                    <filter string="Errors" name="error" domain="[('status', '=', 'error')]"/>
-                    <filter string="Warnings" name="warning" domain="[('status', '=', 'warning')]"/>
-                    <filter string="Today" name="today" domain="[('create_date', '>=', datetime.datetime.combine(context_today(), datetime.time(0,0,0)))]"/>
-                    <filter string="This Week" name="this_week" domain="[('create_date', '>=', (context_today() - datetime.timedelta(days=context_today().weekday())).strftime('%Y-%m-%d'))]"/>
-                    <filter string="This Month" name="this_month" domain="[('create_date', '>=', context_today().strftime('%Y-%m-01'))]"/>
-                    
-                    <group expand="0" string="Group By">
-                        <filter string="Backend" name="group_backend" context="{'group_by': 'backend_id'}"/>
-                        <filter string="Operation" name="group_operation" context="{'group_by': 'operation'}"/>
-                        <filter string="Status" name="group_status" context="{'group_by': 'status'}"/>
-                        <filter string="Model" name="group_model" context="{'group_by': 'model_name'}"/>
-                        <filter string="Date" name="group_date" context="{'group_by': 'create_date:day'}"/>
-                    </group>
-                </search>
-            </field>
-        </record>
-        
         <!-- SAP Sync Log Action -->
         <record id="action_sap_sync_log" model="ir.actions.act_window">
             <field name="name">SAP Sync Logs</field>
             <field name="res_model">sap.sync.log</field>
-            <field name="view_mode">tree,form</field>
-            <field name="search_view_id" ref="view_sap_sync_log_search"/>
-            <field name="context">{'search_default_today': 1}</field>
+            <field name="view_mode">list,form</field>
             <field name="help" type="html">
                 <p class="o_view_nocontent_smiling_face">
                     No sync logs found

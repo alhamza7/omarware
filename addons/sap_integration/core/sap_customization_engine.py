@@ -147,7 +147,7 @@ class SapCustomizationRule(models.Model):
             'type': 'ir.actions.act_window',
             'name': f'Executions for {self.name}',
             'res_model': 'sap.customization.execution',
-            'view_mode': 'tree,form',
+            'view_mode': 'list,form',
             'domain': [('rule_id', '=', self.id)],
             'context': {'default_rule_id': self.id}
         }

@@ -25,11 +25,11 @@
                             </group>
                         </group>
                         
-                        <group string="Backend Access" attrs="{'invisible': [('backend_access_type', '=', 'none')]}">
+                        <group string="Backend Access" invisible="backend_access_type == 'none'">
                             <field name="backend_ids" widget="many2many_tags"/>
                         </group>
                         
-                        <group string="Current Permissions" attrs="{'invisible': [('current_permissions', '=', False)]}">
+                        <group string="Current Permissions" invisible="not current_permissions">
                             <field name="current_permissions" widget="text" readonly="1"/>
                         </group>
                         
@@ -81,18 +81,18 @@
                             </group>
                         </group>
                         
-                        <group string="User Selection" attrs="{'invisible': [('user_selection_type', '=', 'all')]}">
+                        <group string="User Selection" invisible="user_selection_type == 'all'">
                             <field name="user_ids" widget="many2many_tags" 
-                                   attrs="{'invisible': [('user_selection_type', '!=', 'specific')]}"/>
+                                   invisible="user_selection_type != 'specific'"/>
                             <field name="group_id" 
-                                   attrs="{'invisible': [('user_selection_type', '!=', 'group')]}"/>
+                                   invisible="user_selection_type != 'group'"/>
                         </group>
                         
-                        <group string="Backend Access" attrs="{'invisible': [('backend_access_type', '=', 'none')]}">
+                        <group string="Backend Access" invisible="backend_access_type == 'none'">
                             <field name="backend_ids" widget="many2many_tags"/>
                         </group>
                         
-                        <group string="Assignment Results" attrs="{'invisible': [('assignment_results', '=', False)]}">
+                        <group string="Assignment Results" invisible="not assignment_results">
                             <field name="assignment_results" widget="text" readonly="1"/>
                         </group>
                         

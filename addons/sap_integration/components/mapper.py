@@ -26,8 +26,8 @@ class SapPartnerImportMapper(Component):
     """Mapper for importing SAP Business Partners to Odoo"""
     _name = 'sap.partner.import.mapper'
     _inherit = 'base.import.mapper'
-    _apply_on = 'sap.res.partner'
     _collection = 'sap.backend'
+    _apply_on = 'sap.res.partner'
     
     @mapping
     def backend_id(self, record):
@@ -47,11 +47,10 @@ class SapPartnerImportMapper(Component):
     
     @mapping
     def phone(self, record):
-        return {'phone': record.get('Phone1', '')}
-    
-    @mapping
-    def mobile(self, record):
-        return {'mobile': record.get('Cellular', '')}
+        # Map Phone1, Phone, or Cellular to phone field
+        phone = record.get('Phone1', '') or record.get('Phone', '') or record.get('Cellular', '')
+        if phone:
+            return {'phone': phone}
     
     @mapping
     def street(self, record):
@@ -121,8 +120,8 @@ class SapPartnerExportMapper(Component):
     """Mapper for exporting Odoo Partners to SAP"""
     _name = 'sap.partner.export.mapper'
     _inherit = 'base.export.mapper'
-    _apply_on = 'sap.res.partner'
     _collection = 'sap.backend'
+    _apply_on = 'sap.res.partner'
     
     @mapping
     def card_name(self, record):
@@ -170,8 +169,8 @@ class SapProductImportMapper(Component):
     """Mapper for importing SAP Items to Odoo"""
     _name = 'sap.product.import.mapper'
     _inherit = 'base.import.mapper'
-    _apply_on = 'sap.product.product'
     _collection = 'sap.backend'
+    _apply_on = 'sap.product.product'
     
     @mapping
     def backend_id(self, record):
@@ -202,7 +201,8 @@ class SapProductImportMapper(Component):
         item_type = record.get('ItemType', 'itItems')
         if item_type == 'itService':
             return {'type': 'service'}
-        return {'type': 'product'}
+        # In Odoo 19, use 'consu' for storable products
+        return {'type': 'consu'}
     
     @mapping
     def sale_ok(self, record):
@@ -214,7 +214,17 @@ class SapProductImportMapper(Component):
     
     @mapping
     def active(self, record):
-        return {'active': record.get('Valid', 'Y') == 'Y'}
+        # Normalize various possible SAP 'Valid' representations
+        valid_value = record.get('Valid', 'Y')
+        if isinstance(valid_value, str):
+            normalized = valid_value.strip().upper()
+            return {'active': normalized in ('Y', 'YES', 'TRUE', '1')}
+        if isinstance(valid_value, (int, float)):
+            return {'active': bool(valid_value)}
+        if isinstance(valid_value, bool):
+            return {'active': valid_value}
+        # Default to active when unknown
+        return {'active': True}
     
     @mapping
     def description(self, record):
@@ -237,8 +247,8 @@ class SapProductExportMapper(Component):
     """Mapper for exporting Odoo Products to SAP"""
     _name = 'sap.product.export.mapper'
     _inherit = 'base.export.mapper'
-    _apply_on = 'sap.product.product'
     _collection = 'sap.backend'
+    _apply_on = 'sap.product.product'
     
     @mapping
     def item_name(self, record):
@@ -276,8 +286,8 @@ class SapSaleOrderImportMapper(Component):
     """Mapper for importing SAP Orders to Odoo"""
     _name = 'sap.sale.order.import.mapper'
     _inherit = 'base.import.mapper'
-    _apply_on = 'sap.sale.order'
     _collection = 'sap.backend'
+    _apply_on = 'sap.sale.order'
     
     @mapping
     def backend_id(self, record):
@@ -327,8 +337,8 @@ class SapSaleOrderExportMapper(Component):
     """Mapper for exporting Odoo Sale Orders to SAP"""
     _name = 'sap.sale.order.export.mapper'
     _inherit = 'base.export.mapper'
-    _apply_on = 'sap.sale.order'
     _collection = 'sap.backend'
+    _apply_on = 'sap.sale.order'
     
     @mapping
     def card_code(self, record):
@@ -376,4 +386,3 @@ class SapSaleOrderExportMapper(Component):
                 lines.append(line_data)
         
         return {'DocumentLines': lines}
-

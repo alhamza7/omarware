@@ -34,12 +34,11 @@ class SapAdapter(AbstractComponent):
         )
 
 
-class SapCRUDAdapter(AbstractComponent):
+class SapCRUDAdapter(SapAdapter):
     """Generic CRUD Adapter for SAP"""
     _name = 'sap.adapter.crud'
     _inherit = 'sap.adapter'
     _usage = 'backend.adapter'
-    _collection = 'sap.backend'
     
     _sap_model = None  # Override in subclasses
     
@@ -70,7 +69,6 @@ class SapPartnerAdapter(Component):
     """Adapter for SAP Business Partners"""
     _name = 'sap.partner.adapter'
     _inherit = 'sap.adapter.crud'
-    _collection = 'sap.backend'
     _apply_on = 'sap.res.partner'
     _sap_model = 'BusinessPartners'
     
@@ -138,7 +136,6 @@ class SapProductAdapter(Component):
     """Adapter for SAP Items"""
     _name = 'sap.product.adapter'
     _inherit = 'sap.adapter.crud'
-    _collection = 'sap.backend'
     _apply_on = 'sap.product.product'
     _sap_model = 'Items'
     
@@ -206,7 +203,6 @@ class SapSaleOrderAdapter(Component):
     """Adapter for SAP Orders"""
     _name = 'sap.sale.order.adapter'
     _inherit = 'sap.adapter.crud'
-    _collection = 'sap.backend'
     _apply_on = 'sap.sale.order'
     _sap_model = 'Orders'
     
@@ -274,7 +270,6 @@ class SapInvoiceAdapter(Component):
     """Adapter for SAP Invoices"""
     _name = 'sap.invoice.adapter'
     _inherit = 'sap.adapter.crud'
-    _collection = 'sap.backend'
     _apply_on = 'sap.account.move'
     _sap_model = 'Invoices'
     

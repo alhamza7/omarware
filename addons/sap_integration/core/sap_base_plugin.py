@@ -5,52 +5,158 @@
 """
 SAP Base Plugin
 
-Base class for SAP integration plugins.
+Base plugin class for extending SAP integration functionality.
 """
 
-from odoo import models, fields, api
 import logging
-from odoo.exceptions import UserError, ValidationError
-import json
+from datetime import datetime
+from typing import Any, Dict, Optional
 
 from .sap_logger import SapLogger, SapValidationError
-from .sap_base_service import SapBaseService
+
+_logger = logging.getLogger(__name__)
 
 
 class SapBasePlugin:
-    """Base class for SAP integration plugins"""
+    """Base plugin class for SAP integration extensions"""
     
-    # Plugin metadata
-    PLUGIN_ID = 'base_plugin'
-    PLUGIN_NAME = 'Base Plugin'
+    # Plugin Metadata (must be overridden in subclasses)
+    PLUGIN_ID = None
+    PLUGIN_NAME = None
     PLUGIN_VERSION = '1.0.0'
-    PLUGIN_DESCRIPTION = 'Base plugin class'
-    PLUGIN_AUTHOR = 'SAP Integration Team'
+    PLUGIN_DESCRIPTION = ''
+    PLUGIN_AUTHOR = ''
     PLUGIN_CATEGORY = 'general'
     PLUGIN_DEPENDENCIES = []
     PLUGIN_CONFIG_SCHEMA = {}
     
-    def __init__(self, env=None):
-        """Initialize the plugin"""
+    def __init__(self, env=None, config=None):
+        """
+        Initialize the plugin
+        
+        :param env: Odoo environment
+        :param config: Plugin configuration dictionary
+        """
+        if not self.PLUGIN_ID:
+            raise SapValidationError("PLUGIN_ID must be defined in plugin class")
+        if not self.PLUGIN_NAME:
+            raise SapValidationError("PLUGIN_NAME must be defined in plugin class")
+        
         self.env = env
-        self._config = {}
+        self.config = config or {}
+        self.logger = SapLogger(f"sap_integration.plugin.{self.PLUGIN_ID}")
         self._initialized = False
-        self._logger = SapLogger(f"sap_integration.plugin.{self.PLUGIN_ID}")
-    
+        self._state = {}
+        
     def initialize(self):
-        """Initialize the plugin"""
-        raise NotImplementedError("Subclasses must implement initialize method")
-    
+        """
+        Initialize the plugin
+        Called once when plugin is loaded
+        Override this method in subclasses
+        """
+        self.logger.info(f"Initializing plugin: {self.PLUGIN_NAME} v{self.PLUGIN_VERSION}")
+        self._validate_config()
+        self._initialized = True
+        
     def execute(self, context=None):
-        """Execute the plugin"""
-        raise NotImplementedError("Subclasses must implement execute method")
+        """
+        Execute the plugin
+        Override this method in subclasses
+        
+        :param context: Execution context dictionary
+        :return: Execution result dictionary
+        """
+        if not self._initialized:
+            raise SapValidationError(f"Plugin {self.PLUGIN_ID} not initialized")
+        
+        self.logger.info(f"Executing plugin: {self.PLUGIN_NAME}")
+        
+        return {
+            'status': 'success',
+            'message': 'Plugin executed successfully',
+            'plugin_id': self.PLUGIN_ID,
+            'plugin_name': self.PLUGIN_NAME,
+        }
     
     def cleanup(self):
-        """Cleanup the plugin"""
-        raise NotImplementedError("Subclasses must implement cleanup method")
+        """
+        Cleanup the plugin
+        Called when plugin is unloaded
+        Override this method in subclasses
+        """
+        self.logger.info(f"Cleaning up plugin: {self.PLUGIN_NAME}")
+        self._initialized = False
+        self._state = {}
     
-    def get_plugin_info(self):
-        """Get plugin information"""
+    def get_config(self, key, default=None):
+        """
+        Get configuration value
+        
+        :param key: Configuration key
+        :param default: Default value if key not found
+        :return: Configuration value
+        """
+        return self.config.get(key, default)
+    
+    def set_config(self, config):
+        """
+        Set plugin configuration
+        
+        :param config: Configuration dictionary
+        """
+        self.config = config or {}
+        self._validate_config()
+    
+    def get_state(self, key, default=None):
+        """
+        Get plugin state value
+        
+        :param key: State key
+        :param default: Default value if key not found
+        :return: State value
+        """
+        return self._state.get(key, default)
+    
+    def set_state(self, key, value):
+        """
+        Set plugin state value
+        
+        :param key: State key
+        :param value: State value
+        """
+        self._state[key] = value
+    
+    def _validate_config(self):
+        """Validate plugin configuration"""
+        if not self.PLUGIN_CONFIG_SCHEMA:
+            return
+        
+        for param_name, param_schema in self.PLUGIN_CONFIG_SCHEMA.items():
+            param_required = param_schema.get('required', False)
+            param_type = param_schema.get('type')
+            param_default = param_schema.get('default')
+            
+            if param_required and param_name not in self.config:
+                if param_default is not None:
+                    self.config[param_name] = param_default
+                else:
+                    raise SapValidationError(
+                        f"Required configuration parameter '{param_name}' not provided for plugin {self.PLUGIN_ID}"
+                    )
+            
+            if param_name in self.config and param_type:
+                value = self.config[param_name]
+                if not isinstance(value, param_type):
+                    raise SapValidationError(
+                        f"Configuration parameter '{param_name}' must be of type {param_type.__name__}"
+                    )
+    
+    def get_info(self):
+        """
+        Get plugin information
+        
+        :return: Plugin information dictionary
+        """
         return {
             'id': self.PLUGIN_ID,
             'name': self.PLUGIN_NAME,
@@ -59,282 +165,170 @@ class SapBasePlugin:
             'author': self.PLUGIN_AUTHOR,
             'category': self.PLUGIN_CATEGORY,
             'dependencies': self.PLUGIN_DEPENDENCIES,
-            'config_schema': self.PLUGIN_CONFIG_SCHEMA
-        }
-    
-    def set_config(self, config):
-        """Set plugin configuration"""
-        try:
-            self._config = config or {}
-            _logger.info(f"Configuration set for plugin {self.PLUGIN_ID}")
-            
-        except Exception as e:
-            _logger.error(f"Error setting configuration: {str(e)}")
-            raise SapValidationError(f"Failed to set configuration: {str(e)}")
-    
-    def get_config(self, key=None, default=None):
-        """Get plugin configuration"""
-        try:
-            if key is None:
-                return self._config
-            
-            return self._config.get(key, default)
-            
-        except Exception as e:
-            _logger.error(f"Error getting configuration: {str(e)}")
-            return default
-    
-    def validate_config(self, config):
-        """Validate plugin configuration"""
-        try:
-            schema = self.PLUGIN_CONFIG_SCHEMA
-            if not schema:
-                return True
-            
-            for key, value in config.items():
-                if key not in schema:
-                    raise SapValidationError(f"Unknown configuration key: {key}")
-                
-                expected_type = schema[key].get('type')
-                if expected_type and not isinstance(value, expected_type):
-                    raise SapValidationError(f"Invalid type for {key}: expected {expected_type}")
-                
-                # Validate required fields
-                if schema[key].get('required', False) and not value:
-                    raise SapValidationError(f"Required configuration key {key} is missing")
-            
-            return True
-            
-        except Exception as e:
-            _logger.error(f"Error validating configuration: {str(e)}")
-            raise SapValidationError(f"Configuration validation failed: {str(e)}")
-    
-    def log_plugin_activity(self, activity_type, message, data=None):
-        """Log plugin activity"""
-        try:
-            _logger.info(f"Plugin {self.PLUGIN_ID} - {activity_type}: {message}")
-            
-            # Log to activity log if available
-            if hasattr(self.env, 'sap.user.activity.log'):
-                self.env['sap.user.activity.log'].log_activity(
-                    user_id=self.env.user.id,
-                    activity_type='plugin_activity',
-                    description=f"Plugin {self.PLUGIN_ID}: {message}",
-                    additional_data={
-                        'plugin_id': self.PLUGIN_ID,
-                        'activity_type': activity_type,
-                        'data': data
-                    }
-                )
-            
-        except Exception as e:
-            _logger.error(f"Error logging plugin activity: {str(e)}")
-    
-    def get_dependencies(self):
-        """Get plugin dependencies"""
-        return self.PLUGIN_DEPENDENCIES
-    
-    def check_dependencies(self):
-        """Check if all dependencies are satisfied"""
-        try:
-            plugin_manager = self.env['sap.plugin.manager']
-            
-            for dep in self.PLUGIN_DEPENDENCIES:
-                if not plugin_manager._plugin_registry.get(dep):
-                    return False
-            
-            return True
-            
-        except Exception as e:
-            _logger.error(f"Error checking dependencies: {str(e)}")
-            return False
-    
-    def get_status(self):
-        """Get plugin status"""
-        return {
             'initialized': self._initialized,
-            'config': self._config,
-            'dependencies_satisfied': self.check_dependencies()
         }
+    
+    def is_initialized(self):
+        """Check if plugin is initialized"""
+        return self._initialized
 
 
 class SapDataProcessorPlugin(SapBasePlugin):
-    """Base class for data processing plugins"""
-    # _name = 'sap.data.processor.plugin'  # Not a model
-    # _description = 'SAP Data Processor Plugin'  # Not a model
+    """Base plugin for data processing"""
     
     PLUGIN_CATEGORY = 'data_processing'
     
-    def process_data(self, data, context=None):
-        """Process data"""
-        raise NotImplementedError("Subclasses must implement process_data method")
-    
     def execute(self, context=None):
-        """Execute data processing"""
-        try:
-            data = context.get('data', [])
-            result = self.process_data(data, context)
-            
-            self.log_plugin_activity('data_processing', f'Processed {len(data)} records')
-            
-            return {
-                'status': 'success',
-                'processed_count': len(data),
-                'result': result
-            }
-            
-        except Exception as e:
-            _logger.error(f"Error processing data: {str(e)}")
-            return {
-                'status': 'error',
-                'message': str(e)
-            }
+        """
+        Execute data processing
+        
+        :param context: Context with 'data' key containing data to process
+        :return: Processed data result
+        """
+        if not self._initialized:
+            raise SapValidationError(f"Plugin {self.PLUGIN_ID} not initialized")
+        
+        data = context.get('data', []) if context else []
+        processed_data = self.process_data(data, context)
+        
+        return {
+            'status': 'success',
+            'message': 'Data processed successfully',
+            'plugin_id': self.PLUGIN_ID,
+            'processed_data': processed_data,
+            'record_count': len(processed_data) if isinstance(processed_data, list) else 1,
+        }
+    
+    def process_data(self, data, context=None):
+        """
+        Process data - override in subclasses
+        
+        :param data: Data to process
+        :param context: Processing context
+        :return: Processed data
+        """
+        raise NotImplementedError("process_data method must be implemented in subclass")
 
 
 class SapSyncPlugin(SapBasePlugin):
-    """Base class for sync plugins"""
-    # _name = 'sap.sync.plugin'  # Not a model
-    # _description = 'SAP Sync Plugin'  # Not a model
+    """Base plugin for synchronization operations"""
     
     PLUGIN_CATEGORY = 'sync'
     
-    def sync_data(self, backend_id, entity_type, context=None):
-        """Sync data"""
-        raise NotImplementedError("Subclasses must implement sync_data method")
-    
     def execute(self, context=None):
-        """Execute sync operation"""
-        try:
-            backend_id = context.get('backend_id')
-            entity_type = context.get('entity_type')
-            
-            if not backend_id or not entity_type:
-                raise SapValidationError("Backend ID and entity type are required")
-            
-            result = self.sync_data(backend_id, entity_type, context)
-            
-            self.log_plugin_activity('sync', f'Synced {entity_type} for backend {backend_id}')
-            
-            return {
-                'status': 'success',
-                'backend_id': backend_id,
-                'entity_type': entity_type,
-                'result': result
-            }
-            
-        except Exception as e:
-            _logger.error(f"Error syncing data: {str(e)}")
-            return {
-                'status': 'error',
-                'message': str(e)
-            }
+        """
+        Execute synchronization
+        
+        :param context: Context with 'backend_id' and 'entity_type'
+        :return: Sync result
+        """
+        if not self._initialized:
+            raise SapValidationError(f"Plugin {self.PLUGIN_ID} not initialized")
+        
+        backend_id = context.get('backend_id') if context else None
+        entity_type = context.get('entity_type') if context else None
+        
+        if not backend_id or not entity_type:
+            raise SapValidationError("backend_id and entity_type are required for sync plugins")
+        
+        result = self.sync_data(backend_id, entity_type, context)
+        
+        return {
+            'status': 'success',
+            'message': 'Sync completed successfully',
+            'plugin_id': self.PLUGIN_ID,
+            'result': result,
+        }
+    
+    def sync_data(self, backend_id, entity_type, context=None):
+        """
+        Sync data - override in subclasses
+        
+        :param backend_id: SAP backend ID
+        :param entity_type: Entity type to sync
+        :param context: Sync context
+        :return: Sync result
+        """
+        raise NotImplementedError("sync_data method must be implemented in subclass")
 
 
 class SapValidationPlugin(SapBasePlugin):
-    """Base class for validation plugins"""
-    # _name = 'sap.validation.plugin'  # Not a model
-    # _description = 'SAP Validation Plugin'  # Not a model
+    """Base plugin for validation operations"""
     
     PLUGIN_CATEGORY = 'validation'
     
+    def execute(self, context=None):
+        """
+        Execute validation
+        
+        :param context: Context with 'data' key containing data to validate
+        :return: Validation result
+        """
+        if not self._initialized:
+            raise SapValidationError(f"Plugin {self.PLUGIN_ID} not initialized")
+        
+        data = context.get('data') if context else None
+        
+        if data is None:
+            raise SapValidationError("data is required for validation plugins")
+        
+        result = self.validate_data(data, context)
+        
+        return {
+            'status': 'success',
+            'message': 'Validation completed',
+            'plugin_id': self.PLUGIN_ID,
+            'validation_result': result,
+        }
+    
     def validate_data(self, data, context=None):
-        """Validate data"""
-        raise NotImplementedError("Subclasses must implement validate_data method")
+        """
+        Validate data - override in subclasses
+        
+        :param data: Data to validate
+        :param context: Validation context
+        :return: Validation result with 'valid', 'errors', 'warnings' keys
+        """
+        raise NotImplementedError("validate_data method must be implemented in subclass")
+
+
+class SapTransformationPlugin(SapBasePlugin):
+    """Base plugin for data transformation operations"""
+    
+    PLUGIN_CATEGORY = 'transformation'
     
     def execute(self, context=None):
-        """Execute validation"""
-        try:
-            data = context.get('data', {})
-            result = self.validate_data(data, context)
-            
-            self.log_plugin_activity('validation', f'Validated data for {data.get("entity_type", "unknown")}')
-            
-            return {
-                'status': 'success',
-                'valid': result.get('valid', False),
-                'errors': result.get('errors', []),
-                'warnings': result.get('warnings', [])
-            }
-            
-        except Exception as e:
-            _logger.error(f"Error validating data: {str(e)}")
-            return {
-                'status': 'error',
-                'message': str(e)
-            }
+        """
+        Execute transformation
+        
+        :param context: Context with 'data' key containing data to transform
+        :return: Transformation result
+        """
+        if not self._initialized:
+            raise SapValidationError(f"Plugin {self.PLUGIN_ID} not initialized")
+        
+        data = context.get('data') if context else None
+        
+        if data is None:
+            raise SapValidationError("data is required for transformation plugins")
+        
+        transformed_data = self.transform_data(data, context)
+        
+        return {
+            'status': 'success',
+            'message': 'Transformation completed',
+            'plugin_id': self.PLUGIN_ID,
+            'transformed_data': transformed_data,
+        }
+    
+    def transform_data(self, data, context=None):
+        """
+        Transform data - override in subclasses
+        
+        :param data: Data to transform
+        :param context: Transformation context
+        :return: Transformed data
+        """
+        raise NotImplementedError("transform_data method must be implemented in subclass")
 
 
-class SapNotificationPlugin(SapBasePlugin):
-    """Base class for notification plugins"""
-    # _name = 'sap.notification.plugin'  # Not a model
-    # _description = 'SAP Notification Plugin'  # Not a model
-    
-    PLUGIN_CATEGORY = 'notification'
-    
-    def send_notification(self, message, recipients, context=None):
-        """Send notification"""
-        raise NotImplementedError("Subclasses must implement send_notification method")
-    
-    def execute(self, context=None):
-        """Execute notification"""
-        try:
-            message = context.get('message', '')
-            recipients = context.get('recipients', [])
-            
-            if not message or not recipients:
-                raise SapValidationError("Message and recipients are required")
-            
-            result = self.send_notification(message, recipients, context)
-            
-            self.log_plugin_activity('notification', f'Sent notification to {len(recipients)} recipients')
-            
-            return {
-                'status': 'success',
-                'recipients_count': len(recipients),
-                'result': result
-            }
-            
-        except Exception as e:
-            _logger.error(f"Error sending notification: {str(e)}")
-            return {
-                'status': 'error',
-                'message': str(e)
-            }
-
-
-class SapReportPlugin(SapBasePlugin):
-    """Base class for report plugins"""
-    # _name = 'sap.report.plugin'  # Not a model
-    # _description = 'SAP Report Plugin'  # Not a model
-    
-    PLUGIN_CATEGORY = 'reporting'
-    
-    def generate_report(self, report_type, parameters, context=None):
-        """Generate report"""
-        raise NotImplementedError("Subclasses must implement generate_report method")
-    
-    def execute(self, context=None):
-        """Execute report generation"""
-        try:
-            report_type = context.get('report_type')
-            parameters = context.get('parameters', {})
-            
-            if not report_type:
-                raise SapValidationError("Report type is required")
-            
-            result = self.generate_report(report_type, parameters, context)
-            
-            self.log_plugin_activity('report', f'Generated {report_type} report')
-            
-            return {
-                'status': 'success',
-                'report_type': report_type,
-                'result': result
-            }
-            
-        except Exception as e:
-            _logger.error(f"Error generating report: {str(e)}")
-            return {
-                'status': 'error',
-                'message': str(e)
-            }

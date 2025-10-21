@@ -19,6 +19,7 @@ class SapBindingListener(Component):
     """Listen to binding record events"""
     _name = 'sap.binding.listener'
     _inherit = 'base.event.listener'
+    _collection = 'sap.backend'
     
     @skip_if(lambda self, record, **kwargs: self.no_connector_export(record))
     def on_record_create(self, record, fields=None):

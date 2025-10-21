@@ -176,7 +176,8 @@
     <!-- Root Menu -->
     <menuitem id="menu_sap_integration"
               name="SAP Integration"
-              sequence="100"/>
+              sequence="10"
+              action="action_sap_dashboard"/>
 
     <!-- Dashboard Menu (First item) -->
     <menuitem id="menu_sap_dashboard"

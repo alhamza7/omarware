@@ -2,20 +2,6 @@
 <odoo>
     <data>
         
-        <!-- SAP Synced Data Dashboard -->
-        <record id="view_sap_synced_data_dashboard" model="ir.ui.view">
-            <field name="name">sap.synced.data.dashboard</field>
-            <field name="model">sap.synced.data</field>
-            <field name="arch" type="xml">
-                <dashboard string="Synced Data Dashboard">
-                    <!-- Overview Cards -->
-                    <view type="graph" ref="view_sap_synced_data_overview_graph"/>
-                    <view type="pivot" ref="view_sap_synced_data_status_pivot"/>
-                    <view type="search" ref="view_sap_synced_data_search"/>
-                </dashboard>
-            </field>
-        </record>
-        
         <!-- Overview Graph View -->
         <record id="view_sap_synced_data_overview_graph" model="ir.ui.view">
             <field name="name">sap.synced.data.overview.graph</field>
@@ -100,7 +86,7 @@
             <field name="name">sap.synced.data.recent.activity</field>
             <field name="model">sap.synced.data</field>
             <field name="arch" type="xml">
-                <tree string="Recent Activity" decoration-success="sync_status == 'success'" 
+                <list string="Recent Activity" decoration-success="sync_status == 'success'" 
                       decoration-danger="sync_status == 'failed'" 
                       decoration-warning="sync_status in ['pending', 'needs_attention']"
                       create="false" edit="false">
@@ -111,7 +97,7 @@
                     <field name="last_sync_date"/>
                     <field name="error_count"/>
                     <field name="is_stale"/>
-                </tree>
+                </list>
             </field>
         </record>
         
@@ -119,9 +105,7 @@
         <record id="action_sap_synced_data_dashboard" model="ir.actions.act_window">
             <field name="name">Synced Data Dashboard</field>
             <field name="res_model">sap.synced.data</field>
-            <field name="view_mode">dashboard,tree,kanban,form,pivot,graph</field>
-            <field name="search_view_id" ref="view_sap_synced_data_search"/>
-            <field name="context">{'search_default_last_7d': 1}</field>
+            <field name="view_mode">list,kanban,form,pivot,graph</field>
         </record>
         
         <record id="action_sap_synced_data_quick_stats" model="ir.actions.act_window">
@@ -135,9 +119,9 @@
         <record id="action_sap_synced_data_recent_activity" model="ir.actions.act_window">
             <field name="name">Recent Activity</field>
             <field name="res_model">sap.synced.data</field>
-            <field name="view_mode">tree</field>
+            <field name="view_mode">list</field>
             <field name="view_id" ref="view_sap_synced_data_recent_activity"/>
-            <field name="context">{'search_default_last_24h': 1}</field>
+            
         </record>
         
         <!-- Dashboard Menu Items -->

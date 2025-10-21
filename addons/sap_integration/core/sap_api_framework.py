@@ -151,7 +151,7 @@ class SapApiEndpoint(models.Model):
             'type': 'ir.actions.act_window',
             'name': f'Statistics for {self.name}',
             'res_model': 'sap.api.request.log',
-            'view_mode': 'tree,form',
+            'view_mode': 'list,form',
             'domain': [('endpoint_id', '=', self.id)],
             'context': {'default_endpoint_id': self.id}
         }

@@ -4,14 +4,33 @@
     <record id="view_sap_customer_binding_list" model="ir.ui.view">
         <field name="name">sap.res.partner.list</field>
         <field name="model">sap.res.partner</field>
+        <field name="priority">1</field>
         <field name="arch" type="xml">
-            <list>
-                <field name="odoo_id"/>
-                <field name="external_id"/>
-                <field name="backend_id"/>
-                <field name="sap_card_name"/>
-                <field name="sap_card_type"/>
+            <list string="SAP Customer Bindings" create="false">
+                <field name="odoo_id" string="Odoo Partner"/>
+                <field name="external_id" string="SAP CardCode"/>
+                <field name="backend_id" string="SAP Backend"/>
+                <field name="sap_card_name" string="SAP Card Name"/>
+                <field name="sap_card_type" string="SAP Card Type"/>
+                <field name="sync_date" string="Last Sync"/>
             </list>
+        </field>
+    </record>
+
+    <record id="view_sap_customer_binding_search" model="ir.ui.view">
+        <field name="name">sap.res.partner.search</field>
+        <field name="model">sap.res.partner</field>
+        <field name="arch" type="xml">
+            <search string="SAP Customer Bindings">
+                <field name="external_id" string="SAP CardCode" filter_domain="[('external_id', 'ilike', self)]"/>
+                <field name="sap_card_name" string="SAP Card Name" filter_domain="[('sap_card_name', 'ilike', self)]"/>
+                <field name="odoo_id" string="Odoo Partner"/>
+                <filter name="backend_id" string="Backend" domain="[]" context="{'group_by': 'backend_id'}"/>
+                <group expand="0" string="Group By">
+                    <filter name="group_by_backend" string="SAP Backend" context="{'group_by': 'backend_id'}"/>
+                    <filter name="group_by_card_type" string="Card Type" context="{'group_by': 'sap_card_type'}"/>
+                </group>
+            </search>
         </field>
     </record>
 
@@ -31,14 +50,36 @@
     <record id="view_sap_product_binding_list" model="ir.ui.view">
         <field name="name">sap.product.product.list</field>
         <field name="model">sap.product.product</field>
+        <field name="priority">99</field>
+        <field name="mode">primary</field>
         <field name="arch" type="xml">
-            <list>
-                <field name="odoo_id"/>
-                <field name="external_id"/>
-                <field name="backend_id"/>
-                <field name="sap_item_name"/>
-                <field name="sap_item_type"/>
+            <list string="SAP Product Bindings" create="false" edit="false" delete="false">
+                <field name="id"/>
+                <field name="external_id" string="SAP ItemCode"/>
+                <field name="sap_item_name" string="SAP Item Name"/>
+                <field name="backend_id" string="SAP Backend"/>
+                <field name="sap_item_type" string="Type"/>
+                <field name="sync_date" string="Last Sync"/>
             </list>
+        </field>
+    </record>
+
+    <record id="view_sap_product_binding_search" model="ir.ui.view">
+        <field name="name">sap.product.product.search</field>
+        <field name="model">sap.product.product</field>
+        <field name="arch" type="xml">
+            <search string="SAP Product Bindings">
+                <field name="external_id" string="SAP ItemCode" filter_domain="[('external_id', 'ilike', self)]"/>
+                <field name="sap_item_name" string="SAP Item Name" filter_domain="[('sap_item_name', 'ilike', self)]"/>
+                <field name="backend_id" string="SAP Backend"/>
+                <filter name="backend_id" string="Current Backend" domain="[('backend_id', '=', context.get('default_backend_id'))]"/>
+                    <filter name="active_only" string="Active" domain="[('active', '=', True)]"/>
+                    <filter name="inactive_only" string="Archived" domain="[('active', '=', False)]"/>
+                <group expand="0" string="Group By">
+                    <filter name="group_by_backend" string="SAP Backend" context="{'group_by': 'backend_id'}"/>
+                    <filter name="group_by_type" string="Item Type" context="{'group_by': 'sap_item_type'}"/>
+                </group>
+            </search>
         </field>
     </record>
 
@@ -46,6 +87,7 @@
         <field name="name">SAP Product Bindings</field>
         <field name="res_model">sap.product.product</field>
         <field name="view_mode">list,form</field>
+            <field name="context">{'active_test': False}</field>
     </record>
 
     <menuitem id="menu_sap_product_binding"

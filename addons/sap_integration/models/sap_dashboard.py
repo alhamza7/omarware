@@ -109,10 +109,10 @@ class SapDashboard(models.Model):
         """Compute performance metrics"""
         for record in self:
             # Get last sync date from most recent binding
-            last_partner = self.env['sap.res.partner'].search([], order='sync_date desc', limit=1)
-            last_product = self.env['sap.product.product'].search([], order='sync_date desc', limit=1)
+            last_partner = self.env['sap.res.partner'].search([], order='write_date desc', limit=1)
+            last_product = self.env['sap.product.product'].search([], order='write_date desc', limit=1)
             
-            dates = [d.sync_date for d in [last_partner, last_product] if d.sync_date]
+            dates = [d.write_date for d in [last_partner, last_product] if d.write_date]
             record.last_sync_date = max(dates) if dates else False
             
             # Calculate average sync time (placeholder - would need actual timing data)
@@ -124,7 +124,7 @@ class SapDashboard(models.Model):
             'type': 'ir.actions.act_window',
             'name': 'SAP Partners',
             'res_model': 'sap.res.partner',
-            'view_mode': 'tree,form',
+            'view_mode': 'list,form',
             'context': dict(self.env.context),
         }
     
@@ -134,7 +134,7 @@ class SapDashboard(models.Model):
             'type': 'ir.actions.act_window',
             'name': 'SAP Products',
             'res_model': 'sap.product.product',
-            'view_mode': 'tree,form',
+            'view_mode': 'list,form',
             'context': dict(self.env.context),
         }
     
@@ -144,7 +144,7 @@ class SapDashboard(models.Model):
             'type': 'ir.actions.act_window',
             'name': 'SAP Orders',
             'res_model': 'sap.sale.order',
-            'view_mode': 'tree,form',
+            'view_mode': 'list,form',
             'context': dict(self.env.context),
         }
     
@@ -154,7 +154,7 @@ class SapDashboard(models.Model):
             'type': 'ir.actions.act_window',
             'name': 'Sync Errors',
             'res_model': 'sap.res.partner',
-            'view_mode': 'tree,form',
+            'view_mode': 'list,form',
             'domain': [('sync_error', '!=', False)],
             'context': dict(self.env.context),
         }

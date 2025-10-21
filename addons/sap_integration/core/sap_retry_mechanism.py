@@ -21,6 +21,8 @@ from .sap_logger import SapLogger, SapSyncError, SapValidationError, SapConnecti
 from .sap_base_service import SapBaseService
 from ..config.sap_config import SYNC_CONFIG
 
+_logger = logging.getLogger(__name__)
+
 
 class RetryStrategy(Enum):
     """Retry strategy enumeration"""
@@ -37,13 +39,30 @@ class CircuitState(Enum):
     HALF_OPEN = 'half_open'
 
 
-class SapRetryMechanism(SapBaseService):
+class SapRetryMechanism(models.TransientModel):
     """Intelligent retry mechanism for SAP operations"""
     _name = 'sap.retry.mechanism'
     _description = 'SAP Retry Mechanism'
     
     _circuit_breakers = {}
     _retry_lock = threading.Lock()
+    
+    # Fields for retry tracking
+    backend_id = fields.Many2one('sap.backend', string='Backend', readonly=True)
+    operation_name = fields.Char(string='Operation Name', readonly=True)
+    circuit_breaker_state = fields.Selection([
+        ('closed', 'Closed'),
+        ('open', 'Open'),
+        ('half_open', 'Half Open')
+    ], string='Circuit Breaker State', default='closed', readonly=True)
+    retry_count = fields.Integer(string='Retry Count', readonly=True)
+    last_failure = fields.Datetime(string='Last Failure', readonly=True)
+    failure_count = fields.Integer(string='Failure Count', readonly=True)
+    
+    @property
+    def logger(self):
+        from .sap_logger import SapLogger
+        return SapLogger(f"sap_integration.{self._name}")
     
     @api.model
     def execute_with_retry(self, operation_func, operation_name, backend_id, 
@@ -64,7 +83,7 @@ class SapRetryMechanism(SapBaseService):
         """
         try:
             max_retries = max_retries or SYNC_CONFIG['default_retry_attempts']
-            backend = self._get_backend(backend_id)
+            backend = self.env['sap.backend'].browse(backend_id)
             
             # Check circuit breaker
             if not self._is_circuit_breaker_open(backend_id, operation_name):

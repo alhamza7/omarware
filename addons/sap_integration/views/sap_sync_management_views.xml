@@ -2,24 +2,6 @@
 <odoo>
     <data>
         
-        <!-- SAP Sync Management Dashboard -->
-        <record id="view_sap_sync_management_dashboard" model="ir.ui.view">
-            <field name="name">sap.sync.management.dashboard</field>
-            <field name="model">sap.sync.engine</field>
-            <field name="arch" type="xml">
-                <dashboard string="SAP Sync Management">
-                    <!-- Sync Controls -->
-                    <view type="form" ref="view_sap_sync_controls_form"/>
-                    
-                    <!-- Sync Status -->
-                    <view type="graph" ref="view_sap_sync_status_graph"/>
-                    
-                    <!-- Recent Activity -->
-                    <view type="tree" ref="view_sap_sync_activity_tree"/>
-                </dashboard>
-            </field>
-        </record>
-        
         <!-- Sync Controls Form -->
         <record id="view_sap_sync_controls_form" model="ir.ui.view">
             <field name="name">sap.sync.controls.form</field>
@@ -84,7 +66,7 @@
             <field name="name">sap.sync.activity.tree</field>
             <field name="model">sap.sync.log</field>
             <field name="arch" type="xml">
-                <tree string="Recent Sync Activity" 
+                <list string="Recent Sync Activity" 
                       decoration-success="status=='success'" 
                       decoration-danger="status=='failed'"
                       decoration-warning="status=='warning'"
@@ -97,7 +79,7 @@
                     <field name="message"/>
                     <field name="duration"/>
                     <field name="records_processed"/>
-                </tree>
+                </list>
             </field>
         </record>
         
@@ -106,7 +88,7 @@
             <field name="name">sap.batch.processing.tree</field>
             <field name="model">sap.batch.processor</field>
             <field name="arch" type="xml">
-                <tree string="Batch Processing Jobs" create="false" edit="false">
+                <list string="Batch Processing Jobs" create="false" edit="false">
                     <field name="job_id"/>
                     <field name="backend_id"/>
                     <field name="entity_type"/>
@@ -118,7 +100,7 @@
                     <field name="start_time"/>
                     <field name="end_time"/>
                     <field name="duration"/>
-                </tree>
+                </list>
             </field>
         </record>
         
@@ -127,14 +109,14 @@
             <field name="name">sap.retry.mechanism.tree</field>
             <field name="model">sap.retry.mechanism</field>
             <field name="arch" type="xml">
-                <tree string="Retry Mechanism Status" create="false" edit="false">
+                <list string="Retry Mechanism Status" create="false" edit="false">
                     <field name="backend_id"/>
                     <field name="operation_name"/>
                     <field name="circuit_breaker_state" widget="badge"/>
                     <field name="retry_count"/>
                     <field name="last_failure"/>
                     <field name="failure_count"/>
-                </tree>
+                </list>
             </field>
         </record>
         
@@ -142,21 +124,20 @@
         <record id="action_sap_sync_management" model="ir.actions.act_window">
             <field name="name">SAP Sync Management</field>
             <field name="res_model">sap.sync.engine</field>
-            <field name="view_mode">dashboard,form</field>
-            <field name="view_id" ref="view_sap_sync_management_dashboard"/>
+            <field name="view_mode">form</field>
         </record>
         
         <record id="action_sap_batch_processing" model="ir.actions.act_window">
             <field name="name">Batch Processing</field>
             <field name="res_model">sap.batch.processor</field>
-            <field name="view_mode">tree,form</field>
+            <field name="view_mode">list,form</field>
             <field name="view_id" ref="view_sap_batch_processing_tree"/>
         </record>
         
         <record id="action_sap_retry_mechanism" model="ir.actions.act_window">
             <field name="name">Retry Mechanism</field>
             <field name="res_model">sap.retry.mechanism</field>
-            <field name="view_mode">tree,form</field>
+            <field name="view_mode">list,form</field>
             <field name="view_id" ref="view_sap_retry_mechanism_tree"/>
         </record>
         

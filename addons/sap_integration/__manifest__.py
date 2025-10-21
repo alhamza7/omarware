@@ -35,10 +35,10 @@
         'stock',
         'product',
         'uom',
-        'connector',
-        'component',
-        'component_event',
-        # 'queue_job',  # TODO: Install queue_job module from OCA
+        'connector',  # OCA Connector framework - Now activated!
+        'component',  # OCA Component framework - Now activated!
+        'component_event',  # OCA Component Event framework - Now activated!
+        # 'queue_job',  # TODO: Install queue_job module from OCA if needed for background jobs
     ],
     'external_dependencies': {
         'python': ['requests', 'cachetools'],
@@ -47,12 +47,13 @@
         'security/sap_security.xml',
         'security/ir.model.access.csv',
         'data/sap_backend_data.xml',
-        'data/sap_cron_data.xml',
+        # 'data/sap_cron_data.xml',  # Disabled - uses advanced models not yet enabled
         'views/sap_dashboard_views.xml',  # Must be loaded first to define main menu
         'views/sap_backend_views.xml',
         'views/sap_connector_views.xml',
         'views/sap_mapper_views.xml',  # UOM & Pricelist Mapping
         'views/sap_binding_views.xml',  # Customer & Product Bindings
+        # Advanced views
         'views/sap_sync_log_views.xml',  # Sync Log Views
         'views/sap_analysis_views.xml',  # Analysis & Monitoring Views
         'views/sap_synced_data_views.xml',  # Synced Data Views
@@ -60,18 +61,19 @@
         'views/sap_sync_management_views.xml',  # Sync Management Views
         'views/sap_uom_management_views.xml',  # UoM Management Views
         'views/sap_dashboard_control_views.xml',  # Dashboard Control Views
-        'views/sap_future_proofing_views.xml',  # Future-Proofing Views
+        # 'views/sap_future_proofing_views.xml',  # Future-Proofing Views - Disabled (requires additional models)
+        # Wizard views
         'wizard/sap_conflict_resolution_wizard_views.xml',  # Conflict Resolution Wizard
         'wizard/sap_uom_conversion_test_wizard_views.xml',  # UoM Conversion Test Wizard
         'wizard/sap_user_permission_wizard_views.xml',  # User Permission Wizard
-        # Temporarily disabled views with issues
-        # 'views/sap_customer_views.xml',
-        # 'views/sap_product_views.xml',
-        # 'views/sap_quotation_views.xml',
-        # 'views/sap_sale_views.xml',
-        # 'wizard/sap_import_wizard_views.xml',
+        # Additional views
+        'views/sap_customer_views.xml',
+        'views/sap_product_views.xml',
+        'views/sap_quotation_views.xml',
+        'views/sap_sale_views.xml',
+        'wizard/sap_import_wizard_views.xml',
     ],
-    'installable': False,
+    'installable': True,
     'application': True,
     'auto_install': False,
     'license': 'LGPL-3',

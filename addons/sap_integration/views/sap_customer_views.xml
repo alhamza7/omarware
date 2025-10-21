@@ -1,11 +1,88 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-    <!-- Menu Item -->
-    <menuitem id="menu_sap_customer_sync"
-              name="Customer Sync"
-              parent="menu_sap_integration"
-              action="action_sap_customer_sync"
-              sequence="30"/>
+    <data>
+        
+        <!-- SAP Customer Sync Tree View -->
+        <record id="view_sap_customer_sync_tree" model="ir.ui.view">
+            <field name="name">sap.customer.sync.tree</field>
+            <field name="model">sap.customer.sync</field>
+            <field name="arch" type="xml">
+                <list string="Customer Sync" 
+                      decoration-success="sync_status == 'success'" 
+                      decoration-danger="sync_status == 'error'">
+                    <field name="backend_id"/>
+                    <field name="odoo_partner_id"/>
+                    <field name="sap_customer_id"/>
+                    <field name="sap_customer_name"/>
+                    <field name="sync_status" widget="badge"/>
+                    <field name="sync_direction"/>
+                    <field name="last_sync"/>
+                    <field name="error_message" optional="hide"/>
+                </list>
+            </field>
+        </record>
+        
+        <!-- SAP Customer Sync Form View -->
+        <record id="view_sap_customer_sync_form" model="ir.ui.view">
+            <field name="name">sap.customer.sync.form</field>
+            <field name="model">sap.customer.sync</field>
+            <field name="arch" type="xml">
+                <form string="Customer Sync">
+                    <header>
+                        <button name="sync_from_sap" 
+                                string="Sync from SAP" 
+                                type="object" 
+                                class="btn-primary"
+                                invisible="sync_status == 'error'"/>
+                        <button name="sync_to_sap" 
+                                string="Sync to SAP" 
+                                type="object" 
+                                class="btn-secondary"
+                                invisible="sync_status == 'error'"/>
+                        <field name="sync_status" widget="statusbar"/>
+                    </header>
+                    <sheet>
+                        <group>
+                            <group>
+                                <field name="backend_id"/>
+                                <field name="odoo_partner_id"/>
+                                <field name="sap_customer_id"/>
+                                <field name="sap_customer_name"/>
+                            </group>
+                            <group>
+                                <field name="sync_direction"/>
+                                <field name="last_sync"/>
+                                <field name="retry_count"/>
+                                <field name="max_retries"/>
+                            </group>
+                        </group>
+                        <group string="Sync Data">
+                            <field name="sap_data" widget="ace" options="{'mode': 'json'}"/>
+                            <field name="odoo_data" widget="ace" options="{'mode': 'json'}"/>
+                        </group>
+                        <group string="Error Information" invisible="not error_message">
+                            <field name="error_message"/>
+                        </group>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+        
+        <!-- SAP Customer Sync Action -->
+        <record id="action_sap_customer_sync" model="ir.actions.act_window">
+            <field name="name">Customer Sync</field>
+            <field name="res_model">sap.customer.sync</field>
+            <field name="view_mode">list,form</field>
+        </record>
+        
+        <!-- Menu Item -->
+        <menuitem id="menu_sap_customer_sync"
+                  name="Customer Sync"
+                  parent="menu_sap_integration"
+                  action="action_sap_customer_sync"
+                  sequence="30"/>
+        
+    </data>
 </odoo>
 
 

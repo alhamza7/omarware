@@ -20,12 +20,22 @@
 #
 #############################################################################
 import base64
-from odoo.modules import get_module_resource
+import os
+from odoo import tools
 
 
-def test_pre_init_hook(cr):
+def get_module_resource(module, *paths):
+    """Get module resource path - compatibility function for Odoo 19"""
+    from odoo.modules import get_module_path
+    module_path = get_module_path(module)
+    if module_path:
+        return os.path.join(module_path, *paths)
+    return None
+
+
+def test_pre_init_hook(env):
     """pre init hook"""
-    menu_item = cr['ir.ui.menu'].search([('parent_id', '=', False)])
+    menu_item = env['ir.ui.menu'].search([('parent_id', '=', False)])
     for menu in menu_item:
         if menu.name == 'Contacts':
             img_path = get_module_resource(
@@ -215,9 +225,9 @@ def test_pre_init_hook(cr):
                 open(img_path, "rb").read())})
 
 
-def test_post_init_hook(cr):
+def test_post_init_hook(env):
     """post init hook"""
-    menu_item = cr['ir.ui.menu'].search([('parent_id', '=', False)])
+    menu_item = env['ir.ui.menu'].search([('parent_id', '=', False)])
     for menu in menu_item:
         if menu.name == 'Contacts':
             img_path = get_module_resource(

@@ -41,24 +41,24 @@
                         <!-- Resolution Options -->
                         <group string="Resolution Options">
                             <field name="resolution_type" required="1"/>
-                            <field name="resolution_notes" attrs="{'required': [('resolution_type', '=', 'manual')]}"/>
+                            <field name="resolution_notes" required="resolution_type == 'manual'"/>
                         </group>
                         
                         <!-- Field-level Resolution -->
-                        <group string="Field-level Resolution" attrs="{'invisible': [('resolution_type', '!=', 'merged')]}">
+                        <group string="Field-level Resolution" invisible="resolution_type != 'merged'">
                             <field name="field_resolutions" widget="one2many" nolabel="1">
-                                <tree editable="bottom">
+                                <list editable="bottom">
                                     <field name="field_name"/>
                                     <field name="sap_value"/>
                                     <field name="odoo_value"/>
                                     <field name="resolution"/>
-                                    <field name="custom_value" attrs="{'invisible': [('resolution', '!=', 'custom')], 'required': [('resolution', '=', 'custom')]}"/>
-                                </tree>
+                                    <field name="custom_value" invisible="resolution != 'custom'" required="resolution == 'custom'"/>
+                                </list>
                             </field>
                         </group>
                         
                         <!-- Preview -->
-                        <group string="Resolution Preview" attrs="{'invisible': [('preview_data', '=', False)]}">
+                        <group string="Resolution Preview" invisible="not preview_data">
                             <field name="preview_data" widget="text" readonly="1"/>
                         </group>
                         
@@ -86,3 +86,4 @@
         
     </data>
 </odoo>
+

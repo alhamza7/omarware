@@ -7,7 +7,7 @@
             <field name="name">sap.uom.mapping.tree</field>
             <field name="model">sap.uom.mapping</field>
             <field name="arch" type="xml">
-                <tree string="SAP UoM Mappings" 
+                <list string="SAP UoM Mappings" 
                       decoration-success="validation_status=='valid'"
                       decoration-warning="validation_status=='warning'"
                       decoration-danger="validation_status=='error'"
@@ -30,12 +30,12 @@
                             type="object" 
                             icon="fa-check" 
                             string="Validate"
-                            attrs="{'invisible': [('validation_status', '=', 'valid')]}"/>
+                            invisible="validation_status == 'valid'"/>
                     <button name="action_test_conversion" 
                             type="object" 
                             icon="fa-calculator" 
                             string="Test Conversion"/>
-                </tree>
+                </list>
             </field>
         </record>
         
@@ -109,40 +109,12 @@
         </record>
         
         <!-- SAP UoM Mapping Search View -->
-        <record id="view_sap_uom_mapping_search" model="ir.ui.view">
-            <field name="name">sap.uom.mapping.search</field>
-            <field name="model">sap.uom.mapping</field>
-            <field name="arch" type="xml">
-                <search string="SAP UoM Mappings">
-                    <field name="name"/>
-                    <field name="sap_uom_code"/>
-                    <field name="sap_uom_name"/>
-                    <field name="odoo_uom_id"/>
-                    <field name="uom_category"/>
-                    <field name="usage_type"/>
-                    
-                    <filter string="Valid" name="valid" domain="[('validation_status', '=', 'valid')]"/>
-                    <filter string="Warning" name="warning" domain="[('validation_status', '=', 'warning')]"/>
-                    <filter string="Error" name="error" domain="[('validation_status', '=', 'error')]"/>
-                    <filter string="Active" name="active" domain="[('active', '=', True)]"/>
-                    <filter string="Inactive" name="inactive" domain="[('active', '=', False)]"/>
-                    
-                    <group expand="0" string="Group By">
-                        <filter string="UoM Category" name="group_category" context="{'group_by': 'uom_category'}"/>
-                        <filter string="Usage Type" name="group_usage_type" context="{'group_by': 'usage_type'}"/>
-                        <filter string="Validation Status" name="group_validation_status" context="{'group_by': 'validation_status'}"/>
-                        <filter string="Odoo UoM" name="group_odoo_uom" context="{'group_by': 'odoo_uom_id'}"/>
-                    </group>
-                </search>
-            </field>
-        </record>
-        
-        <!-- SAP Product UoM Tree View -->
+                <!-- SAP Product UoM Tree View -->
         <record id="view_sap_product_uom_tree" model="ir.ui.view">
             <field name="name">sap.product.uom.tree</field>
             <field name="model">sap.product.uom</field>
             <field name="arch" type="xml">
-                <tree string="Product UoM Mappings" 
+                <list string="Product UoM Mappings" 
                       decoration-success="is_primary"
                       create="true" edit="true">
                     
@@ -161,12 +133,12 @@
                             type="object" 
                             icon="fa-star" 
                             string="Set Primary"
-                            attrs="{'invisible': [('is_primary', '=', True)]}"/>
+                            invisible="is_primary"/>
                     <button name="action_test_conversion" 
                             type="object" 
                             icon="fa-calculator" 
                             string="Test Conversion"/>
-                </tree>
+                </list>
             </field>
         </record>
         
@@ -181,7 +153,7 @@
                                 type="object" 
                                 string="Set as Primary"
                                 class="btn-primary"
-                                attrs="{'invisible': [('is_primary', '=', True)]}"/>
+                                invisible="is_primary"/>
                         <button name="action_test_conversion" 
                                 type="object" 
                                 string="Test Conversion"
@@ -242,7 +214,7 @@
                             </group>
                         </group>
                         
-                        <group string="Test Results" attrs="{'invisible': [('converted_quantity', '=', 0)]}">
+                        <group string="Test Results" invisible="converted_quantity == 0">
                             <group>
                                 <field name="conversion_factor" readonly="1"/>
                                 <field name="converted_quantity" readonly="1"/>
@@ -255,7 +227,7 @@
                             </group>
                         </group>
                         
-                        <group string="Conversion Chain" attrs="{'invisible': [('conversion_chain', '=', False)]}">
+                        <group string="Conversion Chain" invisible="not conversion_chain">
                             <field name="conversion_chain" readonly="1" widget="text"/>
                         </group>
                         
@@ -268,12 +240,12 @@
                                     string="Validate Mapping" 
                                     type="object" 
                                     class="btn-secondary"
-                                    attrs="{'invisible': [('product_id', '=', False)]}"/>
+                                    invisible="not product_id"/>
                             <button name="action_create_conversion_rule" 
                                     string="Create Rule" 
                                     type="object" 
                                     class="btn-success"
-                                    attrs="{'invisible': [('is_valid', '=', False)]}"/>
+                                    invisible="not is_valid"/>
                             <button string="Cancel" 
                                     class="btn-secondary" 
                                     special="cancel"/>
@@ -287,17 +259,12 @@
         <record id="action_sap_uom_mapping" model="ir.actions.act_window">
             <field name="name">SAP UoM Mappings</field>
             <field name="res_model">sap.uom.mapping</field>
-            <field name="view_mode">tree,form</field>
-            <field name="search_view_id" ref="view_sap_uom_mapping_search"/>
-            <field name="context">{'search_default_active': 1}</field>
-        </record>
+            <field name="view_mode">list,form</field></record>
         
         <record id="action_sap_product_uom" model="ir.actions.act_window">
             <field name="name">Product UoM Mappings</field>
             <field name="res_model">sap.product.uom</field>
-            <field name="view_mode">tree,form</field>
-            <field name="context">{'search_default_active': 1}</field>
-        </record>
+            <field name="view_mode">list,form</field></record>
         
         <record id="action_sap_uom_conversion_test" model="ir.actions.act_window">
             <field name="name">UoM Conversion Test</field>

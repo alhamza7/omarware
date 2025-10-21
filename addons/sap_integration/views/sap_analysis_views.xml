@@ -2,19 +2,6 @@
 <odoo>
     <data>
         
-        <!-- SAP Error Analysis Dashboard -->
-        <record id="view_sap_error_analysis_dashboard" model="ir.ui.view">
-            <field name="name">sap.error.analysis.dashboard</field>
-            <field name="model">sap.sync.log</field>
-            <field name="arch" type="xml">
-                <dashboard string="SAP Error Analysis Dashboard">
-                    <view type="graph" ref="view_sap_error_analysis_graph"/>
-                    <view type="pivot" ref="view_sap_error_analysis_pivot"/>
-                    <view type="search" ref="view_sap_error_analysis_search"/>
-                </dashboard>
-            </field>
-        </record>
-        
         <!-- Error Analysis Graph View -->
         <record id="view_sap_error_analysis_graph" model="ir.ui.view">
             <field name="name">sap.error.analysis.graph</field>
@@ -42,45 +29,12 @@
             </field>
         </record>
         
-        <!-- Error Analysis Search View -->
-        <record id="view_sap_error_analysis_search" model="ir.ui.view">
-            <field name="name">sap.error.analysis.search</field>
-            <field name="model">sap.sync.log">
-            <field name="arch" type="xml">
-                <search string="Error Analysis">
-                    <field name="backend_id" string="Backend"/>
-                    <field name="operation" string="Operation"/>
-                    <field name="model_name" string="Model"/>
-                    <field name="status" string="Status"/>
-                    <field name="error_type" string="Error Type"/>
-                    <field name="message" string="Message"/>
-                    
-                    <filter string="Last 24 Hours" name="last_24h" domain="[('create_date', '>=', datetime.datetime.now() - datetime.timedelta(hours=24))]"/>
-                    <filter string="Last 7 Days" name="last_7d" domain="[('create_date', '>=', datetime.datetime.now() - datetime.timedelta(days=7))]"/>
-                    <filter string="Last 30 Days" name="last_30d" domain="[('create_date', '>=', datetime.datetime.now() - datetime.timedelta(days=30))]"/>
-                    
-                    <filter string="Errors Only" name="errors" domain="[('status', '=', 'error')]"/>
-                    <filter string="Warnings Only" name="warnings" domain="[('status', '=', 'warning')]"/>
-                    <filter string="Success Only" name="success" domain="[('status', '=', 'success')]"/>
-                    
-                    <group expand="0" string="Group By">
-                        <filter string="Backend" name="group_backend" context="{'group_by': 'backend_id'}"/>
-                        <filter string="Operation" name="group_operation" context="{'group_by': 'operation'}"/>
-                        <filter string="Status" name="group_status" context="{'group_by': 'status'}"/>
-                        <filter string="Error Type" name="group_error_type" context="{'group_by': 'error_type'}"/>
-                        <filter string="Model" name="group_model" context="{'group_by': 'model_name'}"/>
-                        <filter string="Date" name="group_date" context="{'group_by': 'create_date:day'}"/>
-                    </group>
-                </search>
-            </field>
-        </record>
-        
         <!-- SAP Alert Rule Tree View -->
         <record id="view_sap_alert_rule_tree" model="ir.ui.view">
             <field name="name">sap.alert.rule.tree</field>
             <field name="model">sap.alert.rule</field>
             <field name="arch" type="xml">
-                <tree string="Alert Rules" decoration-danger="is_triggered == True" decoration-muted="active == False">
+                <list string="Alert Rules" decoration-danger="is_triggered == True" decoration-muted="active == False">
                     <field name="name"/>
                     <field name="priority"/>
                     <field name="condition_type"/>
@@ -89,7 +43,7 @@
                     <field name="is_triggered"/>
                     <field name="trigger_count"/>
                     <field name="last_triggered"/>
-                </tree>
+                </list>
             </field>
         </record>
         
@@ -147,7 +101,7 @@
             <field name="name">sap.alert.tree</field>
             <field name="model">sap.alert</field>
             <field name="arch" type="xml">
-                <tree string="Alerts" decoration-danger="priority == 'critical'" decoration-warning="priority == 'high'">
+                <list string="Alerts" decoration-danger="priority == 'critical'" decoration-warning="priority == 'high'">
                     <field name="create_date"/>
                     <field name="rule_id"/>
                     <field name="backend_id"/>
@@ -156,7 +110,7 @@
                     <field name="message"/>
                     <field name="acknowledged_by"/>
                     <field name="resolved_by"/>
-                </tree>
+                </list>
             </field>
         </record>
         
@@ -191,7 +145,7 @@
                             <field name="details" readonly="1" nolabel="1"/>
                         </group>
                         
-                        <group string="Resolution" attrs="{'invisible': [('status', '=', 'active')]}">
+                        <group string="Resolution" invisible="status == 'active'">
                             <field name="acknowledged_by" readonly="1"/>
                             <field name="acknowledged_date" readonly="1"/>
                             <field name="resolved_by" readonly="1"/>
@@ -201,9 +155,9 @@
                         
                         <footer>
                             <button name="acknowledge" string="Acknowledge" type="object" 
-                                    attrs="{'invisible': [('status', '!=', 'active')]}" class="btn-primary"/>
+                                    invisible="status != 'active'" class="btn-primary"/>
                             <button name="resolve" string="Resolve" type="object" 
-                                    attrs="{'invisible': [('status', '=', 'resolved')]}" class="btn-secondary"/>
+                                    invisible="status == 'resolved'" class="btn-secondary"/>
                         </footer>
                     </sheet>
                 </form>
@@ -215,7 +169,7 @@
             <field name="name">sap.performance.metrics.tree</field>
             <field name="model">sap.performance.metrics</field>
             <field name="arch" type="xml">
-                <tree string="Performance Metrics" decoration-warning="is_slow == True" decoration-danger="is_bottleneck == True">
+                <list string="Performance Metrics" decoration-warning="is_slow == True" decoration-danger="is_bottleneck == True">
                     <field name="timestamp"/>
                     <field name="backend_id"/>
                     <field name="operation"/>
@@ -226,7 +180,7 @@
                     <field name="performance_score"/>
                     <field name="is_slow"/>
                     <field name="is_bottleneck"/>
-                </tree>
+                </list>
             </field>
         </record>
         
@@ -247,30 +201,25 @@
         <record id="action_sap_error_analysis" model="ir.actions.act_window">
             <field name="name">Error Analysis</field>
             <field name="res_model">sap.sync.log</field>
-            <field name="view_mode">dashboard,graph,pivot,tree,form</field>
-            <field name="search_view_id" ref="view_sap_error_analysis_search"/>
-            <field name="context">{'search_default_last_7d': 1, 'search_default_errors': 1}</field>
+            <field name="view_mode">graph,pivot,list,form</field>
         </record>
         
         <record id="action_sap_alert_rules" model="ir.actions.act_window">
             <field name="name">Alert Rules</field>
             <field name="res_model">sap.alert.rule</field>
-            <field name="view_mode">tree,form</field>
-            <field name="context">{'search_default_active': 1}</field>
+            <field name="view_mode">list,form</field>
         </record>
         
         <record id="action_sap_alerts" model="ir.actions.act_window">
             <field name="name">Active Alerts</field>
             <field name="res_model">sap.alert</field>
-            <field name="view_mode">tree,form</field>
-            <field name="context">{'search_default_active': 1}</field>
+            <field name="view_mode">list,form</field>
         </record>
         
         <record id="action_sap_performance_metrics" model="ir.actions.act_window">
             <field name="name">Performance Metrics</field>
             <field name="res_model">sap.performance.metrics</field>
-            <field name="view_mode">tree,graph,form</field>
-            <field name="context">{'search_default_last_7d': 1}</field>
+            <field name="view_mode">list,graph</field>
         </record>
         
         <!-- Menu Items -->

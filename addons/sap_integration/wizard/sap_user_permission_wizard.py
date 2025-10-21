@@ -237,7 +237,7 @@ class SapUserPermissionWizard(models.TransientModel):
                 'type': 'ir.actions.act_window',
                 'name': f'Permissions for {self.user_id.name}',
                 'res_model': 'sap.user.permission',
-                'view_mode': 'tree,form',
+                'view_mode': 'list,form',
                 'domain': [('user_id', '=', self.user_id.id)],
                 'context': {'default_user_id': self.user_id.id}
             }
