@@ -53,9 +53,9 @@ class SapProductSync(models.Model):
             connection = self.backend_id.get_connection()
             
             # Get product data from SAP
-            products = connection.get_products(
-                filter_query=f"ItemCode eq '{self.sap_product_id}'"
-            )
+            products = connection.get('Items', {
+                '$filter': f"ItemCode eq '{self.sap_product_id}'"
+            })
             
             if not products.get('value'):
                 raise UserError(f"Product {self.sap_product_id} not found in SAP")
@@ -244,6 +244,35 @@ class SapProductSync(models.Model):
             self.sync_to_sap()
     
     @api.model
+    def import_record(self, backend, external_id):
+        """Import a single product record from SAP - DIRECT METHOD"""
+        try:
+            _logger.info(f"Importing product {external_id} from SAP backend {backend.name}")
+            
+            # Get product data from SAP
+            connection = backend.get_connection()
+            products = connection.get('Items', {
+                '$filter': f"ItemCode eq '{external_id}'"
+            })
+            
+            if not products.get('value'):
+                _logger.warning(f"Product {external_id} not found in SAP")
+                return None
+            
+            product_data = products['value'][0]
+            
+            # Use direct import helper
+            direct_importer = self.env['sap.product.direct.import']
+            product = direct_importer.import_product_direct(backend, external_id, product_data)
+            
+            _logger.info(f"Successfully imported product {external_id}: {product.name}")
+            return product
+            
+        except Exception as e:
+            _logger.error(f"Error importing product {external_id}: {str(e)}", exc_info=True)
+            raise
+    
+    @api.model
     def sync_all_products(self, backend_id):
         """Sync all products from SAP"""
         try:
@@ -251,7 +280,7 @@ class SapProductSync(models.Model):
             connection = backend.get_connection()
             
             # Get all products from SAP
-            products = connection.get_products(top=1000)  # Adjust as needed
+            products = connection.get('Items', {'$top': 1000})  # Adjust as needed
             
             synced_count = 0
             for product_data in products.get('value', []):

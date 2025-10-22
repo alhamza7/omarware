@@ -174,6 +174,278 @@ class SapUomSync(models.Model):
         # Implementation for syncing to SAP
         pass
     
+    def button_sync_from_sap(self):
+        """Button to sync UoM from SAP"""
+        self.ensure_one()
+        try:
+            self.sync_from_sap()
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'Success',
+                    'message': f'UoM {self.sap_uom_name or self.sap_uom_id} synced successfully',
+                    'type': 'success',
+                    'sticky': False,
+                }
+            }
+        except Exception as e:
+            raise UserError(f"Error syncing UoM: {str(e)}")
+    
+    @api.model
+    def import_all_uoms_from_sap(self, backend):
+        """Import all UoMs and UoM Groups from SAP Service Layer"""
+        try:
+            _logger.info(f"Importing all UoMs and UoM Groups from SAP backend {backend.name}")
+            
+            # Get connection to SAP
+            connection = backend.get_connection()
+            if not connection:
+                raise UserError("Could not establish connection to SAP backend")
+            
+            # First, get all UoM Groups from SAP
+            uom_groups_data = self._import_uom_groups_from_sap(backend, connection)
+            
+            # Then, get all individual UoMs from SAP
+            endpoint = "UnitOfMeasurements"
+            uoms_data = connection.get(endpoint, {})
+            uoms_data = uoms_data.get('value', [])
+            
+            imported_count = 0
+            for uom_data in uoms_data:
+                try:
+                    uom_code = uom_data.get('Code')
+                    uom_name = uom_data.get('Name', uom_code)
+                    
+                    # Check if sync record exists
+                    sync_record = self.search([
+                        ('backend_id', '=', backend.id),
+                        ('sap_uom_id', '=', uom_code)
+                    ], limit=1)
+                    
+                    if not sync_record:
+                        sync_record = self.create({
+                            'backend_id': backend.id,
+                            'sap_uom_id': uom_code,
+                            'sap_uom_name': uom_name,
+                            'sync_direction': 'sap_to_odoo',
+                        })
+                    
+                    # Process UoM
+                    processed_data = {
+                        'name': uom_name,
+                        'category': 'unit',  # Default category
+                        'factor': 1.0
+                    }
+                    uom = sync_record._process_uom_data(processed_data)
+                    
+                    sync_record.write({
+                        'odoo_uom_id': uom.id,
+                        'sap_uom_name': uom_name,
+                        'sync_status': 'success',
+                        'last_sync': fields.Datetime.now(),
+                    })
+                    
+                    imported_count += 1
+                    
+                except Exception as e:
+                    _logger.error(f"Error importing UoM {uom_code}: {str(e)}")
+                    continue
+            
+            _logger.info(f"Successfully imported {imported_count} UoMs from SAP")
+            _logger.info(f"Imported {len(uom_groups_data)} UoM Groups from SAP")
+            return imported_count
+            
+        except Exception as e:
+            _logger.error(f"Error importing all UoMs: {str(e)}")
+            raise
+    
+    def _import_uom_groups_from_sap(self, backend, connection):
+        """Import UoM Groups with conversion factors from SAP"""
+        try:
+            _logger.info(f"Importing UoM Groups from SAP backend {backend.name}")
+            
+            # Get all UoM Groups from SAP
+            endpoint = "UnitOfMeasurementGroups"
+            groups_data = connection.get(endpoint, {'$expand': 'UnitOfMeasurementGroupDefinitionCollection'})
+            groups_data = groups_data.get('value', [])
+            
+            imported_groups = []
+            for group_data in groups_data:
+                try:
+                    group_code = group_data.get('Code')
+                    group_name = group_data.get('Name', group_code)
+                    base_uom = group_data.get('BaseUoM')
+                    
+                    _logger.info(f"Processing UoM Group: {group_code} - {group_name} (Base: {base_uom})")
+                    
+                    # Get UoM definitions (conversions) within the group
+                    uom_definitions = group_data.get('UnitOfMeasurementGroupDefinitionCollection', [])
+                    
+                    # Create or get UoM category in Odoo
+                    uom_category = self._get_or_create_uom_category(group_name, group_code)
+                    
+                    # Process each UoM in the group
+                    base_uom_record = None
+                    for uom_def in uom_definitions:
+                        try:
+                            uom_code = uom_def.get('UoMCode')
+                            uom_name = uom_def.get('UoMName', uom_code)
+                            alt_quantity = float(uom_def.get('AlternateQuantity', 1.0))
+                            base_quantity = float(uom_def.get('BaseQuantity', 1.0))
+                            
+                            # Calculate conversion factor
+                            # In SAP: base_quantity BaseUoM = alt_quantity UoM
+                            # In Odoo: factor = BaseUoM / UoM
+                            factor = base_quantity / alt_quantity if alt_quantity != 0 else 1.0
+                            
+                            _logger.info(f"  Processing UoM: {uom_code} (Factor: {factor}, {base_quantity} {base_uom} = {alt_quantity} {uom_code})")
+                            
+                            # Create or update UoM in Odoo
+                            uom_record = self._create_or_update_uom_in_category(
+                                uom_code=uom_code,
+                                uom_name=uom_name,
+                                category=uom_category,
+                                factor=factor,
+                                is_base=(uom_code == base_uom)
+                            )
+                            
+                            # Track base UoM
+                            if uom_code == base_uom:
+                                base_uom_record = uom_record
+                            
+                            # Create sync record
+                            sync_record = self.search([
+                                ('backend_id', '=', backend.id),
+                                ('sap_uom_id', '=', uom_code)
+                            ], limit=1)
+                            
+                            if not sync_record:
+                                self.create({
+                                    'backend_id': backend.id,
+                                    'sap_uom_id': uom_code,
+                                    'sap_uom_name': uom_name,
+                                    'odoo_uom_id': uom_record.id,
+                                    'sync_direction': 'sap_to_odoo',
+                                    'sync_status': 'success',
+                                    'last_sync': fields.Datetime.now(),
+                                })
+                            else:
+                                sync_record.write({
+                                    'sap_uom_name': uom_name,
+                                    'odoo_uom_id': uom_record.id,
+                                    'sync_status': 'success',
+                                    'last_sync': fields.Datetime.now(),
+                                })
+                                
+                        except Exception as e:
+                            _logger.error(f"  Error processing UoM {uom_code} in group {group_code}: {str(e)}")
+                            continue
+                    
+                    imported_groups.append({
+                        'code': group_code,
+                        'name': group_name,
+                        'base_uom': base_uom,
+                        'uom_count': len(uom_definitions)
+                    })
+                    
+                except Exception as e:
+                    _logger.error(f"Error importing UoM group {group_code}: {str(e)}")
+                    continue
+            
+            _logger.info(f"Successfully imported {len(imported_groups)} UoM Groups from SAP")
+            return imported_groups
+            
+        except Exception as e:
+            _logger.error(f"Error importing UoM groups: {str(e)}")
+            return []
+    
+    def _get_or_create_uom_category(self, category_name, category_code):
+        """Get or create UoM category in Odoo"""
+        try:
+            # Search for existing category
+            category = self.env['uom.category'].search([
+                ('name', '=ilike', f"SAP_{category_code}")
+            ], limit=1)
+            
+            if not category:
+                category = self.env['uom.category'].search([
+                    ('name', '=ilike', category_name)
+                ], limit=1)
+            
+            if not category:
+                # Create new category
+                category = self.env['uom.category'].create({
+                    'name': f"SAP {category_name} ({category_code})",
+                })
+                _logger.info(f"Created new UoM category: {category.name}")
+            
+            return category
+            
+        except Exception as e:
+            _logger.error(f"Error creating UoM category: {str(e)}")
+            # Return default category
+            return self.env.ref('uom.product_uom_categ_unit')
+    
+    def _create_or_update_uom_in_category(self, uom_code, uom_name, category, factor, is_base=False):
+        """Create or update a UoM in a specific category with conversion factor"""
+        try:
+            # Search for existing UoM
+            uom = self.env['uom.uom'].search([
+                ('name', '=', uom_name)
+            ], limit=1)
+            
+            if not uom:
+                # Try by code in name
+                uom = self.env['uom.uom'].search([
+                    ('name', 'ilike', uom_code)
+                ], limit=1)
+            
+            if uom:
+                # Update existing UoM
+                update_vals = {
+                    'category_id': category.id,
+                }
+                
+                # Only update factor if it's not the base UoM
+                if not is_base:
+                    update_vals['uom_type'] = 'bigger' if factor > 1 else 'smaller'
+                    update_vals['factor_inv'] = factor if factor > 1 else 1.0
+                    update_vals['factor'] = 1.0 / factor if factor > 1 else factor
+                else:
+                    update_vals['uom_type'] = 'reference'
+                    update_vals['factor'] = 1.0
+                    update_vals['factor_inv'] = 1.0
+                
+                uom.write(update_vals)
+                _logger.info(f"Updated existing UoM: {uom.name} (Factor: {factor})")
+            else:
+                # Create new UoM
+                uom_vals = {
+                    'name': uom_name,
+                    'category_id': category.id,
+                    'active': True,
+                }
+                
+                if is_base:
+                    uom_vals['uom_type'] = 'reference'
+                    uom_vals['factor'] = 1.0
+                    uom_vals['factor_inv'] = 1.0
+                else:
+                    uom_vals['uom_type'] = 'bigger' if factor > 1 else 'smaller'
+                    uom_vals['factor_inv'] = factor if factor > 1 else 1.0
+                    uom_vals['factor'] = 1.0 / factor if factor > 1 else factor
+                
+                uom = self.env['uom.uom'].create(uom_vals)
+                _logger.info(f"Created new UoM: {uom.name} (Factor: {factor}, Type: {uom_vals['uom_type']})")
+            
+            return uom
+            
+        except Exception as e:
+            _logger.error(f"Error creating/updating UoM {uom_name}: {str(e)}")
+            # Return default UoM
+            return self.env.ref('uom.product_uom_unit')
+    
     @api.model
     def sync_all_uoms(self, backend_id):
         """Sync all UoMs from SAP"""

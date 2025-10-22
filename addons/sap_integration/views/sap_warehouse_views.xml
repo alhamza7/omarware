@@ -8,6 +8,11 @@
         <field name="arch" type="xml">
             <form string="SAP Warehouse">
                 <header>
+                    <button name="button_import_from_sap" 
+                            string="Import from SAP" 
+                            type="object"
+                            class="oe_highlight"
+                            groups="sap_integration.group_sap_manager"/>
                     <field name="active" widget="boolean_toggle"/>
                 </header>
                 <sheet>
@@ -32,19 +37,25 @@
         </field>
     </record>
 
-    <!-- Warehouse Tree View -->
-    <record id="view_sap_warehouse_tree" model="ir.ui.view">
-        <field name="name">sap.warehouse.tree</field>
+    <!-- Warehouse List View -->
+    <record id="view_sap_warehouse_list" model="ir.ui.view">
+        <field name="name">sap.warehouse.list</field>
         <field name="model">sap.warehouse</field>
         <field name="arch" type="xml">
-            <tree>
+            <list>
+                <header>
+                    <button name="%(action_sap_import_wizard)d" 
+                            string="📥 Import from SAP" 
+                            type="action"
+                            class="btn-primary"/>
+                </header>
                 <field name="external_id"/>
                 <field name="sap_warehouse_name"/>
                 <field name="backend_id"/>
                 <field name="odoo_id"/>
                 <field name="sync_date"/>
                 <field name="active"/>
-            </tree>
+            </list>
         </field>
     </record>
 
@@ -52,15 +63,18 @@
     <record id="action_sap_warehouse" model="ir.actions.act_window">
         <field name="name">SAP Warehouses</field>
         <field name="res_model">sap.warehouse</field>
-        <field name="view_mode">tree,form</field>
+        <field name="view_mode">list,form</field>
+        <field name="context">{'search_default_active': 1}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                No SAP warehouses found!
+            </p>
+            <p>
+                Click on "Create" to add a new warehouse or use "Import from SAP" to import warehouses from SAP.
+            </p>
+        </field>
     </record>
-
-    <!-- Menu -->
-    <menuitem id="menu_sap_warehouse" 
-              name="Warehouses" 
-              parent="menu_sap_sync" 
-              action="action_sap_warehouse" 
-              sequence="50"/>
+    
               
 </odoo>
 

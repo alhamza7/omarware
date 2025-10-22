@@ -27,6 +27,7 @@
                     <button name="test_connection" string="Test Connection" type="object" class="btn-primary"/>
                     <button name="sync_all_data" string="Full Sync" type="object" class="btn-secondary"/>
                     <button name="sync_incremental_all" string="⚡ Incremental Sync" type="object" class="btn-success" invisible="not enable_incremental_sync"/>
+                    <button name="action_import_uom_groups" string="📦 Import UoM Groups" type="object" class="btn-info" invisible="connection_status != 'connected'"/>
                     <field name="connection_status" widget="statusbar" statusbar_visible="connected,disconnected,error"/>
                 </header>                <sheet>
                     <div class="oe_button_box" name="button_box">
@@ -159,12 +160,6 @@
         </field>
     </record>
 
-    <!-- Menu Item -->
-    <menuitem id="menu_sap_backend"
-              name="SAP Backends"
-              parent="menu_sap_integration"
-              action="action_sap_backend"
-              sequence="10"/>
 </odoo>
 
 

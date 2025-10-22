@@ -1,0 +1,1037 @@
+<!DOCTYPE html>
+<html dir="ltr" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>POS Design Mockup - Point of Sale</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f0f0f0;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Header */
+        .pos-header {
+            background: linear-gradient(135deg, #714B67 0%, #8B5A8E 100%);
+            color: white;
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+
+        .pos-header h1 {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .header-info {
+            display: flex;
+            gap: 30px;
+            font-size: 13px;
+        }
+
+        /* Main Container */
+        .pos-container {
+            display: flex;
+            height: calc(100vh - 52px);
+            background: #f9f9f9;
+        }
+
+        /* Left Section - Order Lines (50%) */
+        .order-section {
+            width: 50%;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            background: #fafafa;
+            border-right: 2px solid #e0e0e0;
+            position: relative;
+        }
+
+        /* Right Section - Search & Products (50%) */
+        .search-section {
+            width: 50%;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            background: white;
+            position: relative;
+        }
+
+        /* Filters */
+        .filters-container {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            padding-bottom: 10px;
+        }
+
+        .filter-btn {
+            padding: 10px 20px;
+            background: #f8f8f8;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .filter-btn:hover {
+            background: #714B67;
+            color: white;
+            border-color: #714B67;
+        }
+
+        .filter-btn.active {
+            background: #714B67;
+            color: white;
+            border-color: #714B67;
+        }
+
+        /* Search Bar */
+        .search-bar {
+            position: relative;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 15px 45px 15px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: all 0.2s;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: #714B67;
+            box-shadow: 0 0 0 3px rgba(113, 75, 103, 0.1);
+        }
+
+        .search-icon {
+            position: absolute;
+            right: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #999;
+            font-size: 20px;
+        }
+
+        /* Products Table */
+        .products-table-container {
+            flex: 1;
+            overflow-y: auto;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            background: white;
+        }
+
+        .products-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .products-table thead {
+            background: #714B67;
+            color: white;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .products-table th {
+            padding: 12px 10px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 13px;
+            border-bottom: 2px solid #5a3a52;
+        }
+
+        .products-table tbody tr {
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .products-table tbody tr:hover {
+            background: #f8f3f7;
+        }
+
+        .products-table tbody tr.selected {
+            background: #e8d9e5;
+        }
+
+        .products-table td {
+            padding: 12px 10px;
+            font-size: 13px;
+            color: #333;
+        }
+
+        .product-code {
+            color: #714B67;
+            font-weight: 600;
+        }
+
+        .warehouse-badge {
+            display: inline-block;
+            background: #e8f5e9;
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin: 2px;
+            font-size: 11px;
+        }
+
+        /* Order Header */
+        .order-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+        }
+
+        .order-header select, .order-header input {
+            padding: 8px 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        /* Order Table */
+        .order-table-container {
+            flex: 1;
+            overflow-y: auto;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            background: white;
+        }
+
+        .order-table {
+            width: 100%;
+            border-collapse: collapse;
+            border-spacing: 0;
+        }
+
+        .order-table thead {
+            background: #875F84;
+            color: white;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .order-table th {
+            padding: 12px 8px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 13px;
+            border: 1px solid #6d4a6a;
+        }
+
+        .order-table tbody tr {
+            background: white;
+        }
+
+        .order-table td {
+            padding: 0;
+            border: 1px solid #d0d0d0;
+            background: white;
+        }
+
+        .order-table tbody tr:hover td:not(.row-number) {
+            background: #f9f9f9;
+        }
+
+        /* Excel-like cells */
+        .order-table input, .order-table select {
+            width: 100%;
+            padding: 8px;
+            border: none;
+            font-size: 13px;
+            background: transparent;
+            box-sizing: border-box;
+            font-family: inherit;
+        }
+
+        .order-table input:focus, .order-table select:focus {
+            outline: 2px solid #217346;
+            outline-offset: -2px;
+            background: #fffacd;
+            z-index: 2;
+            position: relative;
+        }
+
+        /* Excel-like number input */
+        input[type="number"] {
+            text-align: right;
+        }
+
+        /* Delete button cell */
+        .delete-cell {
+            text-align: center;
+            padding: 8px !important;
+            cursor: pointer;
+            background: #fff;
+            vertical-align: middle;
+        }
+
+        .delete-cell:hover {
+            background: #ffebee !important;
+        }
+
+        /* Row number cell */
+        .row-number {
+            background: #f0f0f0 !important;
+            text-align: center;
+            font-weight: 600;
+            color: #666;
+            padding: 8px !important;
+            border-right: 2px solid #999 !important;
+        }
+
+        /* Readonly cells with colors */
+        input[readonly] {
+            cursor: default;
+        }
+
+        /* Totals Section */
+        .totals-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+        }
+
+        .total-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            font-size: 14px;
+        }
+
+        .total-row.grand-total {
+            border-top: 2px solid #714B67;
+            margin-top: 10px;
+            padding-top: 15px;
+            font-size: 18px;
+            font-weight: bold;
+            color: #714B67;
+        }
+
+        /* Action Buttons */
+        .action-buttons {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+
+        .action-btn {
+            padding: 15px;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn-quotation {
+            background: #2196F3;
+            color: white;
+        }
+
+        .btn-sale-order {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .btn-draft {
+            background: #FF9800;
+            color: white;
+        }
+
+        .btn-cancel {
+            background: #f44336;
+            color: white;
+        }
+
+        .btn-whatsapp {
+            background: #25D366;
+            color: white;
+            grid-column: 1 / -1;
+        }
+
+        .action-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .action-btn:active {
+            transform: translateY(0);
+        }
+
+        /* Scrollbar Styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="pos-header">
+        <h1>🛒 Point of Sale - Perfume Store</h1>
+        <div class="header-info">
+            <span>👤 User: John Smith</span>
+            <span>📅 Date: 2025-10-22</span>
+            <span>🕐 Time: 14:30</span>
+        </div>
+    </div>
+
+    <!-- Main Container -->
+    <div class="pos-container">
+        <!-- Left Section - Order Lines -->
+        <div class="order-section">
+            <!-- Order Header -->
+            <div class="order-header">
+                <div>
+                    <label style="margin-right: 10px;">Customer:</label>
+                    <select style="width: 200px;">
+                        <option>Walk-in Customer</option>
+                        <option>Al Noor Trading Company</option>
+                        <option>Mohammed Ahmed Ali</option>
+                        <option>Al Amal Corporation</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="margin-right: 10px;">Order #:</label>
+                    <input type="text" value="POS/2025/0001" readonly style="width: 150px; background: #f5f5f5;">
+                </div>
+            </div>
+
+            <!-- Order Table -->
+            <div class="order-table-container" id="orderTableContainer">
+                <table class="order-table" id="orderTable">
+                    <thead>
+                        <tr>
+                            <th style="width: 40px">#</th>
+                            <th style="width: 200px">Product</th>
+                            <th style="width: 100px">Warehouse</th>
+                            <th style="width: 80px">Quantity</th>
+                            <th style="width: 100px">Unit Price</th>
+                            <th style="width: 90px">Discount %</th>
+                            <th style="width: 100px">After Disc</th>
+                            <th style="width: 110px">Total</th>
+                            <th style="width: 50px">❌</th>
+                        </tr>
+                    </thead>
+                    <tbody id="orderTableBody">
+                        <tr>
+                            <td class="row-number">1</td>
+                            <td><input type="text" value="Vanilla Absolute"></td>
+                            <td>
+                                <select>
+                                    <option selected>WH1</option>
+                                    <option>WH2</option>
+                                    <option>WH3</option>
+                                </select>
+                            </td>
+                            <td><input type="number" value="10" min="1" step="1"></td>
+                            <td><input type="number" value="45.00" step="0.01" min="0"></td>
+                            <td><input type="number" value="5" min="0" max="100" step="0.1"></td>
+                            <td><input type="number" value="42.75" step="0.01" readonly style="background: #e8f5e9;"></td>
+                            <td><input type="number" value="427.50" step="0.01" readonly style="background: #fff3e0; font-weight: bold;"></td>
+                            <td class="delete-cell" onclick="deleteRow(this)">🗑️</td>
+                        </tr>
+                        <tr>
+                            <td class="row-number">2</td>
+                            <td><input type="text" value="Oud Wood Oriental"></td>
+                            <td>
+                                <select>
+                                    <option>WH1</option>
+                                    <option selected>WH2</option>
+                                    <option>WH3</option>
+                                </select>
+                            </td>
+                            <td><input type="number" value="3" min="1" step="1"></td>
+                            <td><input type="number" value="125.00" step="0.01" min="0"></td>
+                            <td><input type="number" value="0" min="0" max="100" step="0.1"></td>
+                            <td><input type="number" value="125.00" step="0.01" readonly style="background: #e8f5e9;"></td>
+                            <td><input type="number" value="375.00" step="0.01" readonly style="background: #fff3e0; font-weight: bold;"></td>
+                            <td class="delete-cell" onclick="deleteRow(this)">🗑️</td>
+                        </tr>
+                        <tr>
+                            <td class="row-number">3</td>
+                            <td><input type="text" value="Rose Bulgarian Premium"></td>
+                            <td>
+                                <select>
+                                    <option selected>WH1</option>
+                                    <option>WH2</option>
+                                    <option>WH3</option>
+                                </select>
+                            </td>
+                            <td><input type="number" value="5" min="1" step="1"></td>
+                            <td><input type="number" value="68.50" step="0.01" min="0"></td>
+                            <td><input type="number" value="10" min="0" max="100" step="0.1"></td>
+                            <td><input type="number" value="61.65" step="0.01" readonly style="background: #e8f5e9;"></td>
+                            <td><input type="number" value="308.25" step="0.01" readonly style="background: #fff3e0; font-weight: bold;"></td>
+                            <td class="delete-cell" onclick="deleteRow(this)">🗑️</td>
+                        </tr>
+                        <tr>
+                            <td class="row-number">4</td>
+                            <td><input type="text" placeholder="Select product..." style="color: #999;"></td>
+                            <td>
+                                <select>
+                                    <option selected>WH1</option>
+                                    <option>WH2</option>
+                                    <option>WH3</option>
+                                </select>
+                            </td>
+                            <td><input type="number" value="1" min="1" step="1"></td>
+                            <td><input type="number" value="0.00" step="0.01" min="0"></td>
+                            <td><input type="number" value="0" min="0" max="100" step="0.1"></td>
+                            <td><input type="number" value="0.00" step="0.01" readonly style="background: #e8f5e9;"></td>
+                            <td><input type="number" value="0.00" step="0.01" readonly style="background: #fff3e0; font-weight: bold;"></td>
+                            <td class="delete-cell" onclick="deleteRow(this)">🗑️</td>
+                        </tr>
+                        <tr>
+                            <td class="row-number">5</td>
+                            <td><input type="text" placeholder="Select product..." style="color: #999;"></td>
+                            <td>
+                                <select>
+                                    <option selected>WH1</option>
+                                    <option>WH2</option>
+                                    <option>WH3</option>
+                                </select>
+                            </td>
+                            <td><input type="number" value="1" min="1" step="1"></td>
+                            <td><input type="number" value="0.00" step="0.01" min="0"></td>
+                            <td><input type="number" value="0" min="0" max="100" step="0.1"></td>
+                            <td><input type="number" value="0.00" step="0.01" readonly style="background: #e8f5e9;"></td>
+                            <td><input type="number" value="0.00" step="0.01" readonly style="background: #fff3e0; font-weight: bold;"></td>
+                            <td class="delete-cell" onclick="deleteRow(this)">🗑️</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Totals Section -->
+            <div class="totals-section">
+                <div class="total-row">
+                    <span>Subtotal:</span>
+                    <span><strong id="subtotalAmount">$1,177.50</strong></span>
+                </div>
+                <div class="total-row">
+                    <span>Total Discount:</span>
+                    <span style="color: #f44336;"><strong id="discountAmount">-$66.75</strong></span>
+                </div>
+                <div class="total-row">
+                    <span>Tax (0%):</span>
+                    <span><strong>$0.00</strong></span>
+                </div>
+                <div class="total-row grand-total">
+                    <span>Grand Total:</span>
+                    <span id="grandTotalUSD">$1,110.75</span>
+                </div>
+                <div class="total-row" style="color: #714B67; border-top: 1px dashed #ccc; padding-top: 10px; margin-top: 5px;">
+                    <span>Total in Iraqi Dinar:</span>
+                    <span style="font-size: 16px;"><strong id="grandTotalIQD">1,443,975 IQD</strong></span>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="action-buttons">
+                <button class="action-btn btn-quotation">
+                    📋 Quotation
+                </button>
+                <button class="action-btn btn-sale-order">
+                    ✅ Sale Order
+                </button>
+                <button class="action-btn btn-draft">
+                    💾 Draft
+                </button>
+                <button class="action-btn btn-cancel">
+                    🚫 Cancel
+                </button>
+                <button class="action-btn btn-whatsapp">
+                    📱 Send to WhatsApp
+                </button>
+            </div>
+        </div>
+
+        <!-- Right Section - Search & Products -->
+        <div class="search-section">
+            <!-- Filters -->
+            <div class="filters-container">
+                <button class="filter-btn active">📦 All Products</button>
+                <button class="filter-btn">🧴 100ml</button>
+                <button class="filter-btn">💧 50ml</button>
+                <button class="filter-btn">⚗️ 1 Kilo</button>
+                <button class="filter-btn">🔬 100gm</button>
+                <button class="filter-btn">✨ Givaudan</button>
+                <button class="filter-btn">👑 Royal Essence</button>
+            </div>
+
+            <!-- Search Bar -->
+            <div class="search-bar">
+                <input type="text" class="search-input" placeholder="Search for product (Name, Code, Barcode)..." id="searchInput">
+                <span class="search-icon">🔍</span>
+            </div>
+
+            <!-- Products Table -->
+            <div class="products-table-container">
+                <table class="products-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 80px">Code</th>
+                            <th>Product Name</th>
+                            <th>Arabic Name</th>
+                            <th style="width: 100px">Brand</th>
+                            <th style="width: 90px">Unit</th>
+                            <th style="width: 90px">Price (USD)</th>
+                            <th style="width: 110px">Price (IQD)</th>
+                            <th style="width: 80px">Available</th>
+                            <th style="width: 200px">Warehouses</th>
+                        </tr>
+                    </thead>
+                    <tbody id="productsTableBody">
+                        <tr data-product='{"code":"PF001","name":"Vanilla Absolute","arabic":"فانيليا مطلقة","brand":"Givaudan","unit":"100ml","price":45.00}'>
+                            <td class="product-code">PF001</td>
+                            <td><strong>Vanilla Absolute</strong></td>
+                            <td>فانيليا مطلقة</td>
+                            <td>Givaudan</td>
+                            <td>100ml</td>
+                            <td>$45.00</td>
+                            <td>58,500 IQD</td>
+                            <td><strong>250</strong></td>
+                            <td>
+                                <span class="warehouse-badge">WH1: 120</span>
+                                <span class="warehouse-badge">WH2: 80</span>
+                                <span class="warehouse-badge">WH3: 50</span>
+                            </td>
+                        </tr>
+                        <tr data-product='{"code":"PF002","name":"Oud Wood Oriental","arabic":"عود خشبي شرقي","brand":"Royal Essence","unit":"50ml","price":125.00}'>
+                            <td class="product-code">PF002</td>
+                            <td><strong>Oud Wood Oriental</strong></td>
+                            <td>عود خشبي شرقي</td>
+                            <td>Royal Essence</td>
+                            <td>50ml</td>
+                            <td>$125.00</td>
+                            <td>162,500 IQD</td>
+                            <td><strong>180</strong></td>
+                            <td>
+                                <span class="warehouse-badge">WH1: 90</span>
+                                <span class="warehouse-badge">WH2: 90</span>
+                            </td>
+                        </tr>
+                        <tr data-product='{"code":"PF003","name":"Rose Bulgarian Premium","arabic":"ورد بلغاري فاخر","brand":"Givaudan","unit":"100ml","price":68.50}'>
+                            <td class="product-code">PF003</td>
+                            <td><strong>Rose Bulgarian Premium</strong></td>
+                            <td>ورد بلغاري فاخر</td>
+                            <td>Givaudan</td>
+                            <td>100ml</td>
+                            <td>$68.50</td>
+                            <td>89,050 IQD</td>
+                            <td><strong>320</strong></td>
+                            <td>
+                                <span class="warehouse-badge">WH1: 150</span>
+                                <span class="warehouse-badge">WH2: 100</span>
+                                <span class="warehouse-badge">WH3: 70</span>
+                            </td>
+                        </tr>
+                        <tr data-product='{"code":"PF004","name":"Musk White Crystal","arabic":"مسك أبيض كريستال","brand":"Royal Essence","unit":"1 Kilo","price":280.00}'>
+                            <td class="product-code">PF004</td>
+                            <td><strong>Musk White Crystal</strong></td>
+                            <td>مسك أبيض كريستال</td>
+                            <td>Royal Essence</td>
+                            <td>1 Kilo</td>
+                            <td>$280.00</td>
+                            <td>364,000 IQD</td>
+                            <td><strong>95</strong></td>
+                            <td>
+                                <span class="warehouse-badge">WH1: 45</span>
+                                <span class="warehouse-badge">WH2: 50</span>
+                            </td>
+                        </tr>
+                        <tr data-product='{"code":"PF005","name":"Lavender French Pure","arabic":"خزامى فرنسي نقي","brand":"Givaudan","unit":"100ml","price":32.75}'>
+                            <td class="product-code">PF005</td>
+                            <td><strong>Lavender French Pure</strong></td>
+                            <td>خزامى فرنسي نقي</td>
+                            <td>Givaudan</td>
+                            <td>100ml</td>
+                            <td>$32.75</td>
+                            <td>42,575 IQD</td>
+                            <td><strong>420</strong></td>
+                            <td>
+                                <span class="warehouse-badge">WH1: 200</span>
+                                <span class="warehouse-badge">WH2: 150</span>
+                                <span class="warehouse-badge">WH3: 70</span>
+                            </td>
+                        </tr>
+                        <tr data-product='{"code":"PF006","name":"Sandalwood Indian","arabic":"صندل هندي","brand":"Royal Essence","unit":"100gm","price":95.00}'>
+                            <td class="product-code">PF006</td>
+                            <td><strong>Sandalwood Indian</strong></td>
+                            <td>صندل هندي</td>
+                            <td>Royal Essence</td>
+                            <td>100gm</td>
+                            <td>$95.00</td>
+                            <td>123,500 IQD</td>
+                            <td><strong>145</strong></td>
+                            <td>
+                                <span class="warehouse-badge">WH1: 75</span>
+                                <span class="warehouse-badge">WH2: 70</span>
+                            </td>
+                        </tr>
+                        <tr data-product='{"code":"PF007","name":"Jasmine Egyptian Absolute","arabic":"ياسمين مصري مطلق","brand":"Givaudan","unit":"50ml","price":78.50}'>
+                            <td class="product-code">PF007</td>
+                            <td><strong>Jasmine Egyptian Absolute</strong></td>
+                            <td>ياسمين مصري مطلق</td>
+                            <td>Givaudan</td>
+                            <td>50ml</td>
+                            <td>$78.50</td>
+                            <td>102,050 IQD</td>
+                            <td><strong>230</strong></td>
+                            <td>
+                                <span class="warehouse-badge">WH1: 110</span>
+                                <span class="warehouse-badge">WH2: 120</span>
+                            </td>
+                        </tr>
+                        <tr data-product='{"code":"PF008","name":"Amber Golden Oriental","arabic":"عنبر ذهبي شرقي","brand":"Royal Essence","unit":"100ml","price":58.25}'>
+                            <td class="product-code">PF008</td>
+                            <td><strong>Amber Golden Oriental</strong></td>
+                            <td>عنبر ذهبي شرقي</td>
+                            <td>Royal Essence</td>
+                            <td>100ml</td>
+                            <td>$58.25</td>
+                            <td>75,725 IQD</td>
+                            <td><strong>290</strong></td>
+                            <td>
+                                <span class="warehouse-badge">WH1: 140</span>
+                                <span class="warehouse-badge">WH2: 150</span>
+                            </td>
+                        </tr>
+                        <tr data-product='{"code":"PF009","name":"Bergamot Italian Fresh","arabic":"برغموت إيطالي طازج","brand":"Givaudan","unit":"100ml","price":42.00}'>
+                            <td class="product-code">PF009</td>
+                            <td><strong>Bergamot Italian Fresh</strong></td>
+                            <td>برغموت إيطالي طازج</td>
+                            <td>Givaudan</td>
+                            <td>100ml</td>
+                            <td>$42.00</td>
+                            <td>54,600 IQD</td>
+                            <td><strong>360</strong></td>
+                            <td>
+                                <span class="warehouse-badge">WH1: 180</span>
+                                <span class="warehouse-badge">WH2: 120</span>
+                                <span class="warehouse-badge">WH3: 60</span>
+                            </td>
+                        </tr>
+                        <tr data-product='{"code":"PF010","name":"Patchouli Dark Indonesia","arabic":"باتشولي إندونيسي داكن","brand":"Royal Essence","unit":"1 Kilo","price":195.00}'>
+                            <td class="product-code">PF010</td>
+                            <td><strong>Patchouli Dark Indonesia</strong></td>
+                            <td>باتشولي إندونيسي داكن</td>
+                            <td>Royal Essence</td>
+                            <td>1 Kilo</td>
+                            <td>$195.00</td>
+                            <td>253,500 IQD</td>
+                            <td><strong>125</strong></td>
+                            <td>
+                                <span class="warehouse-badge">WH1: 65</span>
+                                <span class="warehouse-badge">WH2: 60</span>
+                            </td>
+                        </tr>
+                        <tr data-product='{"code":"PF011","name":"Citrus Lemon Fresh","arabic":"حمضيات ليمون طازج","brand":"Givaudan","unit":"100ml","price":28.50}'>
+                            <td class="product-code">PF011</td>
+                            <td><strong>Citrus Lemon Fresh</strong></td>
+                            <td>حمضيات ليمون طازج</td>
+                            <td>Givaudan</td>
+                            <td>100ml</td>
+                            <td>$28.50</td>
+                            <td>37,050 IQD</td>
+                            <td><strong>480</strong></td>
+                            <td>
+                                <span class="warehouse-badge">WH1: 220</span>
+                                <span class="warehouse-badge">WH2: 160</span>
+                                <span class="warehouse-badge">WH3: 100</span>
+                            </td>
+                        </tr>
+                        <tr data-product='{"code":"PF012","name":"Frankincense Omani Pure","arabic":"لبان عماني نقي","brand":"Royal Essence","unit":"100gm","price":115.00}'>
+                            <td class="product-code">PF012</td>
+                            <td><strong>Frankincense Omani Pure</strong></td>
+                            <td>لبان عماني نقي</td>
+                            <td>Royal Essence</td>
+                            <td>100gm</td>
+                            <td>$115.00</td>
+                            <td>149,500 IQD</td>
+                            <td><strong>165</strong></td>
+                            <td>
+                                <span class="warehouse-badge">WH1: 85</span>
+                                <span class="warehouse-badge">WH2: 80</span>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Delete row function
+        function deleteRow(btn) {
+            const row = btn.closest('tr');
+            if (confirm('Delete this row?')) {
+                row.remove();
+                updateRowNumbers();
+                calculateTotals();
+            }
+        }
+
+        // Update row numbers after deletion
+        function updateRowNumbers() {
+            const rows = document.querySelectorAll('#orderTableBody tr');
+            rows.forEach((row, index) => {
+                const rowNumCell = row.querySelector('.row-number');
+                if (rowNumCell) {
+                    rowNumCell.textContent = index + 1;
+                }
+            });
+        }
+
+        // Calculate totals for each row
+        function calculateRowTotal(row) {
+            const inputs = row.querySelectorAll('input[type="number"]');
+            const qty = parseFloat(inputs[0].value) || 0;
+            const price = parseFloat(inputs[1].value) || 0;
+            const discount = parseFloat(inputs[2].value) || 0;
+            
+            const afterDisc = price * (1 - discount / 100);
+            const total = qty * afterDisc;
+
+            inputs[3].value = afterDisc.toFixed(2);
+            inputs[4].value = total.toFixed(2);
+        }
+
+        // Calculate grand totals
+        function calculateTotals() {
+            const rows = document.querySelectorAll('#orderTableBody tr');
+            let subtotal = 0;
+            let totalDiscount = 0;
+
+            rows.forEach(row => {
+                const inputs = row.querySelectorAll('input[type="number"]');
+                const qty = parseFloat(inputs[0].value) || 0;
+                const price = parseFloat(inputs[1].value) || 0;
+                const discount = parseFloat(inputs[2].value) || 0;
+
+                subtotal += qty * price;
+                totalDiscount += (qty * price * discount / 100);
+            });
+
+            const grandTotal = subtotal - totalDiscount;
+            const iqdTotal = grandTotal * 1300; // Exchange rate
+
+            // Update display
+            document.getElementById('subtotalAmount').textContent = '$' + subtotal.toFixed(2);
+            document.getElementById('discountAmount').textContent = '-$' + totalDiscount.toFixed(2);
+            document.getElementById('grandTotalUSD').textContent = '$' + grandTotal.toFixed(2);
+            document.getElementById('grandTotalIQD').textContent = iqdTotal.toLocaleString('en-US') + ' IQD';
+        }
+
+        // Add event listeners to all inputs for auto-calculation
+        document.addEventListener('DOMContentLoaded', function() {
+            const orderTable = document.getElementById('orderTable');
+            
+            orderTable.addEventListener('input', function(e) {
+                if (e.target.type === 'number') {
+                    const row = e.target.closest('tr');
+                    calculateRowTotal(row);
+                    calculateTotals();
+                }
+            });
+
+            // Tab and Enter navigation for Excel-like behavior
+            orderTable.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const currentCell = e.target.closest('td');
+                    if (!currentCell) return;
+
+                    const currentRow = currentCell.closest('tr');
+                    const cells = Array.from(currentRow.querySelectorAll('td'));
+                    const currentIndex = cells.indexOf(currentCell);
+
+                    // Move to next row, same column
+                    const nextRow = currentRow.nextElementSibling;
+                    if (nextRow) {
+                        const nextCell = nextRow.querySelectorAll('td')[currentIndex];
+                        const input = nextCell.querySelector('input, select');
+                        if (input) input.focus();
+                    }
+                }
+            });
+
+            // Initialize totals
+            calculateTotals();
+        });
+
+        // Search functionality
+        const searchInput = document.getElementById('searchInput');
+        const productsTableBody = document.getElementById('productsTableBody');
+        const productsRows = productsTableBody.getElementsByTagName('tr');
+
+        searchInput.addEventListener('input', function(e) {
+            const searchTerm = e.target.value.toLowerCase();
+            
+            Array.from(productsRows).forEach(row => {
+                const text = row.textContent.toLowerCase();
+                row.style.display = text.includes(searchTerm) ? '' : 'none';
+            });
+        });
+
+        // Filter buttons
+        const filterBtns = document.querySelectorAll('.filter-btn');
+        filterBtns.forEach(btn => {
+            btn.addEventListener('click', function() {
+                filterBtns.forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+            });
+        });
+
+        // Product row click - add to order
+        Array.from(productsRows).forEach(row => {
+            row.addEventListener('dblclick', function() {
+                const productData = JSON.parse(this.getAttribute('data-product'));
+                
+                // Find first empty row or add new row
+                const orderRows = document.querySelectorAll('#orderTableBody tr');
+                let emptyRow = null;
+                
+                for (let i = 0; i < orderRows.length; i++) {
+                    const productInput = orderRows[i].querySelector('input[type="text"]');
+                    if (!productInput.value || productInput.value.trim() === '' || productInput.placeholder) {
+                        emptyRow = orderRows[i];
+                        break;
+                    }
+                }
+                
+                if (emptyRow) {
+                    const inputs = emptyRow.querySelectorAll('input');
+                    inputs[0].value = productData.name;
+                    inputs[0].style.color = '#000';
+                    inputs[2].value = productData.price;
+                    
+                    calculateRowTotal(emptyRow);
+                    calculateTotals();
+                    
+                    // Visual feedback
+                    this.style.background = '#c8e6c9';
+                    setTimeout(() => {
+                        this.style.background = '';
+                    }, 300);
+                }
+            });
+        });
+
+        // Keyboard navigation for products table
+        let selectedProductIndex = -1;
+        
+        searchInput.addEventListener('keydown', function(e) {
+            const visibleRows = Array.from(productsRows).filter(row => row.style.display !== 'none');
+            
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                selectedProductIndex = Math.min(selectedProductIndex + 1, visibleRows.length - 1);
+                highlightRow(visibleRows);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                selectedProductIndex = Math.max(selectedProductIndex - 1, 0);
+                highlightRow(visibleRows);
+            } else if (e.key === 'Enter' && selectedProductIndex >= 0) {
+                e.preventDefault();
+                visibleRows[selectedProductIndex].dispatchEvent(new Event('dblclick'));
+            }
+        });
+
+        function highlightRow(visibleRows) {
+            Array.from(productsRows).forEach(r => r.classList.remove('selected'));
+            if (selectedProductIndex >= 0 && visibleRows[selectedProductIndex]) {
+                visibleRows[selectedProductIndex].classList.add('selected');
+                visibleRows[selectedProductIndex].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            }
+        }
+
+        // Action buttons
+        document.querySelector('.btn-quotation').addEventListener('click', () => {
+            alert('📋 Creating a new quotation...');
+        });
+
+        document.querySelector('.btn-sale-order').addEventListener('click', () => {
+            alert('✅ Confirming sale order and generating invoice...');
+        });
+
+        document.querySelector('.btn-draft').addEventListener('click', () => {
+            alert('💾 Order saved as draft!');
+        });
+
+        document.querySelector('.btn-cancel').addEventListener('click', () => {
+            if (confirm('Are you sure you want to cancel the current order?')) {
+                // Clear all order rows
+                const orderRows = document.querySelectorAll('#orderTableBody tr');
+                orderRows.forEach(row => {
+                    const inputs = row.querySelectorAll('input');
+                    inputs[0].value = '';
+                    inputs[0].placeholder = 'Select product...';
+                    inputs[0].style.color = '#999';
+                    inputs[1].value = 1;
+                    inputs[2].value = 0;
+                    inputs[3].value = 0;
+                    inputs[4].value = 0;
+                    inputs[5].value = 0;
+                });
+                calculateTotals();
+                alert('🚫 Order cancelled!');
+            }
+        });
+
+        document.querySelector('.btn-whatsapp').addEventListener('click', () => {
+            alert('📱 Opening WhatsApp to send invoice...');
+        });
+
+        console.log('%c🎨 POS Design - Lugal Perfume Store', 'background: #714B67; color: white; padding: 10px; font-size: 16px; border-radius: 5px;');
+        console.log('✅ Excel-like order table with full editing capabilities');
+        console.log('⌨️ Try double-clicking products to add them to order');
+        console.log('⌨️ Use Enter key to move between cells vertically');
+    </script>
+</body>
+</html>

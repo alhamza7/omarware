@@ -60,13 +60,6 @@
             <field name="view_mode">list,form</field>
         </record>
         
-        <!-- Menu Item -->
-        <menuitem id="menu_sap_sale_sync"
-                  name="Sale Sync"
-                  parent="menu_sap_integration"
-                  action="action_sap_sale_sync"
-                  sequence="60"/>
-        
     </data>
 </odoo>
 

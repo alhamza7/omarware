@@ -55,16 +55,18 @@ class SapCustomerSync(models.Model):
         try:
             # Get customer data from SAP
             connection = self.backend_id.get_connection()
-            customers = connection.get_customers(
-                filter_query=f"CardCode eq '{self.sap_customer_id}'"
-            )
-            connection.close_session()
+            customers = connection.get('BusinessPartners', {
+                '$filter': f"CardCode eq '{self.sap_customer_id}'"
+            })
             
             if not customers.get('value'):
                 raise SapValidationError(f"Customer {self.sap_customer_id} not found in SAP")
             
             customer_data = customers['value'][0]
             self.sap_data = str(customer_data)
+            
+            # DEBUG: Log data type
+            _logger.info(f"Customer data type: {type(customer_data)}, Keys: {list(customer_data.keys()) if isinstance(customer_data, dict) else 'NOT A DICT'}")
             
             # Use service layer to sync customer
             customer_service = self.env['sap.customer.service']
@@ -91,7 +93,7 @@ class SapCustomerSync(models.Model):
             self.sync_status = 'error'
             self.error_message = str(e)
             self.retry_count += 1
-            _logger.error(f"Error syncing customer {self.sap_customer_id}: {str(e)}")
+            _logger.error(f"Error syncing customer {self.sap_customer_id}: {str(e)}", exc_info=True)
             raise
     
     def sync_to_sap(self):
@@ -139,6 +141,35 @@ class SapCustomerSync(models.Model):
             self.sync_from_sap()
         elif self.sync_direction == 'odoo_to_sap':
             self.sync_to_sap()
+    
+    @api.model
+    def import_record(self, backend, external_id):
+        """Import a single customer record from SAP - DIRECT METHOD"""
+        try:
+            _logger.info(f"Importing customer {external_id} from SAP backend {backend.name}")
+            
+            # Get customer data from SAP
+            connection = backend.get_connection()
+            customers = connection.get('BusinessPartners', {
+                '$filter': f"CardCode eq '{external_id}'"
+            })
+            
+            if not customers.get('value'):
+                _logger.warning(f"Customer {external_id} not found in SAP")
+                return None
+            
+            customer_data = customers['value'][0]
+            
+            # Use direct import helper
+            direct_importer = self.env['sap.customer.direct.import']
+            partner = direct_importer.import_customer_direct(backend, external_id, customer_data)
+            
+            _logger.info(f"Successfully imported customer {external_id}: {partner.name}")
+            return partner
+            
+        except Exception as e:
+            _logger.error(f"Error importing customer {external_id}: {str(e)}", exc_info=True)
+            raise
     
     @api.model
     def sync_all_customers(self, backend_id):

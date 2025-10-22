@@ -58,13 +58,6 @@
             <field name="view_mode">list,form</field>
         </record>
         
-        <!-- Menu Item -->
-        <menuitem id="menu_sap_quotation_sync"
-                  name="Quotation Sync"
-                  parent="menu_sap_integration"
-                  action="action_sap_quotation_sync"
-                  sequence="50"/>
-        
     </data>
 </odoo>
 

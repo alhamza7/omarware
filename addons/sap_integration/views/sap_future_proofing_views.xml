@@ -407,34 +407,34 @@
         <record id="action_sap_plugin_manager" model="ir.actions.act_window">
             <field name="name">SAP Plugin Manager</field>
             <field name="res_model">sap.plugin.manager</field>
-            <field name="view_mode">tree,form</field>
+            <field name="view_mode">list,form</field>
         </record>
         
         <record id="action_sap_api_endpoint" model="ir.actions.act_window">
             <field name="name">SAP API Endpoints</field>
             <field name="res_model">sap.api.endpoint</field>
-            <field name="view_mode">tree,form</field>
+            <field name="view_mode">list,form</field>
             <field name="context">{'search_default_active': 1}</field>
         </record>
         
         <record id="action_sap_api_key" model="ir.actions.act_window">
             <field name="name">SAP API Keys</field>
             <field name="res_model">sap.api.key</field>
-            <field name="view_mode">tree,form</field>
+            <field name="view_mode">list,form</field>
             <field name="context">{'search_default_active': 1}</field>
         </record>
         
         <record id="action_sap_webhook_endpoint" model="ir.actions.act_window">
             <field name="name">SAP Webhook Endpoints</field>
             <field name="res_model">sap.webhook.endpoint</field>
-            <field name="view_mode">tree,form</field>
+            <field name="view_mode">list,form</field>
             <field name="context">{'search_default_active': 1}</field>
         </record>
         
         <record id="action_sap_customization_rule" model="ir.actions.act_window">
             <field name="name">SAP Customization Rules</field>
             <field name="res_model">sap.customization.rule</field>
-            <field name="view_mode">tree,form</field>
+            <field name="view_mode">list,form</field>
             <field name="context">{'search_default_active': 1}</field>
         </record>
         

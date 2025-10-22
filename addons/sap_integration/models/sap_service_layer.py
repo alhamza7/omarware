@@ -116,6 +116,84 @@ class SapServiceLayerConnection:
             'Accept': 'application/json'
         }
     
+    def get(self, endpoint, params=None):
+        """Generic GET method for any SAP Service Layer endpoint"""
+        try:
+            self._ensure_session()  # Ensure session is valid
+            
+            # Handle both full URLs and endpoint paths
+            if endpoint.startswith('http'):
+                url = endpoint
+            else:
+                url = f"{self.base_url}/{endpoint.lstrip('/')}"
+            
+            headers = self._get_headers()
+            
+            _logger.info(f"GET request to SAP: {url}")
+            response = self.session.get(url, headers=headers, params=params or {}, timeout=self.timeout)
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                _logger.error(f"Error in GET request: {response.status_code} - {response.text}")
+                return {'value': []}
+                
+        except Exception as e:
+            _logger.error(f"Error in GET request: {str(e)}")
+            return {'value': []}
+    
+    def post(self, endpoint, data):
+        """Generic POST method for any SAP Service Layer endpoint"""
+        try:
+            self._ensure_session()
+            
+            if endpoint.startswith('http'):
+                url = endpoint
+            else:
+                url = f"{self.base_url}/{endpoint.lstrip('/')}"
+            
+            headers = self._get_headers()
+            
+            _logger.info(f"POST request to SAP: {url}")
+            response = self.session.post(url, json=data, headers=headers, timeout=self.timeout)
+            
+            if response.status_code in [200, 201]:
+                return response.json()
+            else:
+                error_msg = f"Error in POST request: {response.status_code} - {response.text}"
+                _logger.error(error_msg)
+                raise Exception(error_msg)
+                
+        except Exception as e:
+            _logger.error(f"Error in POST request: {str(e)}")
+            raise
+    
+    def patch(self, endpoint, data):
+        """Generic PATCH method for any SAP Service Layer endpoint"""
+        try:
+            self._ensure_session()
+            
+            if endpoint.startswith('http'):
+                url = endpoint
+            else:
+                url = f"{self.base_url}/{endpoint.lstrip('/')}"
+            
+            headers = self._get_headers()
+            
+            _logger.info(f"PATCH request to SAP: {url}")
+            response = self.session.patch(url, json=data, headers=headers, timeout=self.timeout)
+            
+            if response.status_code in [200, 204]:
+                return response.json() if response.content else {}
+            else:
+                error_msg = f"Error in PATCH request: {response.status_code} - {response.text}"
+                _logger.error(error_msg)
+                raise Exception(error_msg)
+                
+        except Exception as e:
+            _logger.error(f"Error in PATCH request: {str(e)}")
+            raise
+    
     def get_customers(self, skip=0, top=100, filter_query=None):
         """Get customers from SAP Service Layer"""
         try:

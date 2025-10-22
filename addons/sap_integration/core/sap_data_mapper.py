@@ -48,26 +48,39 @@ class SapDataMapper(models.AbstractModel):
                 'comment': f"SAP Partner: {sap_data.get('CardCode', '')}",
             }
             
-            # Address mapping
-            if 'Address' in sap_data:
-                address_data = sap_data['Address']
+            # Address mapping - Handle both direct fields and BPAddresses collection
+            # Try BPAddresses collection first (array of addresses)
+            if 'BPAddresses' in sap_data and isinstance(sap_data['BPAddresses'], list) and sap_data['BPAddresses']:
+                # Get the first address from the collection
+                address_data = sap_data['BPAddresses'][0]
                 partner_data.update({
-                    'street': address_data.get('Address', ''),
-                    'street2': address_data.get('Address2', ''),
+                    'street': address_data.get('Street', '') or address_data.get('AddressName', ''),
+                    'street2': address_data.get('Block', '') or address_data.get('AddressName2', ''),
                     'city': address_data.get('City', ''),
                     'zip': address_data.get('ZipCode', ''),
                     'state_id': self._get_state_id(address_data.get('State', '')),
                     'country_id': self._get_country_id(address_data.get('Country', '')),
                 })
-            
-            # Contact person mapping
-            if 'ContactPersons' in sap_data and sap_data['ContactPersons']:
-                contact = sap_data['ContactPersons'][0]
+            # Fallback to direct address fields
+            elif 'Address' in sap_data and isinstance(sap_data['Address'], str):
                 partner_data.update({
-                    'contact_name': contact.get('Name', ''),
-                    'contact_email': contact.get('EmailAddress', ''),
-                    'contact_phone': contact.get('Phone1', ''),
+                    'street': sap_data.get('Address', ''),
+                    'street2': sap_data.get('Address2', ''),
+                    'city': sap_data.get('City', ''),
+                    'zip': sap_data.get('ZipCode', ''),
+                    'state_id': self._get_state_id(sap_data.get('State', '')),
+                    'country_id': self._get_country_id(sap_data.get('Country', '')),
                 })
+            
+            # Contact person mapping - Handle as array
+            if 'ContactEmployees' in sap_data and isinstance(sap_data['ContactEmployees'], list) and sap_data['ContactEmployees']:
+                contact = sap_data['ContactEmployees'][0]
+                if 'Name' in contact:
+                    partner_data['contact_name'] = contact.get('Name', '')
+                if 'E_Mail' in contact or 'EmailAddress' in contact:
+                    partner_data['contact_email'] = contact.get('E_Mail', '') or contact.get('EmailAddress', '')
+                if 'Phone1' in contact:
+                    partner_data['contact_phone'] = contact.get('Phone1', '')
             
             # Tax information
             if 'TaxIdNum' in sap_data:

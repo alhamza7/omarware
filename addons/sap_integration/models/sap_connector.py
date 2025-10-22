@@ -136,7 +136,7 @@ class SapConnector(models.Model):
         """Sync customers from SAP"""
         try:
             connection = self.backend_id.get_connection()
-            customers = connection.get_customers(top=self.backend_id.batch_size)
+            customers = connection.get('BusinessPartners', {'$top': self.backend_id.batch_size, '$filter': "CardType eq 'C'"})
             
             customer_count = 0
             for customer_data in customers.get('value', []):
@@ -155,7 +155,7 @@ class SapConnector(models.Model):
         """Sync products from SAP"""
         try:
             connection = self.backend_id.get_connection()
-            products = connection.get_products(top=self.backend_id.batch_size)
+            products = connection.get('Items', {'$top': self.backend_id.batch_size})
             
             product_count = 0
             for product_data in products.get('value', []):

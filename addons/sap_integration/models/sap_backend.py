@@ -405,5 +405,46 @@ class SapBackend(models.Model):
         except Exception as e:
             _logger.error(f"Error in incremental sync: {str(e)}")
             raise UserError(f"Incremental sync failed: {str(e)}")
+    
+    def action_import_uom_groups(self):
+        """Import all UoM Groups and UoMs from SAP"""
+        self.ensure_one()
+        
+        if not self.active:
+            raise UserError("Backend is not active")
+        
+        if self.connection_status != 'connected':
+            raise UserError("Backend is not connected. Please test connection first.")
+        
+        try:
+            # Import all UoMs and UoM Groups
+            uom_sync = self.env['sap.uom.sync']
+            result = uom_sync.import_all_uoms_from_sap(self)
+            
+            _logger.info(f"Imported {result} UoMs from {self.name}")
+            
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'UoM Groups Imported Successfully! ✅',
+                    'message': f'Successfully imported {result} Unit of Measures and UoM Groups from SAP',
+                    'type': 'success',
+                    'sticky': False,
+                }
+            }
+            
+        except Exception as e:
+            _logger.error(f"Error importing UoM groups: {str(e)}")
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'Import Failed ❌',
+                    'message': f'Failed to import UoM Groups: {str(e)}',
+                    'type': 'danger',
+                    'sticky': True,
+                }
+            }
 
 

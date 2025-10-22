@@ -179,13 +179,6 @@
               sequence="10"
               action="action_sap_dashboard"/>
 
-    <!-- Dashboard Menu (First item) -->
-    <menuitem id="menu_sap_dashboard"
-              name="📊 Dashboard"
-              parent="menu_sap_integration"
-              action="action_sap_dashboard"
-              sequence="1"/>
-
 </odoo>
 
 

@@ -12,7 +12,7 @@ from odoo import models, fields, api
 from odoo.exceptions import UserError
 
 from ..core.sap_base_service import SapBaseService
-from ..core.sap_mapper import SapDataMapper
+from ..core.sap_data_mapper import SapDataMapper
 from ..core.sap_logger import SapSyncError, SapValidationError
 
 
@@ -27,6 +27,15 @@ class SapCustomerService(SapBaseService):
             # Validate input data
             if not sap_customer_data:
                 raise SapValidationError("SAP customer data is required")
+            
+            # DEBUG: Log incoming data type
+            import logging
+            _logger = logging.getLogger(__name__)
+            _logger.info(f"DEBUG: sap_customer_data type = {type(sap_customer_data)}")
+            if isinstance(sap_customer_data, dict):
+                _logger.info(f"DEBUG: sap_customer_data keys = {list(sap_customer_data.keys())[:10]}")
+            else:
+                _logger.error(f"DEBUG: sap_customer_data is NOT a dict! It's a {type(sap_customer_data)}")
             
             # Map SAP data to Odoo format
             mapper = self.env['sap.data.mapper']

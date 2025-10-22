@@ -97,12 +97,5 @@
             </field>
         </record>
         
-        <!-- SAP Sync Log Menu Item -->
-        <menuitem id="menu_sap_sync_log"
-                  name="Sync Logs"
-                  parent="menu_sap_integration"
-                  action="action_sap_sync_log"
-                  sequence="100"/>
-        
     </data>
 </odoo>
