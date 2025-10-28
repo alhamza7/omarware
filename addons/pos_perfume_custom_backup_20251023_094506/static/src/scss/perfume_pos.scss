@@ -1,0 +1,95 @@
+/* POS Perfume Custom Styles */
+
+/* Color scheme */
+$perfume-primary: #714B67;
+$perfume-secondary: #8B5A8E;
+$perfume-light: #875F84;
+$perfume-accent: #9D6D98;
+
+/* Product card enhancements */
+.product-arabic-name {
+    color: #666;
+    font-size: 0.85em;
+    margin-top: 2px;
+    direction: rtl;
+    text-align: right;
+}
+
+/* Orderline price in IQD */
+.price-iqd {
+    color: #666;
+    font-size: 0.75em;
+    margin-top: 2px;
+}
+
+/* Total in IQD */
+.total-iqd {
+    padding: 10px;
+    background: #f8f9fa;
+    border-radius: 5px;
+    margin-top: 10px;
+    border-left: 4px solid $perfume-primary;
+    
+    span {
+        font-weight: bold;
+    }
+}
+
+/* Custom styling for POS */
+.pos-content {
+    .product-list {
+        .product {
+            border: 1px solid #e0e0e0;
+            transition: all 0.3s ease;
+            
+            &:hover {
+                border-color: $perfume-primary;
+                box-shadow: 0 2px 8px rgba(113, 75, 103, 0.2);
+            }
+            
+            &.selected {
+                border-color: $perfume-primary;
+                background-color: rgba(113, 75, 103, 0.1);
+            }
+        }
+    }
+    
+    .orderline {
+        &.selected {
+            background-color: rgba(113, 75, 103, 0.1);
+        }
+    }
+}
+
+/* Button styling */
+.btn-primary {
+    background-color: $perfume-primary !important;
+    border-color: $perfume-primary !important;
+    
+    &:hover {
+        background-color: $perfume-secondary !important;
+        border-color: $perfume-secondary !important;
+    }
+}
+
+/* Search bar */
+.search-input {
+    border-color: #ddd;
+    
+    &:focus {
+        border-color: $perfume-primary;
+        box-shadow: 0 0 0 0.2rem rgba(113, 75, 103, 0.25);
+    }
+}
+
+/* Header customization */
+.pos-topheader {
+    background: linear-gradient(135deg, $perfume-primary 0%, $perfume-secondary 100%);
+}
+
+/* Receipt styling */
+.receipt-screen {
+    .total {
+        color: $perfume-primary;
+    }
+}

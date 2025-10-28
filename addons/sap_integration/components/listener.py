@@ -147,48 +147,62 @@ class ProductProductListener(Component):
     
     def on_record_create(self, record, fields=None):
         """Create SAP binding when product is created"""
+        # Check if SAP product model is available (avoid errors during module installation)
+        if 'sap.product.product' not in self.env:
+            return
+            
         # Check if auto-export is enabled in any active backend
-        backends = self.env['sap.backend'].search([
-            ('active', '=', True),
-            ('auto_export_products', '=', True)
-        ])
-        
-        for backend in backends:
-            try:
-                # Check if binding already exists
-                existing = self.env['sap.product.product'].search([
-                    ('odoo_id', '=', record.id),
-                    ('backend_id', '=', backend.id),
-                ])
-                
-                if not existing:
-                    binding = self.env['sap.product.product'].create({
-                        'odoo_id': record.id,
-                        'backend_id': backend.id,
-                    })
-                    _logger.info(f"Auto-created SAP binding for product: {record.name} on backend {backend.name}")
+        try:
+            backends = self.env['sap.backend'].search([
+                ('active', '=', True),
+                ('auto_export_products', '=', True)
+            ])
+            
+            for backend in backends:
+                try:
+                    # Check if binding already exists
+                    existing = self.env['sap.product.product'].search([
+                        ('odoo_id', '=', record.id),
+                        ('backend_id', '=', backend.id),
+                    ])
                     
-                    # Export immediately if not using queue_job
-                    binding.export_record()
-            except Exception as e:
-                _logger.error(f"Error auto-creating product binding: {str(e)}")
+                    if not existing:
+                        binding = self.env['sap.product.product'].create({
+                            'odoo_id': record.id,
+                            'backend_id': backend.id,
+                        })
+                        _logger.info(f"Auto-created SAP binding for product: {record.name} on backend {backend.name}")
+                        
+                        # Export immediately if not using queue_job
+                        binding.export_record()
+                except Exception as e:
+                    _logger.error(f"Error auto-creating product binding: {str(e)}")
+        except Exception as e:
+            _logger.warning(f"Could not access sap.product.product model during create: {str(e)}")
     
     def on_record_write(self, record, fields=None):
         """Update SAP when product is updated"""
+        # Check if SAP product model is available (avoid errors during module installation)
+        if 'sap.product.product' not in self.env:
+            return
+            
         # Find existing bindings with auto-export enabled
-        bindings = self.env['sap.product.product'].search([
-            ('odoo_id', '=', record.id),
-            ('backend_id.active', '=', True),
-            ('backend_id.auto_export_products', '=', True)
-        ])
-        
-        for binding in bindings:
-            try:
-                if binding.external_id:  # Only update if already exported
-                    _logger.info(f"Auto-updating product {record.name} to SAP backend {binding.backend_id.name}")
-                    binding.export_record()
-            except Exception as e:
-                _logger.error(f"Error auto-updating product binding: {str(e)}")
+        try:
+            bindings = self.env['sap.product.product'].search([
+                ('odoo_id', '=', record.id),
+                ('backend_id.active', '=', True),
+                ('backend_id.auto_export_products', '=', True)
+            ])
+            
+            for binding in bindings:
+                try:
+                    if binding.external_id:  # Only update if already exported
+                        _logger.info(f"Auto-updating product {record.name} to SAP backend {binding.backend_id.name}")
+                        binding.export_record()
+                except Exception as e:
+                    _logger.error(f"Error auto-updating product binding: {str(e)}")
+        except Exception as e:
+            _logger.warning(f"Could not access sap.product.product model: {str(e)}")
 
 
 class SaleOrderListener(Component):

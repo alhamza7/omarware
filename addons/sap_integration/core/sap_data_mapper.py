@@ -176,7 +176,10 @@ class SapDataMapper(models.AbstractModel):
                 'description': sap_data.get('ItemDescription', ''),
                 'sale_ok': True,
                 'purchase_ok': True,
-                'type': 'product',
+                'available_in_pos': True,  # Make product available in Point of Sale
+                'type': 'consu',  # Consumable = Storable products (displayed as "Goods" in UI)
+                'tracking': 'none',  # Enable inventory tracking
+                'is_storable': True,  # Enable "Track Inventory" checkbox in UI
                 'categ_id': self._get_product_category_id(sap_data.get('ItemsGroupCode', '')),
                 'list_price': float(sap_data.get('SalesUnitPrice', 0)),
                 'standard_price': float(sap_data.get('PurchaseUnitPrice', 0)),
@@ -189,7 +192,7 @@ class SapDataMapper(models.AbstractModel):
             # UoM mapping
             if 'SalesUnit' in sap_data:
                 product_data['uom_id'] = self._get_uom_id(sap_data['SalesUnit'])
-                product_data['uom_po_id'] = self._get_uom_id(sap_data.get('PurchaseUnit', sap_data['SalesUnit']))
+                # Note: uom_po_id removed in Odoo 19.0
             
             # Tax information
             if 'TaxCode' in sap_data:
@@ -238,9 +241,8 @@ class SapDataMapper(models.AbstractModel):
             if odoo_product.uom_id:
                 sap_data['SalesUnit'] = self._get_sap_uom_code(odoo_product.uom_id)
                 sap_data['InventoryUoM'] = self._get_sap_uom_code(odoo_product.uom_id)
-            
-            if odoo_product.uom_po_id:
-                sap_data['PurchaseUnit'] = self._get_sap_uom_code(odoo_product.uom_po_id)
+                # Use same UoM for purchase in Odoo 19.0
+                sap_data['PurchaseUnit'] = self._get_sap_uom_code(odoo_product.uom_id)
             
             # Tax information
             if odoo_product.taxes_id:

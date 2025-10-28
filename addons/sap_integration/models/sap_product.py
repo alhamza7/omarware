@@ -153,10 +153,13 @@ class SapProductSync(models.Model):
             'standard_price': sap_data.get('PurchaseUnitPrice', 0.0),
             'sale_ok': True,
             'purchase_ok': True,
-            'type': 'product',
+            'available_in_pos': True,  # Make product available in Point of Sale
+            'type': 'consu',  # Consumable = Storable products (displayed as "Goods" in UI)
+            'tracking': 'none',  # Enable inventory tracking
+            'is_storable': True,  # Enable "Track Inventory" checkbox in UI
             'categ_id': self._get_product_category(sap_data.get('ItemsGroupCode', '')),
             'uom_id': self._get_uom_id(sap_data.get('SalesUnit', '')),
-            'uom_po_id': self._get_uom_id(sap_data.get('PurchaseUnit', '')),
+            # Note: uom_po_id removed in Odoo 19.0
             'description': sap_data.get('UserText', ''),
             'description_sale': sap_data.get('UserText', ''),
             'description_purchase': sap_data.get('UserText', ''),
@@ -172,7 +175,7 @@ class SapProductSync(models.Model):
             'SalesUnitPrice': product.list_price,
             'PurchaseUnitPrice': product.standard_price,
             'SalesUnit': self._get_sap_uom(product.uom_id),
-            'PurchaseUnit': self._get_sap_uom(product.uom_po_id),
+            'PurchaseUnit': self._get_sap_uom(product.uom_id),  # Use same as sales in Odoo 19.0
             'ItemsGroupCode': self._get_sap_category(product.categ_id),
             'UserText': product.description or '',
             'Valid': 'Y' if product.active else 'N',

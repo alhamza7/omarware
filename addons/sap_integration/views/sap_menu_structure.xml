@@ -100,6 +100,25 @@
               name="📦 Data Management"
               parent="menu_sap_integration"
               sequence="30"/>
+    
+    <!-- New: Complete Product Migration -->
+    <menuitem id="menu_sap_product_extended"
+              name="Extended Product Info"
+              parent="menu_sap_data_management"
+              action="action_sap_product_extended"
+              sequence="1"/>
+    
+    <menuitem id="menu_sap_product_pricelist_sync"
+              name="Product Pricelist Sync"
+              parent="menu_sap_data_management"
+              action="action_sap_product_pricelist_sync"
+              sequence="2"/>
+    
+    <menuitem id="menu_sap_product_warehouse_info"
+              name="Product Warehouse Info"
+              parent="menu_sap_data_management"
+              action="action_sap_product_warehouse_info"
+              sequence="3"/>
 
     <!-- Bindings Submenu -->
     <menuitem id="menu_sap_bindings"

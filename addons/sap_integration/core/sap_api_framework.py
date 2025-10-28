@@ -121,7 +121,7 @@ class SapApiEndpoint(models.Model):
     
     # Constraints
     _sql_constraints = [
-        ('unique_path_method', 'unique(path, method)', 
+        ('unique_path_method', 'UNIQUE(path, method)', 
          'An endpoint with the same path and method already exists.'),
     ]
     
@@ -218,7 +218,7 @@ class SapApiKey(models.Model):
     
     # Constraints
     _sql_constraints = [
-        ('unique_key_value', 'unique(key_value)', 
+        ('unique_key_value', 'UNIQUE(key_value)', 
          'API key value must be unique.'),
     ]
     

@@ -1,0 +1,269 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- ============================================================ -->
+    <!--                    POS PERFUME ORDER VIEWS                   -->
+    <!-- ============================================================ -->
+
+    <!-- Order Line List View -->
+    <record id="view_pos_perfume_order_line_tree" model="ir.ui.view">
+        <field name="name">pos.perfume.order.line.list</field>
+        <field name="model">pos.perfume.order.line</field>
+        <field name="arch" type="xml">
+            <list editable="bottom" decoration-muted="quantity == 0">
+                <field name="product_id" 
+                       required="1"
+                       domain="[('sale_ok', '=', True)]"
+                       context="{'default_detailed_type': 'product'}"/>
+                <field name="product_code" optional="show"/>
+                <field name="product_foreign_name" optional="show" string="Foreign Name"/>
+                <field name="warehouse_id" required="1"/>
+                <field name="available_qty" optional="show" readonly="1"/>
+                <field name="quantity"/>
+                <field name="unit_price"/>
+                <field name="discount_percent"/>
+                <field name="price_after_discount" readonly="1"/>
+                <field name="line_total" readonly="1" sum="Total"/>
+                <field name="currency_id" column_invisible="1"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Form View -->
+    <record id="view_pos_perfume_order_form" model="ir.ui.view">
+        <field name="name">pos.perfume.order.form</field>
+        <field name="model">pos.perfume.order</field>
+        <field name="arch" type="xml">
+            <form string="POS Perfume Order">
+                <header>
+                    <button name="action_quotation" string="Create Quotation" 
+                            type="object" 
+                            invisible="state != 'draft'" 
+                            class="btn-primary"/>
+                    <button name="action_confirm" string="Confirm Sale Order" 
+                            type="object" 
+                            invisible="state not in ('draft', 'quotation')" 
+                            class="btn-primary"/>
+                    <button name="action_send_whatsapp" string="Send WhatsApp" 
+                            type="object" 
+                            icon="fa-whatsapp"
+                            class="btn-success"/>
+                    <button name="action_cancel" string="Cancel" 
+                            type="object" 
+                            invisible="state in ('cancel', 'done')"/>
+                    <button name="action_draft" string="Set to Draft" 
+                            type="object" 
+                            invisible="state not in ('cancel',)"/>
+                    <field name="state" widget="statusbar" 
+                           statusbar_visible="draft,quotation,sale,done"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name" readonly="1"/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group>
+                            <field name="partner_id" required="1"/>
+                            <field name="date"/>
+                        </group>
+                        <group>
+                            <field name="user_id"/>
+                            <field name="sale_order_id" readonly="1"/>
+                            <field name="exchange_rate"/>
+                        </group>
+                    </group>
+                    
+                    <notebook>
+                        <page string="Order Lines" name="order_lines">
+                            <field name="order_line_ids"/>
+                            
+                            <group class="oe_subtotal_footer oe_right" name="sale_total">
+                                <field name="amount_subtotal" widget="monetary"/>
+                                <field name="amount_discount" widget="monetary" 
+                                       decoration-danger="amount_discount &gt; 0"/>
+                                <field name="amount_tax" widget="monetary"/>
+                                <div class="oe_subtotal_footer_separator oe_inline o_td_label">
+                                    <label for="amount_total"/>
+                                </div>
+                                <field name="amount_total" nolabel="1" 
+                                       class="oe_subtotal_footer_separator" 
+                                       widget="monetary" 
+                                       options="{'currency_field': 'currency_id'}"/>
+                                
+                                <!-- IQD Total -->
+                                <div class="oe_subtotal_footer_separator oe_inline o_td_label" 
+                                     style="background: linear-gradient(135deg, #714B67 0%, #8B5A8E 100%); color: white; padding: 10px; border-radius: 5px; margin-top: 10px;">
+                                    <label for="amount_total_iqd" string="المجموع بالدينار العراقي"/>
+                                </div>
+                                <field name="amount_total_iqd" nolabel="1"
+                                       widget="monetary"
+                                       options="{'currency_field': 'currency_iqd_id'}"
+                                       style="background: linear-gradient(135deg, #714B67 0%, #8B5A8E 100%); color: white; padding: 10px; border-radius: 5px; font-size: 1.2em; font-weight: bold; margin-top: 10px;"/>
+                                
+                                <field name="currency_id" column_invisible="1"/>
+                                <field name="currency_iqd_id" column_invisible="1"/>
+                            </group>
+                        </page>
+                        
+                        <page string="Other Information" name="other_info">
+                            <group>
+                                <field name="note" placeholder="Add notes here..."/>
+                            </group>
+                        </page>
+                    </notebook>
+                </sheet>
+                <div class="oe_chatter">
+                    <field name="message_follower_ids"/>
+                    <field name="activity_ids"/>
+                    <field name="message_ids"/>
+                </div>
+            </form>
+        </field>
+    </record>
+
+    <!-- List View -->
+    <record id="view_pos_perfume_order_tree" model="ir.ui.view">
+        <field name="name">pos.perfume.order.list</field>
+        <field name="model">pos.perfume.order</field>
+        <field name="arch" type="xml">
+            <list string="POS Orders" 
+                  decoration-info="state == 'draft'"
+                  decoration-success="state == 'sale'"
+                  decoration-muted="state == 'cancel'">
+                <field name="name" decoration-bf="1"/>
+                <field name="date"/>
+                <field name="partner_id"/>
+                <field name="user_id" optional="show"/>
+                <field name="amount_total" sum="Total" widget="monetary"/>
+                <field name="amount_total_iqd" sum="Total IQD" widget="monetary" optional="show"/>
+                <field name="state" 
+                       decoration-info="state == 'draft'"
+                       decoration-success="state == 'sale'"
+                       decoration-warning="state == 'quotation'"
+                       decoration-muted="state == 'cancel'"
+                       widget="badge"/>
+                <field name="currency_id" column_invisible="1"/>
+                <field name="currency_iqd_id" column_invisible="1"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Kanban View -->
+    <record id="view_pos_perfume_order_kanban" model="ir.ui.view">
+        <field name="name">pos.perfume.order.kanban</field>
+        <field name="model">pos.perfume.order</field>
+        <field name="arch" type="xml">
+            <kanban class="o_kanban_mobile">
+                <field name="name"/>
+                <field name="partner_id"/>
+                <field name="amount_total"/>
+                <field name="state"/>
+                <field name="date"/>
+                <templates>
+                    <t t-name="kanban-box">
+                        <div class="oe_kanban_global_click">
+                            <div class="row mb4">
+                                <div class="col-6">
+                                    <strong><span><field name="name"/></span></strong>
+                                </div>
+                                <div class="col-6 text-end">
+                                    <strong><field name="amount_total" widget="monetary"/></strong>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-12">
+                                    <span><field name="partner_id"/></span>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-8">
+                                    <span class="text-muted"><field name="date" widget="date"/></span>
+                                </div>
+                                <div class="col-4 text-end">
+                                    <field name="state" widget="badge" 
+                                           decoration-info="state == 'draft'"
+                                           decoration-success="state == 'sale'"
+                                           decoration-warning="state == 'quotation'"/>
+                                </div>
+                            </div>
+                        </div>
+                    </t>
+                </templates>
+            </kanban>
+        </field>
+    </record>
+
+    <!-- Action -->
+    <record id="action_pos_perfume_order" model="ir.actions.act_window">
+        <field name="name">POS Perfume Orders</field>
+        <field name="res_model">pos.perfume.order</field>
+        <field name="view_mode">list,kanban,form</field>
+        <field name="context">{}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Create your first POS order
+            </p>
+            <p>
+                Create orders for perfume products with multi-warehouse support
+                and automatic currency conversion.
+            </p>
+        </field>
+    </record>
+
+    <!-- ============================================================ -->
+    <!--                    WHATSAPP WIZARD VIEW                      -->
+    <!-- ============================================================ -->
+
+    <record id="view_pos_whatsapp_send_form" model="ir.ui.view">
+        <field name="name">pos.whatsapp.send.form</field>
+        <field name="model">pos.whatsapp.send</field>
+        <field name="arch" type="xml">
+            <form string="Send via WhatsApp">
+                <group>
+                    <field name="order_id" readonly="1"/>
+                    <field name="phone" placeholder="+964xxxxxxxxxx"/>
+                    <field name="message" widget="text" nolabel="1" 
+                           placeholder="Message will be generated automatically..."/>
+                </group>
+                <footer>
+                    <button name="action_send" string="Send via WhatsApp" 
+                            type="object" class="btn-primary" icon="fa-whatsapp"/>
+                    <button string="Cancel" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <!-- ============================================================ -->
+    <!--                           MENUS                              -->
+    <!-- ============================================================ -->
+
+    <menuitem id="menu_pos_perfume_root"
+              name="POS Perfume"
+              sequence="15"/>
+
+    <menuitem id="menu_pos_perfume_orders"
+              name="Backend Orders"
+              parent="menu_pos_perfume_root"
+              action="action_pos_perfume_order"
+              sequence="20"/>
+
+    <menuitem id="menu_pos_perfume_products"
+              name="Products"
+              parent="menu_pos_perfume_root"
+              action="product.product_normal_action_sell"
+              sequence="20"/>
+
+    <menuitem id="menu_pos_perfume_config"
+              name="Configuration"
+              parent="menu_pos_perfume_root"
+              sequence="100"/>
+
+    <menuitem id="menu_pos_perfume_warehouses"
+              name="Warehouses"
+              parent="menu_pos_perfume_config"
+              action="stock.action_warehouse_form"
+              sequence="10"/>
+
+</odoo>

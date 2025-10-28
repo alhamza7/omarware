@@ -136,9 +136,12 @@ DEFAULT_VALUES = {
         'supplier_rank': 0,
     },
     'product': {
-        'type': 'product',
+        'type': 'consu',  # Consumable = Storable products (displayed as "Goods" in UI)
+        'tracking': 'none',  # Enable inventory tracking
+        'is_storable': True,  # Enable "Track Inventory" checkbox in UI
         'sale_ok': True,
         'purchase_ok': True,
+        'available_in_pos': True,  # Make product available in Point of Sale
     },
     'sale_order': {
         'state': 'draft',

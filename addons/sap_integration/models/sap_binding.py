@@ -51,8 +51,9 @@ class SapResPartner(models.Model):
     sync_error = fields.Text('Synchronization Error', readonly=True)
     sync_retry_count = fields.Integer('Retry Count', default=0)
     
+    # Constraints
     _sql_constraints = [
-        ('sap_partner_uniq', 'unique(backend_id, external_id)',
+        ('sap_partner_uniq', 'UNIQUE(backend_id, external_id)',
          'A partner with the same SAP CardCode already exists for this backend.'),
     ]
     
@@ -168,7 +169,7 @@ class SapProductProduct(models.Model):
     sync_retry_count = fields.Integer('Retry Count', default=0)
     
     _sql_constraints = [
-        ('sap_product_uniq', 'unique(backend_id, external_id)',
+        ('sap_product_uniq', 'UNIQUE(backend_id, external_id)',
          'A product with the same SAP ItemCode already exists for this backend.'),
     ]
     
@@ -283,7 +284,7 @@ class SapSaleOrder(models.Model):
     sync_retry_count = fields.Integer('Retry Count', default=0)
     
     _sql_constraints = [
-        ('sap_order_uniq', 'unique(backend_id, external_id)',
+        ('sap_order_uniq', 'UNIQUE(backend_id, external_id)',
          'A sale order with the same SAP DocEntry already exists for this backend.'),
     ]
 
@@ -327,7 +328,7 @@ class SapAccountMove(models.Model):
     sync_retry_count = fields.Integer('Retry Count', default=0)
     
     _sql_constraints = [
-        ('sap_invoice_uniq', 'unique(backend_id, external_id)',
+        ('sap_invoice_uniq', 'UNIQUE(backend_id, external_id)',
          'An invoice with the same SAP DocEntry already exists for this backend.'),
     ]
 

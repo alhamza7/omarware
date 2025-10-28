@@ -15,6 +15,8 @@ access_sap_invoice_sync_manager,sap.invoice.sync manager,model_sap_invoice_sync,
 access_sap_invoice_sync_user,sap.invoice.sync user,model_sap_invoice_sync,sap_integration.group_sap_user,1,1,0,0
 access_sap_uom_sync_manager,sap.uom.sync manager,model_sap_uom_sync,sap_integration.group_sap_manager,1,1,1,1
 access_sap_uom_sync_user,sap.uom.sync user,model_sap_uom_sync,sap_integration.group_sap_user,1,1,0,0
+access_sap_uom_group_manager,sap.uom.group manager,model_sap_uom_group,sap_integration.group_sap_manager,1,1,1,1
+access_sap_uom_group_user,sap.uom.group user,model_sap_uom_group,sap_integration.group_sap_user,1,0,0,0
 access_sap_pricelist_sync_manager,sap.pricelist.sync manager,model_sap_pricelist_sync,sap_integration.group_sap_manager,1,1,1,1
 access_sap_pricelist_sync_user,sap.pricelist.sync user,model_sap_pricelist_sync,sap_integration.group_sap_user,1,1,0,0
 access_sap_res_partner_manager,sap.res.partner manager,model_sap_res_partner,sap_integration.group_sap_manager,1,1,1,1
@@ -76,3 +78,11 @@ access_sap_customer_direct_import_manager,sap.customer.direct.import manager,mod
 access_sap_customer_direct_import_user,sap.customer.direct.import user,model_sap_customer_direct_import,sap_integration.group_sap_user,1,1,1,0
 access_sap_product_direct_import_manager,sap.product.direct.import manager,model_sap_product_direct_import,sap_integration.group_sap_manager,1,1,1,1
 access_sap_product_direct_import_user,sap.product.direct.import user,model_sap_product_direct_import,sap_integration.group_sap_user,1,1,1,0
+access_sap_product_extended_manager,sap.product.extended manager,model_sap_product_extended,sap_integration.group_sap_manager,1,1,1,1
+access_sap_product_extended_user,sap.product.extended user,model_sap_product_extended,sap_integration.group_sap_user,1,0,0,0
+access_sap_product_pricelist_sync_manager,sap.product.pricelist.sync manager,model_sap_product_pricelist_sync,sap_integration.group_sap_manager,1,1,1,1
+access_sap_product_pricelist_sync_user,sap.product.pricelist.sync user,model_sap_product_pricelist_sync,sap_integration.group_sap_user,1,0,0,0
+access_sap_product_warehouse_info_manager,sap.product.warehouse.info manager,model_sap_product_warehouse_info,sap_integration.group_sap_manager,1,1,1,1
+access_sap_product_warehouse_info_user,sap.product.warehouse.info user,model_sap_product_warehouse_info,sap_integration.group_sap_user,1,0,0,0
+access_sap_product_complete_migration_manager,sap.product.complete.migration manager,model_sap_product_complete_migration,sap_integration.group_sap_manager,1,1,1,1
+access_sap_product_complete_migration_user,sap.product.complete.migration user,model_sap_product_complete_migration,sap_integration.group_sap_user,1,1,1,1

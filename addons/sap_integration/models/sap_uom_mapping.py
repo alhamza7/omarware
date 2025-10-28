@@ -119,11 +119,9 @@ class SapUomMapping(models.Model):
     
     # Constraints
     _sql_constraints = [
-        ('unique_sap_odoo_mapping', 
-         'unique(sap_uom_code, odoo_uom_id)',
+        ('unique_sap_odoo_mapping', 'UNIQUE(sap_uom_code, odoo_uom_id)',
          'A mapping with the same SAP UoM code and Odoo UoM already exists.'),
-        ('positive_conversion_factor',
-         'CHECK (conversion_factor > 0)',
+        ('positive_conversion_factor', 'CHECK (conversion_factor > 0)',
          'Conversion factor must be positive.'),
     ]
     

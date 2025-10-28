@@ -39,8 +39,9 @@ class SapWarehouse(models.Model):
     sync_date = fields.Datetime('Last Sync Date', readonly=True)
     active = fields.Boolean(default=True)
     
+    # Constraints
     _sql_constraints = [
-        ('sap_warehouse_uniq', 'unique(backend_id, external_id)',
+        ('sap_warehouse_uniq', 'UNIQUE(backend_id, external_id)',
          'A warehouse with the same SAP code already exists for this backend.'),
     ]
     
@@ -225,7 +226,7 @@ class SapStockLocation(models.Model):
     active = fields.Boolean(default=True)
     
     _sql_constraints = [
-        ('sap_location_uniq', 'unique(warehouse_id, external_id)',
+        ('sap_location_uniq', 'UNIQUE(warehouse_id, external_id)',
          'A location with the same code already exists for this warehouse.'),
     ]
 

@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    
+    <!-- SAP UoM Group Tree View -->
+    <record id="view_sap_uom_group_tree" model="ir.ui.view">
+        <field name="name">sap.uom.group.tree</field>
+        <field name="model">sap.uom.group</field>
+        <field name="arch" type="xml">
+            <list string="SAP UoM Groups">
+                <field name="sap_group_code"/>
+                <field name="name"/>
+                <field name="base_uom_code"/>
+                <field name="base_uom_id"/>
+                <field name="uom_count"/>
+                <field name="backend_id"/>
+                <field name="sync_status"/>
+                <field name="last_sync"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- SAP UoM Group Form View -->
+    <record id="view_sap_uom_group_form" model="ir.ui.view">
+        <field name="name">sap.uom.group.form</field>
+        <field name="model">sap.uom.group</field>
+        <field name="arch" type="xml">
+            <form string="SAP UoM Group">
+                <header>
+                    <button name="action_sync_from_sap" string="Sync from SAP" type="object" class="btn-primary" icon="fa-refresh"/>
+                    <field name="sync_status" widget="statusbar"/>
+                </header>
+                <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button name="action_view_uoms" type="object" class="oe_stat_button" icon="fa-list">
+                            <field name="uom_count" widget="statinfo" string="UoMs"/>
+                        </button>
+                    </div>
+                    
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name" placeholder="Group Name"/>
+                        </h1>
+                    </div>
+                    
+                    <group>
+                        <group name="sap_info" string="SAP Information">
+                            <field name="sap_group_code"/>
+                            <field name="sap_abs_entry"/>
+                            <field name="backend_id"/>
+                        </group>
+                        <group name="base_uom" string="Base UoM">
+                            <field name="base_uom_code"/>
+                            <field name="base_uom_id"/>
+                        </group>
+                    </group>
+                    
+                    <group name="sync_info" string="Sync Information">
+                        <field name="last_sync"/>
+                        <field name="active"/>
+                    </group>
+                    
+                    <notebook>
+                        <page name="uoms" string="UoMs in Group">
+                            <field name="uom_ids">
+                                <list>
+                                    <field name="sap_uom_id"/>
+                                    <field name="sap_uom_name"/>
+                                    <field name="sap_uom_entry"/>
+                                    <field name="odoo_uom_id"/>
+                                    <field name="odoo_uom_factor" string="Conversion Factor"/>
+                                    <field name="sync_status"/>
+                                </list>
+                            </field>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- SAP UoM Group Search View -->
+    <record id="view_sap_uom_group_search" model="ir.ui.view">
+        <field name="name">sap.uom.group.search</field>
+        <field name="model">sap.uom.group</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="name"/>
+                <field name="sap_group_code"/>
+                <field name="backend_id"/>
+                <filter string="Active" name="active" domain="[('active', '=', True)]"/>
+                <filter string="Inactive" name="inactive" domain="[('active', '=', False)]"/>
+            </search>
+        </field>
+    </record>
+
+    <!-- SAP UoM Group Action -->
+    <record id="action_sap_uom_group" model="ir.actions.act_window">
+        <field name="name">SAP UoM Groups</field>
+        <field name="res_model">sap.uom.group</field>
+        <field name="view_mode">list,form</field>
+        <field name="context">{'search_default_active': 1}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Create your first SAP UoM Group
+            </p>
+            <p>
+                UoM Groups are imported from SAP and contain multiple related units of measure
+                with conversion factors between them.
+            </p>
+        </field>
+    </record>
+
+    <!-- Menu Item -->
+    <menuitem
+        id="menu_sap_uom_groups"
+        name="UoM Groups"
+        parent="menu_sap_uom_management"
+        action="action_sap_uom_group"
+        sequence="5"/>
+
+</odoo>
+

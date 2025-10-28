@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Quick Product Update Wizard Form -->
+    <record id="view_sap_quick_product_update_form" model="ir.ui.view">
+        <field name="name">sap.quick.product.update.form</field>
+        <field name="model">sap.quick.product.update</field>
+        <field name="arch" type="xml">
+            <form string="Quick Product Update from SAP">
+                <sheet>
+                    <group>
+                        <group>
+                            <div class="alert alert-info" role="alert" invisible="state == 'done'">
+                                <p><strong>تحديث سريع للمنتجات من بيانات SAP</strong></p>
+                                <p>سيتم تحديث:</p>
+                                <ul>
+                                    <li>Foreign Name من SAP Extended</li>
+                                    <li>الأسعار من SAP Price List 1</li>
+                                </ul>
+                                <p>هذه العملية سريعة وتستخدم SQL مباشر</p>
+                            </div>
+                            
+                            <field name="result_message" invisible="state != 'done'" readonly="1" colspan="2"/>
+                            <field name="state" invisible="1"/>
+                        </group>
+                    </group>
+                </sheet>
+                <footer>
+                    <button string="تحديث المنتجات الآن" 
+                            name="action_update_products" 
+                            type="object" 
+                            class="btn-primary"
+                            invisible="state == 'done'"/>
+                    <button string="إغلاق" special="cancel" class="btn-secondary"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <!-- Action -->
+    <record id="action_sap_quick_product_update" model="ir.actions.act_window">
+        <field name="name">Quick Product Update</field>
+        <field name="res_model">sap.quick.product.update</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+
+    <!-- Menu Item -->
+    <menuitem id="menu_sap_quick_product_update"
+              name="Quick Product Update"
+              parent="sap_integration.menu_sap_data_import"
+              action="action_sap_quick_product_update"
+              sequence="5"/>
+</odoo>
+

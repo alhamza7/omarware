@@ -48,7 +48,10 @@ class SapProductDirectImport(models.TransientModel):
                 'default_code': item_code,
                 'sale_ok': True,
                 'purchase_ok': True,
-                'type': 'product',
+                'available_in_pos': True,  # Make product available in Point of Sale
+                'type': 'consu',  # Consumable = Storable products (displayed as "Goods" in UI)
+                'tracking': 'none',  # Enable inventory tracking
+                'is_storable': True,  # Enable "Track Inventory" checkbox in UI
             }
             
             # Add optional fields safely
@@ -86,11 +89,9 @@ class SapProductDirectImport(models.TransientModel):
             if product_data.get('SalesUnit'):
                 uom = self._get_or_create_uom(product_data['SalesUnit'])
                 product_vals['uom_id'] = uom.id
-                product_vals['uom_po_id'] = uom.id
             
-            if product_data.get('PurchaseUnit'):
-                uom = self._get_or_create_uom(product_data['PurchaseUnit'])
-                product_vals['uom_po_id'] = uom.id
+            # Note: uom_po_id removed in Odoo 19.0
+            # Purchase UoM can be set through product.supplierinfo if needed
             
             # Category
             if product_data.get('ItemsGroupCode'):
@@ -182,4 +183,6 @@ class SapProductDirectImport(models.TransientModel):
         except:
             # Return default category if error
             return self.env.ref('product.product_category_all')
+
+
 

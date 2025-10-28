@@ -201,7 +201,7 @@ class SapProductImportMapper(Component):
         item_type = record.get('ItemType', 'itItems')
         if item_type == 'itService':
             return {'type': 'service'}
-        # In Odoo 19, use 'consu' for storable products
+        # In Odoo 19, use 'consu' for storable products (displayed as "Goods" in UI)
         return {'type': 'consu'}
     
     @mapping
@@ -211,6 +211,21 @@ class SapProductImportMapper(Component):
     @mapping
     def purchase_ok(self, record):
         return {'purchase_ok': True}
+    
+    @mapping
+    def available_in_pos(self, record):
+        """Make products available in Point of Sale by default"""
+        return {'available_in_pos': True}
+    
+    @mapping
+    def tracking(self, record):
+        """Enable inventory tracking for all products"""
+        return {'tracking': 'none'}
+    
+    @mapping
+    def is_storable(self, record):
+        """Enable Track Inventory checkbox in UI"""
+        return {'is_storable': True}
     
     @mapping
     def active(self, record):
@@ -252,15 +267,17 @@ class SapProductImportMapper(Component):
                 return {'uom_id': uom_id}
         return {}
     
-    @mapping
-    def uom_po_id(self, record):
-        """Map SAP purchase UoM to Odoo purchase UoM"""
-        sap_uom = record.get('PurchaseUnit')
-        if sap_uom:
-            uom_id = self._get_or_create_uom_mapping(sap_uom)
-            if uom_id:
-                return {'uom_po_id': uom_id}
-        return {}
+    # Note: uom_po_id removed in Odoo 19.0
+    # Purchase UoM is now handled through product.supplierinfo
+    # @mapping
+    # def uom_po_id(self, record):
+    #     """Map SAP purchase UoM to Odoo purchase UoM"""
+    #     sap_uom = record.get('PurchaseUnit')
+    #     if sap_uom:
+    #         uom_id = self._get_or_create_uom_mapping(sap_uom)
+    #         if uom_id:
+    #             return {'uom_po_id': uom_id}
+    #     return {}
     
     def _get_or_create_uom_mapping(self, sap_uom_code):
         """Get or create UoM mapping from SAP code"""

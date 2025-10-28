@@ -148,7 +148,7 @@ class SapWebhookEndpoint(models.Model):
     
     # Constraints
     _sql_constraints = [
-        ('unique_url', 'unique(url)', 
+        ('unique_url', 'UNIQUE(url)', 
          'Webhook URL must be unique.'),
     ]
     

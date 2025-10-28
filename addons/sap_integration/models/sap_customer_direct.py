@@ -128,3 +128,5 @@ class SapCustomerDirectImport(models.TransientModel):
             _logger.error(f"Error in direct customer import for {card_code}: {str(e)}", exc_info=True)
             raise
 
+
+

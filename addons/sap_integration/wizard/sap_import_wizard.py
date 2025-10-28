@@ -31,9 +31,21 @@ class SapImportWizard(models.TransientModel):
     import_invoices = fields.Boolean(string='Import Invoices', default=False)
     
     # Filters
-    customer_limit = fields.Integer(string='Customer Limit', default=0, help='Maximum number of customers to import (0 = unlimited)')
-    product_limit = fields.Integer(string='Product Limit', default=0, help='Maximum number of products to import (0 = unlimited)')
-    batch_size = fields.Integer(string='Batch Size', default=100, help='Number of records to fetch per batch')
+    customer_limit = fields.Integer(
+        string='Customer Limit', 
+        default=0, 
+        help='Maximum number of customers to import (0 = unlimited). Example: 10 for testing'
+    )
+    product_limit = fields.Integer(
+        string='Product Limit', 
+        default=10,  # Default to 10 for testing
+        help='Maximum number of products to import (0 = unlimited). Example: 10 for testing'
+    )
+    batch_size = fields.Integer(
+        string='Batch Size', 
+        default=100, 
+        help='Number of records to fetch per batch'
+    )
     
     # Results and Logs
     result_message = fields.Text(string='Import Results', readonly=True)
@@ -414,9 +426,23 @@ class SapImportWizard(models.TransientModel):
             
             while has_more:
                 try:
+                    # Check if we've reached the limit BEFORE fetching
+                    if self.product_limit > 0 and total_count >= self.product_limit:
+                        has_more = False
+                        self._add_log(f"Reached product limit of {self.product_limit}")
+                        break
+                    
+                    # Adjust batch size if approaching limit
+                    current_batch_size = self.batch_size
+                    if self.product_limit > 0:
+                        remaining = self.product_limit - total_count
+                        if remaining <= 0:
+                            break
+                        current_batch_size = min(self.batch_size, remaining)
+                    
                     # Build query parameters
                     params = {
-                        '$top': self.batch_size,
+                        '$top': current_batch_size,
                         '$skip': skip,
                         '$orderby': 'ItemCode'
                     }
@@ -434,6 +460,12 @@ class SapImportWizard(models.TransientModel):
                     
                     # Process each product in batch
                     for idx, product_data in enumerate(batch, 1):
+                        # Check limit during processing
+                        if self.product_limit > 0 and total_count >= self.product_limit:
+                            self._add_log(f"Reached product limit of {self.product_limit} during batch")
+                            has_more = False
+                            break
+                        
                         item_code = None
                         try:
                             item_code = product_data.get('ItemCode')
@@ -457,13 +489,8 @@ class SapImportWizard(models.TransientModel):
                     # Update skip for next batch
                     skip += batch_size
                     
-                    # Check if we've reached the limit
-                    if self.product_limit > 0 and skip >= self.product_limit:
-                        has_more = False
-                        self._add_log(f"Reached product limit of {self.product_limit}")
-                    
                     # Check if there are more records
-                    if batch_size < self.batch_size:
+                    if batch_size < current_batch_size:
                         has_more = False
                     
                     # Commit batch to avoid memory issues

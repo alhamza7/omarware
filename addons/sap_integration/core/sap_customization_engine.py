@@ -114,7 +114,7 @@ class SapCustomizationRule(models.Model):
     
     # Constraints
     _sql_constraints = [
-        ('unique_name', 'unique(name)', 
+        ('unique_name', 'UNIQUE(name)', 
          'Rule name must be unique.'),
     ]
     

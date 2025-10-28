@@ -18,11 +18,10 @@ from ..core.sap_error_analyzer import SapErrorAnalyzer
 from ..core.sap_performance_monitor import SapPerformanceMonitor
 
 
-class SapDashboardEnhanced(models.Model):
+class SapDashboardEnhanced(models.AbstractModel):
     """Enhanced SAP Integration Dashboard"""
     _name = 'sap.dashboard.enhanced'
     _description = 'Enhanced SAP Dashboard'
-    _auto = False
     
     
     @api.model

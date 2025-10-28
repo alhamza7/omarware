@@ -11,6 +11,7 @@ from . import sap_quotation
 from . import sap_sale
 from . import sap_invoice
 from . import sap_uom
+from . import sap_uom_group
 from . import sap_pricelist
 from . import sap_service_layer
 from . import sap_dashboard
@@ -26,5 +27,10 @@ from . import sap_warehouse
 from ..core.sap_logger import SapSyncLog
 from ..core.sap_alert_system import SapAlertRule, SapAlert
 from ..core.sap_performance_monitor import SapPerformanceMetrics
+
+# New comprehensive product migration models
+from . import sap_product_extended
+from . import sap_product_pricelist_sync
+from . import sap_product_warehouse_info
 
 

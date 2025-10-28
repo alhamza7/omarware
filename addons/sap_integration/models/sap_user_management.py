@@ -99,7 +99,7 @@ class SapUserRole(models.Model):
     
     # Constraints
     _sql_constraints = [
-        ('unique_code', 'unique(code)', 'Role code must be unique.'),
+        ('unique_code', 'UNIQUE(code)', 'Role code must be unique.'),
     ]
     
     @api.model
@@ -178,7 +178,7 @@ class SapUserPermission(models.Model):
     
     # Constraints
     _sql_constraints = [
-        ('unique_user_role', 'unique(user_id, role_id)', 
+        ('unique_user_role', 'UNIQUE(user_id, role_id)', 
          'A user can only have one permission per role.'),
     ]
     

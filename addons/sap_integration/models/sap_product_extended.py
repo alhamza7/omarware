@@ -53,6 +53,37 @@ class SapProductExtended(models.Model):
         help="Additional foreign language name"
     )
     
+    # ========== Unit of Measure Codes from SAP ==========
+    sales_unit = fields.Char(
+        string='Sales Unit (SAP)',
+        help="SAP Sales Unit of Measure Code"
+    )
+    purchase_unit = fields.Char(
+        string='Purchase Unit (SAP)',
+        help="SAP Purchase Unit of Measure Code"
+    )
+    inventory_uom = fields.Char(
+        string='Inventory UoM (SAP)',
+        help="SAP Inventory Unit of Measure Code"
+    )
+    
+    # ========== Mapped Odoo UoMs ==========
+    sales_uom_id = fields.Many2one(
+        'uom.uom',
+        string='Sales UoM (Odoo)',
+        help="Mapped Odoo UoM for sales"
+    )
+    purchase_uom_id = fields.Many2one(
+        'uom.uom',
+        string='Purchase UoM (Odoo)',
+        help="Mapped Odoo UoM for purchases"
+    )
+    inventory_uom_id = fields.Many2one(
+        'uom.uom',
+        string='Inventory UoM (Odoo)',
+        help="Mapped Odoo UoM for inventory"
+    )
+    
     # ========== Manufacturer Information ==========
     manufacturer_id = fields.Many2one(
         'res.partner',
@@ -113,19 +144,16 @@ class SapProductExtended(models.Model):
     dimension_unit_id = fields.Many2one(
         'uom.uom',
         string='Dimension Unit',
-        domain="[('category_id.name', '=', 'Length')]",
         help="Unit of measure for dimensions"
     )
     weight_unit_id = fields.Many2one(
         'uom.uom',
         string='Weight Unit',
-        domain="[('category_id.name', '=', 'Weight')]",
         help="Unit of measure for weight"
     )
     volume_unit_id = fields.Many2one(
         'uom.uom',
         string='Volume Unit',
-        domain="[('category_id.name', '=', 'Volume')]",
         help="Unit of measure for volume"
     )
     
@@ -290,8 +318,7 @@ class SapProductExtended(models.Model):
     
     # ========== Constraints ==========
     _sql_constraints = [
-        ('unique_product_backend',
-         'unique(product_id, backend_id)',
+        ('unique_product_backend', 'UNIQUE(product_id, backend_id)',
          'Extended information already exists for this product and backend!'),
     ]
     
@@ -363,6 +390,40 @@ class SapProductExtended(models.Model):
         # Foreign names
         if 'ForeignName' in sap_data:
             vals['foreign_name'] = sap_data['ForeignName']
+        
+        # ========== UoM Codes from SAP ==========
+        if 'SalesUnit' in sap_data:
+            sales_unit_code = sap_data['SalesUnit']
+            vals['sales_unit'] = sales_unit_code
+            # Try to map to Odoo UoM
+            uom_sync = self.env['sap.uom.sync'].search([
+                ('backend_id', '=', vals.get('backend_id')),
+                ('sap_uom_id', '=', sales_unit_code)
+            ], limit=1)
+            if uom_sync and uom_sync.odoo_uom_id:
+                vals['sales_uom_id'] = uom_sync.odoo_uom_id.id
+        
+        if 'PurchaseUnit' in sap_data:
+            purchase_unit_code = sap_data['PurchaseUnit']
+            vals['purchase_unit'] = purchase_unit_code
+            # Try to map to Odoo UoM
+            uom_sync = self.env['sap.uom.sync'].search([
+                ('backend_id', '=', vals.get('backend_id')),
+                ('sap_uom_id', '=', purchase_unit_code)
+            ], limit=1)
+            if uom_sync and uom_sync.odoo_uom_id:
+                vals['purchase_uom_id'] = uom_sync.odoo_uom_id.id
+        
+        if 'InventoryUoM' in sap_data:
+            inventory_uom_code = sap_data['InventoryUoM']
+            vals['inventory_uom'] = inventory_uom_code
+            # Try to map to Odoo UoM
+            uom_sync = self.env['sap.uom.sync'].search([
+                ('backend_id', '=', vals.get('backend_id')),
+                ('sap_uom_id', '=', inventory_uom_code)
+            ], limit=1)
+            if uom_sync and uom_sync.odoo_uom_id:
+                vals['inventory_uom_id'] = uom_sync.odoo_uom_id.id
         
         # Manufacturer
         if 'ManufacturerCatalogNo' in sap_data:

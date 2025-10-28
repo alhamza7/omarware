@@ -93,11 +93,9 @@ class SapProductUom(models.Model):
     
     # Constraints
     _sql_constraints = [
-        ('unique_product_uom_usage',
-         'unique(product_id, sap_uom_code, usage_type)',
+        ('unique_product_uom_usage', 'UNIQUE(product_id, sap_uom_code, usage_type)',
          'A UoM mapping with the same SAP code and usage type already exists for this product.'),
-        ('positive_conversion_factor',
-         'CHECK (conversion_factor > 0)',
+        ('positive_conversion_factor', 'CHECK (conversion_factor > 0)',
          'Conversion factor must be positive.'),
     ]
     

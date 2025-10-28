@@ -35,9 +35,10 @@
         'stock',
         'product',
         'uom',
-        'connector',  # OCA Connector framework - Now activated!
-        'component',  # OCA Component framework - Now activated!
-        'component_event',  # OCA Component Event framework - Now activated!
+        # OCA Connector modules are not compatible with Odoo 19.0, removed for now
+        # 'connector',  # OCA Connector framework
+        # 'component',  # OCA Component framework
+        # 'component_event',  # OCA Component Event framework
         # 'queue_job',  # TODO: Install queue_job module from OCA if needed for background jobs
     ],
     'external_dependencies': {
@@ -54,6 +55,8 @@
         'wizard/sap_conflict_resolution_wizard_views.xml',  # Conflict Resolution Wizard
         'wizard/sap_uom_conversion_test_wizard_views.xml',  # UoM Conversion Test Wizard
         'wizard/sap_user_permission_wizard_views.xml',  # User Permission Wizard
+        'wizard/sap_product_complete_migration_views.xml',  # Complete Product Migration Wizard
+        'wizard/quick_product_update_views.xml',  # Quick Product Update Wizard
         
         # Views (Actions & Forms)
         'views/sap_dashboard_views.xml',  # Dashboard views and actions
@@ -67,12 +70,18 @@
         'views/sap_synced_data_dashboard.xml',  # Synced Data Dashboard
         'views/sap_sync_management_views.xml',  # Sync Management Views
         'views/sap_uom_management_views.xml',  # UoM Management Views
+        'views/sap_uom_group_views.xml',  # UoM Group Views
         'views/sap_dashboard_control_views.xml',  # Dashboard Control Views
         'views/sap_customer_views.xml',
         'views/sap_product_views.xml',
         'views/sap_quotation_views.xml',
         'views/sap_sale_views.xml',
         'views/sap_warehouse_views.xml',
+        
+        # New: Complete Product Migration Views
+        'views/sap_product_extended_views.xml',  # Extended product information
+        'views/sap_product_pricelist_sync_views.xml',  # Pricelist synchronization
+        'views/sap_product_warehouse_info_views.xml',  # Warehouse information
         
         # Menu Structure - Load LAST to organize all menu items
         'views/sap_menu_structure.xml',  # ⭐ New: Organized menu structure

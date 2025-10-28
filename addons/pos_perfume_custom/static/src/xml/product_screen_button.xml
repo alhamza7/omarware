@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates id="template" xml:space="preserve">
+
+    <!-- Add button to product screen for accessing perfume interface -->
+    <t t-name="point_of_sale.ProductScreen" t-inherit="point_of_sale.ProductScreen" t-inherit-mode="extension">
+        <xpath expr="//div[hasclass('leftpane-header')]" position="inside">
+            <button class="btn btn-lg perfume-interface-btn" 
+                    t-on-click="openPerfumeInterface"
+                    style="background: linear-gradient(135deg, #714B67 0%, #8B5A8E 100%); 
+                           color: white; 
+                           padding: 10px 20px; 
+                           margin: 10px; 
+                           border-radius: 8px; 
+                           font-weight: 600;
+                           box-shadow: 0 2px 8px rgba(0,0,0,0.15);">
+                🌸 Perfume Interface
+            </button>
+        </xpath>
+    </t>
+
+</templates>
+
+
+
+

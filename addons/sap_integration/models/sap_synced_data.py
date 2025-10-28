@@ -199,12 +199,10 @@ class SapSyncedData(models.Model):
     
     # Constraints
     _sql_constraints = [
-        ('unique_backend_external_id', 
-         'unique(backend_id, external_id)',
+        ('unique_backend_external_id', 'UNIQUE(backend_id, external_id)',
          'A record with the same external ID already exists for this backend.'),
-        ('unique_backend_odoo_record',
-         'unique(backend_id, model_name, odoo_id)',
-         'A record with the same Odoo record already exists for this backend.')
+        ('unique_backend_odoo_record', 'UNIQUE(backend_id, model_name, odoo_id)',
+         'A record with the same Odoo record already exists for this backend.'),
     ]
     
     @api.model
