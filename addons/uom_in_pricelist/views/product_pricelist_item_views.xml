@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- Product Pricelist Item Form View - Add UoM Field -->
+    <record id="product_pricelist_item_form_view_uom" model="ir.ui.view">
+        <field name="name">product.pricelist.item.form.uom</field>
+        <field name="model">product.pricelist.item</field>
+        <field name="inherit_id" ref="product.product_pricelist_item_form_view"/>
+        <field name="arch" type="xml">
+            <!-- Add UoM field after product_id in form view -->
+            <xpath expr="//field[@name='product_id']" position="after">
+                <field name="product_uom_id"
+                       invisible="applied_on != '0_product_variant'"
+                       options="{'no_create': True, 'no_create_edit': True}"
+                       force_save="1"/>
+            </xpath>
+        </field>
+    </record>
+    
+    <!-- Product Pricelist Item Tree View - Add UoM Column -->
+    <record id="product_pricelist_item_tree_view_uom" model="ir.ui.view">
+        <field name="name">product.pricelist.item.tree.uom</field>
+        <field name="model">product.pricelist.item</field>
+        <field name="inherit_id" ref="product.product_pricelist_item_tree_view_from_product"/>
+        <field name="arch" type="xml">
+            <!-- Add UoM column after product_tmpl_id in tree view -->
+            <xpath expr="//field[@name='product_tmpl_id']" position="after">
+                <field name="product_uom_id" optional="show"/>
+            </xpath>
+        </field>
+    </record>
+</odoo>

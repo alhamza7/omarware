@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Simple Test Report -->
+    <record id="action_report_simple_test" model="ir.actions.report">
+        <field name="name">Simple Test</field>
+        <field name="model">product.product</field>
+        <field name="report_type">qweb-pdf</field>
+        <field name="report_name">product_label_designer.report_product_label_simple_test</field>
+        <field name="report_file">product_label_designer.report_product_label_simple_test</field>
+        <field name="binding_model_id" ref="product.model_product_product"/>
+        <field name="binding_type">report</field>
+    </record>
+
+</odoo>
+

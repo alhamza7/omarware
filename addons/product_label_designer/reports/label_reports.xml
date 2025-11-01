@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Paper Format 80x60mm -->
+    <record id="paperformat_label_80x60" model="report.paperformat">
+        <field name="name">Label 80x60mm</field>
+        <field name="default" eval="False"/>
+        <field name="format">custom</field>
+        <field name="page_height">60</field>
+        <field name="page_width">80</field>
+        <field name="orientation">Landscape</field>
+        <field name="margin_top">0</field>
+        <field name="margin_bottom">0</field>
+        <field name="margin_left">0</field>
+        <field name="margin_right">0</field>
+        <field name="header_line" eval="False"/>
+        <field name="header_spacing">0</field>
+        <field name="dpi">300</field>
+    </record>
+
+    <!-- Paper Format A4 -->
+    <record id="paperformat_a4" model="report.paperformat">
+        <field name="name">A4 Labels Sheet</field>
+        <field name="default" eval="False"/>
+        <field name="format">A4</field>
+        <field name="orientation">Portrait</field>
+        <field name="margin_top">5</field>
+        <field name="margin_bottom">5</field>
+        <field name="margin_left">5</field>
+        <field name="margin_right">5</field>
+        <field name="header_line" eval="False"/>
+        <field name="header_spacing">0</field>
+        <field name="dpi">300</field>
+    </record>
+
+    <!-- Report Action - Single Labels -->
+    <record id="action_report_product_label" model="ir.actions.report">
+        <field name="name">Product Labels</field>
+        <field name="model">product.product</field>
+        <field name="report_type">qweb-pdf</field>
+        <field name="report_name">product_label_designer.report_product_label</field>
+        <field name="report_file">product_label_designer.report_product_label</field>
+        <field name="binding_model_id" ref="product.model_product_product"/>
+        <field name="binding_type">report</field>
+        <field name="paperformat_id" ref="paperformat_label_80x60"/>
+    </record>
+
+    <!-- Report Action - A4 Sheet -->
+    <record id="action_report_product_label_a4" model="ir.actions.report">
+        <field name="name">Product Labels (A4 Sheet)</field>
+        <field name="model">product.product</field>
+        <field name="report_type">qweb-pdf</field>
+        <field name="report_name">product_label_designer.report_product_label_a4</field>
+        <field name="report_file">product_label_designer.report_product_label_a4</field>
+        <field name="paperformat_id" ref="paperformat_a4"/>
+    </record>
+
+</odoo>
+

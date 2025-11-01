@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- SIMPLE TEST TEMPLATE -->
+    <template id="report_product_label_simple_test">
+        <t t-call="web.html_container">
+            <t t-foreach="docs" t-as="o">
+                <div style="page-break-after: always;">
+                    <h1>Product: <t t-esc="o.name"/></h1>
+                    <p>Code: <t t-esc="o.default_code"/></p>
+                    <p>Price: <t t-esc="o.list_price"/></p>
+                </div>
+            </t>
+        </t>
+    </template>
+
+</odoo>
+

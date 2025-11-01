@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- Wizard Form View -->
+    <record id="view_auto_calculate_uom_prices_form" model="ir.ui.view">
+        <field name="name">auto.calculate.uom.prices.form</field>
+        <field name="model">auto.calculate.uom.prices</field>
+        <field name="arch" type="xml">
+            <form string="حساب أسعار UoM تلقائياً">
+                <sheet>
+                    <div class="oe_title">
+                        <h1>حساب أسعار وحدات القياس تلقائياً</h1>
+                        <p>
+                            هذا المعالج سيقوم بحساب الأسعار لجميع وحدات القياس البديلة<br/>
+                            بناءً على نسب التحويل (factor) الخاصة بكل وحدة.
+                        </p>
+                    </div>
+                    
+                    <group>
+                        <group string="الإعدادات الأساسية">
+                            <field name="pricelist_id" 
+                                   options="{'no_create': True}"/>
+                            <field name="product_ids" 
+                                   widget="many2many_tags"
+                                   placeholder="اختر منتجات محددة أو اترك فارغاً للجميع"/>
+                        </group>
+                        
+                        <group string="خيارات الحساب">
+                            <field name="base_uom_price_source"/>
+                            <field name="overwrite_existing"/>
+                            <field name="min_price"/>
+                        </group>
+                    </group>
+                    
+                    <notebook>
+                        <page string="تعليمات" name="instructions">
+                            <group>
+                                <div class="alert alert-info" role="alert">
+                                    <h4>كيفية الاستخدام:</h4>
+                                    <ol>
+                                        <li>اختر قائمة الأسعار المراد تحديثها</li>
+                                        <li>اختياري: حدد منتجات معينة (أو اترك فارغاً للجميع)</li>
+                                        <li>اختر مصدر السعر الأساسي:
+                                            <ul>
+                                                <li><strong>Product List Price</strong>: استخدام سعر القائمة للمنتج</li>
+                                                <li><strong>Existing Rule</strong>: استخدام قاعدة موجودة للوحدة الأساسية</li>
+                                            </ul>
+                                        </li>
+                                        <li>فعّل "Overwrite Existing" إذا أردت استبدال الأسعار الموجودة</li>
+                                        <li>اضغط "حساب الأسعار"</li>
+                                    </ol>
+                                    
+                                    <h4>مثال:</h4>
+                                    <p>
+                                        إذا كان سعر الكيلو = 100<br/>
+                                        وكان factor ل 0.5 كيلو = 0.5<br/>
+                                        السعر المحسوب = 100 × 0.5 = 50
+                                    </p>
+                                </div>
+                            </group>
+                        </page>
+                        
+                        <page string="ملاحظات" name="notes">
+                            <group>
+                                <div class="alert alert-warning" role="alert">
+                                    <h4>⚠️ تحذيرات:</h4>
+                                    <ul>
+                                        <li>تأكد من أن نسب التحويل (factors) صحيحة قبل التشغيل</li>
+                                        <li>قم بعمل backup للبيانات قبل التحديث الجماعي</li>
+                                        <li>اختبر على منتج واحد أولاً قبل التطبيق على الجميع</li>
+                                        <li>راجع النتائج بعد الحساب للتأكد من الدقة</li>
+                                    </ul>
+                                </div>
+                            </group>
+                        </page>
+                    </notebook>
+                </sheet>
+                
+                <footer>
+                    <button string="حساب الأسعار" 
+                            name="action_calculate_prices" 
+                            type="object" 
+                            class="btn-primary"/>
+                    <button string="إلغاء" 
+                            class="btn-secondary" 
+                            special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+    
+    <!-- Wizard Action -->
+    <record id="action_auto_calculate_uom_prices" model="ir.actions.act_window">
+        <field name="name">حساب أسعار UoM تلقائياً</field>
+        <field name="res_model">auto.calculate.uom.prices</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+    
+    <!-- Menu Item - Odoo 19 Compatible -->
+    <menuitem id="menu_auto_calculate_uom_prices"
+              name="حساب أسعار UoM تلقائياً"
+              parent="sale.product_menu_catalog"
+              action="action_auto_calculate_uom_prices"
+              sequence="100"
+              groups="sales_team.group_sale_manager"/>
+</odoo>
+

@@ -1,0 +1,248 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Template List View -->
+    <record id="view_label_template_list" model="ir.ui.view">
+        <field name="name">product.label.template.list</field>
+        <field name="model">product.label.template</field>
+        <field name="arch" type="xml">
+            <list string="Label Templates">
+                <field name="sequence" widget="handle"/>
+                <field name="name"/>
+                <field name="label_width"/>
+                <field name="label_height"/>
+                <field name="active"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Template Form View -->
+    <record id="view_label_template_form" model="ir.ui.view">
+        <field name="name">product.label.template.form</field>
+        <field name="model">product.label.template</field>
+        <field name="arch" type="xml">
+            <form string="Label Template">
+                <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button name="toggle_active" type="object" class="oe_stat_button" icon="fa-archive">
+                            <field name="active" widget="boolean_button" options='{"terminology": "archive"}'/>
+                        </button>
+                    </div>
+                    <group>
+                        <group>
+                            <field name="name"/>
+                            <field name="sequence"/>
+                        </group>
+                        <group>
+                            <field name="label_width"/>
+                            <field name="label_height"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Display Options" name="display">
+                            <group>
+                                <group string="Elements">
+                                    <field name="show_name"/>
+                                    <field name="show_foreign_name"/>
+                                    <field name="show_code"/>
+                                    <field name="show_price"/>
+                                    <field name="show_barcode"/>
+                                    <field name="show_qr"/>
+                                    <field name="show_logo"/>
+                                </group>
+                                <group string="Colors">
+                                    <field name="text_color" widget="color"/>
+                                    <field name="price_color" widget="color"/>
+                                    <field name="bg_color" widget="color"/>
+                                </group>
+                            </group>
+                            <group>
+                                <group string="Font Sizes">
+                                    <field name="font_size_name"/>
+                                    <field name="font_size_foreign_name"/>
+                                    <field name="font_size_code"/>
+                                    <field name="font_size_price"/>
+                                    <field name="font_size_barcode"/>
+                                </group>
+                                <group string="Text Alignment">
+                                    <field name="name_align"/>
+                                    <field name="foreign_name_align"/>
+                                    <field name="code_align"/>
+                                    <field name="price_align"/>
+                                </group>
+                            </group>
+                            <group>
+                                <group string="Font Weight (Bold)">
+                                    <field name="name_bold"/>
+                                    <field name="foreign_name_bold"/>
+                                    <field name="code_bold"/>
+                                    <field name="price_bold"/>
+                                </group>
+                                <group string="Font Style (Italic)">
+                                    <field name="name_italic"/>
+                                    <field name="foreign_name_italic"/>
+                                    <field name="code_italic"/>
+                                    <field name="price_italic"/>
+                                </group>
+                            </group>
+                            <group>
+                                <group string="Price Display">
+                                    <field name="show_currency_symbol"/>
+                                </group>
+                            </group>
+                        </page>
+                        <page string="A4 Layout" name="a4_layout">
+                            <group>
+                                <group string="Labels per Page">
+                                    <field name="labels_per_row"/>
+                                    <field name="labels_per_column"/>
+                                    <field name="label_margin"/>
+                                </group>
+                                <group string="Info">
+                                    <div class="alert alert-info" style="margin-top: 10px;">
+                                        <p><strong>💡 Grid Configuration:</strong></p>
+                                        <p>Configure how many labels to print per A4 page.</p>
+                                        <p><strong>Recommended:</strong> 2×4 (8 labels) for 80×60mm</p>
+                                        <p><strong>Other options:</strong> 3×6, 4×8, etc.</p>
+                                    </div>
+                                </group>
+                            </group>
+                        </page>
+                        <page string="Visual Designer" name="designer">
+                            <group>
+                                <group string="Name Position">
+                                    <field name="name_x"/>
+                                    <field name="name_y"/>
+                                </group>
+                                <group string="Foreign Name Position">
+                                    <field name="foreign_name_x"/>
+                                    <field name="foreign_name_y"/>
+                                </group>
+                            </group>
+                            <group>
+                                <group string="Code Position">
+                                    <field name="code_x"/>
+                                    <field name="code_y"/>
+                                </group>
+                                <group string="Price Position">
+                                    <field name="price_x"/>
+                                    <field name="price_y"/>
+                                </group>
+                            </group>
+                            <group>
+                                <group string="Barcode Position">
+                                    <field name="barcode_x"/>
+                                    <field name="barcode_y"/>
+                                </group>
+                                <group string="QR Code Position &amp; Size">
+                                    <field name="qr_x"/>
+                                    <field name="qr_y"/>
+                                    <field name="qr_size"/>
+                                </group>
+                            </group>
+                            <group>
+                                <group string="Logo Position &amp; Size">
+                                    <field name="logo_x"/>
+                                    <field name="logo_y"/>
+                                    <field name="logo_width"/>
+                                    <field name="logo_height"/>
+                                </group>
+                            </group>
+                            <group>
+                                <button name="action_open_designer" string="Open Visual Designer" type="object" class="btn-primary" icon="fa-paint-brush"/>
+                            </group>
+                        </page>
+                        <page string="Images" name="images">
+                            <group>
+                                <group string="Background">
+                                    <field name="background_image" widget="image"/>
+                                </group>
+                                <group string="Logo">
+                                    <field name="logo_image" widget="image"/>
+                                </group>
+                            </group>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Action -->
+    <record id="action_label_template" model="ir.actions.act_window">
+        <field name="name">Label Templates</field>
+        <field name="res_model">product.label.template</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <!-- Product Selection View for Printing -->
+    <record id="view_product_label_printing_list" model="ir.ui.view">
+        <field name="name">product.product.label.printing.list</field>
+        <field name="model">product.product</field>
+        <field name="arch" type="xml">
+            <list string="Select Products to Print">
+                <field name="default_code"/>
+                <field name="name"/>
+                <field name="foreign_name"/>
+                <field name="list_price"/>
+                <field name="barcode"/>
+                <field name="categ_id"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Action to open product selection -->
+    <record id="action_print_product_labels" model="ir.actions.act_window">
+        <field name="name">Print Product Labels</field>
+        <field name="res_model">product.product</field>
+        <field name="view_mode">list</field>
+        <field name="view_id" ref="view_product_label_printing_list"/>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Select products to print labels
+            </p>
+            <p>
+                Select one or more products and use the "Print Labels" action to print.
+            </p>
+        </field>
+    </record>
+
+    <!-- Menu -->
+    <menuitem id="menu_label_root" name="Product Labels" parent="stock.menu_stock_root" sequence="20"/>
+    
+    <menuitem id="menu_label_templates" name="Label Templates" parent="menu_label_root" 
+              action="action_label_template" sequence="10"/>
+    
+    <menuitem id="menu_print_labels" name="Select Products" parent="menu_label_root"
+              action="action_print_product_labels" sequence="20"/>
+
+    <!-- Add foreign name field to product form -->
+    <record id="view_product_form_foreign_name" model="ir.ui.view">
+        <field name="name">product.product.form.foreign.name</field>
+        <field name="model">product.product</field>
+        <field name="inherit_id" ref="product.product_normal_form_view"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='name']" position="after">
+                <field name="foreign_name" placeholder="e.g., Perfume Bottle 30ml"/>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- Add button to product form -->
+    <record id="view_product_form_button" model="ir.ui.view">
+        <field name="name">product.product.form.label.button</field>
+        <field name="model">product.product</field>
+        <field name="inherit_id" ref="product.product_normal_form_view"/>
+        <field name="arch" type="xml">
+            <xpath expr="//div[@name='button_box']" position="inside">
+                <button name="action_print_label" type="object" class="oe_stat_button" icon="fa-print">
+                    <div class="o_stat_info">
+                        <span class="o_stat_text">Print Label</span>
+                    </div>
+                </button>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>
+
