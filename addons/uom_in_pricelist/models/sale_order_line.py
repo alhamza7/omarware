@@ -17,51 +17,61 @@ class SaleOrderLine(models.Model):
     """Override Sale Order Line to properly handle UoM-specific pricing"""
     _inherit = 'sale.order.line'
 
-    def _compute_price_unit(self):
+    def _get_display_price(self):
         """
-        Enhanced price computation to handle UoM-specific pricelist items
-        This is the KEY to making UoM pricing work without touching Core!
+        Override to handle UoM-specific pricing from pricelist items
+        This is the REAL method that Odoo calls to get prices!
         """
-        _logger.info("🚀 Custom _compute_price_unit called!")
+        _logger.info("🚀 Custom _get_display_price called!")
         
-        for line in self:
-            if not line.product_id or not line.order_id.pricelist_id:
-                super(SaleOrderLine, line)._compute_price_unit()
-                continue
+        if not self.product_id or not self.order_id.pricelist_id:
+            return super()._get_display_price()
+        
+        # Get pricelist and UoM
+        pricelist = self.order_id.pricelist_id
+        uom = self.product_uom_id or self.product_id.uom_id
+        
+        _logger.info(f"🔍 Getting price for {self.product_id.display_name} with UoM {uom.name} (ID: {uom.id})")
+        
+        # Search for exact UoM match in pricelist items
+        pricelist_items = self.env['product.pricelist.item'].search([
+            ('pricelist_id', '=', pricelist.id),
+            ('product_tmpl_id', '=', self.product_id.product_tmpl_id.id),
+            ('applied_on', '=', '1_product'),
+            ('product_packaging_id', '=', uom.id),
+            ('compute_price', '=', 'fixed'),
+        ], limit=1, order='id DESC')
+        
+        if pricelist_items:
+            # Found exact UoM match - use it!
+            price = pricelist_items[0].fixed_price
+            _logger.info(f"✅ Found exact UoM match! Price: ${price}")
+            return price
+        
+        # No exact match - try base price (without packaging)
+        _logger.info(f"⚠️ No exact UoM match, looking for base price")
+        base_items = self.env['product.pricelist.item'].search([
+            ('pricelist_id', '=', pricelist.id),
+            ('product_tmpl_id', '=', self.product_id.product_tmpl_id.id),
+            ('applied_on', '=', '1_product'),
+            ('product_packaging_id', '=', False),
+            ('compute_price', '=', 'fixed'),
+        ], limit=1, order='id DESC')
+        
+        if base_items:
+            price = base_items[0].fixed_price
+            _logger.info(f"✅ Found base price: ${price}")
             
-            # Get pricelist and UoM
-            pricelist = line.order_id.pricelist_id
-            uom = line.product_uom_id or line.product_id.uom_id
+            # Convert price to selected UoM
+            if uom != self.product_id.uom_id:
+                factor = uom.factor_inv / self.product_id.uom_id.factor_inv
+                price = price * factor
+                _logger.info(f"🔄 Converted price by factor {factor}: ${price}")
             
-            _logger.info(f"🔍 Computing price for {line.product_id.display_name} with UoM {uom.name} (ID: {uom.id})")
-            
-            # Search for exact UoM match in pricelist items
-            # استخدام product_tmpl_id وليس product_id (متوافق مع SAP - الأسعار مرتبطة بالمنتج الأساسي ووحدة القياس)
-            pricelist_items = self.env['product.pricelist.item'].search([
-                ('pricelist_id', '=', pricelist.id),
-                ('product_tmpl_id', '=', line.product_id.product_tmpl_id.id),
-                ('product_uom_id', '=', uom.id),  # Exact UoM match!
-                ('compute_price', '=', 'fixed'),
-            ], limit=1, order='id DESC')
-            
-            if pricelist_items:
-                # Found exact UoM match - use it!
-                price = pricelist_items[0].fixed_price
-                _logger.info(f"✅ Found exact UoM match! Price: ${price}")
-                
-                # Handle currency conversion if needed
-                if pricelist.currency_id != line.currency_id:
-                    price = pricelist.currency_id._convert(
-                        price,
-                        line.currency_id,
-                        line.company_id,
-                        line.order_id.date_order or fields.Date.today()
-                    )
-                
-                line.price_unit = price
-                _logger.info(f"💰 Set price_unit to ${line.price_unit}")
-            else:
-                # No exact match - use standard Odoo logic
-                _logger.info(f"⚠️ No exact UoM match, using standard pricing")
-                super(SaleOrderLine, line)._compute_price_unit()
+            return price
+        
+        # No match at all - use standard Odoo logic
+        _logger.info(f"⚠️ No price found, using standard pricing")
+        return super()._get_display_price()
+
 

@@ -36,10 +36,9 @@ class ProductPricelist(models.Model):
             **kwargs
     ):
         """ Low-level method - Mono pricelist, multi products
-        Returns: dict{product_id: (price, suitable_rule) for the given
-        price list}
+        Returns: dict{product_id: (price, suitable_rule) for the given price list}
         
-        Enhanced for Odoo 19 with UoM-specific pricing support.
+        Enhanced for Odoo 19 with UoM-specific pricing support using product_packaging_id.
         """
         self.ensure_one()
         if not products:
@@ -47,7 +46,7 @@ class ProductPricelist(models.Model):
         if not date:
             date = fields.Datetime.now()
         
-        # جلب جميع القواعد المتاحة
+        # Get all applicable rules
         rules = self._get_applicable_rules(products, date, **kwargs)
         results = {}
         
@@ -55,7 +54,7 @@ class ProductPricelist(models.Model):
             suitable_rule = self.env['product.pricelist.item']
             target_uom = uom or product.uom_id
             
-            # تحويل الكمية للوحدة الأساسية للمنتج
+            # Convert quantity to product's base UoM
             qty_in_product_uom = quantity
             if uom and uom != product.uom_id:
                 try:
@@ -65,43 +64,57 @@ class ProductPricelist(models.Model):
                 except:
                     qty_in_product_uom = quantity
             
-            # البحث عن أفضل قاعدة تنطبق
+            _logger.info(f"🔍 Looking for rules for {product.display_name} with UoM {uom.name if uom else 'None'} (ID: {uom.id if uom else None})")
+            
+            # Search for the best matching rule
+            # Priority: exact UoM match > base rule (no UoM)
+            exact_match_rule = None
+            base_rule = None
+            
             for rule in rules:
-                # فحص القاعدة الأساسية
+                # Check basic rule applicability
                 if not rule._is_applicable_for(product, qty_in_product_uom):
                     continue
                 
-                # فحص UoM إذا كان محدد في القاعدة
-                if rule.product_uom_id:
-                    # إذا القاعدة لها UoM محدد
-                    if uom and rule.product_uom_id.id == uom.id:
-                        # مطابقة تامة! استخدم هذه القاعدة
-                        _logger.info(f"✅ Found matching rule for {product.display_name} with UoM {uom.name}")
-                        suitable_rule = rule
-                        break
+                # Check if rule has product_packaging_id (which points to uom.uom)
+                if rule.product_packaging_id:
+                    # Rule has a specific UoM
+                    if uom and rule.product_packaging_id.id == uom.id:
+                        # Exact match!
+                        _logger.info(f"✅ Found EXACT UoM match: Rule {rule.id}, Price {rule.fixed_price}")
+                        exact_match_rule = rule
+                        break  # Perfect match, stop searching
                     else:
-                        # UoM لا يطابق - تخطي هذه القاعدة
-                        _logger.debug(f"⏭️ Skipping rule - UoM mismatch")
+                        # UoM doesn't match - skip this rule
                         continue
                 else:
-                    # القاعدة ليس لها UoM محدد - يمكن استخدامها
-                    suitable_rule = rule
-                    break
+                    # Rule has no specific UoM - use as fallback
+                    if not base_rule:
+                        base_rule = rule
+                        _logger.info(f"📋 Found base rule: Rule {rule.id}, Price {rule.fixed_price}")
             
-            # حساب السعر النهائي
+            # Use exact match if found, otherwise use base rule
+            suitable_rule = exact_match_rule or base_rule
+            
+            if suitable_rule:
+                _logger.info(f"✅ Selected rule {suitable_rule.id} for {product.display_name}")
+            else:
+                _logger.warning(f"⚠️ No suitable rule found for {product.display_name}")
+            
+            # Calculate final price
             if compute_price and suitable_rule:
                 try:
-                    # _compute_price في pricelist_item سيتعامل مع UoM
+                    # _compute_price in pricelist_item will handle UoM
                     price = suitable_rule._compute_price(
                         product, quantity, target_uom, date=date, currency=currency
                     )
-                    _logger.info(f"💰 Final price for {product.display_name}: {price}")
+                    _logger.info(f"💰 Final price for {product.display_name}: ${price}")
                 except Exception as e:
                     _logger.error(f"❌ Error computing price: {e}")
                     price = 0.0
             else:
                 price = 0.0
             
-            results[product.id] = (price, suitable_rule.id)
+            results[product.id] = (price, suitable_rule.id if suitable_rule else False)
         
         return results

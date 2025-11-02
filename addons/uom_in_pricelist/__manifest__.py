@@ -32,7 +32,10 @@
     'company': 'Cybrosys Techno Solutions',
     'maintainer': 'Cybrosys Techno Solutions',
     'website': "https://www.cybrosys.com",
-    'depends': ['sale_management', 'product', 'point_of_sale'],
+    'sequence': 1,  # Load after other sale modules
+    'depends': ['sale_management', 'product', 'point_of_sale', 'sale_loyalty', 'event_sale'],
+    'post_init_hook': 'post_load_hook',
+    'uninstall_hook': 'uninstall_hook',
     'data': [
         'security/ir.model.access.csv',
         'views/product_pricelist_item_views.xml',
