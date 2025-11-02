@@ -1,4 +1,5 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_sap_clear_pricelist_wizard,access_sap_clear_pricelist_wizard,model_sap_clear_pricelist_wizard,base.group_user,1,1,1,1
 access_sap_backend_manager,sap.backend manager,model_sap_backend,sap_integration.group_sap_manager,1,1,1,1
 access_sap_backend_user,sap.backend user,model_sap_backend,sap_integration.group_sap_user,1,0,0,0
 access_sap_connector_manager,sap.connector manager,model_sap_connector,sap_integration.group_sap_manager,1,1,1,1

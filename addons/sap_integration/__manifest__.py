@@ -57,6 +57,7 @@
         'wizard/sap_user_permission_wizard_views.xml',  # User Permission Wizard
         'wizard/sap_product_complete_migration_views.xml',  # Complete Product Migration Wizard
         'wizard/quick_product_update_views.xml',  # Quick Product Update Wizard
+        'wizard/clear_pricelist_wizard_views.xml',  # Clear Pricelist Wizard
         
         # Views (Actions & Forms)
         'views/sap_dashboard_views.xml',  # Dashboard views and actions

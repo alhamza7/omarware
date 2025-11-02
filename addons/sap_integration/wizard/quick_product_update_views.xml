@@ -47,7 +47,7 @@
     <!-- Menu Item -->
     <menuitem id="menu_sap_quick_product_update"
               name="Quick Product Update"
-              parent="sap_integration.menu_sap_data_import"
+              parent="sap_integration.menu_sap_tools"
               action="action_sap_quick_product_update"
               sequence="5"/>
 </odoo>

@@ -116,8 +116,14 @@ class SapServiceLayerConnection:
             'Accept': 'application/json'
         }
     
-    def get(self, endpoint, params=None):
-        """Generic GET method for any SAP Service Layer endpoint"""
+    def get(self, endpoint, params=None, raise_on_error=False):
+        """Generic GET method for any SAP Service Layer endpoint
+        
+        Args:
+            endpoint: SAP endpoint to call
+            params: Query parameters
+            raise_on_error: If True, raise exception on error instead of returning empty data
+        """
         try:
             self._ensure_session()  # Ensure session is valid
             
@@ -133,14 +139,23 @@ class SapServiceLayerConnection:
             response = self.session.get(url, headers=headers, params=params or {}, timeout=self.timeout)
             
             if response.status_code == 200:
-                return response.json()
+                result = response.json()
+                _logger.info(f">>> SAP Response status: 200, Data keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
+                if isinstance(result, dict) and 'value' in result:
+                    _logger.info(f">>> Response has 'value' with {len(result['value'])} items")
+                return result
             else:
-                _logger.error(f"Error in GET request: {response.status_code} - {response.text}")
-                return {'value': []}
+                error_msg = f"SAP API Error {response.status_code}: {response.text}"
+                _logger.error(error_msg)
+                if raise_on_error:
+                    raise Exception(error_msg)
+                return {'value': [], 'error': response.text, 'status_code': response.status_code}
                 
         except Exception as e:
             _logger.error(f"Error in GET request: {str(e)}")
-            return {'value': []}
+            if raise_on_error:
+                raise
+            return {'value': [], 'error': str(e)}
     
     def post(self, endpoint, data):
         """Generic POST method for any SAP Service Layer endpoint"""

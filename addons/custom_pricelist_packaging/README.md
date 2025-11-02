@@ -51,3 +51,4 @@ This module extends Odoo's pricelist functionality to support packaging-based pr
 ## License
 LGPL-3
 
+
