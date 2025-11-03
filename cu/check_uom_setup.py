@@ -1,175 +1,151 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-فحص إعداد وحدات القياس والأسعار
+Check UoM setup for products with multiple prices
 """
 
-import xmlrpc.client
+import sys
+import os
+import io
 
-url = "http://localhost:8069"
-db = "lugal"
-username = "admin"
-password = "admin"
+# Fix encoding
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
-print("=" * 80)
-print("فحص وحدات القياس والأسعار")
-print("=" * 80)
+# Add Odoo to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-try:
-    common = xmlrpc.client.ServerProxy(f'{url}/xmlrpc/2/common', allow_none=True)
-    uid = common.authenticate(db, username, password, {})
+import odoo
+from odoo import api, SUPERUSER_ID
+from odoo.modules.registry import Registry
+
+# Initialize Odoo
+odoo.tools.config.parse_config(['-c', 'odoo.conf', '-d', 'lugal'])
+
+def check_uom_setup():
+    """Check UoM configuration for products"""
     
-    if not uid:
-        print("❌ فشل تسجيل الدخول")
-        exit(1)
+    registry = Registry('lugal')
     
-    models = xmlrpc.client.ServerProxy(f'{url}/xmlrpc/2/object', allow_none=True)
-    print(f"✅ متصل\n")
-    
-    # 1. فحص SAP UoM Groups
-    print("=" * 80)
-    print("1️⃣ مجموعات وحدات القياس من SAP")
-    print("=" * 80)
-    
-    uom_groups = models.execute_kw(db, uid, password,
-        'sap.uom.group', 'search_read', [[]],
-        {'fields': ['name', 'uom_ids'], 'limit': 5})
-    
-    print(f"عدد مجموعات UoM: {len(uom_groups)}\n")
-    
-    if uom_groups:
-        print("أمثلة على المجموعات:\n")
-        for group in uom_groups:
-            print(f"📏 {group['name']}")
-            uom_ids = group.get('uom_ids', [])
-            print(f"   عدد الوحدات: {len(uom_ids)}")
+    with registry.cursor() as cr:
+        env = api.Environment(cr, SUPERUSER_ID, {})
+        
+        print("=" * 80)
+        print("Checking UoM Setup for Products with Multiple Prices")
+        print("=" * 80)
+        
+        # Get a sample product with multiple UoM prices
+        pricelist_items = env['product.pricelist.item'].search([
+            ('product_packaging_id', '!=', False),
+            ('applied_on', '=', '1_product'),
+        ], limit=50)
+        
+        print(f"\nFound {len(pricelist_items)} pricelist items with UoM")
+        
+        # Group by product
+        products_data = {}
+        for item in pricelist_items:
+            tmpl = item.product_tmpl_id
+            if tmpl.id not in products_data:
+                products_data[tmpl.id] = {
+                    'template': tmpl,
+                    'base_uom': tmpl.uom_id,
+                    'price_uoms': []
+                }
+            products_data[tmpl.id]['price_uoms'].append({
+                'uom': item.product_packaging_id,
+                'price': item.fixed_price,
+            })
+        
+        print(f"\nSample Products (first 5):")
+        print("=" * 80)
+        
+        for idx, (tmpl_id, data) in enumerate(list(products_data.items())[:5], 1):
+            template = data['template']
+            base_uom = data['base_uom']
+            price_uoms = data['price_uoms']
             
-            if uom_ids:
-                try:
-                    uoms = models.execute_kw(db, uid, password,
-                        'uom.uom', 'read', [uom_ids],
-                        {'fields': ['name', 'factor', 'category_id']})
-                    
-                    for uom in uoms[:3]:
-                        cat = uom.get('category_id', ['N/A'])[1] if uom.get('category_id') else 'N/A'
-                        print(f"      • {uom['name']} (معامل: {uom.get('factor', 'N/A')}) - {cat}")
-                except:
-                    pass
-            print()
-    
-    # 2. فحص UoM Categories
-    print("=" * 80)
-    print("2️⃣ فئات وحدات القياس (UoM Categories)")
-    print("=" * 80)
-    
-    categories = models.execute_kw(db, uid, password,
-        'uom.category', 'search_read', [[]],
-        {'fields': ['name'], 'limit': 10})
-    
-    print(f"عدد الفئات: {len(categories)}\n")
-    for cat in categories:
-        print(f"   📁 {cat['name']}")
-    
-    # 3. فحص وحدات القياس المتاحة
-    print("\n" + "=" * 80)
-    print("3️⃣ وحدات القياس المتاحة في النظام")
-    print("=" * 80)
-    
-    all_uoms = models.execute_kw(db, uid, password,
-        'uom.uom', 'search_read', [[]],
-        {'fields': ['name', 'category_id'], 'limit': 20})
-    
-    print(f"عدد وحدات القياس: {len(all_uoms)}\n")
-    
-    by_category = {}
-    for uom in all_uoms:
-        cat_name = uom.get('category_id', ['Other'])[1] if uom.get('category_id') else 'Other'
-        if cat_name not in by_category:
-            by_category[cat_name] = []
-        by_category[cat_name].append(uom['name'])
-    
-    for cat, uoms in list(by_category.items())[:5]:
-        print(f"📁 {cat}:")
-        for uom in uoms[:5]:
-            print(f"   • {uom}")
-        print()
-    
-    # 4. فحص كيفية ربط الأسعار
-    print("=" * 80)
-    print("4️⃣ كيفية ربط الأسعار بوحدات القياس")
-    print("=" * 80)
-    
-    # جلب عينة من pricelist items
-    items = models.execute_kw(db, uid, password,
-        'product.pricelist.item', 'search_read',
-        [[['product_id', '!=', False]]],
-        {'fields': ['product_id', 'pricelist_id', 'fixed_price', 'min_quantity'], 'limit': 10})
-    
-    if items:
-        print("\nعينة من عناصر الأسعار:\n")
-        for item in items[:5]:
-            prod_name = item.get('product_id', ['N/A'])[1] if item.get('product_id') else 'N/A'
-            pricelist = item.get('pricelist_id', ['N/A'])[1] if item.get('pricelist_id') else 'N/A'
-            print(f"📦 {prod_name}")
-            print(f"   قائمة الأسعار: {pricelist}")
-            print(f"   السعر: ${item.get('fixed_price', 0):.2f}")
-            print(f"   الكمية الأدنى: {item.get('min_quantity', 1)}\n")
-    
-    # 5. التوصيات
-    print("=" * 80)
-    print("💡 التوضيح والحل")
-    print("=" * 80)
-    
-    print("""
-🔍 الوضع الحالي:
+            print(f"\n{idx}. Product: {template.name}")
+            print(f"   Default Code: {template.default_code}")
+            base_cat = getattr(base_uom, 'category_id', None)
+            base_cat_name = base_cat.name if base_cat else 'N/A'
+            print(f"   Base UoM: {base_uom.name} (Category: {base_cat_name})")
+            print(f"   \nPrice UoMs:")
+            
+            for i, uom_data in enumerate(price_uoms, 1):
+                uom = uom_data['uom']
+                price = uom_data['price']
+                uom_cat = getattr(uom, 'category_id', None)
+                uom_cat_name = uom_cat.name if uom_cat else 'N/A'
+                same_category = (base_cat and uom_cat and uom_cat == base_cat)
+                status = "SAME" if same_category else "DIFFERENT"
+                
+                print(f"     {i}. {uom.name:20} | ${price:>8.2f} | Category: {uom_cat_name:20} [{status}]")
+            
+            # Check if product has packagings (if model exists)
+            try:
+                packagings = env['product.packaging'].search([
+                    ('product_tmpl_id', '=', template.id)
+                ])
+                
+                print(f"   \nProduct Packagings: {len(packagings)}")
+                if packagings:
+                    for pkg in packagings:
+                        print(f"     - {pkg.name} (UoM: {pkg.product_uom_id.name}, Qty: {pkg.qty})")
+            except KeyError:
+                print(f"   \nProduct Packagings: N/A (model not available)")
+        
+        # Check UoM categories
+        print(f"\n{'='*80}")
+        print("UoM Categories Used in Prices")
+        print(f"{'='*80}")
+        
+        uom_categories = {}
+        for data in products_data.values():
+            for uom_data in data['price_uoms']:
+                uom = uom_data['uom']
+                cat = getattr(uom, 'category_id', None)
+                cat_name = cat.name if cat else 'N/A'
+                if cat_name not in uom_categories:
+                    uom_categories[cat_name] = []
+                if uom.name not in uom_categories[cat_name]:
+                    uom_categories[cat_name].append(uom.name)
+        
+        for cat_name, uoms in sorted(uom_categories.items()):
+            print(f"\n{cat_name}:")
+            for uom_name in sorted(uoms):
+                print(f"  - {uom_name}")
+        
+        # Summary
+        print(f"\n{'='*80}")
+        print("Analysis")
+        print(f"{'='*80}")
+        
+        products_with_diff_categories = 0
+        for data in products_data.values():
+            base_cat = getattr(data['base_uom'], 'category_id', None)
+            for uom_data in data['price_uoms']:
+                uom_cat = getattr(uom_data['uom'], 'category_id', None)
+                if base_cat and uom_cat and uom_cat != base_cat:
+                    products_with_diff_categories += 1
+                    break
+        
+        print(f"\nProducts with prices in different UoM categories: {products_with_diff_categories}")
+        print(f"Total products analyzed: {len(products_data)}")
+        
+        if products_with_diff_categories > 0:
+            print(f"\n⚠ WARNING: Some products have prices in UoM categories different from their base UoM!")
+            print(f"   This will prevent UoM selection in Sale Order Lines.")
+            print(f"   \nSolution options:")
+            print(f"   1. Change product base UoM to match price UoMs")
+            print(f"   2. Use Product Packaging instead of direct UoM selection")
+            print(f"   3. Allow UoM selection across categories (requires custom module)")
+        
+        print("\n" + "=" * 80)
 
-1. ✅ البيانات موجودة:
-   • 169 مجموعة وحدات قياس من SAP
-   • 9,335 سعر في كل Pricelist
-   
-2. ⚠️ المشكلة:
-   • الأسعار مرتبطة بـ "الكمية الأدنى" (min_quantity)
-   • وليست مرتبطة بـ "وحدات قياس مختلفة" (UoM)
-   
-3. 📊 مثال:
-   • السعر 42$ للكمية 1 (يمثل 1 كغم)
-   • السعر 22$ للكمية 0.5 (يمثل 0.5 كغم)
-   
-   لكن النظام يراها كـ "كميات" وليس "وحدات قياس"
-
-════════════════════════════════════════════════════════════════════════════════
-
-✅ الحلول الممكنة:
-
-🔧 الحل 1: استخدام Product Packaging (التعبئة والتغليف)
-────────────────────────────────────────────────────────────
-   • في صفحة المنتج → تبويب Inventory
-   • أضف Packaging (مثلاً: كغم، نصف كغم)
-   • ربط كل تعبئة بسعرها في Pricelist
-
-🔧 الحل 2: استخدام وحدات قياس مختلفة فعلية
-────────────────────────────────────────────────────────────
-   • إنشاء وحدات قياس جديدة (0.5 كغم، 1 كغم)
-   • تعديل Pricelist Items لتستخدم UoM بدل min_quantity
-   • يتطلب تعديل على البيانات
-
-🔧 الحل 3: استخدام Product Variants (متغيرات المنتج)
-────────────────────────────────────────────────────────────
-   • إنشاء متغيرات للمنتج (نصف كغم، كغم)
-   • كل متغير له سعره الخاص
-   • الأفضل للمنتجات التي لها أحجام ثابتة
-
-════════════════════════════════════════════════════════════════════════════════
-
-📌 الخلاصة:
-   البيانات موجودة لكن Odoo يفهمها كـ "كميات" وليس "وحدات قياس"
-   هذا طبيعي لأن SAP يرسل الأسعار مرتبطة بالكمية
-   
-   الحل الأفضل: استخدام Product Packaging
-""")
-
-except Exception as e:
-    print(f"\n❌ خطأ: {e}")
-    import traceback
-    traceback.print_exc()
-
+if __name__ == '__main__':
+    try:
+        check_uom_setup()
+    except Exception as e:
+        print(f"\nERROR: {str(e)}")
+        import traceback
+        traceback.print_exc()

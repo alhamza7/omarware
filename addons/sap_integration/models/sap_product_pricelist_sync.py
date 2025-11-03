@@ -503,17 +503,19 @@ class SapProductPricelistSync(models.Model):
                         
                         # Fetch prices AND UoM Group info from Items endpoint
                         try:
-                            # ItemPrices is not a separate endpoint
-                            # We need to get the full item to access prices AND UoM group info
+                            # SAP returns ItemPrices with UoMPrices ONLY when we don't use $select!
+                            # We must fetch the full item to get ItemPrices with nested UoMPrices
                             price_params = {
-                                '$filter': f"ItemCode eq '{item_code}'",
-                                '$select': 'ItemCode,ItemPrices,UoMGroupEntry,InventoryUoMEntry,SalesUoMEntry,PurchaseUoMEntry'
+                                '$filter': f"ItemCode eq '{item_code}'"
                             }
                             item_with_prices = connection.get('Items', price_params)
                             items_value = item_with_prices.get('value', [])
+                            
                             if items_value:
                                 full_item_data = items_value[0]
                                 item_prices = full_item_data.get('ItemPrices', [])
+                                
+                                _logger.info(f"Fetched {len(item_prices)} price lists for {item_code}")
                             else:
                                 full_item_data = {}
                                 item_prices = []
@@ -523,7 +525,7 @@ class SapProductPricelistSync(models.Model):
                             item_prices = []
                         
                         if not item_prices:
-                            _logger.debug(f"No prices found for item {item_code}")
+                            _logger.info(f"No prices found for item {item_code}, skipping")
                             continue
                         
                         # Find product in Odoo
