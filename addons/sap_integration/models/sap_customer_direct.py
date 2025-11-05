@@ -68,20 +68,22 @@ class SapCustomerDirectImport(models.TransientModel):
             if 'BPAddresses' in customer_data and isinstance(customer_data['BPAddresses'], list):
                 if customer_data['BPAddresses']:
                     addr = customer_data['BPAddresses'][0]
-                    if addr.get('Street'):
-                        partner_vals['street'] = addr['Street']
-                    if addr.get('Block'):
-                        partner_vals['street2'] = addr['Block']
-                    if addr.get('City'):
-                        partner_vals['city'] = addr['City']
-                    if addr.get('ZipCode'):
-                        partner_vals['zip'] = addr['ZipCode']
-                    if addr.get('Country'):
-                        country = self.env['res.country'].search([
-                            ('code', '=', addr['Country'])
-                        ], limit=1)
-                        if country:
-                            partner_vals['country_id'] = country.id
+                    # تأكد أن addr هو dictionary وليس list
+                    if isinstance(addr, dict):
+                        if addr.get('Street'):
+                            partner_vals['street'] = addr['Street']
+                        if addr.get('Block'):
+                            partner_vals['street2'] = addr['Block']
+                        if addr.get('City'):
+                            partner_vals['city'] = addr['City']
+                        if addr.get('ZipCode'):
+                            partner_vals['zip'] = addr['ZipCode']
+                        if addr.get('Country'):
+                            country = self.env['res.country'].search([
+                                ('code', '=', addr['Country'])
+                            ], limit=1)
+                            if country:
+                                partner_vals['country_id'] = country.id
             
             # Handle direct address fields (fallback)
             elif customer_data.get('Address'):

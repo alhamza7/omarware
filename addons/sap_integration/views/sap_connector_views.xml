@@ -8,7 +8,11 @@
             <list>
                 <field name="name"/>
                 <field name="backend_id"/>
+                <field name="sync_customers" optional="show"/>
+                <field name="sync_suppliers" optional="show"/>
+                <field name="sync_products" optional="show"/>
                 <field name="active"/>
+                <field name="sync_status"/>
             </list>
         </field>
     </record>
@@ -39,6 +43,7 @@
                         </group>
                         <group string="Sync Options">
                             <field name="sync_customers"/>
+                            <field name="sync_suppliers"/>
                             <field name="sync_products"/>
                             <field name="sync_quotations"/>
                             <field name="sync_sales"/>
@@ -48,10 +53,11 @@
                     <group string="Statistics">
                         <group>
                             <field name="customers_synced"/>
+                            <field name="suppliers_synced"/>
                             <field name="products_synced"/>
-                            <field name="quotations_synced"/>
                         </group>
                         <group>
+                            <field name="quotations_synced"/>
                             <field name="sales_synced"/>
                             <field name="invoices_synced"/>
                         </group>

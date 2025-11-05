@@ -5,7 +5,7 @@
         <field name="name">sap.res.partner.list</field>
         <field name="model">sap.res.partner</field>
         <field name="arch" type="xml">
-            <list string="SAP Customer Bindings" create="false">
+            <list string="SAP Customer Bindings" create="false" limit="80" default_order="sync_date desc">
                 <field name="odoo_id"/>
                 <field name="external_id"/>
                 <field name="backend_id"/>
@@ -43,6 +43,7 @@
         <field name="name">SAP Customer Bindings</field>
         <field name="res_model">sap.res.partner</field>
         <field name="view_mode">list,form</field>
+        <field name="limit">80</field>  <!-- عرض 80 سجل (الافتراضي في Odoo) -->
     </record>
 
     <!-- SAP Product Binding Views -->

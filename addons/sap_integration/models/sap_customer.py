@@ -46,8 +46,14 @@ class SapCustomerSync(models.Model):
     @api.model
     def create(self, vals):
         """Override create to set default values"""
-        if not vals.get('backend_id') and vals.get('connector_id'):
-            vals['backend_id'] = self.env['sap.connector'].browse(vals['connector_id']).backend_id.id
+        # Odoo 19: vals can be a list of dicts
+        if isinstance(vals, list):
+            for val in vals:
+                if not val.get('backend_id') and val.get('connector_id'):
+                    val['backend_id'] = self.env['sap.connector'].browse(val['connector_id']).backend_id.id
+        else:
+            if not vals.get('backend_id') and vals.get('connector_id'):
+                vals['backend_id'] = self.env['sap.connector'].browse(vals['connector_id']).backend_id.id
         return super(SapCustomerSync, self).create(vals)
     
     def sync_from_sap(self):
