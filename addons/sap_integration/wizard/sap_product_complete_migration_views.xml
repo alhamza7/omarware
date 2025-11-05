@@ -43,6 +43,8 @@
                                 <field name="product_limit" placeholder="0 = Unlimited"/>
                                 <field name="update_existing"/>
                                 <field name="skip_errors"/>
+                                <field name="force_enable_sales_pos" 
+                                       help="Enable all imported products in Sales and Point of Sale, regardless of SAP settings"/>
                             </group>
                         </group>
                         

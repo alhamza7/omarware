@@ -77,6 +77,11 @@ class SapProductCompleteMigration(models.TransientModel):
         default=True,
         help="Continue migration even if some records fail"
     )
+    force_enable_sales_pos = fields.Boolean(
+        string='Force Enable Sales & POS',
+        default=True,
+        help="Enable all imported products in Sales and Point of Sale, regardless of SAP settings"
+    )
     
     # ========== State ==========
     state = fields.Selection([
@@ -321,6 +326,57 @@ class SapProductCompleteMigration(models.TransientModel):
                     if not self.skip_errors:
                         raise
             
+            # Final step: Activate products in Sales and POS if requested
+            if self.force_enable_sales_pos:
+                log.append("\n\n" + "=" * 80)
+                log.append("FINAL STEP: Activating Products in Sales & POS")
+                log.append("=" * 80)
+                self._update_progress(98, 'Final: Activating Products', 0, 0, "\n".join(log))
+                
+                try:
+                    # Find all products imported in this migration (products with default_code)
+                    products = self.env['product.product'].search([
+                        ('active', '=', True),
+                        ('default_code', '!=', False)
+                    ])
+                    
+                    if products:
+                        log.append(f"🔄 Activating {len(products)} products in Sales and POS...")
+                        self.write({'migration_log': "\n".join(log)})
+                        self.env.cr.commit()
+                        
+                        # Update in batches to avoid timeout
+                        batch_size = 500
+                        activated_count = 0
+                        
+                        for i in range(0, len(products), batch_size):
+                            batch = products[i:i + batch_size]
+                            batch.write({
+                                'sale_ok': True,
+                                'available_in_pos': True,
+                            })
+                            activated_count += len(batch)
+                            self.env.cr.commit()
+                            
+                            if (i // batch_size + 1) % 5 == 0:
+                                log.append(f"  ✓ Activated {activated_count}/{len(products)} products...")
+                                self.write({'migration_log': "\n".join(log)})
+                                self.env.cr.commit()
+                        
+                        log.append(f"✅ Activated {activated_count} products in Sales and POS")
+                        self.write({'migration_log': "\n".join(log)})
+                        self.env.cr.commit()
+                    else:
+                        log.append("⚠️  No products found to activate")
+                        
+                except Exception as e:
+                    error_msg = f"❌ Error activating products: {str(e)}"
+                    log.append(error_msg)
+                    self._log_error(error_msg, e)
+                    _logger.error(f"Error activating products: {str(e)}", exc_info=True)
+                    if not self.skip_errors:
+                        raise
+            
             # Final Report
             log.append("\n\n" + "=" * 80)
             log.append("MIGRATION COMPLETE! ✅")
@@ -330,6 +386,8 @@ class SapProductCompleteMigration(models.TransientModel):
             log.append(f"Pricelists Created: {self.total_pricelists}")
             log.append(f"Price Records: {self.total_prices}")
             log.append(f"Warehouse Records: {self.total_warehouses}")
+            if self.force_enable_sales_pos:
+                log.append(f"✅ Products activated in Sales & POS: Yes")
             log.append(f"Errors: {self.errors_count}")
             log.append("=" * 80)
             
@@ -646,6 +704,15 @@ class SapProductCompleteMigration(models.TransientModel):
         sales_price = item_data.get('SalesUnitPrice', 0) or 0
         purchase_price = item_data.get('PurchaseUnitPrice', 0) or 0
         
+        # Determine if product should be enabled in Sales and POS
+        # If force_enable_sales_pos is True, enable all active products
+        if self.force_enable_sales_pos:
+            enable_sales = is_active
+            enable_pos = is_active
+        else:
+            enable_sales = is_active and is_sales_item
+            enable_pos = is_active and is_sales_item
+        
         vals = {
             'name': item_name,
             'default_code': item_code,
@@ -655,10 +722,10 @@ class SapProductCompleteMigration(models.TransientModel):
             'tracking': 'none',  # Enable inventory tracking
             'is_storable': True,  # Enable "Track Inventory" checkbox in UI
             'active': is_active,
-            # If product is active, make it available for sale and POS
-            'sale_ok': is_active and is_sales_item,
+            # Enable Sales and POS based on configuration
+            'sale_ok': enable_sales,
             'purchase_ok': is_active and is_purchase_item,
-            'available_in_pos': is_active and is_sales_item,  # Add to POS if active
+            'available_in_pos': enable_pos,  # Add to POS if active
         }
         
         # ========== Add UoMs ==========
