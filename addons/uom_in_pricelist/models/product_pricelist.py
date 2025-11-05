@@ -64,7 +64,7 @@ class ProductPricelist(models.Model):
                 except:
                     qty_in_product_uom = quantity
             
-            _logger.info(f"🔍 Looking for rules for {product.display_name} with UoM {uom.name if uom else 'None'} (ID: {uom.id if uom else None})")
+            _logger.info(f"[Price Rule] Looking for rules for {product.display_name} with UoM {uom.name if uom else 'None'} (ID: {uom.id if uom else None})")
             
             # Search for the best matching rule
             # Priority: exact UoM match > base rule (no UoM)
@@ -76,14 +76,36 @@ class ProductPricelist(models.Model):
                 if not rule._is_applicable_for(product, qty_in_product_uom):
                     continue
                 
-                # Check if rule has product_packaging_id (which points to uom.uom)
-                if rule.product_packaging_id:
+                # Check UoM match - PRIORITY SYSTEM:
+                # 1. HIGHEST: UoM match WITHOUT packaging (base price)
+                # 2. MEDIUM: UoM match WITH packaging (packaging price)
+                # 3. LOWEST: No UoM specified (fallback)
+                
+                rule_uom = None
+                has_packaging = False
+                
+                if rule.product_uom_id:
+                    # Direct UoM specified
+                    rule_uom = rule.product_uom_id
+                    has_packaging = bool(rule.product_packaging_id)
+                elif rule.product_packaging_id and rule.product_packaging_id.product_uom_id:
+                    # UoM from packaging
+                    rule_uom = rule.product_packaging_id.product_uom_id
+                    has_packaging = True
+                
+                if rule_uom:
                     # Rule has a specific UoM
-                    if uom and rule.product_packaging_id.id == uom.id:
-                        # Exact match!
-                        _logger.info(f"✅ Found EXACT UoM match: Rule {rule.id}, Price {rule.fixed_price}")
-                        exact_match_rule = rule
-                        break  # Perfect match, stop searching
+                    if uom and rule_uom.id == uom.id:
+                        # Exact UoM match!
+                        # Prefer item WITHOUT packaging (base price)
+                        if not has_packaging:
+                            _logger.info(f"[Price Rule] Found EXACT UoM match (NO packaging - BASE PRICE): Rule {rule.id}, Price {rule.fixed_price}")
+                            exact_match_rule = rule
+                            break  # Perfect match - base price, stop searching
+                        elif not exact_match_rule or (exact_match_rule and exact_match_rule.product_packaging_id):
+                            # Keep this but continue searching for better match (without packaging)
+                            _logger.info(f"[Price Rule] Found UoM match (WITH packaging): Rule {rule.id}, Price {rule.fixed_price}")
+                            exact_match_rule = rule
                     else:
                         # UoM doesn't match - skip this rule
                         continue
@@ -91,26 +113,26 @@ class ProductPricelist(models.Model):
                     # Rule has no specific UoM - use as fallback
                     if not base_rule:
                         base_rule = rule
-                        _logger.info(f"📋 Found base rule: Rule {rule.id}, Price {rule.fixed_price}")
+                        _logger.info(f"[Price Rule] Found base rule: Rule {rule.id}, Price {rule.fixed_price}")
             
             # Use exact match if found, otherwise use base rule
             suitable_rule = exact_match_rule or base_rule
             
             if suitable_rule:
-                _logger.info(f"✅ Selected rule {suitable_rule.id} for {product.display_name}")
+                _logger.info(f"[Price Rule] Selected rule {suitable_rule.id} for {product.display_name}")
             else:
-                _logger.warning(f"⚠️ No suitable rule found for {product.display_name}")
+                _logger.warning(f"[Price Rule] No suitable rule found for {product.display_name}")
             
             # Calculate final price
             if compute_price and suitable_rule:
                 try:
                     # _compute_price in pricelist_item will handle UoM
                     price = suitable_rule._compute_price(
-                        product, quantity, target_uom, date=date, currency=currency
+                        product, quantity, date=date, currency=currency, uom=target_uom
                     )
-                    _logger.info(f"💰 Final price for {product.display_name}: ${price}")
+                    _logger.info(f"[Price Rule] Final price for {product.display_name}: ${price}")
                 except Exception as e:
-                    _logger.error(f"❌ Error computing price: {e}")
+                    _logger.error(f"[Price Rule] Error computing price: {e}", exc_info=True)
                     price = 0.0
             else:
                 price = 0.0

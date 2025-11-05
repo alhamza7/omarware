@@ -40,6 +40,35 @@ class PosPerfumeOrder(models.Model):
         tracking=True
     )
     
+    pricelist_id = fields.Many2one(
+        'product.pricelist',
+        string='Pricelist',
+        required=True,
+        default=lambda self: self._get_default_pricelist(),
+        tracking=True
+    )
+    
+    def _get_default_pricelist(self):
+        """Get default pricelist - try to find 'Price list 1' first"""
+        # Try to find "Price list 1" - case insensitive
+        pricelist = self.env['product.pricelist'].search([
+            ('name', 'ilike', 'Price list 1'),
+            ('active', '=', True)
+        ], limit=1)
+        
+        # If not found, try "list 1"
+        if not pricelist:
+            pricelist = self.env['product.pricelist'].search([
+                ('name', 'ilike', 'list 1'),
+                ('active', '=', True)
+            ], limit=1)
+        
+        # If still not found, use Public Pricelist (list0)
+        if not pricelist:
+            pricelist = self.env.ref('product.list0', raise_if_not_found=False)
+        
+        return pricelist.id if pricelist else False
+    
     order_line_ids = fields.One2many(
         'pos.perfume.order.line',
         'order_id',
@@ -145,6 +174,14 @@ class PosPerfumeOrder(models.Model):
         for order in self:
             order.amount_total_iqd = order.amount_total * order.exchange_rate
     
+    @api.onchange('partner_id')
+    def _onchange_partner_pricelist(self):
+        """Set pricelist from customer - DISABLED: Always use Price list 1"""
+        # DISABLED: Keep pricelist fixed to "Price list 1" regardless of customer
+        # if self.partner_id and self.partner_id.property_product_pricelist:
+        #     self.pricelist_id = self.partner_id.property_product_pricelist
+        pass
+    
     @api.model_create_multi
     def create(self, vals_list):
         """Generate sequence number for new orders"""
@@ -163,45 +200,121 @@ class PosPerfumeOrder(models.Model):
     
     def action_confirm(self):
         """Confirm order and create sale order"""
-        self.ensure_one()
+        import logging
+        _logger = logging.getLogger(__name__)
         
-        if not self.order_line_ids:
-            raise UserError(_('Cannot confirm an order without lines.'))
+        # Get IDs and normalize them - flatten nested lists and ensure integers
+        def normalize_ids(ids):
+            """Flatten nested lists and extract integer IDs"""
+            result = []
+            if isinstance(ids, (list, tuple)):
+                for item in ids:
+                    if isinstance(item, (list, tuple)):
+                        result.extend(normalize_ids(item))
+                    elif isinstance(item, int):
+                        result.append(item)
+                    elif hasattr(item, 'id'):
+                        result.append(item.id)
+            elif isinstance(ids, int):
+                result.append(ids)
+            elif hasattr(ids, 'id'):
+                result.append(ids.id)
+            return result
         
-        # Create Sale Order
-        sale_vals = {
-            'partner_id': self.partner_id.id,
-            'user_id': self.user_id.id,
-            'date_order': self.date,
-            'origin': self.name,
-            'note': self.note,
-        }
+        order_ids = normalize_ids(self.ids)
+        if not order_ids:
+            raise UserError(_('No orders selected.'))
         
-        # Create sale order lines
-        order_lines = []
-        for line in self.order_line_ids:
-            order_lines.append((0, 0, {
-                'product_id': line.product_id.id,
-                'product_uom_qty': line.quantity,
-                'price_unit': line.unit_price,
-                'discount': line.discount_percent,
-            }))
+        # Ensure all IDs are integers
+        order_ids = [int(id) for id in order_ids if id]
         
-        sale_vals['order_line'] = order_lines
-        sale_order = self.env['sale.order'].create(sale_vals)
+        # Browse records fresh to avoid any cached state issues
+        orders = self.env['pos.perfume.order'].browse(order_ids)
+        _logger.info(f"[POS Confirm] Starting action_confirm for {len(orders)} orders")
+        results = []
         
-        self.write({
-            'state': 'sale',
-            'sale_order_id': sale_order.id,
-        })
+        for order in orders:
+            order_id = order.id
+            # Read all needed fields at once to avoid multiple field cache accesses
+            try:
+                order_data = order.read(['name', 'partner_id', 'user_id', 'date', 'pricelist_id', 'note'])[0]
+                order_name = order_data.get('name', f"Order-{order_id}")
+            except (TypeError, AttributeError, KeyError, IndexError) as e:
+                _logger.warning(f"[POS Confirm] Error reading order data: {e}, using ID only")
+                order_name = f"Order-{order_id}"
+                order_data = {}
+            
+            _logger.info(f"[POS Confirm] Processing order {order_id}: {order_name}")
+            
+            # Validate - get order lines using search to avoid field cache issues
+            try:
+                order_lines = self.env['pos.perfume.order.line'].search([('order_id', '=', order_id)])
+            except (TypeError, AttributeError):
+                # Fallback to direct access if search fails
+                order_lines = order.order_line_ids
+            
+            if not order_lines:
+                _logger.error(f"[POS Confirm] No lines in order {order_id}")
+                raise UserError(_('Cannot confirm an order without lines.'))
+            
+            _logger.info(f"[POS Confirm] Order has {len(order_lines)} lines")
+            
+            # Create Sale Order - use read data or direct access with fallback
+            sale_vals = {
+                'partner_id': order_data.get('partner_id', [False])[0] if order_data.get('partner_id') else order.partner_id.id,
+                'user_id': order_data.get('user_id', [False])[0] if order_data.get('user_id') else order.user_id.id,
+                'date_order': order_data.get('date') or order.date,
+                'origin': order_name,
+                'note': order_data.get('note', '') or (order.note or ''),
+                'pricelist_id': order_data.get('pricelist_id', [False])[0] if order_data.get('pricelist_id') else (order.pricelist_id.id if order.pricelist_id else False),
+            }
+            
+            # Create sale order lines
+            sale_order_lines = []
+            for line in order_lines:
+                line_vals = {
+                    'product_id': line.product_id.id,
+                    'product_uom_qty': line.quantity,
+                    'product_uom_id': line.product_uom_id.id if line.product_uom_id else line.product_id.uom_id.id,
+                    'price_unit': line.unit_price,
+                    'discount': line.discount_percent or 0.0,
+                }
+                # Add warehouse info if available (for sale_order_line_multi_warehouse)
+                if line.warehouse_id:
+                    line_vals['product_warehouse_id'] = line.warehouse_id.id
+                sale_order_lines.append((0, 0, line_vals))
+            
+            sale_vals['order_line'] = sale_order_lines
+            
+            _logger.info(f"[POS Confirm] Creating sale.order with {len(sale_order_lines)} lines")
+            _logger.info(f"[POS Confirm] Sale vals: partner={sale_vals['partner_id']}, pricelist={sale_vals['pricelist_id']}")
+            
+            try:
+                sale_order = self.env['sale.order'].create(sale_vals)
+                _logger.info(f"[POS Confirm] Sale order created: {sale_order.name} (ID: {sale_order.id})")
+            except Exception as e:
+                _logger.error(f"[POS Confirm] Error creating sale order: {e}", exc_info=True)
+                raise
+            
+            # Update POS order
+            order.write({
+                'state': 'sale',
+                'sale_order_id': sale_order.id,
+            })
+            
+            _logger.info(f"[POS Confirm] POS order updated to state=sale")
+            
+            results.append({
+                'type': 'ir.actions.act_window',
+                'res_model': 'sale.order',
+                'res_id': sale_order.id,
+                'view_mode': 'form',
+                'views': [[False, 'form']],
+                'target': 'current',
+            })
         
-        return {
-            'type': 'ir.actions.act_window',
-            'res_model': 'sale.order',
-            'res_id': sale_order.id,
-            'view_mode': 'form',
-            'target': 'current',
-        }
+        # Return single result if single record, otherwise first result
+        return results[0] if len(results) == 1 else results
     
     def action_cancel(self):
         """Cancel order"""
@@ -282,10 +395,24 @@ class PosPerfumeOrderLine(models.Model):
         store=True
     )
     
+    # UoM Support
+    product_uom_id = fields.Many2one(
+        'uom.uom',
+        string='Unit of Measure',
+        required=True,
+        help='Unit of measure for this product'
+    )
+    
     warehouse_id = fields.Many2one(
         'stock.warehouse',
         string='Warehouse',
         required=True
+    )
+    
+    location_id = fields.Many2one(
+        'stock.location',
+        string='Storage Location',
+        help='Specific storage location within warehouse'
     )
     
     quantity = fields.Float(
@@ -391,9 +518,51 @@ class PosPerfumeOrderLine(models.Model):
     
     @api.onchange('product_id')
     def _onchange_product_id(self):
-        """Set default price when product is selected"""
+        """Set default price and UoM when product is selected"""
         if self.product_id:
+            self.product_uom_id = self.product_id.uom_id
             self.unit_price = self.product_id.list_price
+    
+    @api.onchange('product_id', 'product_uom_id')
+    def _onchange_product_uom(self):
+        """Get price based on UoM from pricelist"""
+        if self.product_id and self.product_uom_id and self.order_id.pricelist_id:
+            price = self._get_uom_price(
+                self.order_id.pricelist_id,
+                self.product_uom_id
+            )
+            if price:
+                self.unit_price = price
+    
+    @api.onchange('warehouse_id')
+    def _onchange_warehouse(self):
+        """Set default location when warehouse changes"""
+        if self.warehouse_id:
+            self.location_id = self.warehouse_id.lot_stock_id
+    
+    def _get_uom_price(self, pricelist, uom):
+        """Get price for specific UoM from pricelist items"""
+        self.ensure_one()
+        
+        # Search for exact UoM match in pricelist
+        item = self.env['product.pricelist.item'].search([
+            ('pricelist_id', '=', pricelist.id),
+            ('product_tmpl_id', '=', self.product_id.product_tmpl_id.id),
+            ('product_packaging_id', '=', uom.id),
+            ('compute_price', '=', 'fixed'),
+        ], limit=1)
+        
+        if item:
+            return item.fixed_price
+        
+        # Fallback to base price with conversion
+        if uom != self.product_id.uom_id:
+            return self.product_id.uom_id._compute_price(
+                self.product_id.list_price,
+                uom
+            )
+        
+        return self.product_id.list_price
     
     @api.constrains('quantity')
     def _check_quantity(self):

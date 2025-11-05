@@ -652,5 +652,226 @@ $dark-border: #d0d0d0;
 }
 
 /* ============================================================ */
+/*         NEW COMPONENTS STYLES - UoM, Customer, Location      */
+/* ============================================================ */
+
+/* Product Search with UoM Component */
+.product-search-uom-container {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    
+    .search-section {
+        flex-shrink: 0;
+    }
+    
+    .products-scroll {
+        max-height: 400px;
+        overflow-y: auto;
+    }
+    
+    .product-card {
+        padding: 12px;
+        margin-bottom: 8px;
+        border: 1px solid $border-gray;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.2s;
+        
+        &:hover {
+            border-color: $perfume-primary;
+            background-color: $perfume-hover;
+            transform: translateX(-2px);
+        }
+        
+        .product-code {
+            font-size: 0.9em;
+        }
+        
+        .product-name {
+            font-size: 1em;
+            margin: 4px 0;
+        }
+        
+        .product-foreign-name {
+            font-size: 0.85em;
+        }
+    }
+    
+    .uom-list {
+        max-height: 350px;
+        overflow-y: auto;
+    }
+    
+    .uom-card {
+        padding: 12px;
+        margin-bottom: 8px;
+        border: 2px solid $border-gray;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.2s;
+        
+        &:hover {
+            border-color: $perfume-secondary;
+            background-color: $perfume-hover;
+        }
+        
+        &.selected {
+            border-color: $perfume-primary;
+            background-color: $perfume-selected;
+            box-shadow: 0 2px 8px rgba(113, 75, 103, 0.2);
+        }
+        
+        .uom-name {
+            font-size: 1.1em;
+            color: $perfume-dark;
+        }
+        
+        .uom-info {
+            font-size: 0.85em;
+            color: #666;
+        }
+        
+        .uom-price-usd {
+            font-size: 1.2em;
+        }
+        
+        .uom-price-iqd {
+            font-size: 0.9em;
+        }
+    }
+    
+    .add-to-order-btn {
+        margin-top: auto;
+        padding: 12px;
+        font-size: 1.1em;
+        font-weight: bold;
+    }
+    
+    .empty-state {
+        color: #999;
+    }
+}
+
+/* Customer Search Component */
+.customer-search-container {
+    position: relative;
+    
+    .selected-customer-badge {
+        animation: fadeIn 0.3s;
+    }
+    
+    .customer-dropdown {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        z-index: 1000;
+        background: $white;
+        border: 1px solid $border-gray;
+        border-radius: 6px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        max-height: 400px;
+        overflow-y: auto;
+        margin-top: 4px;
+        
+        .dropdown-header {
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            border-bottom: 1px solid $border-gray;
+        }
+        
+        .customers-list {
+            padding: 4px;
+        }
+        
+        .customer-item {
+            padding: 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            border-bottom: 1px solid $light-gray;
+            
+            &:last-child {
+                border-bottom: none;
+            }
+            
+            &:hover {
+                background-color: $perfume-hover;
+            }
+            
+            .customer-name {
+                font-size: 1em;
+                margin-bottom: 4px;
+            }
+            
+            .customer-details {
+                font-size: 0.85em;
+            }
+        }
+    }
+}
+
+/* Location Selector Component */
+.location-selector-container {
+    .stock-info-section {
+        margin-top: 16px;
+        
+        .stock-metric {
+            .stock-label {
+                font-size: 0.85em;
+                margin-bottom: 4px;
+            }
+            
+            .stock-value {
+                font-size: 1.3em;
+            }
+        }
+    }
+    
+    .form-select {
+        border: 2px solid $border-gray;
+        
+        &:focus {
+            border-color: $perfume-primary;
+            box-shadow: 0 0 0 0.2rem rgba(113, 75, 103, 0.25);
+        }
+    }
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .product-search-uom-container {
+        .products-scroll {
+            max-height: 300px;
+        }
+        
+        .uom-list {
+            max-height: 250px;
+        }
+    }
+}
+
+/* RTL Support */
+[dir="rtl"] {
+    .product-search-uom-container .product-card:hover {
+        transform: translateX(2px);
+    }
+}
+
+/* ============================================================ */
 /*                       END OF STYLES                          */
 /* ============================================================ */

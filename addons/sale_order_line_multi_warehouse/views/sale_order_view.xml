@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <!-- Sale order form view inherited - Add warehouse field in order lines -->
+    <record id="view_order_form" model="ir.ui.view">
+        <field name="name">sale.order.view.form.inherit.sale.order.line.multi.warehouse</field>
+        <field name="model">sale.order</field>
+        <field name="inherit_id" ref="sale.view_order_form"/>
+        <field name="arch" type="xml">
+            <!-- Add warehouse field after product_uom in sale order lines list view -->
+            <xpath expr="//field[@name='order_line']//list//field[@name='product_uom_id']" position="after">
+                <field name="product_warehouse_id" 
+                       optional="show"
+                       domain="[('company_id', '=', parent.company_id)]"
+                       width="150px"/>
+            </xpath>
+            
+            <!-- Add warehouse field in form view inside order lines -->
+            <xpath expr="//field[@name='order_line']//form//field[@name='product_uom_id']" position="after">
+                <field name="product_warehouse_id" 
+                       domain="[('company_id', '=', parent.company_id)]"/>
+            </xpath>
+        </field>
+    </record>
+</odoo>

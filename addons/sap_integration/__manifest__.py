@@ -83,6 +83,7 @@
         'views/sap_product_extended_views.xml',  # Extended product information
         'views/sap_product_pricelist_sync_views.xml',  # Pricelist synchronization
         'views/sap_product_warehouse_info_views.xml',  # Warehouse information
+        'views/product_uom_group_views.xml',  # UoM Group restriction in products/sales
         
         # Menu Structure - Load LAST to organize all menu items
         'views/sap_menu_structure.xml',  # ⭐ New: Organized menu structure

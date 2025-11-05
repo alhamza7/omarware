@@ -64,9 +64,10 @@ class SaleOrderLine(models.Model):
             
             # Convert price to selected UoM
             if uom != self.product_id.uom_id:
-                factor = uom.factor_inv / self.product_id.uom_id.factor_inv
-                price = price * factor
-                _logger.info(f"🔄 Converted price by factor {factor}: ${price}")
+                # In Odoo 19, factor_inv no longer exists
+                # Use the built-in _compute_price method instead
+                price = self.product_id.uom_id._compute_price(price, uom)
+                _logger.info(f"🔄 Converted price to {uom.name}: ${price}")
             
             return price
         

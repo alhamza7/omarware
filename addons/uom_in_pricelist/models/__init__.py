@@ -57,7 +57,7 @@ try:
         ], limit=1)
         
         if items:
-            _logger.info(f"✅ UoM price: {items[0].fixed_price}")
+            _logger.info(f"[UoM Price] Found exact match: {items[0].fixed_price}")
             return items[0].fixed_price
         
         # Base price
@@ -78,8 +78,8 @@ try:
     
     # Patch
     SaleOrderLine._get_display_price = _get_display_price_uom
-    _logger.info("✅ UoM pricing patch applied!")
+    _logger.info("[UoM Pricing] Patch applied successfully!")
     
 except Exception as e:
-    _logger.error(f"❌ Failed to patch UoM pricing: {e}")
+    _logger.error(f"[UoM Pricing] Failed to patch: {e}")
 

@@ -4,6 +4,9 @@ import { Component, onMounted, useState, xml } from "@odoo/owl";
 import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
 import { PosPerfumeScreen } from "./pos_perfume_screen";
+import { ProductSearchWithUoM } from "./product_search_uom";
+import { CustomerSearch } from "./customer_search";
+import { LocationSelector } from "./location_selector";
 
 /**
  * Main POS Perfume Application
@@ -63,7 +66,7 @@ class PosPerfumeApp extends Component {
                 partners = await this.orm.searchRead(
                     "res.partner",
                     [],  // Empty domain = all partners
-                    ["id", "name", "email", "phone", "mobile"],
+                    ["id", "name", "email", "phone"],
                     { 
                         limit: 3000,
                         order: "name"
@@ -83,7 +86,6 @@ class PosPerfumeApp extends Component {
                 id: 0,
                 name: "Walk-in Customer",
                 phone: false,
-                mobile: false,
                 email: false
             });
             

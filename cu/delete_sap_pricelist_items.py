@@ -24,3 +24,4 @@ sync_records.unlink()
 log(f"Done! Deleted {total_items} pricelist items and {len(sync_records)} sync records")
 
 
+

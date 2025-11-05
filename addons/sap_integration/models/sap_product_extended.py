@@ -53,6 +53,18 @@ class SapProductExtended(models.Model):
         help="Additional foreign language name"
     )
     
+    # ========== Unit of Measure Group from SAP ==========
+    sap_uom_group_id = fields.Many2one(
+        'sap.uom.group',
+        string='SAP UoM Group',
+        help="SAP Unit of Measure Group that this product belongs to. "
+             "Defines which UoMs are allowed for this product."
+    )
+    sap_uom_group_entry = fields.Integer(
+        string='SAP UoM Group Entry',
+        help="SAP UoMGroupEntry number from SAP B1"
+    )
+    
     # ========== Unit of Measure Codes from SAP ==========
     sales_unit = fields.Char(
         string='Sales Unit (SAP)',
@@ -354,7 +366,7 @@ class SapProductExtended(models.Model):
             ], limit=1)
             
             # Prepare values
-            vals = self._prepare_extended_values_from_sap(sap_data)
+            vals = self._prepare_extended_values_from_sap(sap_data, backend)
             vals.update({
                 'product_id': product.id,
                 'backend_id': backend.id,
@@ -383,8 +395,13 @@ class SapProductExtended(models.Model):
                 })
             raise
     
-    def _prepare_extended_values_from_sap(self, sap_data):
-        """Prepare extended values from SAP data"""
+    def _prepare_extended_values_from_sap(self, sap_data, backend=None):
+        """Prepare extended values from SAP data
+        
+        Args:
+            sap_data: Dictionary with SAP data
+            backend: sap.backend record (optional, for UoM Group linking)
+        """
         vals = {}
         
         # Foreign names
@@ -392,6 +409,25 @@ class SapProductExtended(models.Model):
             vals['foreign_name'] = sap_data['ForeignName']
         
         # ========== UoM Codes from SAP ==========
+        # UoM Group Entry - Link product to its UoM Group
+        if 'UoMGroupEntry' in sap_data:
+            uom_group_entry = sap_data['UoMGroupEntry']
+            vals['sap_uom_group_entry'] = uom_group_entry
+            
+            # Try to find or create the UoM Group
+            if uom_group_entry and uom_group_entry != -1 and backend:
+                # Search for existing UoM Group by AbsEntry
+                uom_group = self.env['sap.uom.group'].search([
+                    ('sap_abs_entry', '=', uom_group_entry),
+                    ('backend_id', '=', backend.id)
+                ], limit=1)
+                
+                if uom_group:
+                    vals['sap_uom_group_id'] = uom_group.id
+                    _logger.info(f"Linked product to UoM Group: {uom_group.name} (Entry: {uom_group_entry})")
+                else:
+                    _logger.warning(f"UoM Group with Entry {uom_group_entry} not found - will be synced later")
+        
         if 'SalesUnit' in sap_data:
             sales_unit_code = sap_data['SalesUnit']
             vals['sales_unit'] = sales_unit_code

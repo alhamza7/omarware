@@ -22,6 +22,9 @@
         'stock',
         'sale',
         'mail',
+        'uom',                        # ⭐ جديد - دعم وحدات القياس
+        'uom_in_pricelist',          # ⭐ جديد - أسعار حسب UoM
+        'sap_integration',           # ⭐ جديد - معلومات SAP
     ],
     'data': [
         'security/ir.model.access.csv',
@@ -33,8 +36,18 @@
     'assets': {
         'web.assets_backend': [
             'pos_perfume_custom/static/src/scss/perfume_pos.scss',
-            'pos_perfume_custom/static/src/app/pos_perfume_app.js',
+            # Components (يجب أن تُحمَّل أولاً)
+            'pos_perfume_custom/static/src/app/product_search_uom.js',
+            'pos_perfume_custom/static/src/app/customer_search.js',
+            'pos_perfume_custom/static/src/app/location_selector.js',
+            # Screen (يستخدم الـ Components)
             'pos_perfume_custom/static/src/app/pos_perfume_screen.js',
+            # App (آخر شيء - يُسجل الـ action)
+            'pos_perfume_custom/static/src/app/pos_perfume_app.js',
+            # Templates
+            'pos_perfume_custom/static/src/xml/product_search_uom.xml',
+            'pos_perfume_custom/static/src/xml/customer_search.xml',
+            'pos_perfume_custom/static/src/xml/location_selector.xml',
             'pos_perfume_custom/static/src/xml/pos_perfume_screen.xml',
         ],
         'point_of_sale._assets_pos': [

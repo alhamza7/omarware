@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    
+    <!-- Add SAP UoM Group to Product Template Form -->
+    <record id="view_product_template_form_sap_uom_group" model="ir.ui.view">
+        <field name="name">product.template.form.sap.uom.group</field>
+        <field name="model">product.template</field>
+        <field name="inherit_id" ref="product.product_template_form_view"/>
+        <field name="arch" type="xml">
+            
+            <!-- Add UoM Group after UoM field -->
+            <xpath expr="//field[@name='uom_id']" position="after">
+                <field name="sap_uom_group_id" 
+                       options="{'no_create': True, 'no_open': True}"
+                       invisible="not sap_uom_group_id"/>
+            </xpath>
+            
+            <!-- Add UoM Group info in a notebook page (optional detailed view) -->
+            <xpath expr="//notebook" position="inside">
+                <page name="sap_uom_group" string="SAP UoM Group" 
+                      invisible="not sap_uom_group_id">
+                    <group name="uom_group_info" string="UoM Group Information">
+                        <field name="sap_uom_group_id" readonly="1"/>
+                        <field name="sap_uom_group_entry" readonly="1" invisible="1"/>
+                    </group>
+                    
+                    <group name="available_uoms" string="Available UoMs from SAP Group">
+                        <field name="available_product_uom_ids" widget="many2many_tags" readonly="1"/>
+                    </group>
+                    
+                    <div class="alert alert-info" role="alert">
+                        <strong>Note:</strong> This product belongs to SAP UoM Group 
+                        <field name="sap_uom_group_id" readonly="1" nolabel="1" class="oe_inline"/>. 
+                        Only UoMs from this group can be used in sales orders.
+                    </div>
+                </page>
+            </xpath>
+            
+        </field>
+    </record>
+    
+    <!-- Add SAP UoM Group to Product Variant Form -->
+    <record id="view_product_product_form_sap_uom_group" model="ir.ui.view">
+        <field name="name">product.product.form.sap.uom.group</field>
+        <field name="model">product.product</field>
+        <field name="inherit_id" ref="product.product_normal_form_view"/>
+        <field name="arch" type="xml">
+            
+            <!-- Add UoM Group after UoM field -->
+            <xpath expr="//field[@name='uom_id']" position="after">
+                <field name="sap_uom_group_id" 
+                       options="{'no_create': True, 'no_open': True}"
+                       invisible="not sap_uom_group_id"/>
+            </xpath>
+            
+        </field>
+    </record>
+    
+    <!-- Extend Sale Order Line Form to show available UoMs -->
+    <!-- DISABLED TEMPORARILY - Will be re-enabled after testing -->
+    <!--
+    <record id="view_sale_order_line_form_uom_restriction" model="ir.ui.view">
+        <field name="name">sale.order.line.form.uom.restriction</field>
+        <field name="model">sale.order.line</field>
+        <field name="inherit_id" ref="sale.view_order_form"/>
+        <field name="arch" type="xml">
+            
+            <xpath expr="//field[@name='product_uom_id']" position="before">
+                <field name="available_uom_ids" invisible="1"/>
+            </xpath>
+            
+            <xpath expr="//field[@name='product_uom_id']" position="attributes">
+                <attribute name="domain">[('id', 'in', available_uom_ids)]</attribute>
+                <attribute name="options">{'no_create': True}</attribute>
+            </xpath>
+            
+        </field>
+    </record>
+    -->
+    
+</odoo>
