@@ -154,10 +154,11 @@ class SapCustomerSync(models.Model):
         try:
             _logger.info(f"Importing customer {external_id} from SAP backend {backend.name}")
             
-            # Get customer data from SAP
+            # Get customer data from SAP - request ALL fields (no $select)
             connection = backend.get_connection()
             customers = connection.get('BusinessPartners', {
                 '$filter': f"CardCode eq '{external_id}'"
+                # No $select = get ALL fields from SAP
             })
             
             if not customers.get('value'):

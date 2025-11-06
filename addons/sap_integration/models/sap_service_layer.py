@@ -136,6 +136,7 @@ class SapServiceLayerConnection:
             headers = self._get_headers()
             
             _logger.info(f"GET request to SAP: {url}")
+            _logger.info(f"GET request params: {params}")
             response = self.session.get(url, headers=headers, params=params or {}, timeout=self.timeout)
             
             if response.status_code == 200:
