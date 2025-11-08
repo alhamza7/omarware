@@ -217,30 +217,18 @@ class SaleOrder(models.Model):
         """إعداد بيانات quotation للـ SAP Service Layer"""
         # إعداد سطور الوثيقة
         document_lines = []
-        for line_idx, line in enumerate(quotation.order_line):
+        for line in quotation.order_line:
             if not line.product_id:
-                _logger.warning(f"Order line {line_idx} has no product_id, skipping")
                 continue
-            
-            # الحصول على ItemCode (كود المنتج) - أولوية: default_code ثم barcode
-            item_code = line.product_id.default_code or ''
-            if not item_code and line.product_id.barcode:
-                item_code = line.product_id.barcode
-                _logger.info(f"Using barcode as ItemCode for product {line.product_id.name}: {item_code}")
-            
-            if not item_code:
-                _logger.warning(f"Product {line.product_id.name} (ID: {line.product_id.id}) has no default_code or barcode - ItemCode will be empty!")
             
             # إعداد بيانات السطر الأساسية
             line_data = {
-                'ItemCode': item_code,
+                'ItemCode': line.product_id.default_code or '',
                 'ItemDescription': line.name or line.product_id.name,
                 'Quantity': line.product_uom_qty,
                 'UnitPrice': line.price_unit,
                 'DiscountPercent': line.discount,
             }
-            
-            _logger.info(f"Preparing DocumentLine[{line_idx}]: ItemCode={item_code}, ItemDescription={line_data['ItemDescription'][:50]}, Quantity={line.product_uom_qty}, UnitPrice={line.price_unit}, Discount={line.discount}%")
             
             # إضافة UoMEntry (رقم وحدة القياس) إذا كانت متوفرة
             # البحث والتحقق قبل الإرسال
@@ -287,60 +275,15 @@ class SaleOrder(models.Model):
                 # يمكن إضافة mapping للضريبة هنا
                 # line_data['TaxCode'] = tax.code or tax.name
             
-            # إضافة كود المستودع (WarehouseCode) إذا كان متوفراً
-            warehouse_code = None
-            
-            # 1. محاولة الحصول من order line (إذا كان موجوداً في sale_order_line_multi_warehouse)
-            if hasattr(line, 'product_warehouse_id') and line.product_warehouse_id:
-                warehouse = line.product_warehouse_id
-                # البحث عن sap_warehouse_code من sap.product.warehouse.info
-                if backend:
-                    warehouse_info = self.env['sap.product.warehouse.info'].search([
-                        ('warehouse_id', '=', warehouse.id),
-                        ('backend_id', '=', backend.id)
-                    ], limit=1)
-                    if warehouse_info and warehouse_info.sap_warehouse_code:
-                        warehouse_code = warehouse_info.sap_warehouse_code
-                        _logger.info(f"Found WarehouseCode from order line warehouse: {warehouse_code}")
-                    elif warehouse.code:
-                        # استخدام code من warehouse إذا لم يوجد في sap.product.warehouse.info
-                        warehouse_code = warehouse.code
-                        _logger.info(f"Using warehouse code as WarehouseCode: {warehouse_code}")
-            
-            # 2. إذا لم يوجد في order line، استخدام warehouse من quotation
-            if not warehouse_code and quotation.warehouse_id:
-                warehouse = quotation.warehouse_id
-                # البحث عن sap_warehouse_code من sap.product.warehouse.info
-                if backend:
-                    warehouse_info = self.env['sap.product.warehouse.info'].search([
-                        ('warehouse_id', '=', warehouse.id),
-                        ('backend_id', '=', backend.id)
-                    ], limit=1)
-                    if warehouse_info and warehouse_info.sap_warehouse_code:
-                        warehouse_code = warehouse_info.sap_warehouse_code
-                        _logger.info(f"Found WarehouseCode from quotation warehouse: {warehouse_code}")
-                    elif warehouse.code:
-                        # استخدام code من warehouse إذا لم يوجد في sap.product.warehouse.info
-                        warehouse_code = warehouse.code
-                        _logger.info(f"Using quotation warehouse code as WarehouseCode: {warehouse_code}")
-            
-            # 3. إضافة WarehouseCode إلى line_data إذا كان موجوداً
-            if warehouse_code:
-                line_data['WarehouseCode'] = warehouse_code
-                _logger.info(f"✓ Added WarehouseCode={warehouse_code} to DocumentLine[{line_idx}]")
-            else:
-                _logger.warning(f"✗ No WarehouseCode found for DocumentLine[{line_idx}] - ItemCode={item_code}")
+            # إضافة كود المستودع إذا كان متوفراً
+            # يمكن إضافة mapping للمستودع هنا في المستقبل
+            # if quotation.warehouse_id:
+            #     line_data['WarehouseCode'] = quotation.warehouse_id.code
             
             document_lines.append(line_data)
         
         if not document_lines:
             raise UserError("لا يمكن إرسال quotation بدون سطور")
-        
-        # Log all document lines before sending
-        _logger.info(f"=== Prepared {len(document_lines)} DocumentLines for SAP ===")
-        for idx, line in enumerate(document_lines):
-            _logger.info(f"DocumentLine[{idx}]: ItemCode='{line.get('ItemCode')}', Quantity={line.get('Quantity')}, UnitPrice={line.get('UnitPrice')}, UoMEntry={line.get('UoMEntry', 'NOT SET')}, WarehouseCode={line.get('WarehouseCode', 'NOT SET')}")
-        _logger.info("=== End of DocumentLines ===")
         
         # إعداد بيانات الوثيقة
         quotation_data = {
@@ -348,15 +291,6 @@ class SaleOrder(models.Model):
             'DocDate': quotation.date_order.strftime('%Y-%m-%d') if quotation.date_order else datetime.now().strftime('%Y-%m-%d'),
             'DocumentLines': document_lines,
         }
-        
-        # Log full quotation data
-        import json
-        _logger.info(f"=== Full Quotation Data for SAP ===")
-        _logger.info(f"CardCode: {quotation_data.get('CardCode')}")
-        _logger.info(f"DocDate: {quotation_data.get('DocDate')}")
-        _logger.info(f"DocumentLines count: {len(quotation_data.get('DocumentLines', []))}")
-        _logger.info(f"Full JSON: {json.dumps(quotation_data, indent=2, default=str)}")
-        _logger.info("=== End of Quotation Data ===")
         
         # إضافة تاريخ الصلاحية إذا كان موجوداً
         if quotation.validity_date:

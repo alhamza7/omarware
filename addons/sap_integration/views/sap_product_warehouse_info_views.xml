@@ -103,28 +103,6 @@
             <field name="name">Product Warehouse Info</field>
             <field name="res_model">sap.product.warehouse.info</field>
             <field name="view_mode">list,form</field>
-            <field name="context">{}</field>
-            <field name="help" type="html">
-                <p class="o_view_nocontent_smiling_face">
-                    No Product Warehouse Info found
-                </p>
-                <p>
-                    Click on "Remove Duplicates" button to remove duplicate records.
-                </p>
-            </field>
-        </record>
-        
-        <!-- Server Action: Remove Duplicates -->
-        <record id="action_remove_duplicates_server" model="ir.actions.server">
-            <field name="name">Remove Duplicates</field>
-            <field name="model_id" search="[('model', '=', 'sap.product.warehouse.info')]"/>
-            <field name="binding_model_id" search="[('model', '=', 'sap.product.warehouse.info')]"/>
-            <field name="binding_view_types">list</field>
-            <field name="state">code</field>
-            <field name="code">
-model = env['sap.product.warehouse.info']
-action = model.action_remove_duplicates()
-            </field>
         </record>
         
     </data>

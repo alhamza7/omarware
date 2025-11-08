@@ -158,16 +158,6 @@ class ProductProductExtended(models.Model):
         Search products with full details: prices, warehouses, stock
         Returns data for the right panel search table
         """
-        _logger.info(f"[search_products_for_pos] User: {self.env.user.name} (ID: {self.env.user.id}), Groups: {[g.name for g in self.env.user.groups_id]}")
-        
-        # Check if user has POS access
-        has_pos_access = self.env.user.has_group('point_of_sale.group_pos_user') or self.env.user.has_group('point_of_sale.group_pos_manager')
-        _logger.info(f"[search_products_for_pos] User has POS access: {has_pos_access}")
-        
-        if not has_pos_access:
-            _logger.warning(f"[search_products_for_pos] User {self.env.user.name} does not have POS access rights!")
-            return []
-        
         domain = [
             ('sale_ok', '=', True),
             '|', '|', '|',
@@ -177,21 +167,7 @@ class ProductProductExtended(models.Model):
             ('foreign_name', 'ilike', search_term) if 'foreign_name' in self._fields else ('name', 'ilike', search_term),
         ]
         
-        _logger.info(f"[search_products_for_pos] Domain: {domain}")
-        
-        # Check access rights
-        try:
-            products = self.search(domain, limit=limit, order='name')
-            _logger.info(f"[search_products_for_pos] Found {len(products)} products")
-        except Exception as e:
-            _logger.error(f"[search_products_for_pos] Error searching products: {str(e)}", exc_info=True)
-            # Try with sudo to check if it's a permission issue
-            try:
-                products = self.sudo().search(domain, limit=limit, order='name')
-                _logger.warning(f"[search_products_for_pos] Found {len(products)} products with sudo (permission issue detected)")
-            except Exception as e2:
-                _logger.error(f"[search_products_for_pos] Error even with sudo: {str(e2)}")
-                products = self.env['product.product']  # Return empty recordset
+        products = self.search(domain, limit=limit, order='name')
         
         # Get pricelist - default to "Price list 1"
         if not pricelist_id:

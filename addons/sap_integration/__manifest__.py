@@ -1,6 +1,6 @@
 {
     'name': 'SAP Integration',
-    'version': '2.0.1',
+    'version': '2.0.0',
     'summary': 'SAP Integration using OCA Connectors and Service Layer',
     'description': '''
         SAP Integration Module
