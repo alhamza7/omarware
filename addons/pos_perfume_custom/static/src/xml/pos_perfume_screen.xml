@@ -169,11 +169,11 @@
                                     <th style="width: 90px; text-align: center; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">Quantity</th>
                                     <th style="width: 100px; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">UoM</th>
                                     <th style="width: 100px; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">Warehouse</th>
-                                    <th style="width: 80px; text-align: center; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">Available</th>
                                     <th style="width: 100px; text-align: right; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">Price (USD)</th>
                                     <th style="width: 100px; text-align: right; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">Price (IQD)</th>
-                                    <th style="width: 90px; text-align: center; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">Tax %</th>
+                                    <th style="width: 90px; text-align: center; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">Disc %</th>
                                     <th style="width: 120px; text-align: right; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">Total</th>
+                                    <th style="width: 80px; text-align: center; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">Available</th>
                                     <th style="width: 50px; text-align: center; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">❌</th>
                                 </tr>
                             </thead>
@@ -317,15 +317,6 @@
                                             </div>
                                         </td>
                                         
-                                        <!-- Available Quantity -->
-                                        <td style="text-align: center;">
-                                            <span t-if="line.availableQty !== null" 
-                                                  t-att-style="line.availableQty > 0 ? 'color: green; font-weight: 600;' : 'color: red; font-weight: 600;'">
-                                                <t t-esc="Math.floor(line.availableQty)"/>
-                                            </span>
-                                            <span t-else="" style="color: #999;">-</span>
-                                        </td>
-                                        
                                         <!-- Price (USD) -->
                                         <td>
                                             <input type="number" 
@@ -379,6 +370,15 @@
                                                    readonly="readonly"
                                                    class="order-cell-input readonly-cell total-cell"
                                                    style="text-align: right; background: #eff6ff; font-weight: 600; width: 100%; color: #2563eb;"/>
+                                        </td>
+                                        
+                                        <!-- Available Quantity -->
+                                        <td style="text-align: center;">
+                                            <span t-if="line.availableQty !== null" 
+                                                  t-att-style="line.availableQty > 0 ? 'color: green; font-weight: 600;' : 'color: red; font-weight: 600;'">
+                                                <t t-esc="Math.floor(line.availableQty)"/>
+                                            </span>
+                                            <span t-else="" style="color: #999;">-</span>
                                         </td>
                                         
                                         <!-- Delete Button -->
