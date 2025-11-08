@@ -76,6 +76,37 @@ export class PosPerfumeScreen extends Component {
             activeUnitFilter: null,         // Active unit filter object or null
             fullPlasticFilterActive: null,  // true/false/null for full plastic filter
             
+            // Order table edit mode (for main order table)
+            orderTableEditMode: false,
+            orderTableColumnWidths: {
+                row: '40px',
+                product: '250px',
+                quantity: '90px',
+                uom: '100px',
+                warehouse: '100px',
+                priceUsd: '100px',
+                priceIqd: '100px',
+                discount: '90px',
+                total: '120px',
+                available: '80px',
+                delete: '50px'
+            },
+            orderTableColumnNames: {
+                row: '#',
+                product: 'Product',
+                quantity: 'Quantity',
+                uom: 'UoM',
+                warehouse: 'Warehouse',
+                priceUsd: 'Price (USD)',
+                priceIqd: 'Price (IQD)',
+                discount: 'Disc %',
+                total: 'Total',
+                available: 'Available',
+                delete: '❌'
+            },
+            editingColumnName: null,
+            resizingOrderColumn: null,
+            
             // UI state
             exchangeRate: 1300,
             
@@ -94,6 +125,10 @@ export class PosPerfumeScreen extends Component {
         this.rightSearchTimer = null;
         
         onMounted(async () => {
+            // Load saved table column widths and names from localStorage
+            this.loadOrderTableColumnWidths();
+            this.loadOrderTableColumnNames();
+            
             // Set user name
             if (window.odoo && window.odoo.session_info) {
                 this.state.userName = window.odoo.session_info.name || window.odoo.session_info.username || 'Cashier';
@@ -3407,6 +3442,142 @@ export class PosPerfumeScreen extends Component {
     togglePlasticFilterHandler(value) {
         const key = `togglePlasticFilter_${value}`;
         return this.getHandler(key, () => () => this.togglePlasticFilter(value));
+    }
+    
+    /**
+     * Load order table column widths from localStorage
+     */
+    loadOrderTableColumnWidths() {
+        try {
+            const saved = localStorage.getItem('pos_perfume_order_table_widths');
+            if (saved) {
+                const widths = JSON.parse(saved);
+                this.state.orderTableColumnWidths = { ...this.state.orderTableColumnWidths, ...widths };
+            }
+        } catch (e) {
+            console.warn('Failed to load table column widths from localStorage:', e);
+        }
+    }
+    
+    /**
+     * Load order table column names from localStorage
+     */
+    loadOrderTableColumnNames() {
+        try {
+            const saved = localStorage.getItem('pos_perfume_order_table_names');
+            if (saved) {
+                const names = JSON.parse(saved);
+                this.state.orderTableColumnNames = { ...this.state.orderTableColumnNames, ...names };
+            }
+        } catch (e) {
+            console.warn('Failed to load table column names from localStorage:', e);
+        }
+    }
+    
+    /**
+     * Save order table column widths to localStorage
+     */
+    saveOrderTableColumnWidths() {
+        try {
+            localStorage.setItem('pos_perfume_order_table_widths', JSON.stringify(this.state.orderTableColumnWidths));
+        } catch (e) {
+            console.warn('Failed to save table column widths to localStorage:', e);
+        }
+    }
+    
+    /**
+     * Save order table column names to localStorage
+     */
+    saveOrderTableColumnNames() {
+        try {
+            localStorage.setItem('pos_perfume_order_table_names', JSON.stringify(this.state.orderTableColumnNames));
+        } catch (e) {
+            console.warn('Failed to save table column names to localStorage:', e);
+        }
+    }
+    
+    /**
+     * Toggle order table edit mode
+     */
+    toggleOrderTableEditMode() {
+        this.state.orderTableEditMode = !this.state.orderTableEditMode;
+        if (!this.state.orderTableEditMode) {
+            this.state.resizingOrderColumn = null;
+            this.state.editingColumnName = null;
+            // Save widths and names when exiting edit mode
+            this.saveOrderTableColumnWidths();
+            this.saveOrderTableColumnNames();
+        }
+    }
+    
+    /**
+     * Start editing column name
+     */
+    startEditingColumnName(columnName) {
+        if (!this.state.orderTableEditMode) return;
+        this.state.editingColumnName = columnName;
+    }
+    
+    /**
+     * Save column name
+     */
+    saveColumnName(columnName, newName) {
+        if (newName && newName.trim()) {
+            this.state.orderTableColumnNames[columnName] = newName.trim();
+            this.saveOrderTableColumnNames();
+        }
+        this.state.editingColumnName = null;
+    }
+    
+    /**
+     * Handle column name input keydown
+     */
+    handleColumnNameKeyDown(columnName, event) {
+        if (event.key === 'Enter') {
+            this.saveColumnName(columnName, event.target.value);
+            event.target.blur();
+        } else if (event.key === 'Escape') {
+            this.cancelEditingColumnName();
+            event.target.blur();
+        }
+    }
+    
+    /**
+     * Cancel editing column name
+     */
+    cancelEditingColumnName() {
+        this.state.editingColumnName = null;
+    }
+    
+    /**
+     * Start order column resize
+     */
+    startOrderColumnResize(columnName, event) {
+        if (!this.state.orderTableEditMode) return;
+        event.preventDefault();
+        event.stopPropagation();
+        this.state.resizingOrderColumn = columnName;
+        
+        const startX = event.clientX;
+        const startWidth = parseInt(this.state.orderTableColumnWidths[columnName]) || 100;
+        
+        const doResize = (e) => {
+            if (this.state.resizingOrderColumn !== columnName) return;
+            const diff = e.clientX - startX;
+            const newWidth = Math.max(30, startWidth + diff);
+            this.state.orderTableColumnWidths[columnName] = newWidth + 'px';
+        };
+        
+        const stopResize = () => {
+            this.state.resizingOrderColumn = null;
+            document.removeEventListener('mousemove', doResize);
+            document.removeEventListener('mouseup', stopResize);
+            // Save widths after resize
+            this.saveOrderTableColumnWidths();
+        };
+        
+        document.addEventListener('mousemove', doResize);
+        document.addEventListener('mouseup', stopResize);
     }
     
     isBrandFilterActiveHandler(brand) {

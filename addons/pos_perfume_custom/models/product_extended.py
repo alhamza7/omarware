@@ -157,15 +157,37 @@ class ProductProductExtended(models.Model):
         """
         Search products with full details: prices, warehouses, stock
         Returns data for the right panel search table
+        
+        Special search rules:
+        - If search_term is "-", search only for codes starting with "S"
+        - If search_term is numeric only, use exact match instead of partial match
         """
-        domain = [
-            ('sale_ok', '=', True),
-            '|', '|', '|',
-            ('name', 'ilike', search_term),
-            ('default_code', 'ilike', search_term),
-            ('barcode', 'ilike', search_term),
-            ('foreign_name', 'ilike', search_term) if 'foreign_name' in self._fields else ('name', 'ilike', search_term),
-        ]
+        # Normalize search term
+        search_term = (search_term or '').strip()
+        
+        domain = [('sale_ok', '=', True)]
+        
+        # Special case: "-" searches for codes starting with "S"
+        if search_term == '-':
+            domain.append(('default_code', '=like', 'S%'))
+        # Special case: numeric only search - use exact match only
+        elif search_term.isdigit():
+            # For numeric search, use exact match on default_code and barcode only
+            # This ensures that searching for "1110" returns only "1110" and not "1111"
+            domain.extend([
+                '|',
+                ('default_code', '=', search_term),
+                ('barcode', '=', search_term),
+            ])
+        else:
+            # Normal search: partial match on all fields
+            domain.extend([
+                '|', '|', '|',
+                ('name', 'ilike', search_term),
+                ('default_code', 'ilike', search_term),
+                ('barcode', 'ilike', search_term),
+                ('foreign_name', 'ilike', search_term) if 'foreign_name' in self._fields else ('name', 'ilike', search_term),
+            ])
         
         products = self.search(domain, limit=limit, order='name')
         
