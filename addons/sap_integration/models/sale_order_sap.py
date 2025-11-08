@@ -275,15 +275,74 @@ class SaleOrder(models.Model):
                 # يمكن إضافة mapping للضريبة هنا
                 # line_data['TaxCode'] = tax.code or tax.name
             
-            # إضافة كود المستودع إذا كان متوفراً
-            # يمكن إضافة mapping للمستودع هنا في المستقبل
-            # if quotation.warehouse_id:
-            #     line_data['WarehouseCode'] = quotation.warehouse_id.code
+            # إضافة كود المستودع (WarehouseCode) من Sale Line
+            warehouse_code = None
+            
+            # 1. محاولة الحصول من order line (product_warehouse_id من sale_order_line_multi_warehouse)
+            if hasattr(line, 'product_warehouse_id') and line.product_warehouse_id:
+                warehouse = line.product_warehouse_id
+                _logger.info(f"Found warehouse in order line: {warehouse.name} (ID: {warehouse.id})")
+                
+                # البحث عن sap_warehouse_code من sap.product.warehouse.info
+                if backend:
+                    warehouse_info = self.env['sap.product.warehouse.info'].search([
+                        ('warehouse_id', '=', warehouse.id),
+                        ('backend_id', '=', backend.id)
+                    ], limit=1)
+                    if warehouse_info and warehouse_info.sap_warehouse_code:
+                        warehouse_code = warehouse_info.sap_warehouse_code
+                        _logger.info(f"Found WarehouseCode from sap.product.warehouse.info: {warehouse_code}")
+                    elif warehouse.code:
+                        # استخدام code من warehouse إذا لم يوجد في sap.product.warehouse.info
+                        warehouse_code = warehouse.code
+                        _logger.info(f"Using warehouse code as WarehouseCode: {warehouse_code}")
+                else:
+                    # إذا لم يكن backend متوفراً، استخدام warehouse.code مباشرة
+                    if warehouse.code:
+                        warehouse_code = warehouse.code
+                        _logger.info(f"Using warehouse code directly (no backend): {warehouse_code}")
+            
+            # 2. إذا لم يوجد في order line، استخدام warehouse من quotation
+            if not warehouse_code and quotation.warehouse_id:
+                warehouse = quotation.warehouse_id
+                _logger.info(f"Using warehouse from quotation: {warehouse.name} (ID: {warehouse.id})")
+                
+                # البحث عن sap_warehouse_code من sap.product.warehouse.info
+                if backend:
+                    warehouse_info = self.env['sap.product.warehouse.info'].search([
+                        ('warehouse_id', '=', warehouse.id),
+                        ('backend_id', '=', backend.id)
+                    ], limit=1)
+                    if warehouse_info and warehouse_info.sap_warehouse_code:
+                        warehouse_code = warehouse_info.sap_warehouse_code
+                        _logger.info(f"Found WarehouseCode from quotation warehouse: {warehouse_code}")
+                    elif warehouse.code:
+                        # استخدام code من warehouse إذا لم يوجد في sap.product.warehouse.info
+                        warehouse_code = warehouse.code
+                        _logger.info(f"Using quotation warehouse code as WarehouseCode: {warehouse_code}")
+                else:
+                    # إذا لم يكن backend متوفراً، استخدام warehouse.code مباشرة
+                    if warehouse.code:
+                        warehouse_code = warehouse.code
+                        _logger.info(f"Using quotation warehouse code directly (no backend): {warehouse_code}")
+            
+            # 3. إضافة WarehouseCode إلى line_data إذا كان موجوداً
+            if warehouse_code:
+                line_data['WarehouseCode'] = warehouse_code
+                _logger.info(f"✓ Added WarehouseCode={warehouse_code} to DocumentLine for ItemCode={line_data.get('ItemCode')}")
+            else:
+                _logger.warning(f"✗ No WarehouseCode found for DocumentLine - ItemCode={line_data.get('ItemCode')}")
             
             document_lines.append(line_data)
         
         if not document_lines:
             raise UserError("لا يمكن إرسال quotation بدون سطور")
+        
+        # Log all document lines before sending
+        _logger.info(f"=== Prepared {len(document_lines)} DocumentLines for SAP ===")
+        for idx, line in enumerate(document_lines):
+            _logger.info(f"DocumentLine[{idx}]: ItemCode='{line.get('ItemCode')}', Quantity={line.get('Quantity')}, UnitPrice={line.get('UnitPrice')}, UoMEntry={line.get('UoMEntry', 'NOT SET')}, WarehouseCode={line.get('WarehouseCode', 'NOT SET')}")
+        _logger.info("=== End of DocumentLines ===")
         
         # إعداد بيانات الوثيقة
         quotation_data = {

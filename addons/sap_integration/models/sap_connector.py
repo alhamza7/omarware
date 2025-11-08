@@ -155,12 +155,17 @@ class SapConnector(models.Model):
             
             while has_more:
                 # Build query parameters with pagination
+                # جلب Business Partners التي تبدأ بـ IBG أو OBG بغض النظر عن CardType
+                filter_query = "(startswith(CardCode, 'IBG') or startswith(CardCode, 'OBG'))"
+                
                 params = {
                     '$top': batch_size,
                     '$skip': skip,
-                    '$filter': "CardType eq 'C'",  # Customer type
+                    '$filter': filter_query,
                     '$orderby': 'CardCode'
                 }
+                
+                _logger.info(f"Using filter: {filter_query}")
                 
                 # Fetch batch
                 _logger.info(f"Fetching customers batch: skip={skip}, top={batch_size}")
