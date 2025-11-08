@@ -2553,19 +2553,41 @@ export class PosPerfumeScreen extends Component {
     async addProductFromRightPanel(product) {
         // Find empty line
         let line = this.state.currentOrder.lines.find(l => !l.product_id);
+        let lineIndex;
         
         if (!line) {
             // Add new line
             const newLine = this.createEmptyLine(this.state.currentOrder.lines.length + 1);
             this.state.currentOrder.lines.push(newLine);
             line = newLine;
+            lineIndex = this.state.currentOrder.lines.length - 1;
+        } else {
+            // Get index of existing line
+            lineIndex = this.state.currentOrder.lines.findIndex(l => l === line);
+            if (lineIndex === -1) {
+                // Fallback: use indexOf
+                lineIndex = this.state.currentOrder.lines.indexOf(line);
+            }
         }
         
-        // Set product
-        line.product_id = product.id;
-        line.productName = product.name;
+        // Verify lineIndex is valid
+        if (lineIndex === -1 || lineIndex >= this.state.currentOrder.lines.length) {
+            console.error(`Invalid lineIndex: ${lineIndex}, lines length: ${this.state.currentOrder.lines.length}`);
+            return;
+        }
         
-        const lineIndex = this.state.currentOrder.lines.indexOf(line);
+        // Verify line still exists before setting product
+        if (!this.state.currentOrder.lines[lineIndex]) {
+            console.error(`Line at index ${lineIndex} disappeared before setting product`);
+            return;
+        }
+        
+        // Re-get line reference to ensure it's current
+        let currentLine = this.state.currentOrder.lines[lineIndex];
+        
+        // Set product
+        currentLine.product_id = product.id;
+        currentLine.productName = product.name;
         
         // Load UoMs and warehouses
         await Promise.all([
@@ -2573,28 +2595,53 @@ export class PosPerfumeScreen extends Component {
             this.loadAvailableWarehousesFromProduct(lineIndex, product)
         ]);
         
+        // Verify line still exists after async operations
+        if (!this.state.currentOrder.lines[lineIndex]) {
+            console.error(`Line at index ${lineIndex} disappeared after loading UoMs/warehouses`);
+            return;
+        }
+        
+        // Re-get line reference again
+        currentLine = this.state.currentOrder.lines[lineIndex];
+        
         // Load product info
         await this.loadProductInfo(lineIndex, product.id);
         
+        // Verify line still exists after loading product info
+        if (!this.state.currentOrder.lines[lineIndex]) {
+            console.error(`Line at index ${lineIndex} disappeared after loading product info`);
+            return;
+        }
+        
+        // Re-get line reference one more time
+        currentLine = this.state.currentOrder.lines[lineIndex];
+        
         // Auto-select UOM based on active unit filter
-        if (this.state.activeUnitFilter && line.availableUoms && line.availableUoms.length > 0) {
-            const targetUnit = this.findUomByFilter(line.availableUoms, this.state.activeUnitFilter.filter);
+        if (this.state.activeUnitFilter && currentLine.availableUoms && currentLine.availableUoms.length > 0) {
+            const targetUnit = this.findUomByFilter(currentLine.availableUoms, this.state.activeUnitFilter.filter);
             if (targetUnit) {
-                line.uom_id = targetUnit.id;
-                line.uomName = targetUnit.name;
-                line.uomValid = true;
+                currentLine.uom_id = targetUnit.id;
+                currentLine.uomName = targetUnit.name;
+                currentLine.uomValid = true;
                 
                 // Update price if available
                 if (targetUnit.price !== undefined) {
-                    line.unitPrice = targetUnit.price;
+                    currentLine.unitPrice = targetUnit.price;
                 } else {
                     // Call onchange to get price
                     await this.onUomChange(lineIndex);
                 }
                 
-                this.calculateLine(line);
+                this.calculateLine(currentLine);
                 this.calculateTotals();
             }
+        }
+        
+        // Add new empty line if we're at the last line
+        const isLastLine = lineIndex === this.state.currentOrder.lines.length - 1;
+        if (isLastLine) {
+            const newEmptyLine = this.createEmptyLine(this.state.currentOrder.lines.length + 1);
+            this.state.currentOrder.lines.push(newEmptyLine);
         }
         
         // Clear search and reset selection
@@ -2618,7 +2665,24 @@ export class PosPerfumeScreen extends Component {
      * Load warehouses from product data (from right panel)
      */
     async loadAvailableWarehousesFromProduct(lineIndex, product) {
+        // Verify lineIndex is valid first
+        if (lineIndex === -1 || lineIndex < 0 || !this.state.currentOrder.lines || lineIndex >= this.state.currentOrder.lines.length) {
+            console.error(`Invalid lineIndex: ${lineIndex}, lines length: ${this.state.currentOrder.lines ? this.state.currentOrder.lines.length : 0}`);
+            return;
+        }
+        
         const line = this.state.currentOrder.lines[lineIndex];
+        
+        // Check if line exists
+        if (!line) {
+            console.error(`Line at index ${lineIndex} not found`);
+            return;
+        }
+        
+        // Initialize availableWarehouses if it doesn't exist
+        if (!line.availableWarehouses) {
+            line.availableWarehouses = [];
+        }
         
         line.availableWarehouses = product.warehouses || [];
         
