@@ -9,7 +9,7 @@ Additional SAP warehouse information for products.
 Main inventory data goes to stock.quant and stock.warehouse.orderpoint.
 """
 
-from odoo import models, fields, api
+from odoo import models, fields, api, _
 from odoo.exceptions import UserError, ValidationError
 import logging
 
@@ -551,6 +551,59 @@ class SapProductWarehouseInfo(models.Model):
             'res_id': self.orderpoint_id.id,
             'view_mode': 'form',
             'target': 'current',
+        }
+    
+    @api.model
+    def action_remove_duplicates(self):
+        """
+        Remove duplicate warehouse info records.
+        Keeps the record with the latest last_sync_date for each (product_id, warehouse_id, backend_id) combination.
+        Can be called from server action or button.
+        """
+        _logger.info("Starting duplicate removal process...")
+        
+        # Use model to access all records
+        model = self.env['sap.product.warehouse.info']
+        
+        # Find duplicates: same product, warehouse, and backend
+        duplicates_query = """
+            SELECT product_id, warehouse_id, backend_id, COUNT(*) as count
+            FROM sap_product_warehouse_info
+            GROUP BY product_id, warehouse_id, backend_id
+            HAVING COUNT(*) > 1
+        """
+        
+        self.env.cr.execute(duplicates_query)
+        duplicate_groups = self.env.cr.fetchall()
+        
+        total_removed = 0
+        
+        for product_id, warehouse_id, backend_id, count in duplicate_groups:
+            # Get all records for this combination, ordered by last_sync_date (newest first)
+            records = model.search([
+                ('product_id', '=', product_id),
+                ('warehouse_id', '=', warehouse_id),
+                ('backend_id', '=', backend_id)
+            ], order='last_sync_date DESC NULLS LAST, id DESC')
+            
+            if len(records) > 1:
+                # Keep the first one (newest), delete the rest
+                to_delete = records[1:]
+                delete_ids = to_delete.ids
+                to_delete.unlink()
+                total_removed += len(delete_ids)
+                _logger.info(f"Removed {len(delete_ids)} duplicate(s) for product_id={product_id}, warehouse_id={warehouse_id}, backend_id={backend_id}")
+        
+        _logger.info(f"Duplicate removal complete. Total records removed: {total_removed}")
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': _('Duplicates Removed'),
+                'message': _('Successfully removed %d duplicate record(s).') % total_removed,
+                'type': 'success',
+                'sticky': False,
+            }
         }
     
     def action_sync_from_sap(self):
