@@ -66,15 +66,9 @@ export class PosPerfumeScreen extends Component {
             // Right panel search
             rightSearchTerm: '',
             rightSearchResults: [],
-            rightSearchResultsOriginal: [],  // Original results before filtering
             rightSearchLoading: false,
             selectedRightProduct: null,
             selectedRightProductIndex: 0,
-            
-            // Filter state
-            activeFilters: [],              // Array of active brand filters
-            activeUnitFilter: null,         // Active unit filter object or null
-            fullPlasticFilterActive: null,  // true/false/null for full plastic filter
             
             // UI state
             exchangeRate: 1300,
@@ -1548,62 +1542,6 @@ export class PosPerfumeScreen extends Component {
     }
     
     /**
-     * Get customer display name
-     */
-    getCustomerDisplayName(partnerId) {
-        if (!partnerId) return '';
-        if (Array.isArray(partnerId)) {
-            return partnerId[1] || '';
-        }
-        return this.state.currentOrder.partner || '';
-    }
-    
-    /**
-     * Handle customer search input
-     */
-    onCustomerSearchInput(ev) {
-        // Use CustomerSearch component functionality
-        // This will be handled by opening the customer search
-    }
-    
-    /**
-     * Handle customer search focus
-     */
-    onCustomerSearchFocus(ev) {
-        // Open customer search dropdown
-        this.openCustomerSearch();
-    }
-    
-    /**
-     * Handle customer search blur
-     */
-    onCustomerSearchBlur(ev) {
-        // Close dropdown after delay
-        setTimeout(() => {
-            // Dropdown will close automatically
-        }, 200);
-    }
-    
-    /**
-     * Handle customer search keydown
-     */
-    handleCustomerSearchKeyDown(ev) {
-        if (ev.key === 'Enter') {
-            ev.preventDefault();
-            this.openCustomerSearch();
-        }
-    }
-    
-    /**
-     * Open customer search (use CustomerSearch component)
-     */
-    openCustomerSearch() {
-        // Trigger customer search - we'll use the existing CustomerSearch component
-        // For now, open customer dialog
-        this.openCustomerDialog();
-    }
-    
-    /**
      * Save order
      * Returns orderId if successful, false otherwise
      */
@@ -1835,224 +1773,9 @@ export class PosPerfumeScreen extends Component {
     }
     
     /**
-     * Save order with SAP sync - Save and sync to SAP if there are changes
-     */
-    async saveOrderWithSync() {
-        if (!this.state.currentOrder.partner_id) {
-            this.notification.add(_t("Please select a customer"), { type: "warning" });
-            return false;
-        }
-        
-        const lines = this.state.currentOrder.lines.filter(l => l.product_id);
-        if (lines.length === 0) {
-            this.notification.add(_t("Please add at least one product"), { type: "warning" });
-            return false;
-        }
-        
-        try {
-            // Get current order state
-            let currentState = 'draft';
-            let saleOrderId = null;
-            if (this.state.currentOrder.order_id) {
-                const orderIds = Array.isArray(this.state.currentOrder.order_id) 
-                    ? [this.state.currentOrder.order_id[0]] 
-                    : [this.state.currentOrder.order_id];
-                const orders = await this.orm.read('pos.perfume.order', orderIds, ['state', 'sale_order_id']);
-                if (orders.length > 0) {
-                    currentState = orders[0].state;
-                    saleOrderId = orders[0].sale_order_id ? (Array.isArray(orders[0].sale_order_id) ? orders[0].sale_order_id[0] : orders[0].sale_order_id) : null;
-                }
-            }
-            
-            // Save the POS order
-            const orderId = await this.saveOrder(currentState);
-            if (!orderId) {
-                return false;
-            }
-            
-            // If there's a sale order, update it and sync to SAP
-            if (saleOrderId) {
-                try {
-                    // First, check the sale order state
-                    const saleOrders = await this.orm.read('sale.order', [saleOrderId], ['state', 'order_line']);
-                    if (saleOrders.length === 0) {
-                        throw new Error('Sale order not found');
-                    }
-                    
-                    const saleOrder = saleOrders[0];
-                    const isConfirmed = saleOrder.state === 'sale';
-                    
-                    if (isConfirmed) {
-                        // For confirmed sale orders, we can't delete lines
-                        // Instead, we'll update existing lines or add new ones
-                        const existingLineIds = saleOrder.order_line || [];
-                        const orderLines = [];
-                        
-                        // Update existing lines or add new ones
-                        lines.forEach((line, index) => {
-                            if (index < existingLineIds.length) {
-                                // Update existing line
-                                const lineId = Array.isArray(existingLineIds[index]) 
-                                    ? existingLineIds[index][0] 
-                                    : existingLineIds[index];
-                                orderLines.push([1, lineId, {
-                                    product_uom_qty: line.quantity,
-                                    product_uom_id: line.uom_id,
-                                    price_unit: line.unitPrice,
-                                    discount: line.discountPercent,
-                                    product_warehouse_id: line.warehouse_id,
-                                }]);
-                            } else {
-                                // Add new line
-                                orderLines.push([0, 0, {
-                                    product_id: line.product_id,
-                                    product_uom_qty: line.quantity,
-                                    product_uom_id: line.uom_id,
-                                    price_unit: line.unitPrice,
-                                    discount: line.discountPercent,
-                                    product_warehouse_id: line.warehouse_id,
-                                }]);
-                            }
-                        });
-                        
-                        // Set quantity to 0 for lines that are no longer in the POS order
-                        for (let i = lines.length; i < existingLineIds.length; i++) {
-                            const lineId = Array.isArray(existingLineIds[i]) 
-                                ? existingLineIds[i][0] 
-                                : existingLineIds[i];
-                            orderLines.push([1, lineId, {
-                                product_uom_qty: 0,
-                            }]);
-                        }
-                        
-                        await this.orm.write('sale.order', [saleOrderId], {
-                            order_line: orderLines,
-                        });
-                    } else {
-                        // For draft/quotation orders, we can clear and add new lines
-                        const orderLines = lines.map((line, index) => [0, 0, {
-                            product_id: line.product_id,
-                            product_uom_qty: line.quantity,
-                            product_uom_id: line.uom_id,
-                            price_unit: line.unitPrice,
-                            discount: line.discountPercent,
-                            product_warehouse_id: line.warehouse_id,
-                        }]);
-                        
-                        await this.orm.write('sale.order', [saleOrderId], {
-                            order_line: [[5, 0, 0], ...orderLines], // Clear and add new lines
-                        });
-                    }
-                    
-                    // Trigger SAP sync by calling action_manual_sync_to_sap
-                    // This ensures sync happens even if write() doesn't trigger it
-                    try {
-                        await this.orm.call('sale.order', 'action_manual_sync_to_sap', [[saleOrderId]]);
-                        console.log('SAP sync successful for order:', saleOrderId);
-                        this.notification.add(_t("Order saved and synced to SAP!"), { type: "success" });
-                    } catch (syncError) {
-                        console.error('SAP sync error:', syncError);
-                        // The write() method should trigger automatic sync, but log the error
-                        let syncErrorMsg = syncError.message || 'Unknown error';
-                        if (syncError.data && syncError.data.message) {
-                            syncErrorMsg = syncError.data.message;
-                        }
-                        console.warn('SAP sync failed, but order was saved. Error:', syncErrorMsg);
-                        this.notification.add(_t("Order saved! SAP sync attempted but may have failed. Check logs."), { type: "warning" });
-                    }
-                    
-                    // Reload order to get updated SAP info
-                    await this.loadOrder(orderId);
-                } catch (error) {
-                    console.error('Error updating sale order:', error);
-                    let errorMessage = error.message || 'Unknown error';
-                    if (error.data && error.data.message) {
-                        errorMessage = error.data.message;
-                    } else if (error.args && error.args[0]) {
-                        errorMessage = error.args[0];
-                    }
-                    this.notification.add(_t("Order saved, but error updating sale order: ") + errorMessage, { type: "warning" });
-                }
-            } else {
-                this.notification.add(_t("Order saved successfully!"), { type: "success" });
-            }
-            
-            return orderId;
-        } catch (error) {
-            console.error("Error saving order:", error);
-            this.notification.add(_t("Failed to save order: ") + error.message, { type: "danger" });
-            return false;
-        }
-    }
-    
-    /**
-     * Confirm sale order - Creates and confirms sale.order, or converts quotation to sale order
+     * Confirm sale order - Creates and confirms sale.order
      */
     async confirmSaleOrder() {
-        // If order is already a quotation, convert it to sale order
-        if (this.state.currentOrder.order_id) {
-            const orderIds = Array.isArray(this.state.currentOrder.order_id) 
-                ? [this.state.currentOrder.order_id[0]] 
-                : [this.state.currentOrder.order_id];
-            const orders = await this.orm.read('pos.perfume.order', orderIds, ['state', 'sale_order_id']);
-            
-            if (orders.length > 0 && orders[0].state === 'quotation' && orders[0].sale_order_id) {
-                // Convert quotation to sale order
-                const saleOrderId = Array.isArray(orders[0].sale_order_id) 
-                    ? orders[0].sale_order_id[0] 
-                    : orders[0].sale_order_id;
-                
-                try {
-                    // First save any changes
-                    await this.saveOrderWithSync();
-                    
-                    // Read sale order to check its state
-                    const saleOrders = await this.orm.read('sale.order', [saleOrderId], ['state', 'name']);
-                    if (saleOrders.length === 0) {
-                        throw new Error('Sale order not found');
-                    }
-                    
-                    const saleOrder = saleOrders[0];
-                    console.log('[ConfirmSaleOrder] Sale order state:', saleOrder.state, 'Name:', saleOrder.name);
-                    
-                    // Confirm the sale order (this will change state from quotation to sale)
-                    try {
-                        await this.orm.call('sale.order', 'action_confirm', [[saleOrderId]]);
-                    } catch (confirmError) {
-                        console.error('[ConfirmSaleOrder] Error confirming sale order:', confirmError);
-                        // Try to get more details about the error
-                        let errorMsg = confirmError.message || 'Unknown error';
-                        if (confirmError.data && confirmError.data.message) {
-                            errorMsg = confirmError.data.message;
-                        } else if (confirmError.args && confirmError.args[0]) {
-                            errorMsg = confirmError.args[0];
-                        }
-                        throw new Error(`Cannot confirm sale order: ${errorMsg}`);
-                    }
-                    
-                    // Update POS order state to 'sale'
-                    await this.orm.write('pos.perfume.order', orderIds, { state: 'sale' });
-                    
-                    // Reload order to get updated state and SAP info
-                    await this.loadOrder(orderIds[0]);
-                    
-                    this.notification.add(_t("Quotation converted to Sale Order and synced to SAP!"), { type: "success" });
-                    return;
-                } catch (error) {
-                    console.error('Error converting quotation to sale order:', error);
-                    let errorMessage = error.message || 'Unknown error';
-                    if (error.data && error.data.message) {
-                        errorMessage = error.data.message;
-                    } else if (error.args && error.args[0]) {
-                        errorMessage = error.args[0];
-                    }
-                    this.notification.add(_t("Failed to convert quotation: ") + errorMessage, { type: "danger" });
-                    return;
-                }
-            }
-        }
-        
-        // Otherwise, create new sale order
         const orderId = await this.saveOrder('draft');
         if (orderId) {
             try {
@@ -2063,14 +1786,26 @@ export class PosPerfumeScreen extends Component {
                     // Confirm the sale order
                     await this.orm.call('sale.order', 'action_confirm', [[result.res_id]]);
                     
-                    // Update POS order state to 'sale'
-                    const orderIds = Array.isArray(orderId) ? [orderId[0]] : [orderId];
-                    await this.orm.write('pos.perfume.order', orderIds, { state: 'sale' });
+                    this.notification.add(_t("Sale order confirmed! Opening..."), { type: "success" });
                     
-                    // Reload order to get updated state and SAP info
-                    await this.loadOrder(orderIds[0]);
+                    // Open the confirmed sale order - ensure action is properly formatted
+                    try {
+                        const action = {
+                            type: result.type || 'ir.actions.act_window',
+                            res_model: result.res_model || 'sale.order',
+                            res_id: result.res_id,
+                            view_mode: result.view_mode || 'form',
+                            views: result.views || [[false, 'form']],
+                            target: result.target || 'current',
+                        };
+                        await this.action.doAction(action);
+                    } catch (actionError) {
+                        console.error('[Sale Order] Error opening sale order:', actionError);
+                        // Fallback: open in new window
+                        window.open(`/web#id=${result.res_id}&model=sale.order&view_type=form`, '_blank');
+                    }
                     
-                    this.notification.add(_t("Sale Order created and confirmed!"), { type: "success" });
+                    this.resetOrder();
                 }
             } catch (error) {
                 console.error('Error confirming sale order:', error);
@@ -2109,7 +1844,6 @@ export class PosPerfumeScreen extends Component {
             this.state.currentOrder.partner_id = null;
             this.state.currentOrder.orderNumber = 'New Order';
             this.state.currentOrder.order_id = null;
-            this.state.currentOrder.state = 'draft';
             this.state.currentOrder.sap_doc_num = null;
             this.state.currentOrder.sap_doc_entry = null;
             this.state.currentOrder.sap_synced = false;
@@ -2162,60 +1896,30 @@ export class PosPerfumeScreen extends Component {
     }
     
     /**
-     * Navigate to previous order - Always available, loads last order if no orders loaded
+     * Navigate to previous order
      */
     async navigateToPreviousOrder() {
-        // If no orders loaded, load the last order first
-        if (this.state.previousOrders.length === 0) {
-            await this.openPreviousOrders();
-            // Wait a bit for orders to load
-            if (this.state.previousOrders.length > 0) {
-                this.state.currentOrderIndex = 0;
-                await this.loadOrder(this.state.previousOrders[0].id);
-                return;
-            }
-        }
-        
-        // If we have orders and we're at the first one, go to the last one (wrap around)
-        if (this.state.currentOrderIndex <= 0) {
-            this.state.currentOrderIndex = this.state.previousOrders.length - 1;
-        } else {
+        if (this.state.currentOrderIndex > 0) {
             this.state.currentOrderIndex--;
-        }
-        
-        const order = this.state.previousOrders[this.state.currentOrderIndex];
-        if (order) {
-            await this.loadOrder(order.id);
-            this.state.showPreviousOrdersDialog = false;
+            const order = this.state.previousOrders[this.state.currentOrderIndex];
+            if (order) {
+                await this.loadOrder(order.id);
+                this.state.showPreviousOrdersDialog = false;
+            }
         }
     }
     
     /**
-     * Navigate to next order - Always available, loads last order if no orders loaded
+     * Navigate to next order
      */
     async navigateToNextOrder() {
-        // If no orders loaded, load the last order first
-        if (this.state.previousOrders.length === 0) {
-            await this.openPreviousOrders();
-            // Wait a bit for orders to load
-            if (this.state.previousOrders.length > 0) {
-                this.state.currentOrderIndex = 0;
-                await this.loadOrder(this.state.previousOrders[0].id);
-                return;
-            }
-        }
-        
-        // If we have orders and we're at the last one, go to the first one (wrap around)
-        if (this.state.currentOrderIndex >= this.state.previousOrders.length - 1) {
-            this.state.currentOrderIndex = 0;
-        } else {
+        if (this.state.currentOrderIndex < this.state.previousOrders.length - 1) {
             this.state.currentOrderIndex++;
-        }
-        
-        const order = this.state.previousOrders[this.state.currentOrderIndex];
-        if (order) {
-            await this.loadOrder(order.id);
-            this.state.showPreviousOrdersDialog = false;
+            const order = this.state.previousOrders[this.state.currentOrderIndex];
+            if (order) {
+                await this.loadOrder(order.id);
+                this.state.showPreviousOrdersDialog = false;
+            }
         }
     }
     
@@ -2399,7 +2103,6 @@ export class PosPerfumeScreen extends Component {
             this.state.currentOrder.orderNumber = order.name;
             this.state.currentOrder.partner_id = order.partner_id ? order.partner_id[0] : null;
             this.state.currentOrder.pricelist_id = order.pricelist_id ? order.pricelist_id[0] : null;
-            this.state.currentOrder.state = order.state || 'draft';
             // Update SAP fields
             this.state.currentOrder.sap_doc_num = order.sap_doc_num || null;
             this.state.currentOrder.sap_doc_entry = order.sap_doc_entry || null;
@@ -2517,17 +2220,11 @@ export class PosPerfumeScreen extends Component {
                 
                 console.log(`[Right Panel] Found ${products.length} products with prices and stock`);
                 
-                // Store original results (before filtering)
-                this.state.rightSearchResultsOriginal = products;
-                
-                // Apply filters
                 this.state.rightSearchResults = products;
-                this.applyFiltersToResults();
-                
                 // Reset selection when new results arrive
                 this.state.selectedRightProductIndex = 0;
-                if (this.state.rightSearchResults.length > 0) {
-                    this.state.selectedRightProduct = this.state.rightSearchResults[0].id;
+                if (products.length > 0) {
+                    this.state.selectedRightProduct = products[0].id;
                 } else {
                     this.state.selectedRightProduct = null;
                 }
@@ -2575,27 +2272,6 @@ export class PosPerfumeScreen extends Component {
         
         // Load product info
         await this.loadProductInfo(lineIndex, product.id);
-        
-        // Auto-select UOM based on active unit filter
-        if (this.state.activeUnitFilter && line.availableUoms && line.availableUoms.length > 0) {
-            const targetUnit = this.findUomByFilter(line.availableUoms, this.state.activeUnitFilter.filter);
-            if (targetUnit) {
-                line.uom_id = targetUnit.id;
-                line.uomName = targetUnit.name;
-                line.uomValid = true;
-                
-                // Update price if available
-                if (targetUnit.price !== undefined) {
-                    line.unitPrice = targetUnit.price;
-                } else {
-                    // Call onchange to get price
-                    await this.onUomChange(lineIndex);
-                }
-                
-                this.calculateLine(line);
-                this.calculateTotals();
-            }
-        }
         
         // Clear search and reset selection
         this.state.rightSearchTerm = '';
@@ -2835,355 +2511,9 @@ export class PosPerfumeScreen extends Component {
         }
     }
     
-    // ============================================================
-    // FILTER FUNCTIONS - UI Handlers
-    // ============================================================
-    
-    /**
-     * Toggle brand filter
-     */
-    toggleBrandFilter(brand) {
-        const index = this.state.activeFilters.findIndex(f => f.prefix === brand);
-        if (index >= 0) {
-            this.state.activeFilters.splice(index, 1);
-        } else {
-            this.state.activeFilters.push({
-                prefix: brand,
-                name: brand,
-                type: 'brand'
-            });
-        }
-        this.applyFiltersToResults();
-    }
-    
-    /**
-     * Toggle unit filter
-     */
-    toggleUnitFilter(unit) {
-        if (this.state.activeUnitFilter && this.state.activeUnitFilter.filter === unit.filter) {
-            this.state.activeUnitFilter = null;
-        } else {
-            this.state.activeUnitFilter = unit;
-        }
-        this.applyFiltersToResults();
-    }
-    
-    /**
-     * Toggle plastic filter
-     */
-    togglePlasticFilter(value) {
-        this.state.fullPlasticFilterActive = value;
-        this.applyFiltersToResults();
-    }
-    
-    /**
-     * Check if brand filter is active
-     */
-    isBrandFilterActive(brand) {
-        return this.state.activeFilters.some(f => f.prefix === brand);
-    }
-    
-    /**
-     * Check if unit filter is active
-     */
-    isUnitFilterActive(filter) {
-        return this.state.activeUnitFilter && this.state.activeUnitFilter.filter === filter;
-    }
-    
-    // ============================================================
-    // FILTER FUNCTIONS - Filtering Logic
-    // ============================================================
-    
-    /**
-     * Apply all filters to search results
-     */
-    applyFiltersToResults() {
-        // Use original results if available, otherwise use current results
-        const sourceProducts = this.state.rightSearchResultsOriginal || this.state.rightSearchResults || [];
-        
-        if (sourceProducts.length === 0) {
-            this.state.rightSearchResults = [];
-            return;
-        }
-        
-        let filtered = [...sourceProducts];
-        
-        // 1. Filter by brands
-        filtered = this.filterProductsByBrand(filtered);
-        
-        // 2. Filter by plastic
-        filtered = this.filterProductsByPlastic(filtered);
-        
-        // 3. Filter by units (1KG, 0.5, 50, 100, 125 special case)
-        filtered = this.filterProductsBy025KgUnit(filtered);
-        
-        // Update results
-        this.state.rightSearchResults = filtered;
-    }
-    
-    /**
-     * Filter products by brand
-     * تعتمد فلاتر البراند على الكود (sub_sku أو default_code) فقط
-     * عند اختيار براند واحد: إظهار منتجات هذا البراند فقط
-     * عند اختيار عدة براندات: إظهار منتجات أي من البراندات المختارة (OR logic)
-     * إذا لم يتم اختيار أي براند: إظهار جميع المنتجات
-     */
-    filterProductsByBrand(products) {
-        if (!this.state.activeFilters || this.state.activeFilters.length === 0) {
-            return products; // لا توجد فلاتر نشطة، إرجاع جميع المنتجات
-        }
-        
-        const activeBrands = this.state.activeFilters.map(f => f.prefix.toUpperCase());
-        console.log('[Filter] Active brands:', activeBrands);
-        
-        return products.filter(product => {
-            // الاعتماد على الكود فقط (sub_sku أو default_code)
-            const sku = (product.sub_sku || product.default_code || '').toUpperCase();
-            
-            if (!sku) {
-                return false; // لا يوجد كود، إخفاء المنتج
-            }
-            
-            // التحقق من مطابقة المنتج مع أي من البراندات النشطة (OR logic)
-            const matches = this.state.activeFilters.some(filter => {
-                const prefix = filter.prefix.toUpperCase();
-                let matches = false;
-                
-                // حالات خاصة لكل براند
-                if (prefix === 'ADF') {
-                    // ADF -> الكود يبدأ بـ "ADF"
-                    matches = sku.startsWith('ADF');
-                }
-                else if (prefix === 'ROYAL') {
-                    // ROYAL -> الكود يبدأ بـ "R" (لكن ليس "ADF" أو "G" أو "EURO")
-                    // أو يبدأ بـ "ROYAL" أو "ROY"
-                    matches = (sku.startsWith('R') && !sku.startsWith('ADF') && !sku.startsWith('G') && !sku.startsWith('EURO')) 
-                           || sku.startsWith('ROYAL') 
-                           || sku.startsWith('ROY');
-                }
-                else if (prefix === 'GIVAUDAN') {
-                    // GIVAUDAN -> الكود يبدأ بـ "G" (لكن ليس "ADF" أو "R" أو "EURO")
-                    // أو يبدأ بـ "GIVAUDAN" أو "GIV"
-                    matches = (sku.startsWith('G') && !sku.startsWith('ADF') && !sku.startsWith('R') && !sku.startsWith('EURO')) 
-                           || sku.startsWith('GIVAUDAN') 
-                           || sku.startsWith('GIV');
-                }
-                else if (prefix === 'EURO') {
-                    // EURO: التحقق من وجود "N1" في الكود أو يبدأ بـ "EURO"
-                    matches = sku.includes('N1') || sku.startsWith('EURO');
-                }
-                else {
-                    // الحالة الافتراضية: التحقق من أن الكود يبدأ ببادئة البراند
-                    matches = sku.startsWith(prefix);
-                }
-                
-                if (matches) {
-                    console.log(`[Filter] Product ${sku} matches brand ${prefix}`);
-                }
-                
-                return matches;
-            });
-            
-            return matches;
-        });
-    }
-    
-    /**
-     * Filter products by plastic
-     */
-    filterProductsByPlastic(products) {
-        if (this.state.fullPlasticFilterActive === false) {
-            return products.filter(product => !this.isFullPlasticProduct(product));
-        }
-        return products;
-    }
-    
-    /**
-     * Check if product is full plastic
-     * تعتمد على UOM فقط (Unit of Measure)
-     */
-    isFullPlasticProduct(product) {
-        const keywords = ['فل بلاستك', 'فل بلاستيك', 'full plastic', 'fl plastic'];
-        
-        // Get UOM name from product - check multiple possible fields
-        let uomName = '';
-        
-        // Check sap_uom_group_name first
-        if (product.sap_uom_group_name) {
-            uomName = product.sap_uom_group_name;
-        }
-        // Check uom_name
-        else if (product.uom_name) {
-            uomName = product.uom_name;
-        }
-        // Check unit (if it's a string or object)
-        else if (product.unit) {
-            uomName = typeof product.unit === 'string' ? product.unit : (product.unit.name || '');
-        }
-        // Check availableUoms (from line)
-        else if (product.availableUoms && product.availableUoms.length > 0) {
-            uomName = product.availableUoms[0].name || '';
-        }
-        // Check processed_units, units, sub_units
-        else {
-            const allUnits = [
-                ...(product.processed_units || []),
-                ...(product.units || []),
-                ...(product.sub_units || [])
-            ];
-            
-            if (allUnits.length > 0) {
-                uomName = typeof allUnits[0] === 'string' ? allUnits[0] : (allUnits[0].name || '');
-            }
-        }
-        
-        // Check if UOM name contains any of the keywords
-        const uomNameLower = (uomName || '').toLowerCase();
-        return keywords.some(kw => uomNameLower.includes(kw.toLowerCase()));
-    }
-    
-    /**
-     * Filter products by 0.25KG unit (special case for 1KG, 0.5, 50, 100, 125)
-     */
-    filterProductsBy025KgUnit(products) {
-        if (!this.state.activeUnitFilter) {
-            return products;
-        }
-        
-        const specialFilters = ['1KG', '0.5', '50', '100', '125'];
-        if (!specialFilters.includes(this.state.activeUnitFilter.filter)) {
-            return products;
-        }
-        
-        return products.filter(product => {
-            if (this.shouldHideProduct(product)) {
-                return false;
-            }
-            return true;
-        });
-    }
-    
-    /**
-     * Check if product should be hidden
-     * تعتمد على UOM فقط (Unit of Measure)
-     * عند اختيار فلتر الوحدة (مثلاً 125g):
-     * - إظهار فقط منتجات "لك" (دائماً)
-     * - إظهار منتجات "فل بلاستك" (فقط إذا كان fullPlasticFilterActive === true)
-     * - إخفاء باقي المنتجات
-     */
-    shouldHideProduct(product) {
-        // Get UOM name from product - check multiple possible fields
-        let uomName = '';
-        
-        // Check sap_uom_group_name first
-        if (product.sap_uom_group_name) {
-            uomName = product.sap_uom_group_name;
-        }
-        // Check uom_name
-        else if (product.uom_name) {
-            uomName = product.uom_name;
-        }
-        // Check unit (if it's a string or object)
-        else if (product.unit) {
-            uomName = typeof product.unit === 'string' ? product.unit : (product.unit.name || '');
-        }
-        // Check availableUoms (from line)
-        else if (product.availableUoms && product.availableUoms.length > 0) {
-            uomName = product.availableUoms[0].name || '';
-        }
-        // Check processed_units, units, sub_units
-        else {
-            const allUnits = [
-                ...(product.processed_units || []),
-                ...(product.units || []),
-                ...(product.sub_units || [])
-            ];
-            
-            if (allUnits.length > 0) {
-                uomName = typeof allUnits[0] === 'string' ? allUnits[0] : (allUnits[0].name || '');
-            }
-        }
-        
-        const uomNameLower = (uomName || '').toLowerCase();
-        
-        // Check if "لك" product (UOM contains "لك")
-        if (uomNameLower.includes('لك')) {
-            return false; // Don't hide - always show "لك" products
-        }
-        
-        // Check if "فل بلاستك" product (UOM contains "فل بلاستك")
-        if (uomNameLower.includes('فل بلاستك') || uomNameLower.includes('فل بلاستيك')) {
-            // Show only if full plastic filter is active (true)
-            return this.state.fullPlasticFilterActive !== true;
-        }
-        
-        // Hide all other products (not "لك" and not "فل بلاستك")
-        return true;
-    }
-    
-    /**
-     * Find UOM by filter value (e.g., "125" -> "125g" or "125 غم")
-     */
-    findUomByFilter(availableUoms, filterValue) {
-        if (!availableUoms || availableUoms.length === 0) {
-            return null;
-        }
-        
-        // Map filter values to search patterns
-        const filterMap = {
-            '125': ['125', '125g', '125 غم', '125g', '125 جرام'],
-            '100': ['100', '100g', '100 غم', '100g', '100 جرام'],
-            '50': ['50', '50g', '50 غم', '50g', '50 جرام'],
-            '0.5': ['0.5', '0.5kg', '0.5 كغم', '500', '500g', '500 غم'],
-            '1KG': ['1', '1kg', '1 كغم', '1000', '1000g', '1000 غم'],
-            '0.25': ['0.25', '0.25kg', '0.25 كغم', '250', '250g', '250 غم']
-        };
-        
-        const searchPatterns = filterMap[filterValue] || [filterValue];
-        
-        // Search in UOM names
-        for (const uom of availableUoms) {
-            const uomName = (uom.name || '').toLowerCase();
-            for (const pattern of searchPatterns) {
-                if (uomName.includes(pattern.toLowerCase())) {
-                    return uom;
-                }
-            }
-        }
-        
-        // If not found, return first UOM
-        return availableUoms[0];
-    }
-    
     openProductPopupHandler(lineIndex) {
         const key = `openProductPopup_${lineIndex}`;
         return this.getHandler(key, () => () => this.openProductPopup(lineIndex));
-    }
-    
-    // Handler methods for filter functions
-    toggleBrandFilterHandler(brand) {
-        const key = `toggleBrandFilter_${brand}`;
-        return this.getHandler(key, () => () => this.toggleBrandFilter(brand));
-    }
-    
-    toggleUnitFilterHandler(unit) {
-        const key = `toggleUnitFilter_${unit.filter}`;
-        return this.getHandler(key, () => () => this.toggleUnitFilter(unit));
-    }
-    
-    togglePlasticFilterHandler(value) {
-        const key = `togglePlasticFilter_${value}`;
-        return this.getHandler(key, () => () => this.togglePlasticFilter(value));
-    }
-    
-    isBrandFilterActiveHandler(brand) {
-        const key = `isBrandFilterActive_${brand}`;
-        return this.getHandler(key, () => () => this.isBrandFilterActive(brand));
-    }
-    
-    isUnitFilterActiveHandler(filter) {
-        const key = `isUnitFilterActive_${filter}`;
-        return this.getHandler(key, () => () => this.isUnitFilterActive(filter));
     }
 }
 

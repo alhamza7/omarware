@@ -354,11 +354,15 @@ class SapServiceLayerConnection:
             headers = self._get_headers()
             
             _logger.info(f"Creating business partner in SAP: {url}")
+            _logger.info(f"Request data being sent: {json.dumps(partner_data, indent=2, default=str)}")
             response = self.session.post(url, json=partner_data, headers=headers, timeout=30)
+            
+            _logger.info(f"Response status code: {response.status_code}")
+            _logger.info(f"Response text: {response.text[:500]}")  # أول 500 حرف من الاستجابة
             
             if response.status_code in [200, 201]:
                 result = response.json()
-                _logger.info(f"Business partner created: {result.get('CardCode')}")
+                _logger.info(f"Business partner created successfully: {result.get('CardCode')}")
                 return result
             else:
                 error_msg = f"Error creating business partner: {response.status_code} - {response.text}"
@@ -366,7 +370,7 @@ class SapServiceLayerConnection:
                 raise Exception(error_msg)
                 
         except Exception as e:
-            _logger.error(f"Error creating business partner: {str(e)}")
+            _logger.error(f"Exception in create_business_partner: {str(e)}", exc_info=True)
             raise
     
     def update_business_partner(self, card_code, partner_data):
@@ -439,7 +443,12 @@ class SapServiceLayerConnection:
             url = f"{self.base_url}/Quotations"
             headers = self._get_headers()
             
-            _logger.info(f"Creating quotation in SAP: {url}")
+            # Log DocumentLines details before sending
+            document_lines = quotation_data.get('DocumentLines', [])
+            _logger.info(f"Creating quotation in SAP: {url}, DocumentLines count: {len(document_lines)}")
+            for idx, line in enumerate(document_lines):
+                _logger.info(f"Sending DocumentLine[{idx}]: ItemCode={line.get('ItemCode')}, UoMEntry={line.get('UoMEntry', 'NOT SET')}, Quantity={line.get('Quantity')}, UnitPrice={line.get('UnitPrice')}")
+            
             response = self.session.post(url, json=quotation_data, headers=headers, timeout=30)
             
             if response.status_code in [200, 201]:
@@ -474,6 +483,113 @@ class SapServiceLayerConnection:
             _logger.error(f"Error updating quotation: {str(e)}")
             return None
     
+    def convert_quotation_to_order(self, doc_entry):
+        """Convert quotation to sales order in SAP Service Layer
+        
+        Args:
+            doc_entry: The DocEntry of the quotation to convert
+            
+        Returns:
+            dict: The created sales order data with DocNum and DocEntry, or None if failed
+        """
+        try:
+            self._ensure_session()
+            
+            # Try method 1: Use CopyTo bound action (if available in your SAP system)
+            url = f"{self.base_url}/Quotations({doc_entry})/CopyTo"
+            headers = self._get_headers()
+            data = {
+                "DocumentType": "Orders"
+            }
+            
+            _logger.info(f"Converting quotation {doc_entry} to sales order in SAP (method 1 - CopyTo): {url}")
+            response = self.session.post(url, json=data, headers=headers, timeout=30)
+            
+            if response.status_code in [200, 201]:
+                result = response.json() if response.content else {}
+                _logger.info(f"Successfully converted quotation {doc_entry} to sales order using CopyTo. Result: {result}")
+                return result
+            elif response.status_code == 404:
+                # CopyTo action not available, try method 2: Get quotation and create order manually
+                _logger.info(f"CopyTo action not available (404), trying method 2: Get quotation and create order manually")
+                return self._convert_quotation_to_order_manual(doc_entry)
+            else:
+                error_msg = f"Error converting quotation to sales order (method 1): {response.status_code} - {response.text}"
+                _logger.warning(error_msg)
+                # Try method 2 as fallback
+                _logger.info(f"Trying method 2: Get quotation and create order manually")
+                return self._convert_quotation_to_order_manual(doc_entry)
+                
+        except Exception as e:
+            _logger.error(f"Error converting quotation to sales order: {str(e)}", exc_info=True)
+            # Try method 2 as fallback
+            try:
+                _logger.info(f"Trying method 2: Get quotation and create order manually")
+                return self._convert_quotation_to_order_manual(doc_entry)
+            except Exception as e2:
+                _logger.error(f"Error in fallback method: {str(e2)}", exc_info=True)
+                return None
+    
+    def _convert_quotation_to_order_manual(self, doc_entry):
+        """Convert quotation to sales order by retrieving quotation data and creating a new order manually
+        
+        Args:
+            doc_entry: The DocEntry of the quotation to convert
+            
+        Returns:
+            dict: The created sales order data with DocNum and DocEntry, or None if failed
+        """
+        try:
+            self._ensure_session()
+            
+            # Step 1: Get the quotation data
+            url = f"{self.base_url}/Quotations({doc_entry})"
+            headers = self._get_headers()
+            
+            _logger.info(f"Retrieving quotation {doc_entry} from SAP: {url}")
+            response = self.session.get(url, headers=headers, timeout=30)
+            
+            if response.status_code != 200:
+                error_msg = f"Error retrieving quotation {doc_entry}: {response.status_code} - {response.text}"
+                _logger.error(error_msg)
+                return None
+            
+            quotation_data = response.json()
+            _logger.info(f"Retrieved quotation data: DocNum={quotation_data.get('DocNum')}, CardCode={quotation_data.get('CardCode')}")
+            
+            # Step 2: Prepare sales order data from quotation
+            order_data = {
+                'CardCode': quotation_data.get('CardCode'),
+                'DocDate': quotation_data.get('DocDate'),
+                'DocDueDate': quotation_data.get('DocDueDate') or quotation_data.get('DocDate'),
+                'DocumentLines': quotation_data.get('DocumentLines', []),
+            }
+            
+            # Copy other relevant fields if they exist
+            for field in ['Comments', 'NumAtCard', 'Address', 'Address2', 'ShipToCode', 'PayToCode']:
+                if field in quotation_data:
+                    order_data[field] = quotation_data[field]
+            
+            # Step 3: Create the sales order
+            url = f"{self.base_url}/Orders"
+            _logger.info(f"Creating sales order from quotation {doc_entry} in SAP: {url}")
+            _logger.info(f"Order data: CardCode={order_data.get('CardCode')}, DocumentLines={len(order_data.get('DocumentLines', []))} lines")
+            
+            response = self.session.post(url, json=order_data, headers=headers, timeout=30)
+            
+            if response.status_code in [200, 201]:
+                result = response.json() if response.content else {}
+                _logger.info(f"Successfully created sales order from quotation {doc_entry}. Result: {result}")
+                return result
+            else:
+                error_msg = f"Error creating sales order from quotation {doc_entry}: {response.status_code} - {response.text}"
+                _logger.error(error_msg)
+                return None
+                
+        except Exception as e:
+            _logger.error(f"Error in manual conversion method: {str(e)}", exc_info=True)
+            return None
+    
     def close_session(self):
         """Close SAP Service Layer session"""
         try:
@@ -484,6 +600,147 @@ class SapServiceLayerConnection:
                 _logger.info("SAP Service Layer session closed")
         except Exception as e:
             _logger.error(f"Error closing session: {str(e)}")
+    
+    def get_numbering_series(self, series_code=None, document_type='BusinessPartners'):
+        """Get numbering series information from SAP"""
+        try:
+            # في SAP Business One Service Layer، يمكن قراءة Numbering Series من DocumentNumberingService
+            # أو من خلال DocumentSeriesService
+            url = f"{self.base_url}/DocumentSeriesService_GetDocumentSeries"
+            headers = self._get_headers()
+            
+            # محاولة قراءة Numbering Series للـ Business Partners
+            # قد نحتاج إلى استخدام endpoint مختلف حسب إصدار SAP
+            # بديل: قراءة آخر Business Partner للحصول على آخر CardCode
+            if document_type == 'BusinessPartners':
+                # قراءة آخر Business Partner للحصول على آخر CardCode
+                url = f"{self.base_url}/BusinessPartners"
+                params = {
+                    '$orderby': 'CardCode desc',
+                    '$top': 1,
+                    '$select': 'CardCode'
+                }
+                response = self.session.get(url, headers=headers, params=params, timeout=30)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    if 'value' in data and len(data['value']) > 0:
+                        last_card_code = data['value'][0].get('CardCode', '')
+                        _logger.info(f"Last CardCode from SAP: {last_card_code}")
+                        return {'last_card_code': last_card_code}
+            
+            # إذا فشل، نعود إلى قراءة Numbering Series مباشرة
+            # هذا يتطلب معرفة DocumentTypeCode للـ Business Partners
+            _logger.warning(f"Could not get numbering series from SAP, trying alternative method")
+            return None
+            
+        except Exception as e:
+            _logger.error(f"Error getting numbering series: {str(e)}")
+            return None
+    
+    def get_ibg_series_number(self):
+        """Get Series number for IBG from SAP (similar to PHP getIBGSeriesNumber)"""
+        try:
+            # محاولة 1: البحث في Business Partners الموجودين
+            url = f"{self.base_url}/BusinessPartners"
+            headers = self._get_headers()
+            params = {
+                '$filter': "startswith(CardCode, 'IBG')",
+                '$select': 'CardCode,Series',
+                '$top': 1,
+                '$orderby': 'CreateDate desc'
+            }
+            
+            response = self.session.get(url, headers=headers, params=params, timeout=30)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if 'value' in data and len(data['value']) > 0:
+                    series_number = data['value'][0].get('Series')
+                    if series_number is not None:
+                        _logger.info(f'Found Series number from existing BP: {series_number}')
+                        return int(series_number)
+            
+            # محاولة 2: استخدام SeriesService
+            try:
+                series_url = f"{self.base_url}/SeriesService_GetDocumentSeries"
+                series_data = {
+                    'DocumentTypeParams': {
+                        'Document': '2'  # 2 = Business Partners
+                    }
+                }
+                series_response = self.session.post(series_url, json=series_data, headers=headers, timeout=30)
+                
+                if series_response.status_code == 200:
+                    series_result = series_response.json()
+                    if 'value' in series_result:
+                        for series in series_result['value']:
+                            # البحث عن السلسلة الافتراضية أو التي تبدأ بـ IBG
+                            if series.get('IsDefault') == 'tYES':
+                                return int(series.get('Series', 1))
+                            if 'IBG' in (series.get('Name') or ''):
+                                return int(series.get('Series', 1))
+            except Exception as e:
+                _logger.warning(f'SeriesService query failed: {e}')
+            
+            # القيمة الافتراضية
+            _logger.info('Using default Series number: 1')
+            return 1
+            
+        except Exception as e:
+            _logger.error(f'Failed to get IBG series number: {e}')
+            return 1  # قيمة افتراضية
+    
+    def get_next_card_code(self, series_code='IBG'):
+        """Get next CardCode from SAP Numbering Series"""
+        try:
+            # محاولة قراءة آخر CardCode من SAP
+            url = f"{self.base_url}/BusinessPartners"
+            headers = self._get_headers()
+            
+            # فلترة Business Partners التي تبدأ بـ series_code
+            params = {
+                '$filter': f"startswith(CardCode, '{series_code}')",
+                '$orderby': 'CardCode desc',
+                '$top': 1,
+                '$select': 'CardCode'
+            }
+            
+            response = self.session.get(url, headers=headers, params=params, timeout=30)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if 'value' in data and len(data['value']) > 0:
+                    last_card_code = data['value'][0].get('CardCode', '')
+                    _logger.info(f"Last CardCode from SAP with prefix {series_code}: {last_card_code}")
+                    
+                    # استخراج الرقم من CardCode
+                    import re
+                    match = re.search(rf'{series_code}(\d+)', last_card_code)
+                    if match:
+                        last_number = int(match.group(1))
+                        next_number = last_number + 1
+                        # استخدام padding لضمان أن CardCode يطابق تنسيق Numbering Series في SAP
+                        # SAP يتوقع تنسيق مع padding (IBG05079) وليس بدون padding (IBG5079)
+                        # نستخدم 5 أرقام padding كما هو موضح في الصورة (Next No. = 5079)
+                        next_card_code = f"{series_code}{str(next_number).zfill(5)}"
+                        _logger.info(f"Next CardCode will be: {next_card_code} (with padding, last={last_number}, next={next_number})")
+                        return next_card_code
+                    else:
+                        # إذا لم نجد رقم، نبدأ من 1
+                        _logger.info(f"Could not extract number from CardCode, starting from 1")
+                        return f"{series_code}00001"
+                else:
+                    # لا توجد Business Partners بهذا prefix، نبدأ من 1
+                    _logger.info(f"No Business Partners found with prefix {series_code}, starting from 1")
+                    return f"{series_code}00001"
+            else:
+                _logger.warning(f"Could not get last CardCode from SAP: {response.status_code}")
+                return None
+                
+        except Exception as e:
+            _logger.error(f"Error getting next CardCode: {str(e)}")
+            return None
     
     def test_connection(self):
         """Test connection to SAP Service Layer"""

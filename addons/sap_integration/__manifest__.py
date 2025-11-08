@@ -77,7 +77,11 @@
         'views/sap_product_views.xml',
         'views/sap_quotation_views.xml',
         'views/sap_sale_views.xml',
+        'views/sale_order_sap_views.xml',  # SAP integration for sale orders
         'views/sap_warehouse_views.xml',
+        
+        # Reports
+        'report/sale_report_inherit.xml',  # Add SAP Document Number to sale order PDF
         
         # New: Complete Product Migration Views
         'views/sap_product_extended_views.xml',  # Extended product information

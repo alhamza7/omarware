@@ -148,6 +148,34 @@ class PosPerfumeOrder(models.Model):
         copy=False
     )
     
+    # SAP Fields (from related sale order)
+    sap_doc_num = fields.Char(
+        string='SAP Document Number',
+        related='sale_order_id.sap_doc_num',
+        readonly=True,
+        store=True,
+        copy=False,
+        help="SAP Document Number from related Sale Order"
+    )
+    
+    sap_doc_entry = fields.Integer(
+        string='SAP Doc Entry',
+        related='sale_order_id.sap_doc_entry',
+        readonly=True,
+        store=True,
+        copy=False,
+        help="SAP Doc Entry from related Sale Order"
+    )
+    
+    sap_synced = fields.Boolean(
+        string='Synced to SAP',
+        related='sale_order_id.sap_synced',
+        readonly=True,
+        store=True,
+        copy=False,
+        help="Whether the order is synced to SAP"
+    )
+    
     # Notes
     note = fields.Text(string='Notes')
     
@@ -296,13 +324,16 @@ class PosPerfumeOrder(models.Model):
                 _logger.error(f"[POS Confirm] Error creating sale order: {e}", exc_info=True)
                 raise
             
-            # Update POS order
+            # Update POS order - preserve current state if it's 'quotation', otherwise set to 'sale'
+            current_state = order.state
+            new_state = 'sale' if current_state != 'quotation' else 'quotation'
+            
             order.write({
-                'state': 'sale',
+                'state': new_state,
                 'sale_order_id': sale_order.id,
             })
             
-            _logger.info(f"[POS Confirm] POS order updated to state=sale")
+            _logger.info(f"[POS Confirm] POS order updated to state={new_state} (was {current_state})")
             
             results.append({
                 'type': 'ir.actions.act_window',

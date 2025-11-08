@@ -1,6 +1,6 @@
 /** @odoo-module */
 
-import { Component, useState, useRef, onMounted } from "@odoo/owl";
+import { Component, useState, useRef, onMounted, onWillUpdateProps } from "@odoo/owl";
 import { useService } from "@web/core/utils/hooks";
 import { _t } from "@web/core/l10n/translation";
 
@@ -18,6 +18,7 @@ export class CustomerSearch extends Component {
     setup() {
         this.orm = useService("orm");
         this.notification = useService("notification");
+        this.action = useService("action");
         
         this.state = useState({
             searchTerm: '',
@@ -25,9 +26,11 @@ export class CustomerSearch extends Component {
             selectedCustomer: null,
             showDropdown: false,
             loading: false,
+            selectedIndex: 0,  // For keyboard navigation
         });
         
         this.searchInputRef = useRef("searchInput");
+        this.searchTimer = null;
         
         onMounted(async () => {
             // Load initial customer if provided
@@ -37,6 +40,19 @@ export class CustomerSearch extends Component {
             
             // Load recent customers for quick access
             await this.loadRecentCustomers();
+        });
+        
+        // Update customer when selectedCustomerId prop changes
+        onWillUpdateProps(async (nextProps) => {
+            if (nextProps.selectedCustomerId !== this.props.selectedCustomerId) {
+                if (nextProps.selectedCustomerId) {
+                    await this.loadCustomer(nextProps.selectedCustomerId);
+                } else {
+                    // Clear selection if customer ID is removed
+                    this.state.selectedCustomer = null;
+                    this.state.searchTerm = '';
+                }
+            }
         });
     }
     
@@ -54,9 +70,17 @@ export class CustomerSearch extends Component {
         
         // Update search term immediately
         this.state.searchTerm = value;
+        this.state.selectedIndex = 0;  // Reset selection index
         
-        // Search for customers
-        this.searchCustomers(value);
+        // Clear existing timer
+        if (this.searchTimer) {
+            clearTimeout(this.searchTimer);
+        }
+        
+        // Debounce search
+        this.searchTimer = setTimeout(() => {
+            this.searchCustomers(value);
+        }, 300);
     }
     
     /**
@@ -188,6 +212,7 @@ export class CustomerSearch extends Component {
         if (this.state.customers.length === 0) {
             this.loadRecentCustomers();
         }
+        this.state.selectedIndex = 0;  // Reset selection on focus
     }
     
     /**
@@ -203,10 +228,38 @@ export class CustomerSearch extends Component {
      * Handle keyboard navigation
      */
     onKeydown(ev) {
-        // Future: Add arrow key navigation
-        if (ev.key === 'Escape') {
+        if (!this.state.showDropdown || !this.state.customers.length) {
+            if (ev.key === 'Escape') {
+                this.state.showDropdown = false;
+            }
+            return;
+        }
+        
+        if (ev.key === 'ArrowDown') {
+            ev.preventDefault();
+            this.state.selectedIndex = Math.min(
+                this.state.selectedIndex + 1,
+                this.state.customers.length - 1
+            );
+        } else if (ev.key === 'ArrowUp') {
+            ev.preventDefault();
+            this.state.selectedIndex = Math.max(this.state.selectedIndex - 1, 0);
+        } else if (ev.key === 'Enter') {
+            ev.preventDefault();
+            if (this.state.customers[this.state.selectedIndex]) {
+                this.selectCustomer(this.state.customers[this.state.selectedIndex]);
+            }
+        } else if (ev.key === 'Escape') {
             this.state.showDropdown = false;
         }
+    }
+    
+    /**
+     * Check if customer is selected (for highlighting)
+     */
+    isCustomerSelected(customer) {
+        const index = this.state.customers.findIndex(c => c.id === customer.id);
+        return index === this.state.selectedIndex;
     }
     
     /**
@@ -224,6 +277,32 @@ export class CustomerSearch extends Component {
         }
         
         return parts.join(' | ');
+    }
+    
+    /**
+     * Open customer popup/form view
+     */
+    async openCustomerPopup() {
+        if (!this.state.selectedCustomer) {
+            return;
+        }
+        
+        try {
+            await this.action.doAction({
+                type: 'ir.actions.act_window',
+                res_model: 'res.partner',
+                res_id: this.state.selectedCustomer.id,
+                view_mode: 'form',
+                views: [[false, 'form']],
+                target: 'new',
+                context: {
+                    default_id: this.state.selectedCustomer.id,
+                }
+            });
+        } catch (error) {
+            console.error("Error opening customer popup:", error);
+            this.notification.add(_t("Failed to open customer details"), { type: "danger" });
+        }
     }
 }
 

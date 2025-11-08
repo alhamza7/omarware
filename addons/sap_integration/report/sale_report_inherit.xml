@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <!-- Inherit Sale Order Report to add SAP Document Number -->
+        <template id="report_saleorder_document_sap_inherit" inherit_id="sale.report_saleorder_document">
+            <xpath expr="//div[@id='informations']" position="after">
+                <!-- Add SAP Document Number if available -->
+                <div t-if="doc.sap_doc_num" class="row mb-4">
+                    <div class="col-12">
+                        <strong>رقم SAP Document:</strong> <span t-esc="doc.sap_doc_num"/>
+                        <t t-if="doc.sap_doc_entry"> (<span t-esc="doc.sap_doc_entry"/>)</t>
+                    </div>
+                </div>
+            </xpath>
+            
+        </template>
+    </data>
+</odoo>
+

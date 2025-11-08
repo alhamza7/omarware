@@ -36,6 +36,49 @@ class SaleOrderLine(models.Model):
         domain="[('company_id', '=', company_id)]"
     )
 
+    def _get_procurement_group(self):
+        """Get or create procurement group for the order line.
+        
+        Returns:
+            False: In Odoo 19, procurement.group doesn't exist as a model
+        """
+        # In Odoo 19, procurement.group doesn't exist as a model
+        # Procurement is handled through stock.rule.Procurement (NamedTuple)
+        # Return False to indicate no group is needed
+        # The procurement system will handle grouping automatically
+        return False
+
+    def _prepare_procurement_group_vals(self):
+        """Prepare values for creating a procurement group.
+        
+        Returns:
+            dict: Values for creating procurement.group
+        """
+        self.ensure_one()
+        order = self.order_id
+        vals = {
+            'name': order.name or 'New',
+        }
+        
+        # Add move_type if picking_policy exists
+        if hasattr(order, 'picking_policy'):
+            vals['move_type'] = order.picking_policy or 'direct'
+        
+        # Add partner_id (use partner_shipping_id or fallback to partner_id)
+        partner_id = False
+        if hasattr(order, 'partner_shipping_id') and order.partner_shipping_id:
+            partner_id = order.partner_shipping_id.id
+        elif order.partner_id:
+            partner_id = order.partner_id.id
+        if partner_id:
+            vals['partner_id'] = partner_id
+        
+        # Add sale_id only if order is saved (has ID)
+        if order.id:
+            vals['sale_id'] = order.id
+        
+        return vals
+
     def _action_launch_stock_rule(self, previous_product_uom_qty=False):
         """
         Overwriting the function for adding functionalities of multiple
@@ -67,45 +110,65 @@ class SaleOrderLine(models.Model):
             if float_compare(qty, line.product_uom_qty, precision_digits=precision) == 0:
                 continue
                 
-            # Get or create procurement group
-            group_id = line._get_procurement_group()
-            if not group_id:
-                group_id = self.env['procurement.group'].create(
-                    line._prepare_procurement_group_vals()
-                )
-                line.order_id.procurement_group_id = group_id
-            else:
-                # Update group if needed
-                updated_vals = {}
-                if group_id.partner_id != line.order_id.partner_shipping_id:
-                    updated_vals['partner_id'] = line.order_id.partner_shipping_id.id
-                if group_id.move_type != line.order_id.picking_policy:
-                    updated_vals['move_type'] = line.order_id.picking_policy
-                if updated_vals:
-                    group_id.write(updated_vals)
-                    
-            # Prepare procurement values
-            values = line._prepare_procurement_values(group_id=group_id)
+            # In Odoo 19, procurement.group doesn't exist
+            # Prepare procurement values without group_id
+            values = line._prepare_procurement_values()
             
             # ⭐ Set warehouse from line if specified
             if line.product_warehouse_id:
                 values['warehouse_id'] = line.product_warehouse_id
+            
+            # Check if product has routes configured
+            # Get routes from values, line, or product
+            route_ids = values.get('route_ids', False)
+            
+            # Check if route_ids is empty (could be empty recordset, empty list, or False)
+            has_routes = False
+            if route_ids:
+                # If it's a recordset, check if it has records
+                if hasattr(route_ids, '__len__') and hasattr(route_ids, '__iter__'):
+                    if len(route_ids) > 0:
+                        has_routes = True
+                elif isinstance(route_ids, (list, tuple)) and len(route_ids) > 0:
+                    has_routes = True
+                elif route_ids:  # Other truthy values
+                    has_routes = True
+            
+            # Try to get routes from line or product if not found in values
+            if not has_routes:
+                if hasattr(line, 'route_ids') and line.route_ids and len(line.route_ids) > 0:
+                    has_routes = True
+                elif line.product_id.route_ids and len(line.product_id.route_ids) > 0:
+                    has_routes = True
+            
+            # Skip if no routes are configured (will cause "No rule has been found" error)
+            if not has_routes:
+                import logging
+                _logger = logging.getLogger(__name__)
+                _logger.warning(f"Skipping procurement for product {line.product_id.display_name} (ID: {line.product_id.id}) - no routes configured")
+                continue
                 
             # Calculate product quantity
             product_qty = line.product_uom_qty - qty
-            line_uom = line.product_uom
+            # Get UoM: use product_uom_id (Odoo 19) if available, otherwise fallback to product_id.uom_id
+            if hasattr(line, 'product_uom_id') and line.product_uom_id:
+                line_uom = line.product_uom_id
+            else:
+                line_uom = line.product_id.uom_id
             quant_uom = line.product_id.uom_id
             product_qty, procurement_uom = line_uom._adjust_uom_quantities(
                 product_qty, quant_uom
             )
             
-            # Create procurement
+            # Create procurement using stock.rule.Procurement (Odoo 19)
+            # Use _get_location_final() if available, otherwise use partner_shipping_id.property_stock_customer
+            location_final = line._get_location_final() if hasattr(line, '_get_location_final') else line.order_id.partner_shipping_id.property_stock_customer
             procurements.append(
-                self.env['procurement.group'].Procurement(
+                self.env['stock.rule'].Procurement(
                     line.product_id,
                     product_qty,
                     procurement_uom,
-                    line.order_id.partner_shipping_id.property_stock_customer,
+                    location_final,
                     line.product_id.display_name,
                     line.order_id.name,
                     line.order_id.company_id,
@@ -115,7 +178,15 @@ class SaleOrderLine(models.Model):
             
         # Run procurements
         if procurements:
-            self.env['procurement.group'].run(procurements)
+            try:
+                self.env['stock.rule'].run(procurements)
+            except Exception as e:
+                # Log the error but don't fail the order confirmation
+                import logging
+                _logger = logging.getLogger(__name__)
+                _logger.warning(f"Error running procurements: {e}")
+                # Re-raise the exception to show the user the error
+                raise
             
         # Confirm pickings
         orders = self.mapped('order_id')

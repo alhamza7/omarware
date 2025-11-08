@@ -1,72 +1,62 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <templates id="template" xml:space="preserve">
     
-    <!-- Customer Search Template - Compact -->
+    <!-- Customer Search Template - Similar to Product Search -->
     <t t-name="pos_perfume_custom.CustomerSearch">
         <div class="customer-search-container" style="position: relative; width: 100%;">
-            <!-- Search Input - Compact Single Line -->
+            <!-- Search Input with Arrow Button -->
             <div style="position: relative;">
-                <div style="display: flex; align-items: center; gap: 5px;">
-                    <input 
-                        t-ref="searchInput"
-                        type="text"
-                        class="form-control customer-search-input"
-                        placeholder="🔍 Search customer..."
-                        t-model="state.searchTerm"
-                        t-on-input="onSearchInput"
-                        t-on-focus="onFocus"
-                        t-on-blur="onBlur"
-                        t-on-keydown="onKeydown"
-                        style="flex: 1; padding: 7px 35px 7px 10px; font-size: 12px; border: 1px solid #ccc; border-radius: 4px;"
-                    />
-                    <t t-if="state.selectedCustomer">
-                        <button class="btn btn-sm" 
-                                t-on-click.stop="clearSelection"
-                                style="padding: 5px 8px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; flex-shrink: 0;"
-                                title="Clear selection">
-                            ✕
-                        </button>
-                    </t>
-                </div>
+                <input 
+                    t-ref="searchInput"
+                    type="text"
+                    class="form-control customer-search-input"
+                    placeholder="Search customer..."
+                    t-model="state.searchTerm"
+                    t-on-input="onSearchInput"
+                    t-on-focus="onFocus"
+                    t-on-blur="onBlur"
+                    t-on-keydown="onKeydown"
+                    t-att-style="state.selectedCustomer ? 'width: 100%; height: 36px; padding: 7px 32px 7px 12px; font-size: 14px; border: 1px solid #d1d5db; border-radius: 6px; background-color: white;' : 'width: 100%; height: 36px; padding: 7px 12px; font-size: 14px; border: 1px solid #d1d5db; border-radius: 6px; background-color: white;'"
+                />
+                <button t-if="state.selectedCustomer"
+                        t-on-click.stop="openCustomerPopup"
+                        title="View customer details"
+                        style="position: absolute; right: 4px; top: 50%; transform: translateY(-50%); padding: 2px 4px; background: transparent; color: #2563eb; border: none; cursor: pointer; font-size: 12px; flex-shrink: 0; min-width: 20px; height: 22px; display: flex; align-items: center; justify-content: center; z-index: 10;"
+                        onmouseover="this.style.color='#1d4ed8'"
+                        onmouseout="this.style.color='#2563eb'">
+                    ➡️
+                </button>
             </div>
             
-            <!-- Loading Indicator -->
-            <div t-if="state.loading" class="text-center my-2">
-                <div class="spinner-border spinner-border-sm text-primary" role="status">
-                    <span class="visually-hidden">Loading...</span>
-                </div>
-            </div>
-            
-            <!-- Customer Dropdown -->
-            <div class="customer-dropdown" t-if="state.showDropdown and state.customers.length > 0">
-                <div class="dropdown-header bg-light p-2">
-                    <strong>
-                        <t t-if="state.searchTerm">نتائج البحث</t>
-                        <t t-else="">العملاء الأخيرون</t>
-                    </strong>
-                </div>
-                <div class="customers-list">
+            <!-- Customer Dropdown - Similar to Product Dropdown -->
+            <div t-if="state.showDropdown" 
+                 class="customer-dropdown"
+                 style="position: absolute; z-index: 1000; background: white; border: 1px solid #ccc; max-height: 300px; overflow-y: auto; width: 400px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); top: 100%; left: 0; margin-top: 2px;">
+                <t t-if="state.loading" style="padding: 12px; text-align: center; color: #999;">
+                    <i class="fa fa-spinner fa-spin"/> Searching...
+                </t>
+                <t t-elif="state.customers.length > 0">
                     <t t-foreach="state.customers" t-as="customer" t-key="customer.id">
-                        <div class="customer-item" t-on-click="() => this.selectCustomer(customer)">
-                            <div class="customer-info">
-                                <div class="customer-name fw-bold">
-                                    <i class="fa fa-user-circle text-info me-2"/>
-                                    <t t-esc="customer.name"/>
-                                </div>
-                                <div class="customer-details text-muted small">
-                                    <t t-esc="getCustomerInfo(customer)"/>
-                                </div>
+                        <div t-on-click="() => this.selectCustomer(customer)"
+                             t-att-class="this.isCustomerSelected(customer) ? 'customer-item selected' : 'customer-item'"
+                             style="padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #f0f0f0;"
+                             onmouseover="this.style.background='#f5f5f5'"
+                             onmouseout="this.style.background=''"
+                             t-att-style="this.isCustomerSelected(customer) ? 'padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #f0f0f0; background: #e3f2fd;' : 'padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #f0f0f0;'">
+                            <div style="font-weight: 600; color: #333;">
+                                <t t-esc="customer.name"/>
+                            </div>
+                            <div style="font-size: 11px; color: #666;">
+                                <t t-esc="getCustomerInfo(customer)"/>
                             </div>
                         </div>
                     </t>
-                </div>
-            </div>
-            
-            <!-- Empty State -->
-            <div class="empty-state text-center py-3" 
-                 t-if="state.searchTerm and state.customers.length === 0 and !state.loading">
-                <i class="fa fa-user-times fa-2x text-muted mb-2"/>
-                <p class="text-muted small mb-0">لا توجد نتائج</p>
+                </t>
+                <t t-elif="state.searchTerm and !state.loading">
+                    <div style="padding: 12px; text-align: center; color: #999;">
+                        No customers found
+                    </div>
+                </t>
             </div>
         </div>
     </t>

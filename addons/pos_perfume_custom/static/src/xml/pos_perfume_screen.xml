@@ -8,146 +8,213 @@
     <t t-name="pos_perfume_custom.PosPerfumeScreen">
         <div class="pos-perfume-container">
             
-            <!-- Header -->
-            <div class="pos-header">
-                <h1>🛒 NBS POS</h1>
-                <div class="header-info">
-                    <span class="user-info">
-                        👤 User: <t t-esc="state.userName"/>
-                    </span>
-                    <span class="date-info">
-                        📅 Date: <t t-esc="state.currentDate"/>
-                    </span>
-                    <span class="time-info">
-                        🕐 Time: <t t-esc="state.currentTime"/>
-                    </span>
+            <!-- Header - Matching image design: Solid blue background with Order # and Actions -->
+            <div style="background: #2563eb; color: white; padding: 12px 24px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                <div style="display: flex; justify-content: space-between; align-items: center; max-width: 1800px; margin: 0 auto; gap: 20px;">
+                    <!-- Left: Logo and Branding -->
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <div style="width: 40px; height: 40px; background: #3b82f6; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 14px;">
+                            NBS
+                        </div>
+                        <h1 style="font-size: 20px; font-weight: 600; margin: 0; color: white;">NBS POS</h1>
+                    </div>
+                    
+                    <!-- Center: Order #, SAP, Navigation Arrows, and Action Buttons -->
+                    <div style="display: flex; align-items: center; gap: 8px; flex: 1; justify-content: center;">
+                        <label style="font-size: 14px; color: white; white-space: nowrap; font-weight: 500;">Order #:</label>
+                        <button t-on-click="navigateToPreviousOrder"
+                                title="Previous order"
+                                style="height: 32px; width: 32px; padding: 0; background: rgba(255, 255, 255, 0.2); color: white; border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s; display: flex; align-items: center; justify-content: center;"
+                                onmouseover="this.style.background='rgba(255, 255, 255, 0.3)'"
+                                onmouseout="this.style.background='rgba(255, 255, 255, 0.2)'">
+                            ◀
+                        </button>
+                        <div style="position: relative; width: 150px;">
+                            <input type="text" 
+                                   class="form-control"
+                                   t-att-value="state.currentOrder.orderNumber || 'New Order'" 
+                                   placeholder="New Order"
+                                   t-on-input="onOrderNumberInput"
+                                   t-on-keydown="onOrderNumberKeyDown"
+                                   style="width: 100%; height: 32px; padding: 7px 32px 7px 12px; font-size: 14px; border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 6px; background: white; color: #1f2937;"/>
+                            <i class="fa fa-chevron-down" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: #6b7280; font-size: 12px; pointer-events: none;"/>
+                        </div>
+                        <button t-on-click="navigateToNextOrder"
+                                title="Next order"
+                                style="height: 32px; width: 32px; padding: 0; background: rgba(255, 255, 255, 0.2); color: white; border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s; display: flex; align-items: center; justify-content: center;"
+                                onmouseover="this.style.background='rgba(255, 255, 255, 0.3)'"
+                                onmouseout="this.style.background='rgba(255, 255, 255, 0.2)'">
+                            ▶
+                        </button>
+                        
+                        <!-- SAP Doc Field -->
+                        <label style="font-size: 14px; color: white; white-space: nowrap; font-weight: 500; margin-left: 8px;">SAP:</label>
+                        <input type="text" 
+                               class="form-control"
+                               t-att-value="state.currentOrder.sap_doc_num || state.sapDocSearch"
+                               t-att-placeholder="state.currentOrder.sap_doc_num ? ('SAP: ' + state.currentOrder.sap_doc_num + (state.currentOrder.sap_doc_entry ? ' (' + state.currentOrder.sap_doc_entry + ')' : '')) : 'SAP Doc #...'"
+                               t-on-keydown="onSapDocKeyDown"
+                               t-on-input="onSapDocInput"
+                               t-att-readonly="state.currentOrder.sap_doc_num ? true : false"
+                               t-att-style="state.currentOrder.sap_doc_num ? 'width: 120px; height: 32px; text-align: center; border: 1px solid rgba(255, 255, 255, 0.5); padding: 7px 12px; font-size: 12px; background: rgba(255, 255, 255, 0.9); color: #1f2937; font-weight: 600; border-radius: 6px;' : 'width: 120px; height: 32px; text-align: center; border: 1px solid rgba(255, 255, 255, 0.3); padding: 7px 12px; font-size: 14px; background: white; color: #1f2937; border-radius: 6px;'"/>
+                        
+                        <!-- Action Buttons -->
+                        <button class="btn-new-order" 
+                                t-on-click="resetOrder"
+                                title="New Order"
+                                style="height: 32px; padding: 6px 12px; background: white; color: #1f2937; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s; margin-left: 8px;"
+                                onmouseover="this.style.background='#f9fafb'"
+                                onmouseout="this.style.background='white'">
+                            New Order
+                        </button>
+                        <button class="btn-load-order" 
+                                t-on-click="openPreviousOrders"
+                                title="Load previous orders"
+                                style="height: 32px; padding: 6px 12px; background: rgba(255, 255, 255, 0.2); color: white; border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s; display: flex; align-items: center; gap: 6px;"
+                                onmouseover="this.style.background='rgba(255, 255, 255, 0.3)'"
+                                onmouseout="this.style.background='rgba(255, 255, 255, 0.2)'">
+                            <i class="fa fa-upload" style="font-size: 12px;"/>
+                            <span>Load</span>
+                        </button>
+                    </div>
+                    
+                    <!-- Right: User Info -->
+                    <div style="display: flex; align-items: center; gap: 16px; font-size: 14px;">
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <i class="fa fa-user" style="font-size: 14px;"/>
+                            <span>User: <t t-esc="state.userName"/></span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <i class="fa fa-calendar" style="font-size: 14px;"/>
+                            <span>Date: <t t-esc="state.currentDate"/></span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <i class="fa fa-clock-o" style="font-size: 14px;"/>
+                            <span>Time: <t t-esc="state.currentTime"/></span>
+                        </div>
+                    </div>
                 </div>
             </div>
 
             <!-- Main Container (50/50 Split) -->
-            <div class="pos-main-container" style="padding-bottom: 100px;">
+            <div class="pos-main-container" style="padding-bottom: 100px; background: #f9fafb;">
                 
                 <!-- ============= LEFT SECTION: ORDER LINES ============= -->
-                <div class="order-section">
+                <div class="order-section" style="background: #f9fafb;">
                     
-                    <!-- Order Header -->
-                    <div class="order-header" style="background: #f9f9f9; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
-                        <div style="display: grid; grid-template-columns: 1fr auto; gap: 15px; align-items: center;">
-                            <!-- Left: Customer & Pricelist in one row -->
-                            <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
-                                <!-- Customer Selection - Compact -->
-                                <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 250px;">
-                                    <label style="font-weight: 600; min-width: 75px; color: #714B67; font-size: 13px;">Customer:</label>
-                                    <div style="flex: 1; position: relative;">
+                    <!-- Order Header - Compact design: Customer, Search, Pricelist, SAP -->
+                    <div class="order-header" style="background: white; border: 1px solid #2563eb; border-radius: 6px; padding: 10px 16px; margin-bottom: 15px; box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);">
+                        <div style="max-width: 1800px; margin: 0 auto;">
+                            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                                <!-- Customer Section -->
+                                <div style="display: flex; align-items: center; gap: 6px;">
+                                    <label style="font-size: 14px; color: #4b5563; white-space: nowrap; font-weight: 500;">Customer:</label>
+                                    <div style="position: relative; width: 192px;">
                                         <CustomerSearch 
-                                            onSelectCustomer="(customer) => this.onSelectCustomer(customer)"
+                                            onSelectCustomer.bind="onSelectCustomer"
                                             selectedCustomerId="state.currentOrder.partner_id"
                                         />
                                     </div>
-                                    <button class="btn-add-customer" 
-                                            t-on-click.stop="(ev) => this.openCustomerDialog()"
-                                            title="Add new customer"
-                                            style="padding: 7px 12px; background: #714B67; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; font-size: 12px; flex-shrink: 0;">
-                                        ➕
-                                    </button>
                                 </div>
                                 
-                                <!-- Pricelist Selection - Compact -->
-                                <div style="display: flex; align-items: center; gap: 8px; flex: 0 0 auto;">
-                                    <label style="font-weight: 600; min-width: 70px; color: #714B67; font-size: 13px;">Pricelist:</label>
+                                <!-- Search Button -->
+                                <button class="btn-search-customer" 
+                                        t-on-click="openCustomerSearch"
+                                        title="Search customer"
+                                        style="height: 36px; padding: 7px 12px; background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s; display: flex; align-items: center; gap: 6px;"
+                                        onmouseover="this.style.background='#1d4ed8'"
+                                        onmouseout="this.style.background='#2563eb'">
+                                    <i class="fa fa-search" style="font-size: 14px;"/>
+                                    <span>Search</span>
+                                </button>
+                                
+                                <!-- Add Customer Button -->
+                                <button class="btn-add-customer" 
+                                        t-on-click="openCustomerDialog"
+                                        title="Add new customer"
+                                        style="height: 36px; padding: 7px 12px; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s; display: flex; align-items: center; gap: 6px;"
+                                        onmouseover="this.style.background='#059669'"
+                                        onmouseout="this.style.background='#10b981'">
+                                    <i class="fa fa-plus" style="font-size: 14px;"/>
+                                    <span>Add Customer</span>
+                                </button>
+                                
+                                <!-- Pricelist Section -->
+                                <div style="display: flex; align-items: center; gap: 6px;">
+                                    <label style="font-size: 14px; color: #4b5563; white-space: nowrap; font-weight: 500;">Pricelist:</label>
+                                    <div style="position: relative; width: 180px;">
                                     <select class="form-control" 
-                                            style="width: 180px; padding: 7px; border: 1px solid #ccc; border-radius: 4px; background-color: #f5f5f5; cursor: not-allowed; font-size: 12px;"
-                                            t-model="state.currentOrder.pricelist_id"
-                                            t-on-change="() => this.onPricelistChange()"
-                                            disabled="true"
-                                            title="Pricelist is fixed to 'Price list 1'">
-                                        <option value="">Select...</option>
-                                        <t t-if="state.pricelists">
-                                            <t t-foreach="state.pricelists" t-as="pricelist" t-key="pricelist.id">
-                                                <option t-att-value="pricelist.id">
-                                                    <t t-esc="pricelist.name"/>
-                                                </option>
-                                            </t>
-                                        </t>
+                                                t-att-value="state.currentOrder.pricelist_id ? (Array.isArray(state.currentOrder.pricelist_id) ? state.currentOrder.pricelist_id[0] : state.currentOrder.pricelist_id) : ''"
+                                                style="width: 100%; height: 36px; padding: 7px 32px 7px 12px; font-size: 14px; border: 1px solid #d1d5db; border-radius: 6px; background-color: white; appearance: none; -webkit-appearance: none; -moz-appearance: none;">
+                                            <option>SAP Price List 1</option>
                                     </select>
+                                        <i class="fa fa-chevron-down" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: #6b7280; font-size: 12px; pointer-events: none;"/>
                                 </div>
                             </div>
                             
-                            <!-- Right: Order Number & Actions -->
-                            <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0;">
-                                <label style="font-weight: 600; color: #714B67; font-size: 13px;">Order #:</label>
-                                <div style="display: flex; gap: 8px; align-items: center;">
-                                    <input type="text" 
-                                           class="form-control"
-                                           t-att-value="state.currentOrder.orderNumber" 
-                                           readonly="readonly" 
-                                           style="width: 120px; background: #f5f5f5; text-align: center; border: 1px solid #ccc; padding: 7px; font-size: 12px;"/>
-                                    <button class="btn-load-order" 
-                                            t-on-click="() => this.openPreviousOrders()"
-                                            title="Load previous orders"
-                                            style="padding: 7px 12px; background: #5a6c7d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">
-                                        📋 Load
-                                    </button>
-                                    <button class="btn-new-order" 
-                                            t-on-click="() => this.resetOrder()"
-                                            title="Create new order"
-                                            style="padding: 7px 12px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">
-                                        ➕ New
-                                    </button>
-                                </div>
                             </div>
                         </div>
                     </div>
 
                     <!-- Order Table -->
                     <div class="order-table-container" 
-                         t-on-keydown="(ev) => this.handleGlobalKeyDown(ev)"
+                         t-on-keydown="handleGlobalKeyDown"
                          tabindex="0"
                          style="outline: none;">
                         <table class="order-table">
                             <thead>
-                                <tr style="background: #714B67; color: white;">
-                                    <th style="width: 40px; text-align: center;">#</th>
-                                    <th style="width: 250px">Product</th>
-                                    <th style="width: 90px; text-align: center;">Quantity</th>
-                                    <th style="width: 100px;">UoM</th>
-                                    <th style="width: 100px;">Warehouse</th>
-                                    <th style="width: 80px; text-align: center;">Available</th>
-                                    <th style="width: 100px; text-align: right;">Price (USD)</th>
-                                    <th style="width: 100px; text-align: right;">Price (IQD)</th>
-                                    <th style="width: 90px; text-align: center;">Disc %</th>
-                                    <th style="width: 120px; text-align: right;">Total</th>
-                                    <th style="width: 50px; text-align: center;">❌</th>
+                                <tr style="background: #2563eb; color: white;">
+                                    <th style="width: 40px; text-align: center; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">#</th>
+                                    <th style="width: 250px; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">Product</th>
+                                    <th style="width: 90px; text-align: center; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">Quantity</th>
+                                    <th style="width: 100px; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">UoM</th>
+                                    <th style="width: 100px; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">Warehouse</th>
+                                    <th style="width: 80px; text-align: center; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">Available</th>
+                                    <th style="width: 100px; text-align: right; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">Price (USD)</th>
+                                    <th style="width: 100px; text-align: right; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">Price (IQD)</th>
+                                    <th style="width: 90px; text-align: center; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">Tax %</th>
+                                    <th style="width: 120px; text-align: right; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">Total</th>
+                                    <th style="width: 50px; text-align: center; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">❌</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <t t-foreach="state.currentOrder.lines" t-as="line" t-key="line.id">
-                                    <tr style="border-bottom: 1px solid #e0e0e0;">
+                                    <tr style="border-bottom: 1px solid #e5e7eb;">
                                         <!-- Row Number -->
                                         <td style="text-align: center; font-weight: 600; color: #666;">
                                             <t t-esc="line.rowNumber"/>
                                         </td>
                                         
                                         <!-- Product Search (Dynamic like Sale Order) -->
-                                        <td>
+                                        <td style="position: relative;">
+                                            <div style="display: flex; align-items: center; gap: 3px;">
+                                                <button t-if="line.product_id"
+                                                        t-on-click="openProductPopupHandler(line_index)"
+                                                        title="View product details"
+                                                        style="padding: 2px 4px; background: transparent; color: #2563eb; border: none; cursor: pointer; font-size: 12px; flex-shrink: 0; min-width: 20px; height: 22px; display: flex; align-items: center; justify-content: center; transition: all 0.2s;"
+                                                        onmouseover="this.style.color='#1d4ed8'"
+                                                        onmouseout="this.style.color='#2563eb'">
+                                                    ➡️
+                                                </button>
                                             <input type="text" 
                                                    t-att-value="line.productName"
                                                    t-att-placeholder="'Search product...'"
                                                    t-att-data-line-index="line_index"
                                                    t-att-data-row="line_index"
                                                    t-att-data-col="0"
-                                                   t-on-input="(ev) => this.onProductSearch(ev, line_index)"
-                                                   t-on-focus="(ev) => { this.onProductFocus(ev, line_index); this.setFocusedCell(line_index, 0); }"
-                                                   t-on-blur="(ev) => this.onProductBlur(ev, line_index)"
-                                                   t-on-keydown="(ev) => { this.handleProductKeyDown(ev, line_index); this.handleTableKeyDown(ev, line_index, 0); }"
+                                                       t-on-input="onProductSearchHandler(line_index)"
+                                                       t-on-focus="onProductFocusHandler(line_index)"
+                                                       t-on-blur="onProductBlurHandler(line_index)"
+                                                       t-on-keydown="handleProductKeyDownHandler(line_index)"
                                                    class="order-cell-input"
-                                                   style="width: 100%;"/>
+                                                       style="flex: 1;"/>
+                                            </div>
                                             <!-- Product Dropdown -->
                                             <div t-if="line.showProductDropdown" 
                                                  class="product-dropdown"
                                                  style="position: absolute; z-index: 1000; background: white; border: 1px solid #ccc; max-height: 300px; overflow-y: auto; width: 400px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
                                                 <t t-foreach="line.searchResults || []" t-as="product" t-key="product.id">
-                                                    <div t-on-click="() => this.selectProduct(line_index, product)"
+                                                    <div t-on-click="selectProductHandler(line_index, product)"
                                                          t-att-class="this.isProductSelected(line_index, product, line) ? 'product-item selected' : 'product-item'"
                                                          style="padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #f0f0f0;"
                                                          onmouseover="this.style.background='#f5f5f5'"
@@ -179,9 +246,9 @@
                                                    t-att-value="line.quantity"
                                                    t-att-data-row="line_index"
                                                    t-att-data-col="1"
-                                                   t-on-input="(ev) => this.updateLine(line_index, 'quantity', parseFloat(ev.target.value) || 1)"
-                                                   t-on-focus="(ev) => { ev.target.select(); this.setFocusedCell(line_index, 1); }"
-                                                   t-on-keydown="(ev) => this.handleTableKeyDown(ev, line_index, 1)"
+                                                   t-on-input="updateLineHandler(line_index, 'quantity')"
+                                                   t-on-focus="focusSelectHandler(line_index, 1)"
+                                                   t-on-keydown="handleTableKeyDownHandler(line_index, 1)"
                                                    min="1" 
                                                    step="1"
                                                    class="order-cell-input"
@@ -194,10 +261,10 @@
                                                    t-att-value="line.uomName || ''"
                                                    t-att-data-row="line_index"
                                                    t-att-data-col="2"
-                                                   t-on-input="(ev) => this.onUomInput(ev, line_index)"
-                                                   t-on-focus="(ev) => this.onUomFocus(ev, line_index)"
-                                                   t-on-blur="(ev) => this.validateUom(ev, line_index)"
-                                                   t-on-keydown="(ev) => this.handleUomKeyDown(ev, line_index)"
+                                                   t-on-input="onUomInputHandler(line_index)"
+                                                   t-on-focus="onUomFocusHandler(line_index)"
+                                                   t-on-blur="validateUomHandler(line_index)"
+                                                   t-on-keydown="handleUomKeyDownHandler(line_index)"
                                                    t-att-class="line.uomValid === false and line.uomName ? 'order-cell-input invalid-input' : 'order-cell-input'"
                                                    placeholder="UoM..."
                                                    style="width: 100%;"
@@ -207,7 +274,7 @@
                                                  class="uom-dropdown"
                                                  style="position: absolute; z-index: 1000; background: white; border: 1px solid #ccc; max-height: 200px; overflow-y: auto; width: 150px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); top: 100%; left: 0;">
                                                 <t t-foreach="(line.filteredUoms || line.availableUoms)" t-as="uom" t-key="uom.id || uom.uom_id">
-                                                    <div t-on-click="() => this.selectUom(line_index, uom)"
+                                                    <div t-on-click="selectUomHandler(line_index, uom)"
                                                          t-att-class="this.isUomSelected(line_index, uom, line) ? 'uom-item selected' : 'uom-item'"
                                                          style="padding: 6px 10px; cursor: pointer; border-bottom: 1px solid #f0f0f0;"
                                                          onmouseover="this.style.background='#f5f5f5'"
@@ -225,10 +292,10 @@
                                                    t-att-value="line.warehouseCode || ''"
                                                    t-att-data-row="line_index"
                                                    t-att-data-col="3"
-                                                   t-on-input="(ev) => this.onWarehouseInput(ev, line_index)"
-                                                   t-on-focus="(ev) => this.onWarehouseFocus(ev, line_index)"
-                                                   t-on-blur="(ev) => this.validateWarehouse(ev, line_index)"
-                                                   t-on-keydown="(ev) => this.handleWarehouseKeyDown(ev, line_index)"
+                                                   t-on-input="onWarehouseInputHandler(line_index)"
+                                                   t-on-focus="onWarehouseFocusHandler(line_index)"
+                                                   t-on-blur="validateWarehouseHandler(line_index)"
+                                                   t-on-keydown="handleWarehouseKeyDownHandler(line_index)"
                                                    t-att-class="line.warehouseValid === false and line.warehouseCode ? 'order-cell-input invalid-input' : 'order-cell-input'"
                                                    placeholder="WH..."
                                                    style="width: 100%;"
@@ -238,7 +305,7 @@
                                                  class="warehouse-dropdown"
                                                  style="position: absolute; z-index: 1000; background: white; border: 1px solid #ccc; max-height: 200px; overflow-y: auto; width: 150px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); top: 100%; left: 0;">
                                                 <t t-foreach="(line.filteredWarehouses || line.availableWarehouses)" t-as="wh" t-key="wh.id">
-                                                    <div t-on-click="() => this.selectWarehouse(line_index, wh)"
+                                                    <div t-on-click="selectWarehouseHandler(line_index, wh)"
                                                          t-att-class="this.isWarehouseSelected(line_index, wh, line) ? 'warehouse-item selected' : 'warehouse-item'"
                                                          style="padding: 6px 10px; cursor: pointer; border-bottom: 1px solid #f0f0f0;"
                                                          onmouseover="this.style.background='#f5f5f5'"
@@ -265,9 +332,9 @@
                                                    t-att-value="line.unitPrice.toFixed(2)"
                                                    t-att-data-row="line_index"
                                                    t-att-data-col="5"
-                                                   t-on-input="(ev) => this.updateLine(line_index, 'unitPrice', parseFloat(ev.target.value) || 0)"
-                                                   t-on-focus="(ev) => { ev.target.select(); this.setFocusedCell(line_index, 5); }"
-                                                   t-on-keydown="(ev) => this.handleTableKeyDown(ev, line_index, 5)"
+                                                   t-on-input="updateLineHandler(line_index, 'unitPrice')"
+                                                   t-on-focus="focusSelectHandler(line_index, 5)"
+                                                   t-on-keydown="handleTableKeyDownHandler(line_index, 5)"
                                                    step="0.01"
                                                    min="0"
                                                    class="order-cell-input"
@@ -280,9 +347,9 @@
                                                    t-att-value="(line.unitPrice * state.exchangeRate).toFixed(2)"
                                                    t-att-data-row="line_index"
                                                    t-att-data-col="6"
-                                                   t-on-input="(ev) => this.onPriceIqdInput(ev, line_index)"
-                                                   t-on-focus="(ev) => { ev.target.select(); this.setFocusedCell(line_index, 6); }"
-                                                   t-on-keydown="(ev) => this.handleTableKeyDown(ev, line_index, 6)"
+                                                   t-on-input="onPriceIqdInputHandler(line_index)"
+                                                   t-on-focus="focusSelectHandler(line_index, 6)"
+                                                   t-on-keydown="handleTableKeyDownHandler(line_index, 6)"
                                                    step="0.01"
                                                    min="0"
                                                    class="order-cell-input"
@@ -295,9 +362,9 @@
                                                    t-att-value="line.discountPercent"
                                                    t-att-data-row="line_index"
                                                    t-att-data-col="7"
-                                                   t-on-input="(ev) => this.updateLine(line_index, 'discountPercent', parseFloat(ev.target.value) || 0)"
-                                                   t-on-focus="(ev) => { ev.target.select(); this.setFocusedCell(line_index, 7); }"
-                                                   t-on-keydown="(ev) => this.handleTableKeyDown(ev, line_index, 7)"
+                                                   t-on-input="updateLineHandler(line_index, 'discountPercent')"
+                                                   t-on-focus="focusSelectHandler(line_index, 7)"
+                                                   t-on-keydown="handleTableKeyDownHandler(line_index, 7)"
                                                    min="0" 
                                                    max="100"
                                                    step="0.1"
@@ -311,15 +378,17 @@
                                                    t-att-value="line.total.toFixed(2)"
                                                    readonly="readonly"
                                                    class="order-cell-input readonly-cell total-cell"
-                                                   style="text-align: right; background: #f0f8ff; font-weight: 600; width: 100%;"/>
+                                                   style="text-align: right; background: #eff6ff; font-weight: 600; width: 100%; color: #2563eb;"/>
                                         </td>
                                         
                                         <!-- Delete Button -->
-                                        <td style="text-align: center; cursor: pointer; font-size: 18px; padding: 5px;" 
-                                            t-on-click="() => this.deleteLine(line_index)"
-                                            t-on-keydown="(ev) => this.handleDeleteKeyDown(ev, line_index)"
+                                        <td style="text-align: center; cursor: pointer; font-size: 18px; padding: 5px; transition: all 0.2s;" 
+                                            t-on-click="deleteLineHandler(line_index)"
+                                            t-on-keydown="handleDeleteKeyDownHandler(line_index)"
                                             tabindex="0"
-                                            title="Delete line (Press Delete key)">
+                                            title="Delete line (Press Delete key)"
+                                            onmouseover="this.style.background='#fee2e2'; this.style.color='#dc2626'"
+                                            onmouseout="this.style.background=''; this.style.color=''">
                                             ❌
                                         </td>
                                     </tr>
@@ -331,29 +400,90 @@
                 </div>
 
                 <!-- ============= RIGHT SECTION: PRODUCT SEARCH ============= -->
-                <div class="search-section" style="display: flex; flex-direction: column; height: 100%; background: white; border-radius: 8px; border: 1px solid #ddd; box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow: hidden;">
+                <div class="search-section" style="display: flex; flex-direction: column; height: 100%; background: white; border-radius: 8px; border: 1px solid #e5e7eb; box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1); overflow: hidden;">
                     
-                    <!-- Search Bar - Improved -->
-                    <div style="padding: 12px 15px; background: linear-gradient(135deg, #714B67 0%, #8B6B7A 100%); box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                    <!-- Search Bar - Matching image design: Solid blue background -->
+                    <div style="padding: 16px; background: #2563eb; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                            <i class="fa fa-search" style="color: white; font-size: 16px;"/>
                             <h3 style="color: white; margin: 0; font-size: 16px; font-weight: 600;">
-                                🔍 Product Search
+                                Product Search
                             </h3>
-                            <span t-if="state.rightSearchResults.length > 0" 
-                                  style="color: white; font-size: 12px; background: rgba(255,255,255,0.2); padding: 4px 8px; border-radius: 12px;">
-                                <t t-esc="state.rightSearchResults.length"/> results
-                            </span>
                         </div>
                         <div style="position: relative;">
                             <input type="text" 
                                    class="form-control"
                                    t-model="state.rightSearchTerm"
-                                   t-on-input="() => this.searchRightPanel()"
-                                   t-on-keydown="(ev) => this.handleRightSearchKeyDown(ev)"
+                                   t-on-input="searchRightPanel"
+                                   t-on-keydown="handleRightSearchKeyDown"
                                    t-att-id="'right-search-input'"
-                                   placeholder="Search by name, code, or barcode... (Press + to focus here)"
-                                   style="padding: 10px 40px 10px 15px; font-size: 13px; border: 2px solid rgba(255,255,255,0.3); border-radius: 6px; background: white; width: 100%; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"/>
-                            <i class="fa fa-search" style="position: absolute; right: 15px; top: 50%; transform: translateY(-50%); color: #714B67; font-size: 16px;"/>
+                                   placeholder="Search by name, code, or barcode"
+                                   style="padding: 10px 40px 10px 15px; font-size: 14px; border: 1px solid #d1d5db; border-radius: 6px; background: white; width: 100%; box-shadow: 0 1px 3px rgba(0,0,0,0.1);"/>
+                            <i class="fa fa-search" style="position: absolute; right: 15px; top: 50%; transform: translateY(-50%); color: #6b7280; font-size: 16px; pointer-events: none;"/>
+                        </div>
+                    </div>
+                    
+                    <!-- Compact Filters Section - Above Products Table -->
+                    <div style="padding: 8px 12px; background: #f9fafb; border-bottom: 1px solid #e5e7eb;">
+                        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                            <!-- Brand Filters -->
+                            <div style="display: flex; align-items: center; gap: 4px;">
+                                <span style="font-size: 11px; font-weight: 600; color: #6b7280; white-space: nowrap;">Brands:</span>
+                                <div style="display: flex; gap: 4px;">
+                                    <button t-foreach="['ADF', 'ROYAL', 'GIVAUDAN', 'EURO']" t-as="brand" t-key="brand"
+                                            t-on-click="() => this.toggleBrandFilter(brand)"
+                                            t-att-style="this.isBrandFilterActive(brand) ? 'padding: 4px 8px; border: 1px solid #2563eb; border-radius: 3px; background: #2563eb; color: white; cursor: pointer; font-size: 11px; transition: all 0.2s; font-weight: 500; white-space: nowrap;' : 'padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 3px; background: white; cursor: pointer; font-size: 11px; transition: all 0.2s; white-space: nowrap;'"
+                                            onmouseover="this.style.background=this.style.background.includes('#2563eb') ? '#1d4ed8' : '#f3f4f6'"
+                                            onmouseout="this.style.background=this.style.background.includes('#2563eb') ? '#2563eb' : 'white'">
+                                        <t t-esc="brand"/>
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <!-- Divider -->
+                            <div style="width: 1px; height: 20px; background: #e5e7eb;"></div>
+                            
+                            <!-- Unit Filters -->
+                            <div style="display: flex; align-items: center; gap: 4px;">
+                                <span style="font-size: 11px; font-weight: 600; color: #6b7280; white-space: nowrap;">Units:</span>
+                                <div style="display: flex; gap: 4px; flex-wrap: wrap;">
+                                    <button t-foreach="[{filter: '1KG', name: '1KG'}, {filter: '0.5', name: '0.5KG'}, {filter: '50', name: '50g'}, {filter: '100', name: '100g'}, {filter: '125', name: '125g'}, {filter: '0.25', name: '0.25KG'}]" t-as="unit" t-key="unit.filter"
+                                            t-on-click="() => this.toggleUnitFilter(unit)"
+                                            t-att-style="this.isUnitFilterActive(unit.filter) ? 'padding: 4px 8px; border: 1px solid #2563eb; border-radius: 3px; background: #2563eb; color: white; cursor: pointer; font-size: 11px; transition: all 0.2s; font-weight: 500; white-space: nowrap;' : 'padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 3px; background: white; cursor: pointer; font-size: 11px; transition: all 0.2s; white-space: nowrap;'"
+                                            onmouseover="this.style.background=this.style.background.includes('#2563eb') ? '#1d4ed8' : '#f3f4f6'"
+                                            onmouseout="this.style.background=this.style.background.includes('#2563eb') ? '#2563eb' : 'white'">
+                                        <t t-esc="unit.name"/>
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <!-- Divider -->
+                            <div style="width: 1px; height: 20px; background: #e5e7eb;"></div>
+                            
+                            <!-- Full Plastic Filter -->
+                            <div style="display: flex; align-items: center; gap: 4px;">
+                                <span style="font-size: 11px; font-weight: 600; color: #6b7280; white-space: nowrap;">Plastic:</span>
+                                <div style="display: flex; gap: 4px;">
+                                    <button t-on-click="() => this.togglePlasticFilter(true)"
+                                            t-att-style="state.fullPlasticFilterActive === true ? 'padding: 4px 8px; border: 1px solid #2563eb; border-radius: 3px; background: #2563eb; color: white; cursor: pointer; font-size: 11px; transition: all 0.2s; font-weight: 500; white-space: nowrap;' : 'padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 3px; background: white; cursor: pointer; font-size: 11px; transition: all 0.2s; white-space: nowrap;'"
+                                            onmouseover="this.style.background=this.style.background.includes('#2563eb') ? '#1d4ed8' : '#f3f4f6'"
+                                            onmouseout="this.style.background=this.style.background.includes('#2563eb') ? '#2563eb' : 'white'">
+                                        All
+                                    </button>
+                                    <button t-on-click="() => this.togglePlasticFilter(false)"
+                                            t-att-style="state.fullPlasticFilterActive === false ? 'padding: 4px 8px; border: 1px solid #2563eb; border-radius: 3px; background: #2563eb; color: white; cursor: pointer; font-size: 11px; transition: all 0.2s; font-weight: 500; white-space: nowrap;' : 'padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 3px; background: white; cursor: pointer; font-size: 11px; transition: all 0.2s; white-space: nowrap;'"
+                                            onmouseover="this.style.background=this.style.background.includes('#2563eb') ? '#1d4ed8' : '#f3f4f6'"
+                                            onmouseout="this.style.background=this.style.background.includes('#2563eb') ? '#2563eb' : 'white'">
+                                        Hide
+                                    </button>
+                                    <button t-on-click="() => this.togglePlasticFilter(null)"
+                                            t-att-style="state.fullPlasticFilterActive === null ? 'padding: 4px 8px; border: 1px solid #2563eb; border-radius: 3px; background: #2563eb; color: white; cursor: pointer; font-size: 11px; transition: all 0.2s; font-weight: 500; white-space: nowrap;' : 'padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 3px; background: white; cursor: pointer; font-size: 11px; transition: all 0.2s; white-space: nowrap;'"
+                                            onmouseover="this.style.background=this.style.background.includes('#2563eb') ? '#1d4ed8' : '#f3f4f6'"
+                                            onmouseout="this.style.background=this.style.background.includes('#2563eb') ? '#2563eb' : 'white'">
+                                        Reset
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     
@@ -368,27 +498,27 @@
                         <t t-elif="state.rightSearchResults and state.rightSearchResults.length > 0">
                             <div style="height: 100%; overflow-y: auto;">
                                 <table class="table table-hover table-sm" style="margin: 0;">
-                                    <thead style="position: sticky; top: 0; background: #f8f9fa; z-index: 1;">
+                                    <thead style="position: sticky; top: 0; background: #f9fafb; z-index: 1;">
                                         <tr>
-                                            <th style="padding: 10px; font-size: 11px; border-bottom: 2px solid #714B67;">Code</th>
-                                            <th style="padding: 10px; font-size: 11px; border-bottom: 2px solid #714B67;">Product</th>
-                                            <th style="padding: 10px; font-size: 11px; border-bottom: 2px solid #714B67; text-align: center;">Unit</th>
-                                            <th style="padding: 10px; font-size: 11px; border-bottom: 2px solid #714B67; text-align: right;">Price (USD)</th>
-                                            <th style="padding: 10px; font-size: 11px; border-bottom: 2px solid #714B67; text-align: center;">Stock</th>
-                                            <th style="padding: 10px; font-size: 11px; border-bottom: 2px solid #714B67;">Warehouses</th>
+                                            <th style="padding: 10px; font-size: 12px; border-bottom: 2px solid #2563eb; color: #1f2937; font-weight: 600;">Code</th>
+                                            <th style="padding: 10px; font-size: 12px; border-bottom: 2px solid #2563eb; color: #1f2937; font-weight: 600;">Product</th>
+                                            <th style="padding: 10px; font-size: 12px; border-bottom: 2px solid #2563eb; text-align: center; color: #1f2937; font-weight: 600;">UOM</th>
+                                            <th style="padding: 10px; font-size: 12px; border-bottom: 2px solid #2563eb; text-align: right; color: #1f2937; font-weight: 600;">Price (USD)</th>
+                                            <th style="padding: 10px; font-size: 12px; border-bottom: 2px solid #2563eb; text-align: center; color: #1f2937; font-weight: 600;">Stock</th>
+                                            <th style="padding: 10px; font-size: 12px; border-bottom: 2px solid #2563eb; color: #1f2937; font-weight: 600;">Warehouses</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         <t t-foreach="state.rightSearchResults" t-as="product" t-key="product.id">
-                                            <tr t-on-click="() => this.addProductFromRightPanel(product)"
+                                            <tr t-on-click="addProductFromRightPanelHandler(product)"
                                                 style="cursor: pointer;"
                                                 t-att-class="this.isRightProductSelected(product) ? 'table-active' : ''"
                                                 t-att-data-product-id="product.id"
-                                                onmouseover="this.style.background='#f0f8ff'"
+                                                onmouseover="this.style.background='rgba(37, 99, 235, 0.05)'"
                                                 onmouseout="this.style.background=''"
-                                                t-att-style="this.isRightProductSelected(product) ? 'background: #e3f2fd; cursor: pointer;' : 'cursor: pointer;'">
+                                                t-att-style="this.isRightProductSelected(product) ? 'background: #dbeafe; cursor: pointer;' : 'cursor: pointer;'">
                                                 
-                                                <td style="padding: 8px; font-size: 12px; font-weight: 600; color: #714B67;">
+                                                <td style="padding: 8px; font-size: 12px; font-weight: 600; color: #2563eb;">
                                                     <t t-esc="product.default_code || '-'"/>
                                                 </td>
                                                 
@@ -407,10 +537,10 @@
                                                 </td>
                                                 
                                                 <td style="padding: 8px; font-size: 11px; text-align: center; color: #666;">
-                                                    <t t-esc="product.uom_name"/>
+                                                    <t t-esc="product.sap_uom_group_name || product.uom_name"/>
                                                 </td>
                                                 
-                                                <td style="padding: 8px; font-size: 12px; text-align: right; font-weight: 600; color: #2e7d32;">
+                                                <td style="padding: 8px; font-size: 12px; text-align: right; font-weight: 600; color: #16a34a;">
                                                     $<t t-esc="product.list_price.toFixed(2)"/>
                                                     <div style="font-size: 10px; color: #666; font-weight: normal;">
                                                         <t t-esc="Math.floor(product.price_iqd).toLocaleString()"/> IQD
@@ -425,7 +555,7 @@
                                                 
                                                 <td style="padding: 8px; font-size: 10px;">
                                                     <t t-foreach="product.warehouses || []" t-as="wh" t-key="wh.code">
-                                                        <span style="display: inline-block; margin: 2px; padding: 3px 6px; background: #e8f5e9; border-radius: 3px; color: #2e7d32; white-space: nowrap;">
+                                                        <span style="display: inline-block; margin: 2px; padding: 3px 6px; background: #dcfce7; border-radius: 4px; color: #16a34a; white-space: nowrap; font-size: 11px;">
                                                             <strong><t t-esc="wh.code"/>:</strong> <t t-esc="Math.floor(wh.qty)"/>
                                                         </span>
                                                     </t>
@@ -450,12 +580,12 @@
                     </div>
                     
                     <!-- Quick Stats Footer -->
-                    <div style="padding: 10px 15px; background: #f8f9fa; border-radius: 0 0 8px 8px; border-top: 2px solid #714B67;">
+                    <div style="padding: 10px 15px; background: #f9fafb; border-radius: 0 0 8px 8px; border-top: 2px solid #e5e7eb;">
                         <div style="display: flex; justify-content: space-between; align-items: center;">
                             <span style="font-size: 12px; color: #666;">
                                 <i class="fa fa-info-circle"/> Click on product to add to order
                             </span>
-                            <span style="font-size: 12px; font-weight: 600; color: #714B67;">
+                            <span style="font-size: 12px; font-weight: 600; color: #2563eb;">
                                 <t t-if="state.rightSearchResults">
                                     <t t-esc="state.rightSearchResults.length"/> results
                                 </t>
@@ -465,69 +595,196 @@
                 </div>
             </div>
             
-            <!-- Bottom Bar: Totals and Action Buttons -->
-            <div style="position: fixed; bottom: 0; left: 0; right: 0; background: #f9f9f9; border-top: 2px solid #714B67; padding: 15px 20px; box-shadow: 0 -2px 10px rgba(0,0,0,0.1); z-index: 1000; display: flex; align-items: center; justify-content: space-between; gap: 30px;">
-                <!-- Totals Section -->
-                <div style="display: flex; align-items: center; gap: 25px; flex: 1;">
-                    <div style="display: flex; flex-direction: column; gap: 5px;">
-                        <div style="display: flex; align-items: center; gap: 10px;">
-                            <span style="font-size: 13px; color: #666;">Subtotal:</span>
-                            <span style="font-size: 14px; font-weight: 600;">$<t t-esc="state.currentOrder.totals.subtotal.toFixed(2)"/></span>
+            <!-- Bottom Bar: Totals and Action Buttons - Inspired by route 44 OrderSummary -->
+            <div style="position: fixed; bottom: 0; left: 0; right: 0; background: white; border-top: 2px solid #e5e7eb; padding: 16px 24px; box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.1), 0 -2px 4px -1px rgba(0, 0, 0, 0.06); z-index: 1000; display: flex; align-items: center; justify-content: space-between; gap: 32px;">
+                <!-- Totals Section - Inspired by route 44 OrderSummary -->
+                <div style="display: flex; align-items: center; gap: 32px; flex: 1; max-width: 1800px; margin: 0 auto; width: 100%;">
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <div style="display: flex; align-items: center; gap: 16px;">
+                            <span style="font-size: 14px; color: #4b5563; width: 96px;">Subtotal:</span>
+                            <span style="font-size: 18px; font-weight: 500;">$<t t-esc="state.currentOrder.totals.subtotal.toFixed(2)"/></span>
                         </div>
-                        <div style="display: flex; align-items: center; gap: 10px;">
-                            <span style="font-size: 13px; color: #666;">Discount:</span>
-                            <span style="font-size: 14px; font-weight: 600; color: #f44336;">-$<t t-esc="state.currentOrder.totals.discount.toFixed(2)"/></span>
-                        </div>
-                    </div>
-                    <div style="display: flex; flex-direction: column; gap: 5px;">
-                        <div style="display: flex; align-items: center; gap: 10px;">
-                            <span style="font-size: 13px; color: #666;">Tax (0%):</span>
-                            <span style="font-size: 14px; font-weight: 600;">$<t t-esc="state.currentOrder.totals.tax.toFixed(2)"/></span>
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 10px;">
-                            <span style="font-size: 14px; font-weight: 600; color: #714B67;">Grand Total:</span>
-                            <span style="font-size: 16px; font-weight: 700; color: #714B67;">$<t t-esc="state.currentOrder.totals.total_usd.toFixed(2)"/></span>
+                        <div style="display: flex; align-items: center; gap: 16px;">
+                            <span style="font-size: 14px; color: #4b5563; width: 96px;">Tax total:</span>
+                            <span style="font-size: 18px; font-weight: 500;">$<t t-esc="state.currentOrder.totals.tax.toFixed(2)"/></span>
                         </div>
                     </div>
-                    <div style="display: flex; flex-direction: column; gap: 5px; border-left: 2px solid #ddd; padding-left: 20px;">
-                        <div style="display: flex; align-items: center; gap: 10px;">
-                            <span style="font-size: 14px; font-weight: 600; color: #714B67;">Total in Iraqi Dinar:</span>
-                            <span style="font-size: 18px; font-weight: 700; color: #714B67;">
-                                <t t-esc="Math.floor(state.currentOrder.totals.total_iqd).toLocaleString('en-US')"/> IQD
-                            </span>
+                    
+                    <div style="width: 1px; height: 64px; background: #e5e7eb;"></div>
+                    
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <div style="display: flex; align-items: center; gap: 16px;">
+                            <span style="font-size: 14px; color: #4b5563; width: 112px;">Discount:</span>
+                            <span style="font-size: 18px; font-weight: 500; color: #dc2626;">-$<t t-esc="state.currentOrder.totals.discount.toFixed(2)"/></span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 16px;">
+                            <span style="font-size: 14px; color: #1f2937; width: 112px; font-weight: 500;">Grand Total:</span>
+                            <span style="font-size: 24px; font-weight: 600; color: #2563eb;">$<t t-esc="state.currentOrder.totals.total_usd.toFixed(2)"/></span>
+                        </div>
+                    </div>
+                    
+                    <div style="width: 1px; height: 64px; background: #e5e7eb;"></div>
+                    
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                        <div style="font-size: 14px; color: #4b5563;">Total in Iraqi Dinar:</div>
+                        <div style="font-size: 18px; color: #1f2937; font-weight: 500; margin-top: 4px;">
+                            <t t-esc="Math.floor(state.currentOrder.totals.total_iqd).toLocaleString('en-US')"/> <span style="font-size: 14px;">IQD</span>
                         </div>
                     </div>
                 </div>
                 
-                <!-- Action Buttons -->
-                <div style="display: flex; gap: 10px; flex-shrink: 0;">
+                <!-- Order State Display -->
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                    <label style="font-size: 14px; color: #4b5563; font-weight: 500;">Order State:</label>
+                    <span t-att-style="state.currentOrder.state === 'draft' ? 'background: #ffc107; color: white; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 600;' : state.currentOrder.state === 'quotation' ? 'background: #17a2b8; color: white; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 600;' : state.currentOrder.state === 'sale' ? 'background: #28a745; color: white; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 600;' : 'background: #6c757d; color: white; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 600;'">
+                        <t t-esc="state.currentOrder.state ? state.currentOrder.state.toUpperCase() : 'DRAFT'"/>
+                    </span>
+                </div>
+                
+                <!-- Action Buttons - Inspired by route 44 OrderSummary -->
+                <div style="display: flex; gap: 8px; flex-shrink: 0;">
+                    <button class="action-btn btn-save" 
+                            t-on-click="saveOrderWithSync"
+                            style="padding: 8px 16px; background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; white-space: nowrap; height: 40px; transition: all 0.2s;"
+                            onmouseover="this.style.background='#1d4ed8'"
+                            onmouseout="this.style.background='#2563eb'">
+                        💾 Save
+                    </button>
                     <button class="action-btn btn-quotation" 
-                            t-on-click="() => this.createQuotation()"
-                            style="padding: 10px 20px; background: #5a6c7d; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; white-space: nowrap;">
+                            t-on-click="createQuotation"
+                            style="padding: 8px 16px; background: white; color: #2563eb; border: 1px solid #93c5fd; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; white-space: nowrap; height: 40px; transition: all 0.2s;"
+                            onmouseover="this.style.background='#eff6ff'; this.style.borderColor='#60a5fa'"
+                            onmouseout="this.style.background='white'; this.style.borderColor='#93c5fd'">
                         📋 Quotation
                     </button>
                     <button class="action-btn btn-sale-order" 
-                            t-on-click="() => this.confirmSaleOrder()"
-                            style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; white-space: nowrap;">
+                            t-on-click="confirmSaleOrder"
+                            style="padding: 8px 16px; background: #16a34a; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; white-space: nowrap; height: 40px; transition: all 0.2s;"
+                            onmouseover="this.style.background='#15803d'"
+                            onmouseout="this.style.background='#16a34a'">
                         ✅ Sale Order
                     </button>
-                    <button class="action-btn btn-draft" 
-                            t-on-click="() => this.saveOrderDraft()"
-                            style="padding: 10px 20px; background: #17a2b8; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; white-space: nowrap;">
-                        💾 Draft
-                    </button>
                     <button class="action-btn btn-cancel" 
-                            t-on-click="() => this.cancelOrder()"
-                            style="padding: 10px 20px; background: #dc3545; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; white-space: nowrap;">
+                            t-on-click="cancelOrder"
+                            style="padding: 8px 16px; background: #dc2626; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; white-space: nowrap; height: 40px; transition: all 0.2s;"
+                            onmouseover="this.style.background='#b91c1c'"
+                            onmouseout="this.style.background='#dc2626'">
                         🚫 Cancel
                     </button>
                     <button class="action-btn btn-whatsapp" 
-                            t-on-click="() => this.sendWhatsApp()"
-                            style="padding: 10px 20px; background: #25D366; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; white-space: nowrap;">
+                            t-on-click="sendWhatsApp"
+                            style="padding: 8px 16px; background: #22c55e; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; white-space: nowrap; height: 40px; transition: all 0.2s;"
+                            onmouseover="this.style.background='#16a34a'"
+                            onmouseout="this.style.background='#22c55e'">
                         📱 WhatsApp
+                    </button>
+                    <button t-if="state.currentOrder.order_id"
+                            class="action-btn btn-print" 
+                            t-on-click="printOrder"
+                            style="padding: 8px 16px; background: #4b5563; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; white-space: nowrap; height: 40px; transition: all 0.2s;"
+                            onmouseover="this.style.background='#374151'"
+                            onmouseout="this.style.background='#4b5563'">
+                        🖨️ Print
                     </button>
                 </div>
             </div>
+            
+            <!-- Previous Orders Dialog -->
+            <t t-if="state.showPreviousOrdersDialog">
+                <div class="modal-overlay" 
+             style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;"
+             t-on-click="closePreviousOrdersDialog">
+            <div class="modal-content" 
+                 style="background: white; border-radius: 8px; padding: 20px; max-width: 800px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 4px 20px rgba(0,0,0,0.3);"
+                 t-on-click.stop="">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 2px solid #2563eb; padding-bottom: 10px;">
+                    <h3 style="margin: 0; color: #2563eb; font-size: 18px; font-weight: 600;">Previous Orders</h3>
+                    <button t-on-click="closePreviousOrdersDialog"
+                            style="background: #dc2626; color: white; border: none; border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s;"
+                            onmouseover="this.style.background='#b91c1c'"
+                            onmouseout="this.style.background='#dc2626'">
+                        ✕ Close
+                    </button>
+                </div>
+                
+                <!-- Search in Previous Orders -->
+                <div style="margin-bottom: 15px;">
+                    <input type="text" 
+                           class="form-control"
+                           t-model="state.previousOrdersSearchTerm"
+                           t-on-input="onPreviousOrdersSearch"
+                           placeholder="Search by Order #, Customer, or SAP Doc..."
+                           style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; height: 40px;"/>
+                </div>
+                
+                <div style="max-height: 60vh; overflow-y: auto;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <thead style="background: #f9fafb; position: sticky; top: 0;">
+                            <tr>
+                                <th style="padding: 10px; text-align: left; border-bottom: 2px solid #2563eb; font-size: 12px; font-weight: 600; color: #1f2937;">Order #</th>
+                                <th style="padding: 10px; text-align: left; border-bottom: 2px solid #2563eb; font-size: 12px; font-weight: 600; color: #1f2937;">Customer</th>
+                                <th style="padding: 10px; text-align: left; border-bottom: 2px solid #2563eb; font-size: 12px; font-weight: 600; color: #1f2937;">Date</th>
+                                <th style="padding: 10px; text-align: right; border-bottom: 2px solid #2563eb; font-size: 12px; font-weight: 600; color: #1f2937;">Total</th>
+                                <th style="padding: 10px; text-align: left; border-bottom: 2px solid #2563eb; font-size: 12px; font-weight: 600; color: #1f2937;">SAP Doc</th>
+                                <th style="padding: 10px; text-align: center; border-bottom: 2px solid #2563eb; font-size: 12px; font-weight: 600; color: #1f2937;">State</th>
+                                <th style="padding: 10px; text-align: center; border-bottom: 2px solid #2563eb; font-size: 12px; font-weight: 600; color: #1f2937;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <t t-foreach="(state.filteredPreviousOrders.length > 0 ? state.filteredPreviousOrders : state.previousOrders)" t-as="order" t-key="order.id">
+                                <tr style="border-bottom: 1px solid #e0e0e0; cursor: pointer;"
+                                    onmouseover="this.style.background='#f5f5f5'"
+                                    onmouseout="this.style.background=''"
+                                    t-att-class="order.id === state.currentOrder.order_id ? 'table-active' : ''"
+                                    t-att-style="order.id === state.currentOrder.order_id ? 'background: #dbeafe; border-bottom: 1px solid #e5e7eb; cursor: pointer;' : 'border-bottom: 1px solid #e5e7eb; cursor: pointer;'">
+                                    <td style="padding: 10px; font-weight: 600; color: #2563eb; font-size: 12px;">
+                                        <t t-esc="order.name"/>
+                                    </td>
+                                    <td style="padding: 10px; font-size: 12px;">
+                                        <t t-esc="order.partner_id ? order.partner_id[1] : 'No Customer'"/>
+                                    </td>
+                                    <td style="padding: 10px; font-size: 12px; color: #666;">
+                                        <t t-esc="order.date ? new Date(order.date).toLocaleDateString() : '-'"/>
+                                    </td>
+                                    <td style="padding: 10px; text-align: right; font-weight: 600; font-size: 12px; color: #16a34a;">
+                                        $<t t-esc="order.amount_total ? order.amount_total.toFixed(2) : '0.00'"/>
+                                    </td>
+                                    <td style="padding: 10px; font-size: 12px;">
+                                        <t t-if="order.sap_doc_num">
+                                            <span style="color: #2563eb; font-weight: 600;">
+                                                <t t-esc="order.sap_doc_num"/>
+                                            </span>
+                                            <t t-if="order.sap_doc_entry">
+                                                <span style="color: #666; font-size: 10px; margin-left: 5px;">
+                                                    (Entry: <t t-esc="order.sap_doc_entry"/>)
+                                                </span>
+                                            </t>
+                                        </t>
+                                        <t t-else="">
+                                            <span style="color: #999;">-</span>
+                                        </t>
+                                    </td>
+                                    <td style="padding: 10px; text-align: center; font-size: 12px;">
+                                        <span t-att-style="order.state === 'draft' ? 'background: #ffc107; color: white; padding: 3px 8px; border-radius: 3px;' : order.state === 'quotation' ? 'background: #17a2b8; color: white; padding: 3px 8px; border-radius: 3px;' : order.state === 'sale' ? 'background: #28a745; color: white; padding: 3px 8px; border-radius: 3px;' : 'background: #6c757d; color: white; padding: 3px 8px; border-radius: 3px;'">
+                                            <t t-esc="order.state ? order.state.toUpperCase() : 'DRAFT'"/>
+                                        </span>
+                                    </td>
+                                    <td style="padding: 10px; text-align: center;">
+                                        <button t-on-click="() => this.selectOrderFromDialog(order.id)"
+                                                style="padding: 5px 12px; background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500; transition: all 0.2s;"
+                                                onmouseover="this.style.background='#1d4ed8'"
+                                                onmouseout="this.style.background='#2563eb'">
+                                            Load
+                                        </button>
+                                    </td>
+                                </tr>
+                            </t>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+            </t>
         </div>
     </t>
 

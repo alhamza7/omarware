@@ -267,6 +267,16 @@ class ProductProductExtended(models.Model):
                 if hasattr(product, 'foreign_name'):
                     foreign_name = product.foreign_name or ''
                 
+                # Get SAP UoM Group name
+                sap_uom_group_name = ''
+                if hasattr(product, 'sap_uom_group_id') and product.sap_uom_group_id:
+                    sap_uom_group_name = product.sap_uom_group_id.name
+                elif hasattr(product.product_tmpl_id, 'sap_uom_group_id') and product.product_tmpl_id.sap_uom_group_id:
+                    sap_uom_group_name = product.product_tmpl_id.sap_uom_group_id.name
+                # Fallback to UoM name if no UoM Group
+                if not sap_uom_group_name:
+                    sap_uom_group_name = product.uom_id.name
+                
                 result.append({
                     'id': product.id,
                     'name': product.name,
@@ -276,6 +286,7 @@ class ProductProductExtended(models.Model):
                     'price_iqd': list_price_iqd,
                     'uom_id': product.uom_id.id,
                     'uom_name': product.uom_id.name,
+                    'sap_uom_group_name': sap_uom_group_name,  # SAP UoM Group name
                     'categ_name': product.categ_id.name if product.categ_id else '',
                     'qty_available': total_stock,
                     'warehouses': warehouses,
