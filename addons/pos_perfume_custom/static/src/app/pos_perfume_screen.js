@@ -2618,8 +2618,10 @@ export class PosPerfumeScreen extends Component {
         
         // Auto-select UOM based on active unit filter
         if (this.state.activeUnitFilter && currentLine.availableUoms && currentLine.availableUoms.length > 0) {
+            console.log(`[UOM Auto-Select] Filter: ${this.state.activeUnitFilter.filter}, Available UOMs:`, currentLine.availableUoms.map(u => u.name));
             const targetUnit = this.findUomByFilter(currentLine.availableUoms, this.state.activeUnitFilter.filter);
             if (targetUnit) {
+                console.log(`[UOM Auto-Select] Selected UOM: ${targetUnit.name} (ID: ${targetUnit.id})`);
                 currentLine.uom_id = targetUnit.id;
                 currentLine.uomName = targetUnit.name;
                 currentLine.uomValid = true;
@@ -2627,13 +2629,23 @@ export class PosPerfumeScreen extends Component {
                 // Update price if available
                 if (targetUnit.price !== undefined) {
                     currentLine.unitPrice = targetUnit.price;
+                    console.log(`[UOM Auto-Select] Price from UOM: ${targetUnit.price}`);
                 } else {
                     // Call onchange to get price
+                    console.log(`[UOM Auto-Select] Calling onUomChange to get price...`);
                     await this.onUomChange(lineIndex);
                 }
                 
                 this.calculateLine(currentLine);
                 this.calculateTotals();
+            } else {
+                console.warn(`[UOM Auto-Select] No matching UOM found for filter: ${this.state.activeUnitFilter.filter}`);
+            }
+        } else {
+            if (!this.state.activeUnitFilter) {
+                console.log(`[UOM Auto-Select] No active unit filter`);
+            } else if (!currentLine.availableUoms || currentLine.availableUoms.length === 0) {
+                console.warn(`[UOM Auto-Select] No available UOMs for product ${product.id}`);
             }
         }
         
@@ -3190,33 +3202,190 @@ export class PosPerfumeScreen extends Component {
      */
     findUomByFilter(availableUoms, filterValue) {
         if (!availableUoms || availableUoms.length === 0) {
+            console.warn(`[findUomByFilter] No available UOMs provided`);
             return null;
         }
         
-        // Map filter values to search patterns
+        if (!filterValue) {
+            console.warn(`[findUomByFilter] No filter value provided`);
+            return null;
+        }
+        
+        // Map filter values to search patterns (ordered by priority: most specific first)
         const filterMap = {
-            '125': ['125', '125g', '125 غم', '125g', '125 جرام'],
-            '100': ['100', '100g', '100 غم', '100g', '100 جرام'],
-            '50': ['50', '50g', '50 غم', '50g', '50 جرام'],
-            '0.5': ['0.5', '0.5kg', '0.5 كغم', '500', '500g', '500 غم'],
-            '1KG': ['1', '1kg', '1 كغم', '1000', '1000g', '1000 غم'],
-            '0.25': ['0.25', '0.25kg', '0.25 كغم', '250', '250g', '250 غم']
+            '125': [
+                '125g', '125غم', '125 غم', '125 جرام', '125 غرام', '125g', '125غم',
+                '125'  // Keep as last to avoid matching "125" in "1250" or similar
+            ],
+            '100': [
+                '100g', '100غم', '100 غم', '100 جرام', '100 غرام', '100g', '100غم',
+                '100'  // Keep as last
+            ],
+            '50': [
+                '50g', '50غم', '50 غم', '50 جرام', '50 غرام', '50g', '50غم',
+                '50'  // Keep as last
+            ],
+            '0.5': [
+                '0.5kg', '0.5 كغم', '0.5 كيلو',
+                '500g', '500غم', '500 غم', '500 جرام', '500 غرام'
+                // Removed '0.5' and '500' to avoid false matches with "كغم" or other units
+            ],
+            '1KG': [
+                'كغم', 'كيلو', 'kg', 'كيلوغرام',  // Most specific: Arabic and English "kg"
+                '1kg', '1 كغم', '1 كيلو', '1 كغم',
+                '1000g', '1000غم', '1000 غم'
+                // Removed '1' and '1000' to avoid false matches
+            ],
+            '0.25': [
+                '0.25kg', '0.25 كغم', '0.25 كيلو',
+                '250g', '250غم', '250 غم', '250 جرام', '250 غرام'
+                // Removed '0.25' and '250' to avoid false matches
+            ]
         };
         
         const searchPatterns = filterMap[filterValue] || [filterValue];
+        console.log(`[findUomByFilter] Searching for filter: ${filterValue}, patterns:`, searchPatterns);
         
-        // Search in UOM names
+        // Search in UOM names (exact match first, then partial, ordered by priority)
         for (const uom of availableUoms) {
-            const uomName = (uom.name || '').toLowerCase();
+            const uomName = (uom.name || '').toLowerCase().trim();
+            console.log(`[findUomByFilter] Checking UOM: "${uom.name}" (normalized: "${uomName}")`);
+            
+            // Try exact match first (most specific patterns first)
             for (const pattern of searchPatterns) {
-                if (uomName.includes(pattern.toLowerCase())) {
+                const patternLower = pattern.toLowerCase().trim();
+                
+                // Exact match
+                if (uomName === patternLower) {
+                    console.log(`[findUomByFilter] Exact match found: "${uom.name}" for pattern "${pattern}"`);
                     return uom;
+                }
+                
+                // Match with common suffixes
+                if (uomName === patternLower + 'g' || 
+                    uomName === patternLower + 'غم' || 
+                    uomName === patternLower + ' غم' ||
+                    uomName === patternLower + 'g' ||
+                    uomName === patternLower + 'kg' ||
+                    uomName === patternLower + ' كغم' ||
+                    uomName === patternLower + ' كيلو') {
+                    console.log(`[findUomByFilter] Exact match with suffix found: "${uom.name}" for pattern "${pattern}"`);
+                    return uom;
+                }
+            }
+            
+            // Try partial match (skip single digits to avoid false matches)
+            for (const pattern of searchPatterns) {
+                const patternLower = pattern.toLowerCase().trim();
+                
+                // Skip single digit patterns (like "1") to avoid matching "1" in "125" or "100"
+                if (patternLower.length === 1 && /^\d$/.test(patternLower)) {
+                    continue;
+                }
+                
+                // For "1KG" filter, be very strict - only match if UOM name contains "kg", "كغم", or "كيلو"
+                if (filterValue === '1KG') {
+                    // First check: UOM name must NOT contain "0.25", "250", "0.5", "500" to avoid false matches
+                    const hasWrongNumbers = uomName.includes('0.25') || 
+                                           uomName.includes('250') ||
+                                           uomName.includes('0.5') ||
+                                           uomName.includes('500') ||
+                                           uomName.includes('125') ||
+                                           uomName.includes('100') ||
+                                           uomName.includes('50');
+                    
+                    if (hasWrongNumbers) {
+                        // Skip this UOM if it contains numbers that indicate it's not 1KG
+                        continue;
+                    }
+                    
+                    // Second check: UOM name must contain "kg", "كغم", or "كيلو"
+                    const hasKgKeyword = uomName.includes('kg') || 
+                                        uomName.includes('كغم') || 
+                                        uomName.includes('كيلو') ||
+                                        uomName.includes('كيلوغرام');
+                    
+                    if (!hasKgKeyword) {
+                        // Skip this UOM if it doesn't contain kg keywords
+                        continue;
+                    }
+                    
+                    // Third check: Pattern must also contain kg keywords
+                    const patternHasKg = patternLower.includes('kg') || 
+                                        patternLower.includes('كغم') || 
+                                        patternLower.includes('كيلو') ||
+                                        patternLower.includes('كيلوغرام');
+                    
+                    if (patternHasKg) {
+                        // Check if UOM name matches the pattern
+                        if (uomName.includes(patternLower) || patternLower.includes(uomName)) {
+                            console.log(`[findUomByFilter] Partial match found: "${uom.name}" for pattern "${pattern}"`);
+                            return uom;
+                        }
+                    }
+                } else if (filterValue === '0.5') {
+                    // For "0.5" filter, only match if UOM contains "0.5" or "500" (not just "kg" or "كغم")
+                    const has05Or500 = uomName.includes('0.5') || 
+                                      uomName.includes('500') ||
+                                      uomName.includes('0.5kg') ||
+                                      uomName.includes('0.5 كغم') ||
+                                      uomName.includes('500g') ||
+                                      uomName.includes('500غم');
+                    
+                    if (!has05Or500) {
+                        // Skip this UOM if it doesn't contain 0.5 or 500 keywords
+                        continue;
+                    }
+                    
+                    // Check if UOM name matches the pattern
+                    if (uomName.includes(patternLower) || patternLower.includes(uomName)) {
+                        console.log(`[findUomByFilter] Partial match found: "${uom.name}" for pattern "${pattern}"`);
+                        return uom;
+                    }
+                } else if (filterValue === '0.25') {
+                    // For "0.25" filter, only match if UOM contains "0.25" or "250" (not just "kg" or "كغم")
+                    const has025Or250 = uomName.includes('0.25') || 
+                                       uomName.includes('250') ||
+                                       uomName.includes('0.25kg') ||
+                                       uomName.includes('0.25 كغم') ||
+                                       uomName.includes('250g') ||
+                                       uomName.includes('250غم');
+                    
+                    if (!has025Or250) {
+                        // Skip this UOM if it doesn't contain 0.25 or 250 keywords
+                        continue;
+                    }
+                    
+                    // Check if UOM name matches the pattern
+                    if (uomName.includes(patternLower) || patternLower.includes(uomName)) {
+                        console.log(`[findUomByFilter] Partial match found: "${uom.name}" for pattern "${pattern}"`);
+                        return uom;
+                    }
+                } else {
+                    // For other filters (125, 100, 50), use normal partial match but be careful
+                    // Skip if pattern is just a number and UOM contains other numbers
+                    if (/^\d+$/.test(patternLower)) {
+                        // If pattern is just a number, make sure UOM name contains this exact number
+                        // and not as part of another number (e.g., "125" should not match "1250")
+                        const numberPattern = new RegExp(`\\b${patternLower}\\b`);
+                        if (numberPattern.test(uomName)) {
+                            console.log(`[findUomByFilter] Partial match found: "${uom.name}" for pattern "${pattern}"`);
+                            return uom;
+                        }
+                    } else {
+                        // For non-numeric patterns, use normal partial match
+                        if (uomName.includes(patternLower) || patternLower.includes(uomName)) {
+                            console.log(`[findUomByFilter] Partial match found: "${uom.name}" for pattern "${pattern}"`);
+                            return uom;
+                        }
+                    }
                 }
             }
         }
         
-        // If not found, return first UOM
-        return availableUoms[0];
+        // If not found, log warning and return null (don't return first UOM automatically)
+        console.warn(`[findUomByFilter] No matching UOM found for filter: ${filterValue}`);
+        return null;
     }
     
     openProductPopupHandler(lineIndex) {

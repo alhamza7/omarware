@@ -6,6 +6,31 @@
     <!-- ============================================================ -->
 
     <t t-name="pos_perfume_custom.PosPerfumeScreen">
+        <style>
+            .filter-btn-active {
+                background: #10b981 !important;
+                color: white !important;
+                border: 2px solid #059669 !important;
+                box-shadow: 0 2px 6px rgba(16, 185, 129, 0.4) !important;
+                font-weight: 700 !important;
+            }
+            .filter-btn-active:hover {
+                background: #059669 !important;
+                border-color: #047857 !important;
+                box-shadow: 0 3px 8px rgba(16, 185, 129, 0.5) !important;
+            }
+            .filter-btn-inactive {
+                background: white !important;
+                color: #6b7280 !important;
+                border: 1px solid #d1d5db !important;
+                font-weight: 500 !important;
+            }
+            .filter-btn-inactive:hover {
+                background: #f9fafb !important;
+                border-color: #9ca3af !important;
+                color: #4b5563 !important;
+            }
+        </style>
         <div class="pos-perfume-container">
             
             <!-- Header - Matching image design: Solid blue background with Order # and Actions -->
@@ -432,9 +457,8 @@
                                 <div style="display: flex; gap: 4px;">
                                     <button t-foreach="['ADF', 'ROYAL', 'GIVAUDAN', 'EURO']" t-as="brand" t-key="brand"
                                             t-on-click="() => this.toggleBrandFilter(brand)"
-                                            t-att-style="this.isBrandFilterActive(brand) ? 'padding: 4px 8px; border: 1px solid #2563eb; border-radius: 3px; background: #2563eb; color: white; cursor: pointer; font-size: 11px; transition: all 0.2s; font-weight: 500; white-space: nowrap;' : 'padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 3px; background: white; cursor: pointer; font-size: 11px; transition: all 0.2s; white-space: nowrap;'"
-                                            onmouseover="this.style.background=this.style.background.includes('#2563eb') ? '#1d4ed8' : '#f3f4f6'"
-                                            onmouseout="this.style.background=this.style.background.includes('#2563eb') ? '#2563eb' : 'white'">
+                                            t-att-class="this.isBrandFilterActive(brand) ? 'filter-btn-active' : 'filter-btn-inactive'"
+                                            style="padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; transition: all 0.2s; white-space: nowrap; font-weight: 600;">
                                         <t t-esc="brand"/>
                                     </button>
                                 </div>
@@ -449,9 +473,8 @@
                                 <div style="display: flex; gap: 4px; flex-wrap: wrap;">
                                     <button t-foreach="[{filter: '1KG', name: '1KG'}, {filter: '0.5', name: '0.5KG'}, {filter: '50', name: '50g'}, {filter: '100', name: '100g'}, {filter: '125', name: '125g'}, {filter: '0.25', name: '0.25KG'}]" t-as="unit" t-key="unit.filter"
                                             t-on-click="() => this.toggleUnitFilter(unit)"
-                                            t-att-style="this.isUnitFilterActive(unit.filter) ? 'padding: 4px 8px; border: 1px solid #2563eb; border-radius: 3px; background: #2563eb; color: white; cursor: pointer; font-size: 11px; transition: all 0.2s; font-weight: 500; white-space: nowrap;' : 'padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 3px; background: white; cursor: pointer; font-size: 11px; transition: all 0.2s; white-space: nowrap;'"
-                                            onmouseover="this.style.background=this.style.background.includes('#2563eb') ? '#1d4ed8' : '#f3f4f6'"
-                                            onmouseout="this.style.background=this.style.background.includes('#2563eb') ? '#2563eb' : 'white'">
+                                            t-att-class="this.isUnitFilterActive(unit.filter) ? 'filter-btn-active' : 'filter-btn-inactive'"
+                                            style="padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; transition: all 0.2s; white-space: nowrap; font-weight: 600;">
                                         <t t-esc="unit.name"/>
                                     </button>
                                 </div>
@@ -465,21 +488,18 @@
                                 <span style="font-size: 11px; font-weight: 600; color: #6b7280; white-space: nowrap;">Plastic:</span>
                                 <div style="display: flex; gap: 4px;">
                                     <button t-on-click="() => this.togglePlasticFilter(true)"
-                                            t-att-style="state.fullPlasticFilterActive === true ? 'padding: 4px 8px; border: 1px solid #2563eb; border-radius: 3px; background: #2563eb; color: white; cursor: pointer; font-size: 11px; transition: all 0.2s; font-weight: 500; white-space: nowrap;' : 'padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 3px; background: white; cursor: pointer; font-size: 11px; transition: all 0.2s; white-space: nowrap;'"
-                                            onmouseover="this.style.background=this.style.background.includes('#2563eb') ? '#1d4ed8' : '#f3f4f6'"
-                                            onmouseout="this.style.background=this.style.background.includes('#2563eb') ? '#2563eb' : 'white'">
+                                            t-att-class="state.fullPlasticFilterActive === true ? 'filter-btn-active' : 'filter-btn-inactive'"
+                                            style="padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; transition: all 0.2s; white-space: nowrap; font-weight: 600;">
                                         All
                                     </button>
                                     <button t-on-click="() => this.togglePlasticFilter(false)"
-                                            t-att-style="state.fullPlasticFilterActive === false ? 'padding: 4px 8px; border: 1px solid #2563eb; border-radius: 3px; background: #2563eb; color: white; cursor: pointer; font-size: 11px; transition: all 0.2s; font-weight: 500; white-space: nowrap;' : 'padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 3px; background: white; cursor: pointer; font-size: 11px; transition: all 0.2s; white-space: nowrap;'"
-                                            onmouseover="this.style.background=this.style.background.includes('#2563eb') ? '#1d4ed8' : '#f3f4f6'"
-                                            onmouseout="this.style.background=this.style.background.includes('#2563eb') ? '#2563eb' : 'white'">
+                                            t-att-class="state.fullPlasticFilterActive === false ? 'filter-btn-active' : 'filter-btn-inactive'"
+                                            style="padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; transition: all 0.2s; white-space: nowrap; font-weight: 600;">
                                         Hide
                                     </button>
                                     <button t-on-click="() => this.togglePlasticFilter(null)"
-                                            t-att-style="state.fullPlasticFilterActive === null ? 'padding: 4px 8px; border: 1px solid #2563eb; border-radius: 3px; background: #2563eb; color: white; cursor: pointer; font-size: 11px; transition: all 0.2s; font-weight: 500; white-space: nowrap;' : 'padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 3px; background: white; cursor: pointer; font-size: 11px; transition: all 0.2s; white-space: nowrap;'"
-                                            onmouseover="this.style.background=this.style.background.includes('#2563eb') ? '#1d4ed8' : '#f3f4f6'"
-                                            onmouseout="this.style.background=this.style.background.includes('#2563eb') ? '#2563eb' : 'white'">
+                                            t-att-class="state.fullPlasticFilterActive === null ? 'filter-btn-active' : 'filter-btn-inactive'"
+                                            style="padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; transition: all 0.2s; white-space: nowrap; font-weight: 600;">
                                         Reset
                                     </button>
                                 </div>
