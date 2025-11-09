@@ -230,33 +230,15 @@ class SaleOrder(models.Model):
             if not item_code:
                 _logger.warning(f"Product {line.product_id.name} (ID: {line.product_id.id}) has no default_code or barcode - ItemCode will be empty!")
             
-            # الحصول على ItemDescription (وصف المنتج فقط - بدون كود)
-            # استخدام product_id.name مباشرة لضمان عدم وجود كود في الوصف
-            item_description = line.product_id.name or ''
-            
-            # إذا كان line.name موجوداً ومختلفاً عن product_id.name، يمكن استخدامه بعد تنظيفه من الكود
-            if line.name and line.name != line.product_id.name:
-                # إزالة الكود من line.name إذا كان موجوداً في البداية
-                cleaned_name = line.name
-                if line.product_id.default_code and cleaned_name.startswith(line.product_id.default_code):
-                    # إزالة الكود من البداية
-                    cleaned_name = cleaned_name.replace(line.product_id.default_code, '', 1).strip()
-                    # إزالة أي فواصل أو مسافات زائدة في البداية
-                    cleaned_name = cleaned_name.lstrip(' -:')
-                if cleaned_name:
-                    item_description = cleaned_name
-                    _logger.info(f"Using cleaned line.name as ItemDescription: {item_description}")
-            
-            # إعداد بيانات السطر الأساسية
+            # إعداد بيانات السطر الأساسية (بدون ItemDescription)
             line_data = {
                 'ItemCode': item_code,
-                'ItemDescription': item_description,
                 'Quantity': line.product_uom_qty,
                 'UnitPrice': line.price_unit,
                 'DiscountPercent': line.discount,
             }
             
-            _logger.info(f"Preparing DocumentLine: ItemCode={item_code}, ItemDescription={item_description[:50]}...")
+            _logger.info(f"Preparing DocumentLine: ItemCode={item_code}, Quantity={line.product_uom_qty}")
             
             # إضافة UoMEntry (رقم وحدة القياس) إذا كانت متوفرة
             # البحث والتحقق قبل الإرسال

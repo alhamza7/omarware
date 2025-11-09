@@ -8,11 +8,7 @@
     for better navigation and user experience.
     -->
 
-    <!-- Main Menu -->
-    <menuitem id="menu_sap_integration"
-              name="SAP Integration"
-              sequence="10"
-              web_icon="sap_integration,static/description/icon.png"/>
+    <!-- Main Menu - Note: menu_sap_integration is defined in sap_dashboard_views.xml -->
 
     <!-- ═══════════════════════════════════════════════════════════ -->
     <!-- 📊 DASHBOARD SECTION -->
@@ -107,6 +103,12 @@
               parent="menu_sap_data_management"
               action="action_sap_product_extended"
               sequence="1"/>
+    
+    <menuitem id="menu_sap_sync_foreign_names"
+              name="Sync Foreign Names to Products"
+              parent="menu_sap_data_management"
+              action="action_sync_all_foreign_names_to_products_wizard"
+              sequence="1.5"/>
     
     <menuitem id="menu_sap_product_pricelist_sync"
               name="Product Pricelist Sync"
@@ -265,7 +267,6 @@
               parent="menu_sap_analysis"
               action="action_sap_error_analysis"
               sequence="1"/>
-
 
 </odoo>
 

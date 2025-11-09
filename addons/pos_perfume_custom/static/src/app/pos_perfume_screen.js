@@ -75,6 +75,7 @@ export class PosPerfumeScreen extends Component {
             activeFilters: [],              // Array of active brand filters
             activeUnitFilter: null,         // Active unit filter object or null
             fullPlasticFilterActive: null,  // true/false/null for full plastic filter
+            csLocFilterActive: false,  // true to show CS/LOC products, false to hide them
             
             // Order table edit mode (for main order table)
             orderTableEditMode: false,
@@ -361,6 +362,32 @@ export class PosPerfumeScreen extends Component {
     }
     
     /**
+     * Get default warehouse from available warehouses list
+     * Priority: WH 18 > First warehouse
+     */
+    getDefaultWarehouse(availableWarehouses) {
+        if (!availableWarehouses || availableWarehouses.length === 0) {
+            return null;
+        }
+        
+        // Try to find WH 18 first (case insensitive)
+        const wh18 = availableWarehouses.find(w => {
+            const code = (w.code || '').toUpperCase();
+            const name = (w.name || '').toUpperCase();
+            return code === 'WH 18' || code === 'WH18' || name.includes('WH 18') || name.includes('WH18');
+        });
+        
+        if (wh18) {
+            console.log('✅ Found WH 18 as default warehouse:', wh18);
+            return wh18;
+        }
+        
+        // Fallback to first warehouse
+        console.log('ℹ️ WH 18 not found, using first warehouse:', availableWarehouses[0]);
+        return availableWarehouses[0];
+    }
+    
+    /**
      * Select product from dropdown
      */
     async selectProduct(lineIndex, product) {
@@ -370,6 +397,11 @@ export class PosPerfumeScreen extends Component {
         line.productName = product.name;
         line.showProductDropdown = false;
         line.searchResults = [];
+        
+        // Save color and badge info
+        line.color_class = product.color_class || '';
+        line.badge_text = product.badge_text || '';
+        line.default_code = product.default_code || '';
         
         // Load complete product info (UoMs + Warehouses + Prices)
         await this.loadProductInfo(lineIndex, product.id);
@@ -411,6 +443,11 @@ export class PosPerfumeScreen extends Component {
             line.availableUoms = data.available_uoms || [];
             line.availableWarehouses = data.warehouses || [];
             
+            // Save color and badge info from product data
+            line.color_class = data.color_class || '';
+            line.badge_text = data.badge_text || '';
+            line.default_code = data.default_code || '';
+            
             // Set UoM name from saved UoM
             if (savedUomId && line.availableUoms.length > 0) {
                 const savedUom = line.availableUoms.find(u => u.id === savedUomId || u.uom_id === savedUomId);
@@ -435,11 +472,14 @@ export class PosPerfumeScreen extends Component {
                     line.warehouseValid = true;
                 }
             } else if (line.availableWarehouses.length > 0) {
-                // Fallback to first warehouse if saved not found
-                line.warehouse_id = line.availableWarehouses[0].id;
-                line.warehouseCode = line.availableWarehouses[0].code || (line.availableWarehouses[0].name ? line.availableWarehouses[0].name.split(' ')[0] : '');
-                line.availableQty = line.availableWarehouses[0].quantity;
-                line.warehouseValid = true;
+                // Use default warehouse (WH 18 if available, otherwise first)
+                const defaultWarehouse = this.getDefaultWarehouse(line.availableWarehouses);
+                if (defaultWarehouse) {
+                    line.warehouse_id = defaultWarehouse.id;
+                    line.warehouseCode = defaultWarehouse.code || (defaultWarehouse.name ? defaultWarehouse.name.split(' ')[0] : '');
+                    line.availableQty = defaultWarehouse.quantity;
+                    line.warehouseValid = true;
+                }
             } else {
                 line.warehouse_id = null;
                 line.warehouseCode = '';
@@ -507,6 +547,11 @@ export class PosPerfumeScreen extends Component {
             // Set warehouses
             line.availableWarehouses = data.warehouses || [];
             
+            // Save color and badge info from product data
+            line.color_class = data.color_class || '';
+            line.badge_text = data.badge_text || '';
+            line.default_code = data.default_code || '';
+            
             // Set default values from onchange
             line.uom_id = data.product_uom_id;
             line.unitPrice = data.price_unit || 0;
@@ -523,12 +568,15 @@ export class PosPerfumeScreen extends Component {
                 }
             }
             
-            // Set default warehouse and validate
+            // Set default warehouse and validate (WH 18 if available, otherwise first)
             if (line.availableWarehouses.length > 0) {
-                line.warehouse_id = line.availableWarehouses[0].id;
-                line.availableQty = line.availableWarehouses[0].quantity;
-                line.warehouseCode = line.availableWarehouses[0].code || (line.availableWarehouses[0].name ? line.availableWarehouses[0].name.split(' ')[0] : '');
-                line.warehouseValid = true;
+                const defaultWarehouse = this.getDefaultWarehouse(line.availableWarehouses);
+                if (defaultWarehouse) {
+                    line.warehouse_id = defaultWarehouse.id;
+                    line.availableQty = defaultWarehouse.quantity;
+                    line.warehouseCode = defaultWarehouse.code || (defaultWarehouse.name ? defaultWarehouse.name.split(' ')[0] : '');
+                    line.warehouseValid = true;
+                }
             } else {
                 line.warehouse_id = null;
                 line.warehouseCode = '';
@@ -2555,9 +2603,33 @@ export class PosPerfumeScreen extends Component {
                 // Store original results (before filtering)
                 this.state.rightSearchResultsOriginal = products;
                 
+                // Check if S-200 is in original results
+                const s200Products = products.filter(p => {
+                    const code = (p.default_code || '').toUpperCase();
+                    return code.includes('S-200') || code.startsWith('S-200');
+                });
+                if (s200Products.length > 0) {
+                    console.log(`[Search] Found ${s200Products.length} S-200 products in original results:`, s200Products.map(p => p.default_code));
+                } else {
+                    console.log(`[Search] No S-200 products found in original results. Total products: ${products.length}`);
+                    // Log first 10 product codes for debugging
+                    console.log(`[Search] First 10 product codes:`, products.slice(0, 10).map(p => p.default_code));
+                }
+                
                 // Apply filters
                 this.state.rightSearchResults = products;
                 this.applyFiltersToResults();
+                
+                // Check if S-200 is still in filtered results
+                const s200AfterFilter = this.state.rightSearchResults.filter(p => {
+                    const code = (p.default_code || '').toUpperCase();
+                    return code.includes('S-200') || code.startsWith('S-200');
+                });
+                if (s200AfterFilter.length > 0) {
+                    console.log(`[Filter] S-200 products after filtering:`, s200AfterFilter.map(p => p.default_code));
+                } else if (s200Products.length > 0) {
+                    console.warn(`[Filter] S-200 products were filtered out! Original: ${s200Products.length}, After filter: 0`);
+                }
                 
                 // Reset selection when new results arrive
                 this.state.selectedRightProductIndex = 0;
@@ -2733,10 +2805,13 @@ export class PosPerfumeScreen extends Component {
         
         line.availableWarehouses = product.warehouses || [];
         
-        // Set default warehouse
+        // Set default warehouse (WH 18 if available, otherwise first)
         if (line.availableWarehouses.length > 0) {
-            line.warehouse_id = line.availableWarehouses[0].id;
-            line.availableQty = line.availableWarehouses[0].quantity;
+            const defaultWarehouse = this.getDefaultWarehouse(line.availableWarehouses);
+            if (defaultWarehouse) {
+                line.warehouse_id = defaultWarehouse.id;
+                line.availableQty = defaultWarehouse.quantity;
+            }
         }
     }
     
@@ -2988,6 +3063,16 @@ export class PosPerfumeScreen extends Component {
     }
     
     /**
+     * Toggle CS-LOC filter
+     * When active: show only CS and LOC products
+     * When inactive: hide CS and LOC products
+     */
+    toggleCsLocFilter() {
+        this.state.csLocFilterActive = !this.state.csLocFilterActive;
+        this.applyFiltersToResults();
+    }
+    
+    /**
      * Check if brand filter is active
      */
     isBrandFilterActive(brand) {
@@ -3017,19 +3102,42 @@ export class PosPerfumeScreen extends Component {
             return;
         }
         
+        console.log(`[Filter] Applying filters to ${sourceProducts.length} products`);
+        console.log(`[Filter] Active brand filters: ${this.state.activeFilters?.length || 0}`);
+        console.log(`[Filter] Active unit filter: ${this.state.activeUnitFilter ? this.state.activeUnitFilter.filter : 'none'}`);
+        console.log(`[Filter] Full plastic filter: ${this.state.fullPlasticFilterActive}`);
+        console.log(`[Filter] CS-LOC filter: ${this.state.csLocFilterActive}`);
+        
         let filtered = [...sourceProducts];
         
+        // 0. Always hide PR products (first, before any other filters)
+        const beforePR = filtered.length;
+        filtered = this.filterProductsByPR(filtered);
+        console.log(`[Filter] After PR filter (always hide): ${filtered.length} products (was ${beforePR})`);
+        
         // 1. Filter by brands
+        const beforeBrand = filtered.length;
         filtered = this.filterProductsByBrand(filtered);
+        console.log(`[Filter] After brand filter: ${filtered.length} products (was ${beforeBrand})`);
         
-        // 2. Filter by plastic
+        // 2. Filter by CS-LOC (hide CS/LOC by default, show only when filter is active)
+        const beforeCsLoc = filtered.length;
+        filtered = this.filterProductsByCsLoc(filtered);
+        console.log(`[Filter] After CS-LOC filter: ${filtered.length} products (was ${beforeCsLoc})`);
+        
+        // 3. Filter by plastic
+        const beforePlastic = filtered.length;
         filtered = this.filterProductsByPlastic(filtered);
+        console.log(`[Filter] After plastic filter: ${filtered.length} products (was ${beforePlastic})`);
         
-        // 3. Filter by units (1KG, 0.5, 50, 100, 125 special case)
+        // 4. Filter by units (1KG, 0.5, 50, 100, 125 special case)
+        const beforeUnit = filtered.length;
         filtered = this.filterProductsBy025KgUnit(filtered);
+        console.log(`[Filter] After unit filter: ${filtered.length} products (was ${beforeUnit})`);
         
         // Update results
         this.state.rightSearchResults = filtered;
+        console.log(`[Filter] Final result: ${filtered.length} products`);
     }
     
     /**
@@ -3041,7 +3149,9 @@ export class PosPerfumeScreen extends Component {
      */
     filterProductsByBrand(products) {
         if (!this.state.activeFilters || this.state.activeFilters.length === 0) {
-            return products; // لا توجد فلاتر نشطة، إرجاع جميع المنتجات
+            // لا توجد فلاتر نشطة، إرجاع جميع المنتجات (بما في ذلك CS, LOC, إلخ)
+            console.log('[Filter] No active brand filters - showing all products');
+            return products;
         }
         
         const activeBrands = this.state.activeFilters.map(f => f.prefix.toUpperCase());
@@ -3052,6 +3162,7 @@ export class PosPerfumeScreen extends Component {
             const sku = (product.sub_sku || product.default_code || '').toUpperCase();
             
             if (!sku) {
+                console.log(`[Filter] Product ${product.id} has no SKU - hiding`);
                 return false; // لا يوجد كود، إخفاء المنتج
             }
             
@@ -3095,7 +3206,56 @@ export class PosPerfumeScreen extends Component {
                 return matches;
             });
             
+            if (!matches) {
+                console.log(`[Filter] Product ${sku} does not match any active brand - hiding`);
+            }
+            
             return matches;
+        });
+    }
+    
+    /**
+     * Always hide PR products (regardless of any filters)
+     */
+    filterProductsByPR(products) {
+        return products.filter(product => {
+            const sku = (product.sub_sku || product.default_code || '').toUpperCase();
+            if (sku.startsWith('PR') || sku.startsWith('DY')) {
+                console.log(`[Filter] Hiding PR/DY product: ${sku}`);
+                return false;
+            }
+            return true;
+        });
+    }
+    
+    /**
+     * Filter products by CS-LOC
+     * When csLocFilterActive is false (default): hide CS and LOC products
+     * When csLocFilterActive is true: show only CS and LOC products
+     */
+    filterProductsByCsLoc(products) {
+        return products.filter(product => {
+            const sku = (product.sub_sku || product.default_code || '').toUpperCase();
+            const isCsLoc = sku.startsWith('CS') || sku.startsWith('LOC');
+            
+            if (this.state.csLocFilterActive) {
+                // Filter is active: show only CS and LOC products
+                if (isCsLoc) {
+                    console.log(`[Filter] Showing CS-LOC product: ${sku}`);
+                    return true;
+                } else {
+                    console.log(`[Filter] Hiding non-CS-LOC product: ${sku}`);
+                    return false;
+                }
+            } else {
+                // Filter is inactive: hide CS and LOC products
+                if (isCsLoc) {
+                    console.log(`[Filter] Hiding CS-LOC product (filter inactive): ${sku}`);
+                    return false;
+                } else {
+                    return true;
+                }
+            }
         });
     }
     
@@ -3155,17 +3315,21 @@ export class PosPerfumeScreen extends Component {
     
     /**
      * Filter products by 0.25KG unit (special case for 1KG, 0.5, 50, 100, 125)
+     * Only apply shouldHideProduct when a unit filter is active
      */
     filterProductsBy025KgUnit(products) {
         if (!this.state.activeUnitFilter) {
+            // No unit filter active - show all products (don't hide CS, LOC, etc.)
             return products;
         }
         
         const specialFilters = ['1KG', '0.5', '50', '100', '125'];
         if (!specialFilters.includes(this.state.activeUnitFilter.filter)) {
+            // Not a special filter - show all products
             return products;
         }
         
+        // Only apply shouldHideProduct when a special unit filter is active
         return products.filter(product => {
             if (this.shouldHideProduct(product)) {
                 return false;

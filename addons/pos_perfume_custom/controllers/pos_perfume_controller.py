@@ -44,6 +44,9 @@ class PosPerfumeController(http.Controller):
             
             _logger.info(f"[POS] Found {len(warehouses)} warehouses")
             
+            # Get color and badge info based on product code
+            priority, color_class, badge_text = product._get_product_priority_and_color(product.default_code)
+            
             return {
                 'success': True,
                 'data': {
@@ -55,6 +58,9 @@ class PosPerfumeController(http.Controller):
                     'available_qty': product.qty_available,
                     'available_uoms': available_uoms,
                     'warehouses': warehouses,
+                    'default_code': product.default_code or '',
+                    'color_class': color_class,
+                    'badge_text': badge_text,
                 }
             }
             

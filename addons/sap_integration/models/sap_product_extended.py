@@ -48,6 +48,44 @@ class SapProductExtended(models.Model):
         string='Foreign Name',
         help="Product name in foreign language from SAP"
     )
+    
+    @api.model_create_multi
+    def create(self, vals_list):
+        """Override create to sync foreign_name to product.product"""
+        records = super().create(vals_list)
+        
+        # Sync foreign_name to product.product
+        for record, vals in zip(records, vals_list):
+            if 'foreign_name' in vals and vals['foreign_name'] and record.product_id:
+                self._sync_foreign_name_to_product(record.product_id, vals['foreign_name'])
+        
+        return records
+    
+    def write(self, vals):
+        """Override write to sync foreign_name to product.product"""
+        result = super().write(vals)
+        
+        # If foreign_name was updated, sync it to product.product
+        if 'foreign_name' in vals:
+            foreign_name_value = vals['foreign_name']
+            for record in self:
+                if record.product_id:
+                    # Use the new value if provided, otherwise use the current value
+                    sync_value = foreign_name_value if foreign_name_value else record.foreign_name
+                    if sync_value:
+                        self._sync_foreign_name_to_product(record.product_id, sync_value)
+        
+        return result
+    
+    def _sync_foreign_name_to_product(self, product, foreign_name):
+        """Sync foreign_name from sap.product.extended to product.product"""
+        try:
+            # Update product.template foreign_name (which will update product.product via related field)
+            if product.product_tmpl_id:
+                product.product_tmpl_id.write({'foreign_name': foreign_name})
+                _logger.info(f"Synced foreign_name '{foreign_name}' from sap.product.extended to product {product.id}")
+        except Exception as e:
+            _logger.warning(f"Error syncing foreign_name to product.product: {e}")
     foreign_name_2 = fields.Char(
         string='Foreign Name 2',
         help="Additional foreign language name"

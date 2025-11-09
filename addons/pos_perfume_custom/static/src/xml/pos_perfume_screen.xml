@@ -493,6 +493,10 @@
                                                         onmouseout="this.style.color='#2563eb'">
                                                     ➡️
                                                 </button>
+                                                <!-- Badge for priority products -->
+                                                <span t-if="line.badge_text" t-att-class="line.color_class ? ('product-badge badge-' + line.color_class) : 'product-badge'" style="flex-shrink: 0;">
+                                                    <t t-esc="line.badge_text"/>
+                                                </span>
                                             <input type="text" 
                                                    t-att-value="line.productName"
                                                    t-att-placeholder="'Search product...'"
@@ -774,6 +778,11 @@
                                             style="padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; transition: all 0.2s; white-space: nowrap; font-weight: 600;">
                                         Reset
                                     </button>
+                                    <button t-on-click="() => this.toggleCsLocFilter()"
+                                            t-att-class="state.csLocFilterActive === true ? 'filter-btn-active' : 'filter-btn-inactive'"
+                                            style="padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; transition: all 0.2s; white-space: nowrap; font-weight: 600;">
+                                        CS-LOC
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -810,8 +819,10 @@
                                                 onmouseout="this.style.background=''"
                                                 t-att-style="this.isRightProductSelected(product) ? 'background: #dbeafe; cursor: pointer;' : 'cursor: pointer;'">
                                                 
-                                                <td style="padding: 6px 4px; font-size: 11px; font-weight: 600; color: #2563eb; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                                                    <t t-esc="product.default_code || '-'"/>
+                                                <td style="padding: 6px 4px; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                                    <span t-att-class="product.color_class ? ('code-' + product.color_class) : ''" style="font-weight: 600;">
+                                                        <t t-esc="product.default_code || '-'"/>
+                                                    </span>
                                                 </td>
                                                 
                                                 <td style="padding: 6px 4px; font-size: 11px; overflow: hidden;">

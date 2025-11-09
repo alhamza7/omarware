@@ -873,5 +873,88 @@ $dark-border: #d0d0d0;
 }
 
 /* ============================================================ */
+/*             PRODUCT PRIORITY BADGES & COLORS                 */
+/* ============================================================ */
+
+/* Badge colors for different product types */
+.badge-r {
+    background-color: #b8860b !important; /* ذهبي غامق - Dark Goldenrod */
+    color: white !important;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 700;
+    display: inline-block;
+    margin-right: 4px;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+
+.badge-adf {
+    background-color: #c2185b !important; /* وردي غامق - Dark Pink */
+    color: white !important;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 700;
+    display: inline-block;
+    margin-right: 4px;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+
+.badge-g {
+    background-color: #1565c0 !important; /* أزرق غامق - Dark Blue */
+    color: white !important;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 700;
+    display: inline-block;
+    margin-right: 4px;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+
+.badge-n1 {
+    background-color: #ffa726 !important;
+    color: white !important;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+    display: inline-block;
+    margin-right: 4px;
+}
+
+/* Colored code in search table */
+.code-r {
+    color: #b8860b !important; /* ذهبي غامق */
+    font-weight: 700;
+}
+
+.code-adf {
+    color: #c2185b !important; /* وردي غامق */
+    font-weight: 700;
+}
+
+.code-g {
+    color: #1565c0 !important; /* أزرق غامق */
+    font-weight: 700;
+}
+
+.code-n1 {
+    color: #ffa726 !important;
+    font-weight: 600;
+}
+
+/* Product badge in cart */
+.product-badge {
+    font-size: 10px;
+    padding: 1px 4px;
+    border-radius: 2px;
+    margin-left: 4px;
+    font-weight: 700;
+    vertical-align: middle;
+}
+
+/* ============================================================ */
 /*                       END OF STYLES                          */
 /* ============================================================ */

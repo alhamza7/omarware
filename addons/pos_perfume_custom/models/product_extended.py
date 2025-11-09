@@ -152,44 +152,106 @@ class ProductProductExtended(models.Model):
         
         return usd_amount * 1300
     
+    def _get_product_priority_and_color(self, default_code):
+        """
+        Get priority order and color for products based on code prefix
+        Returns: (priority, color_class, badge_text)
+        color_class will be just 'r', 'adf', 'g', 'n1' (lowercase)
+        R = 1 (red), ADF = 2 (blue), G = 3 (green), N1 = 4 (orange), others = 5 (gray)
+        """
+        if not default_code:
+            return (5, '', '')
+        
+        code_upper = default_code.upper()
+        
+        if code_upper.startswith('R'):
+            return (1, 'r', 'R')
+        elif code_upper.startswith('ADF'):
+            return (2, 'adf', 'ADF')
+        elif code_upper.startswith('G'):
+            return (3, 'g', 'G')
+        elif code_upper.startswith('N1'):
+            return (4, 'n1', 'N1')
+        else:
+            return (5, '', '')
+    
     @api.model
     def search_products_for_pos(self, search_term, limit=50, pricelist_id=None):
         """
         Search products with full details: prices, warehouses, stock
         Returns data for the right panel search table
         
-        Special search rules:
-        - If search_term is "-", search only for codes starting with "S"
-        - If search_term is numeric only, use exact match instead of partial match
+        Search rules (REBUILT FROM SCRATCH):
+        1. "-" → Products with code starting with "S"
+        2. Pure number (e.g., "200") → Exact number match in name/code
+        3. Number with symbols (e.g., "-200", "200-") → Search in all fields
+        4. Text → Search in all fields
+        
+        Results are ordered by:
+        1. Priority (R, ADF, G, N1 first)
+        2. Name, Foreign Name, Code
         """
         # Normalize search term
         search_term = (search_term or '').strip()
         
-        domain = [('sale_ok', '=', True)]
+        if not search_term:
+            return []
         
-        # Special case: "-" searches for codes starting with "S"
+        # RULE 1: "-" searches for codes starting with "S"
         if search_term == '-':
-            domain.append(('default_code', '=like', 'S%'))
-        # Special case: numeric only search - use exact match only
+            products = self.search([
+                ('sale_ok', '=', True),
+                ('default_code', '=like', 'S%')
+            ], limit=limit)
+        
+        # RULE 2: Pure number (e.g., "200") - search for EXACT number in name and code
         elif search_term.isdigit():
-            # For numeric search, use exact match on default_code and barcode only
-            # This ensures that searching for "1110" returns only "1110" and not "1111"
-            domain.extend([
-                '|',
-                ('default_code', '=', search_term),
-                ('barcode', '=', search_term),
-            ])
+            # Use simple ilike search - Odoo will handle jsonb automatically
+            products = self.search([
+                ('sale_ok', '=', True),
+                '|', '|',
+                ('name', 'ilike', ' ' + search_term + ' '),  # " 200 " in name
+                ('name', 'ilike', ' ' + search_term),  # " 200" at end
+                ('default_code', 'ilike', search_term),  # "200" anywhere in code
+            ], limit=limit * 2)  # Get more to filter
+            
+            # Filter to exact number matches only (not 2000, 1200, etc.)
+            filtered_products = []
+            for p in products:
+                code = p.default_code or ''
+                name = p.name or ''
+                
+                # Check if number appears as standalone in code or name
+                # For code: check patterns like "S-200", "200-", "A200B" but not "2000"
+                code_match = False
+                if code:
+                    # Split by non-digits and check if our number is in the parts
+                    import re
+                    code_parts = re.split(r'[^0-9]+', code)
+                    if search_term in code_parts:
+                        code_match = True
+                
+                # For name: check if number appears with spaces around it
+                name_match = False
+                if name:
+                    if (' ' + search_term + ' ') in name or (' ' + search_term) in name or (search_term + ' ') in name:
+                        name_match = True
+                
+                if code_match or name_match:
+                    filtered_products.append(p)
+            
+            products = self.browse([p.id for p in filtered_products[:limit]])
+        
+        # RULE 3 & 4: Text or number with symbols - search in all fields
         else:
-            # Normal search: partial match on all fields
-            domain.extend([
+            products = self.search([
+                ('sale_ok', '=', True),
                 '|', '|', '|',
                 ('name', 'ilike', search_term),
                 ('default_code', 'ilike', search_term),
                 ('barcode', 'ilike', search_term),
                 ('foreign_name', 'ilike', search_term) if 'foreign_name' in self._fields else ('name', 'ilike', search_term),
-            ])
-        
-        products = self.search(domain, limit=limit, order='name')
+            ], limit=limit)
         
         # Get pricelist - default to "Price list 1"
         if not pricelist_id:
@@ -299,6 +361,9 @@ class ProductProductExtended(models.Model):
                 if not sap_uom_group_name:
                     sap_uom_group_name = product.uom_id.name
                 
+                # Get priority and color info
+                priority, color_class, badge_text = self._get_product_priority_and_color(product.default_code)
+                
                 result.append({
                     'id': product.id,
                     'name': product.name,
@@ -313,10 +378,17 @@ class ProductProductExtended(models.Model):
                     'qty_available': total_stock,
                     'warehouses': warehouses,
                     'image_url': f'/web/image/product.product/{product.id}/image_128' if product.image_128 else '',
+                    # Priority and color info
+                    'priority': priority,
+                    'color_class': color_class,
+                    'badge_text': badge_text,
                 })
             except Exception as e:
                 _logger.error(f"Error processing product {product.id}: {str(e)}")
                 continue
+        
+        # Sort results by priority (R, ADF, G, N1 first), then by name
+        result.sort(key=lambda x: (x['priority'], x['name'] or '', x['foreign_name'] or '', x['default_code'] or ''))
         
         return result
     
