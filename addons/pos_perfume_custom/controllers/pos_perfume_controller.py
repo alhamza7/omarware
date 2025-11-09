@@ -47,6 +47,11 @@ class PosPerfumeController(http.Controller):
             # Get color and badge info based on product code
             priority, color_class, badge_text = product._get_product_priority_and_color(product.default_code)
             
+            # Get foreign_name
+            foreign_name = ''
+            if hasattr(product, 'foreign_name'):
+                foreign_name = product.foreign_name or ''
+            
             return {
                 'success': True,
                 'data': {
@@ -59,6 +64,7 @@ class PosPerfumeController(http.Controller):
                     'available_uoms': available_uoms,
                     'warehouses': warehouses,
                     'default_code': product.default_code or '',
+                    'foreign_name': foreign_name,
                     'color_class': color_class,
                     'badge_text': badge_text,
                 }

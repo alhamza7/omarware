@@ -362,6 +362,19 @@ export class PosPerfumeScreen extends Component {
     }
     
     /**
+     * Get display name for product (merge with foreign_name if code starts with S)
+     */
+    getProductDisplayName(productName, foreignName, defaultCode) {
+        // If code starts with S, merge name with foreign_name
+        if (defaultCode && defaultCode.toUpperCase().startsWith('S')) {
+            if (foreignName && foreignName.trim()) {
+                return `${productName} ${foreignName}`;
+            }
+        }
+        return productName;
+    }
+    
+    /**
      * Get default warehouse from available warehouses list
      * Priority: WH 18 > First warehouse
      */
@@ -394,14 +407,22 @@ export class PosPerfumeScreen extends Component {
         const line = this.state.currentOrder.lines[lineIndex];
         
         line.product_id = product.id;
-        line.productName = product.name;
-        line.showProductDropdown = false;
-        line.searchResults = [];
         
         // Save color and badge info
         line.color_class = product.color_class || '';
         line.badge_text = product.badge_text || '';
         line.default_code = product.default_code || '';
+        line.foreign_name = product.foreign_name || '';
+        
+        // Get display name (merge with foreign_name if code starts with S)
+        line.productName = this.getProductDisplayName(
+            product.name, 
+            product.foreign_name, 
+            product.default_code
+        );
+        
+        line.showProductDropdown = false;
+        line.searchResults = [];
         
         // Load complete product info (UoMs + Warehouses + Prices)
         await this.loadProductInfo(lineIndex, product.id);
@@ -447,6 +468,16 @@ export class PosPerfumeScreen extends Component {
             line.color_class = data.color_class || '';
             line.badge_text = data.badge_text || '';
             line.default_code = data.default_code || '';
+            line.foreign_name = data.foreign_name || '';
+            
+            // Update productName to merge with foreign_name if code starts with S
+            if (line.productName && line.default_code) {
+                line.productName = this.getProductDisplayName(
+                    data.product_name || line.productName,
+                    line.foreign_name,
+                    line.default_code
+                );
+            }
             
             // Set UoM name from saved UoM
             if (savedUomId && line.availableUoms.length > 0) {
@@ -551,6 +582,16 @@ export class PosPerfumeScreen extends Component {
             line.color_class = data.color_class || '';
             line.badge_text = data.badge_text || '';
             line.default_code = data.default_code || '';
+            line.foreign_name = data.foreign_name || '';
+            
+            // Update productName to merge with foreign_name if code starts with S
+            if (line.productName && line.default_code) {
+                line.productName = this.getProductDisplayName(
+                    data.product_name || line.productName,
+                    line.foreign_name,
+                    line.default_code
+                );
+            }
             
             // Set default values from onchange
             line.uom_id = data.product_uom_id;
@@ -575,7 +616,7 @@ export class PosPerfumeScreen extends Component {
                     line.warehouse_id = defaultWarehouse.id;
                     line.availableQty = defaultWarehouse.quantity;
                     line.warehouseCode = defaultWarehouse.code || (defaultWarehouse.name ? defaultWarehouse.name.split(' ')[0] : '');
-                    line.warehouseValid = true;
+                line.warehouseValid = true;
                 }
             } else {
                 line.warehouse_id = null;
@@ -801,7 +842,7 @@ export class PosPerfumeScreen extends Component {
             line.discountPercent = discount;
         } else {
             // For other fields, just update
-            line[field] = value;
+        line[field] = value;
         }
         
         this.calculateLine(line);
@@ -2291,7 +2332,7 @@ export class PosPerfumeScreen extends Component {
         // If we have orders and we're at the last one, go to the first one (wrap around)
         if (this.state.currentOrderIndex >= this.state.previousOrders.length - 1) {
             this.state.currentOrderIndex = 0;
-        } else {
+            } else {
             this.state.currentOrderIndex++;
         }
         
@@ -2372,8 +2413,8 @@ export class PosPerfumeScreen extends Component {
                     await this.loadOrder(orders[0].id);
                     this.state.orderNumberSearch = '';
                     ev.target.value = '';
-                } else {
-                    this.notification.add(_t("Order not found"), { type: "warning" });
+            } else {
+                this.notification.add(_t("Order not found"), { type: "warning" });
                 }
             } catch (error) {
                 console.error('Error searching order:', error);
@@ -2441,7 +2482,7 @@ export class PosPerfumeScreen extends Component {
                 } else {
                     this.notification.add(_t("Order with SAP Doc not found"), { type: "warning" });
                 }
-            } catch (error) {
+        } catch (error) {
                 console.error('Error searching SAP Doc:', error);
                 this.notification.add(_t("Error searching SAP Doc"), { type: "danger" });
             }
@@ -2694,7 +2735,17 @@ export class PosPerfumeScreen extends Component {
         
         // Set product
         currentLine.product_id = product.id;
-        currentLine.productName = product.name;
+        currentLine.default_code = product.default_code || '';
+        currentLine.foreign_name = product.foreign_name || '';
+        currentLine.color_class = product.color_class || '';
+        currentLine.badge_text = product.badge_text || '';
+        
+        // Get display name (merge with foreign_name if code starts with S)
+        currentLine.productName = this.getProductDisplayName(
+            product.name,
+            product.foreign_name,
+            product.default_code
+        );
         
         // Load UoMs and warehouses
         await Promise.all([
