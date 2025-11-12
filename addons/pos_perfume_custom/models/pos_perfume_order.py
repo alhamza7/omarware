@@ -336,23 +336,43 @@ class PosPerfumeOrder(models.Model):
                 'date_order': order_data.get('date') or order.date,
                 'origin': order_name,
                 'note': order_data.get('note', '') or (order.note or ''),
-                'invoice_type': order_data.get('invoice_type') or order.invoice_type or False,
+                # NOTE: invoice_type is a custom field on pos.perfume.order, not on sale.order
+                # If you have a custom sale.order field for invoice_type, add it here
                 'pricelist_id': order_data.get('pricelist_id', [False])[0] if order_data.get('pricelist_id') else (order.pricelist_id.id if order.pricelist_id else False),
             }
             
             # Create sale order lines
             sale_order_lines = []
             for line in order_lines:
+                # Ensure product exists
+                if not line.product_id:
+                    _logger.warning(f"[POS Confirm] Skipping line without product: {line.id}")
+                    continue
+                
+                # Get UoM - use product_uom_id if set, otherwise product's default UoM
+                uom_id = None
+                if line.product_uom_id:
+                    uom_id = line.product_uom_id.id
+                elif line.product_id and line.product_id.uom_id:
+                    uom_id = line.product_id.uom_id.id
+                
+                if not uom_id:
+                    _logger.error(f"[POS Confirm] No UoM for product {line.product_id.name}")
+                    raise UserError(_('Product %s does not have a unit of measure defined.') % line.product_id.name)
+                
                 line_vals = {
                     'product_id': line.product_id.id,
-                    'product_uom_qty': line.quantity,
-                    'product_uom_id': line.product_uom_id.id if line.product_uom_id else line.product_id.uom_id.id,
-                    'price_unit': line.unit_price,
+                    'product_uom_qty': line.quantity or 1.0,
+                    'product_uom_id': uom_id,  # Correct field name in Odoo
+                    'price_unit': line.unit_price or 0.0,
                     'discount': line.discount_percent or 0.0,
                 }
-                # Add warehouse info if available (for sale_order_line_multi_warehouse)
-                if line.warehouse_id:
+                
+                # Add warehouse info if available (check if module exists)
+                if line.warehouse_id and hasattr(self.env['sale.order.line'], 'product_warehouse_id'):
                     line_vals['product_warehouse_id'] = line.warehouse_id.id
+                
+                _logger.debug(f"[POS Confirm] Line vals: product={line.product_id.name}, qty={line.quantity}, uom={uom_id}, price={line.unit_price}")
                 sale_order_lines.append((0, 0, line_vals))
             
             sale_vals['order_line'] = sale_order_lines

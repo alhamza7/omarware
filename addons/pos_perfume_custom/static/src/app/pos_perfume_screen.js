@@ -512,39 +512,57 @@ export class PosPerfumeScreen extends Component {
      */
     getDefaultWarehouse(availableWarehouses) {
         if (!availableWarehouses || availableWarehouses.length === 0) {
+            console.warn('⚠️ No warehouses available');
             return null;
         }
         
         // Log all available warehouses to debug
-        console.log('🏭 Available warehouses:', availableWarehouses.map(w => ({
+        console.log('🏭 Available warehouses for selection:', availableWarehouses.map(w => ({
             id: w.id,
             code: w.code,
             name: w.name,
-            quantity: w.quantity
+            quantity: w.quantity || w.qty || 0
         })));
         
         // Priority 1: Try to find Warehouse ID 18
         const wh18 = availableWarehouses.find(w => w.id === 18);
         
         if (wh18) {
-            console.log('✅ Selected Warehouse ID 18 as default warehouse:', wh18);
+            console.log('✅ Found Warehouse ID 18! Selecting it as default:', {
+                id: wh18.id,
+                code: wh18.code,
+                name: wh18.name,
+                quantity: wh18.quantity || wh18.qty || 0
+            });
             return wh18;
+        } else {
+            console.warn('⚠️ Warehouse ID 18 NOT found in available warehouses');
         }
         
         // Priority 2: Find warehouse with highest quantity
         const sortedByQuantity = [...availableWarehouses].sort((a, b) => {
-            const qtyA = a.quantity || 0;
-            const qtyB = b.quantity || 0;
+            const qtyA = a.quantity || a.qty || 0;
+            const qtyB = b.quantity || b.qty || 0;
             return qtyB - qtyA; // Descending order
         });
         
-        if (sortedByQuantity.length > 0 && sortedByQuantity[0].quantity > 0) {
-            console.log('✅ Selected warehouse with highest quantity:', sortedByQuantity[0]);
+        if (sortedByQuantity.length > 0 && (sortedByQuantity[0].quantity || sortedByQuantity[0].qty || 0) > 0) {
+            console.log('✅ Selected warehouse with highest quantity:', {
+                id: sortedByQuantity[0].id,
+                code: sortedByQuantity[0].code,
+                name: sortedByQuantity[0].name,
+                quantity: sortedByQuantity[0].quantity || sortedByQuantity[0].qty || 0
+            });
             return sortedByQuantity[0];
         }
         
         // Fallback to first warehouse
-        console.log('ℹ️ Using first warehouse as fallback:', availableWarehouses[0]);
+        console.log('ℹ️ Using first warehouse as fallback:', {
+            id: availableWarehouses[0].id,
+            code: availableWarehouses[0].code,
+            name: availableWarehouses[0].name,
+            quantity: availableWarehouses[0].quantity || availableWarehouses[0].qty || 0
+        });
         return availableWarehouses[0];
     }
     
@@ -2373,7 +2391,28 @@ export class PosPerfumeScreen extends Component {
                 }
             } catch (error) {
                 console.error('Error confirming sale order:', error);
-                this.notification.add(_t("Failed to confirm sale order: ") + error.message, { type: "danger" });
+                // Extract detailed error message
+                let errorMessage = 'Unknown error';
+                if (error.data && error.data.message) {
+                    errorMessage = error.data.message;
+                } else if (error.data && error.data.debug) {
+                    errorMessage = error.data.debug;
+                } else if (error.message) {
+                    errorMessage = error.message;
+                } else if (error.args && error.args[0]) {
+                    errorMessage = error.args[0];
+                }
+                
+                console.error('Full error details:', {
+                    message: errorMessage,
+                    data: error.data,
+                    stack: error.stack
+                });
+                
+                this.notification.add(_t("Failed to confirm sale order: ") + errorMessage, { 
+                    type: "danger",
+                    sticky: true
+                });
             }
         }
     }
