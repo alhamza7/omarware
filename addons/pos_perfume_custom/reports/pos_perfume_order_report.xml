@@ -9,78 +9,61 @@
                 <t t-name="pos_perfume_custom.report_pos_perfume_order">
                     <t t-call="web.html_container">
                         <t t-foreach="docs" t-as="doc">
-                            <div class="page" dir="rtl" lang="ar" style="font-family: 'Arial', 'Tahoma', sans-serif; background: #f8f9fa;">
+                            <div class="page" dir="rtl" lang="ar" style="font-family: Arial, Tahoma, sans-serif; background: #f8f9fa; padding: 20px;">
                                 <!-- Black Header -->
-                                <div style="background: linear-gradient(135deg, #000000 0%, #1a1a1a 50%, #000000 100%); color: white; padding: 25px; margin-bottom: 25px; border-bottom: 4px solid #d4af37;">
-                                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
-                                        <!-- Company Logo -->
-                                        <div style="flex: 1; text-align: right;">
-                                            <t t-if="doc.company_id and doc.company_id.logo">
-                                                <img t-att-src="image_data_uri(doc.company_id.logo)" style="max-height: 70px; max-width: 150px; filter: brightness(0) invert(1);"/>
-                                            </t>
-                                        </div>
-                                        
-                                        <!-- Title -->
-                                        <div style="flex: 2; text-align: center;">
-                                            <div style="background: linear-gradient(135deg, #d4af37, #f4e5a5, #d4af37); padding: 15px 40px; border-radius: 10px; display: inline-block; box-shadow: 0 6px 20px rgba(212, 175, 55, 0.4);">
-                                                <h1 style="margin: 0; font-size: 28px; color: #000; font-weight: bold;">
-                                                    <span t-if="doc.state == 'draft'">مسودة طلب #</span>
-                                                    <span t-elif="doc.state == 'sale'">فاتورة بيع #</span>
-                                                    <span t-else="">طلب #</span>
-                                                    <span t-field="doc.name"/>
-                                                </h1>
-                                            </div>
-                                        </div>
-                                        
-                                        <!-- Company Info -->
-                                        <div style="flex: 1; text-align: left;">
-                                            <t t-if="doc.company_id">
-                                                <h2 style="margin: 0 0 8px 0; font-size: 20px; color: #d4af37; font-weight: bold;">
-                                                    <span t-field="doc.company_id.name"/>
-                                                </h2>
-                                                <p style="margin: 0 0 4px 0; font-size: 12px; color: #bbb;">
-                                                    <span t-if="doc.company_id.phone" t-field="doc.company_id.phone"/>
-                                                </p>
-                                                <p style="margin: 0; font-size: 11px; color: #999;">
-                                                    <span t-if="doc.company_id.email" t-field="doc.company_id.email"/>
-                                                </p>
-                                            </t>
+                                <div style="background: #000000; color: white; padding: 25px; margin-bottom: 25px; border-bottom: 4px solid #d4af37;">
+                                    <div style="text-align: center; margin-bottom: 15px;">
+                                        <div style="background: #d4af37; padding: 15px 40px; border-radius: 10px; display: inline-block;">
+                                            <h1 style="margin: 0; font-size: 28px; color: #000; font-weight: bold;">
+                                                <span t-if="doc.state == 'draft'">مسودة طلب #</span>
+                                                <span t-elif="doc.state == 'sale'">فاتورة بيع #</span>
+                                                <span t-else="">طلب #</span>
+                                                <span t-field="doc.name"/>
+                                            </h1>
                                         </div>
                                     </div>
                                     
+                                    <div style="text-align: center; margin-bottom: 10px;">
+                                        <t t-if="doc.company_id">
+                                            <h2 style="margin: 0; font-size: 20px; color: #d4af37; font-weight: bold;">
+                                                <span t-field="doc.company_id.name"/>
+                                            </h2>
+                                        </t>
+                                    </div>
+                                    
                                     <!-- Info Bar -->
-                                    <div style="margin-top: 20px; padding-top: 15px; border-top: 2px solid #333; display: flex; gap: 20px; flex-wrap: wrap; font-size: 12px;">
-                                        <div t-if="doc.date">
-                                            <span style="color: #d4af37; margin-left: 8px;">📅 التاريخ:</span>
+                                    <div style="text-align: center; font-size: 12px; padding-top: 15px; border-top: 2px solid #333;">
+                                        <span t-if="doc.date" style="margin-left: 15px;">
+                                            <span style="color: #d4af37;">📅 التاريخ:</span>
                                             <span t-field="doc.date" t-options='{"widget": "datetime"}'/>
-                                        </div>
-                                        <div t-if="doc.user_id">
-                                            <span style="color: #d4af37; margin-left: 8px;">👤 المندوب:</span>
+                                        </span>
+                                        <span t-if="doc.user_id" style="margin-left: 15px;">
+                                            <span style="color: #d4af37;">👤 المندوب:</span>
                                             <span t-field="doc.user_id.name"/>
-                                        </div>
-                                        <div t-if="doc.sap_doc_num">
-                                            <span style="color: #d4af37; margin-left: 8px;">🔢 رقم SAP:</span>
+                                        </span>
+                                        <span t-if="doc.sap_doc_num" style="margin-left: 15px;">
+                                            <span style="color: #d4af37;">🔢 رقم SAP:</span>
                                             <span style="font-weight: bold;" t-field="doc.sap_doc_num"/>
-                                        </div>
+                                        </span>
                                     </div>
                                 </div>
 
                                 <!-- Customer Information -->
-                                <div style="border: 3px solid #1a1a1a; border-radius: 10px; margin-bottom: 25px; background: linear-gradient(to bottom, #f8f9fa, white); overflow: hidden;">
-                                    <div style="background: linear-gradient(135deg, #1a1a1a, #000); color: #d4af37; padding: 12px 20px; font-size: 15px; font-weight: bold; border-bottom: 2px solid #d4af37;">
+                                <div style="border: 3px solid #1a1a1a; border-radius: 10px; margin-bottom: 25px; background: white; overflow: hidden;">
+                                    <div style="background: #1a1a1a; color: #d4af37; padding: 12px 20px; font-size: 15px; font-weight: bold;">
                                         معلومات العميل
                                     </div>
                                     <div style="padding: 20px;">
-                                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; font-size: 13px;">
-                                            <div t-if="doc.partner_id">
+                                        <div style="font-size: 13px;">
+                                            <div t-if="doc.partner_id" style="margin-bottom: 10px;">
                                                 <span style="color: #1a1a1a; font-weight: bold; margin-left: 8px;">📋 الاسم:</span>
                                                 <span style="color: #333;" t-field="doc.partner_id.name"/>
                                             </div>
-                                            <div t-if="doc.partner_id.phone">
+                                            <div t-if="doc.partner_id.phone" style="margin-bottom: 10px;">
                                                 <span style="color: #1a1a1a; font-weight: bold; margin-left: 8px;">📞 الهاتف:</span>
                                                 <span style="color: #333;" t-field="doc.partner_id.phone"/>
                                             </div>
-                                            <div t-if="doc.partner_id.email" style="grid-column: 1 / -1;">
+                                            <div t-if="doc.partner_id.email">
                                                 <span style="color: #1a1a1a; font-weight: bold; margin-left: 8px;">📧 البريد:</span>
                                                 <span style="color: #333;" t-field="doc.partner_id.email"/>
                                             </div>
@@ -89,10 +72,10 @@
                                 </div>
 
                                 <!-- Products Table -->
-                                <div style="border: 3px solid #1a1a1a; border-radius: 10px; overflow: hidden; box-shadow: 0 6px 20px rgba(0,0,0,0.15); margin-bottom: 25px;">
+                                <div style="border: 3px solid #1a1a1a; border-radius: 10px; overflow: hidden; margin-bottom: 25px; background: white;">
                                     <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
                                         <thead>
-                                            <tr style="background: linear-gradient(135deg, #000, #1a1a1a, #000); color: #d4af37; border-bottom: 3px solid #d4af37;">
+                                            <tr style="background: #000000; color: #d4af37; border-bottom: 3px solid #d4af37;">
                                                 <th style="padding: 12px 10px; text-align: center; border-left: 2px solid #333; width: 50px; font-weight: bold;">ت</th>
                                                 <th style="padding: 12px 15px; text-align: right; border-left: 2px solid #333; font-weight: bold;">المنتج</th>
                                                 <th style="padding: 12px 10px; text-align: center; border-left: 2px solid #333; width: 80px; font-weight: bold;">الكمية</th>
@@ -127,23 +110,23 @@
                                 </div>
 
                                 <!-- Totals Section -->
-                                <div style="display: flex; justify-content: flex-end; margin-bottom: 25px;">
-                                    <div style="width: 450px; border: 3px solid #1a1a1a; border-radius: 10px; overflow: hidden; box-shadow: 0 6px 20px rgba(0,0,0,0.15);">
+                                <div style="margin-bottom: 25px;">
+                                    <div style="width: 100%; max-width: 450px; margin-right: 0; margin-left: auto; border: 3px solid #1a1a1a; border-radius: 10px; overflow: hidden; background: white;">
                                         <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
                                             <tbody>
-                                                <tr style="background: linear-gradient(to left, #f8f9fa, white); border-bottom: 2px solid #ddd;">
+                                                <tr style="background: #f8f9fa; border-bottom: 2px solid #ddd;">
                                                     <td style="padding: 12px 20px; text-align: right; font-weight: bold; color: #1a1a1a;">المجموع الجزئي</td>
                                                     <td style="padding: 12px 20px; text-align: left; font-weight: 600; color: #333;">
                                                         <span t-field="doc.amount_subtotal" t-options='{"widget": "monetary", "display_currency": doc.currency_id}'/>
                                                     </td>
                                                 </tr>
-                                                <tr t-if="doc.amount_discount and doc.amount_discount > 0" style="background: linear-gradient(to left, #fff5f5, white); border-bottom: 2px solid #ddd;">
+                                                <tr t-if="doc.amount_discount and doc.amount_discount > 0" style="background: #fff5f5; border-bottom: 2px solid #ddd;">
                                                     <td style="padding: 12px 20px; text-align: right; font-weight: bold; color: #1a1a1a;">الخصم</td>
                                                     <td style="padding: 12px 20px; text-align: left; color: #dc2626; font-weight: 600;">
                                                         <span t-field="doc.amount_discount" t-options='{"widget": "monetary", "display_currency": doc.currency_id}'/>
                                                     </td>
                                                 </tr>
-                                                <tr style="background: linear-gradient(135deg, #000, #1a1a1a); color: #d4af37; border-top: 3px solid #d4af37;">
+                                                <tr style="background: #000000; color: #d4af37; border-top: 3px solid #d4af37;">
                                                     <td style="padding: 15px 20px; text-align: right; font-size: 16px;">
                                                         <strong>💰 المجموع الكلي</strong>
                                                     </td>
@@ -159,7 +142,7 @@
                                 </div>
 
                                 <!-- Notes -->
-                                <div t-if="doc.note" style="border: 2px solid #d4af37; background: linear-gradient(to bottom, #fffbeb, white); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                                <div t-if="doc.note" style="border: 2px solid #d4af37; background: #fffbeb; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
                                     <h4 style="margin: 0 0 10px 0; color: #1a1a1a; font-size: 14px; font-weight: bold;">
                                         📝 ملاحظات
                                     </h4>
@@ -167,7 +150,7 @@
                                 </div>
 
                                 <!-- Footer -->
-                                <div style="margin-top: 30px; padding: 20px; background: linear-gradient(135deg, #1a1a1a, #000); border-radius: 10px; text-align: center; color: white; border: 2px solid #d4af37;">
+                                <div style="margin-top: 30px; padding: 20px; background: #000000; border-radius: 10px; text-align: center; color: white; border: 2px solid #d4af37;">
                                     <p style="margin: 0 0 10px 0; font-size: 16px; color: #d4af37; font-weight: bold;">
                                         ✨ شكراً لتعاملكم معنا ✨
                                     </p>
