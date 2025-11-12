@@ -446,5 +446,49 @@ class SapBackend(models.Model):
                     'sticky': True,
                 }
             }
+    
+    @api.model
+    def get_invoice_types_from_sap(self):
+        """Get invoice types from SAP User-Defined Fields
+        
+        Returns:
+            list: List of tuples [(value, label), ...]
+        """
+        try:
+            # Get active SAP backend
+            backend = self.search([('active', '=', True)], limit=1)
+            
+            if not backend:
+                _logger.warning("No active SAP backend found")
+                return []
+            
+            # Get connection and fetch invoice types
+            connection = backend.get_connection()
+            invoice_types = connection.get_invoice_types()
+            
+            if invoice_types:
+                _logger.info(f"Found {len(invoice_types)} invoice types from SAP: {invoice_types}")
+                return invoice_types
+            else:
+                _logger.warning("No invoice types found in SAP, returning default values")
+                # إرجاع قيم افتراضية إذا لم يتم العثور على أي شيء في SAP
+                return [
+                    ('retail', 'بيع تجزئة - Retail'),
+                    ('wholesale', 'بيع جملة - Wholesale'),
+                    ('delivery', 'توصيل - Delivery'),
+                    ('corporate', 'شركات - Corporate'),
+                    ('individual', 'أفراد - Individual'),
+                ]
+                
+        except Exception as e:
+            _logger.error(f"Error fetching invoice types from SAP: {str(e)}", exc_info=True)
+            # إرجاع قيم افتراضية في حالة الخطأ
+            return [
+                ('retail', 'بيع تجزئة - Retail'),
+                ('wholesale', 'بيع جملة - Wholesale'),
+                ('delivery', 'توصيل - Delivery'),
+                ('corporate', 'شركات - Corporate'),
+                ('individual', 'أفراد - Individual'),
+            ]
 
 

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from odoo import http
+from odoo import http, fields
 from odoo.http import request
 import logging
 
@@ -303,3 +303,107 @@ class PosPerfumeController(http.Controller):
                 'success': False,
                 'error': str(e)
             }
+    
+    @http.route('/pos_perfume/send_whatsapp', type='json', auth='user')
+    def send_whatsapp(self, order_id):
+        """
+        Send POS Order as PDF via WhatsApp using ULTRAMSG
+        """
+        try:
+            # Get order
+            order = request.env['pos.perfume.order'].browse(order_id)
+            if not order.exists():
+                return {'success': False, 'error': 'Order not found'}
+            
+            # Check if order is saved
+            if order.state == 'draft' and not order.id:
+                return {'success': False, 'error': 'Please save the order first'}
+            
+            # Check if customer has phone
+            if not order.partner_id or not order.partner_id.phone:
+                return {'success': False, 'error': 'Customer phone number is missing'}
+            
+            # Get ULTRAMSG config
+            config = request.env['ultramsg.config'].search([('active', '=', True)], limit=1)
+            if not config:
+                return {'success': False, 'error': 'ULTRAMSG not configured. Please contact administrator.'}
+            
+            # Generate PDF report
+            report = request.env.ref('pos_perfume_custom.action_report_pos_perfume_order')
+            pdf_content, _ = report._render_qweb_pdf([order.id])
+            
+            # Upload PDF to get public URL (we'll save it temporarily)
+            import base64
+            attachment = request.env['ir.attachment'].create({
+                'name': f'Invoice_{order.name}.pdf',
+                'type': 'binary',
+                'datas': base64.b64encode(pdf_content),
+                'res_model': 'pos.perfume.order',
+                'res_id': order.id,
+                'public': True,
+            })
+            
+            # Get public URL for the PDF
+            base_url = request.env['ir.config_parameter'].sudo().get_param('web.base.url')
+            pdf_url = f"{base_url}/web/content/{attachment.id}?download=true"
+            
+            # Prepare message
+            message_body = f"""
+مرحباً {order.partner_id.name}،
+
+هذه فاتورتك من متجرنا:
+📄 رقم الطلب: {order.name}
+💰 المجموع: ${order.amount_total:.2f}
+
+شكراً لتعاملك معنا!
+            """.strip()
+            
+            # Create message log
+            message = request.env['ultramsg.message'].create({
+                'phone': order.partner_id.phone,
+                'message_type': 'document',
+                'message_body': message_body,
+                'document_url': pdf_url,
+                'document_name': f'Invoice_{order.name}.pdf',
+                'res_model': 'pos.perfume.order',
+                'res_id': order.id,
+                'state': 'sending',
+            })
+            
+            # Send via ULTRAMSG
+            result = config.send_message(
+                phone=order.partner_id.phone,
+                message_type='document',
+                message_body=message_body,
+                document_url=pdf_url,
+                document_name=f'Invoice_{order.name}.pdf',
+            )
+            
+            # Update message status
+            if result.get('success'):
+                message.write({
+                    'state': 'sent',
+                    'sent_date': fields.Datetime.now(),
+                    'ultramsg_id': result.get('ultramsg_id'),
+                    'ultramsg_response': str(result.get('response')),
+                })
+                return {
+                    'success': True,
+                    'message': f'Invoice sent successfully to {order.partner_id.phone}',
+                    'message_id': message.id,
+                }
+            else:
+                message.write({
+                    'state': 'failed',
+                    'error_message': result.get('error'),
+                    'ultramsg_response': str(result.get('response')),
+                })
+                return {
+                    'success': False,
+                    'error': result.get('error', 'Failed to send message'),
+                    'message_id': message.id,
+                }
+                
+        except Exception as e:
+            _logger.error(f"Error in send_whatsapp: {e}", exc_info=True)
+            return {'success': False, 'error': str(e)}

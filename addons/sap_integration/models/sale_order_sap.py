@@ -28,6 +28,42 @@ class SaleOrder(models.Model):
         help="تم إرسال هذا Quotation إلى SAP"
     )
     
+    # Invoice Type (SAP User-Defined Field)
+    invoice_type = fields.Selection(
+        string='نوع الفاتورة / Invoice Type',
+        selection='_get_invoice_type_selection',
+        help="نوع الفاتورة الذي سيتم إرساله إلى SAP (U_InvoiceType)"
+    )
+    
+    @api.model
+    def _get_invoice_type_selection(self):
+        """Get invoice types from SAP dynamically"""
+        try:
+            invoice_types = self.env['sap.backend'].get_invoice_types_from_sap()
+            if invoice_types:
+                return invoice_types
+            else:
+                # Default values if SAP is not available
+                return [
+                    ('retail', 'بيع تجزئة - Retail'),
+                    ('wholesale', 'بيع جملة - Wholesale'),
+                    ('delivery', 'توصيل - Delivery'),
+                    ('corporate', 'شركات - Corporate'),
+                    ('individual', 'أفراد - Individual'),
+                ]
+        except Exception as e:
+            import logging
+            _logger = logging.getLogger(__name__)
+            _logger.error(f"Error fetching invoice types: {str(e)}")
+            # Return default values on error
+            return [
+                ('retail', 'بيع تجزئة - Retail'),
+                ('wholesale', 'بيع جملة - Wholesale'),
+                ('delivery', 'توصيل - Delivery'),
+                ('corporate', 'شركات - Corporate'),
+                ('individual', 'أفراد - Individual'),
+            ]
+    
     @api.model
     def create(self, vals):
         """Override create to send quotation to SAP after creation"""
@@ -360,6 +396,11 @@ class SaleOrder(models.Model):
             'DocDate': quotation.date_order.strftime('%Y-%m-%d') if quotation.date_order else datetime.now().strftime('%Y-%m-%d'),
             'DocumentLines': document_lines,
         }
+        
+        # إضافة نوع الفاتورة (User-Defined Field) إذا كان متوفراً
+        if quotation.invoice_type:
+            quotation_data['U_InvoiceType'] = quotation.invoice_type
+            _logger.info(f"Adding U_InvoiceType to quotation: {quotation.invoice_type}")
         
         # إضافة تاريخ الصلاحية إذا كان موجوداً
         if quotation.validity_date:

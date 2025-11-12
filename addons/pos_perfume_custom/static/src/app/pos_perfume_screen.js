@@ -44,6 +44,8 @@ export class PosPerfumeScreen extends Component {
                 sap_doc_num: null,
                 sap_doc_entry: null,
                 sap_synced: false,
+                invoice_type: null,  // Invoice type for SAP
+                note: '',  // Notes field
                 lines: [],
                 totals: {
                     subtotal: 0,
@@ -120,6 +122,24 @@ export class PosPerfumeScreen extends Component {
         
         // Initialize lines after state is created
         this.state.currentOrder.lines = this.createEmptyLines(10);
+        
+        // Add computed property for customer ID (for CustomerSearch component)
+        // Initialize as null, will be updated when partner_id changes
+        this.state.currentOrder.customerIdForSearch = null;
+        
+        // Helper to update customerIdForSearch when partner_id changes
+        this._updateCustomerIdForSearch = () => {
+            const partnerId = this.state.currentOrder.partner_id;
+            if (!partnerId) {
+                this.state.currentOrder.customerIdForSearch = null;
+            } else if (typeof partnerId === 'number') {
+                this.state.currentOrder.customerIdForSearch = partnerId;
+            } else if (Array.isArray(partnerId)) {
+                this.state.currentOrder.customerIdForSearch = partnerId[0] ? Number(partnerId[0]) : null;
+            } else {
+                this.state.currentOrder.customerIdForSearch = Number(partnerId) || null;
+            }
+        };
         
         // Debounce timer for search
         this.searchTimers = {};
@@ -383,20 +403,41 @@ export class PosPerfumeScreen extends Component {
             return null;
         }
         
-        // Try to find WH 18 first (case insensitive)
+        // Log all available warehouses to debug
+        console.log('🏭 Available warehouses:', availableWarehouses.map(w => ({
+            id: w.id,
+            code: w.code,
+            name: w.name
+        })));
+        
+        // Try to find WH 18 first (case insensitive, multiple patterns)
         const wh18 = availableWarehouses.find(w => {
-            const code = (w.code || '').toUpperCase();
-            const name = (w.name || '').toUpperCase();
-            return code === 'WH 18' || code === 'WH18' || name.includes('WH 18') || name.includes('WH18');
+            const code = (w.code || '').toUpperCase().trim();
+            const name = (w.name || '').toUpperCase().trim();
+            
+            // Check multiple patterns for WH 18
+            const patterns = [
+                'WH 18', 'WH18', 'WH-18', 
+                '18', 'WAREHOUSE 18', 'مستودع 18'
+            ];
+            
+            const foundByCode = patterns.some(p => code === p || code.includes(p));
+            const foundByName = patterns.some(p => name === p || name.includes(p));
+            
+            if (foundByCode || foundByName) {
+                console.log(`✅ Found WH 18 match: code="${w.code}", name="${w.name}"`);
+            }
+            
+            return foundByCode || foundByName;
         });
         
         if (wh18) {
-            console.log('✅ Found WH 18 as default warehouse:', wh18);
+            console.log('✅ Selected WH 18 as default warehouse:', wh18);
             return wh18;
         }
         
         // Fallback to first warehouse
-        console.log('ℹ️ WH 18 not found, using first warehouse:', availableWarehouses[0]);
+        console.log('ℹ️ WH 18 not found in list, using first warehouse:', availableWarehouses[0]);
         return availableWarehouses[0];
     }
     
@@ -1632,7 +1673,10 @@ export class PosPerfumeScreen extends Component {
     onSelectCustomer(customer) {
         if (customer) {
             this.state.currentOrder.partner = customer.name;
-            this.state.currentOrder.partner_id = customer.id;
+            // Ensure partner_id is always a number
+            this.state.currentOrder.partner_id = customer.id ? Number(customer.id) : null;
+            // Update customerIdForSearch
+            this._updateCustomerIdForSearch();
             
             // DISABLED: Keep pricelist fixed to "Price list 1" - don't change when customer changes
             // if (customer.pricelist_id) {
@@ -1647,6 +1691,7 @@ export class PosPerfumeScreen extends Component {
         } else {
             this.state.currentOrder.partner = null;
             this.state.currentOrder.partner_id = null;
+            this._updateCustomerIdForSearch();
         }
     }
     
@@ -1764,6 +1809,8 @@ export class PosPerfumeScreen extends Component {
                     partner_id: this.state.currentOrder.partner_id,
                     pricelist_id: this.state.currentOrder.pricelist_id,
                     exchange_rate: this.state.exchangeRate,
+                    invoice_type: this.state.currentOrder.invoice_type || false,
+                    note: this.state.currentOrder.note || '',
                     order_line_ids: [[5, 0, 0], ...orderLines], // Clear existing lines and add new ones
                     state: state,
                 });
@@ -1775,6 +1822,8 @@ export class PosPerfumeScreen extends Component {
                     partner_id: this.state.currentOrder.partner_id,
                     pricelist_id: this.state.currentOrder.pricelist_id,
                     exchange_rate: this.state.exchangeRate,
+                    invoice_type: this.state.currentOrder.invoice_type || false,
+                    note: this.state.currentOrder.note || '',
                     order_line_ids: orderLines,
                     state: state,
                 }]);
@@ -2231,12 +2280,15 @@ export class PosPerfumeScreen extends Component {
         if (confirm(_t("Are you sure you want to create a new order? Current order will be lost."))) {
             this.state.currentOrder.partner = null;
             this.state.currentOrder.partner_id = null;
+            this._updateCustomerIdForSearch();
             this.state.currentOrder.orderNumber = 'New Order';
             this.state.currentOrder.order_id = null;
             this.state.currentOrder.state = 'draft';
             this.state.currentOrder.sap_doc_num = null;
             this.state.currentOrder.sap_doc_entry = null;
             this.state.currentOrder.sap_synced = false;
+            this.state.currentOrder.invoice_type = null;
+            this.state.currentOrder.note = '';
             this.state.currentOrder.lines = this.createEmptyLines(10);
             this.calculateTotals();
             this.notification.add(_t("New order created"), { type: "success" });
@@ -2500,7 +2552,7 @@ export class PosPerfumeScreen extends Component {
             const orders = await this.orm.read(
                 'pos.perfume.order',
                 orderIds,
-                ['id', 'name', 'partner_id', 'pricelist_id', 'order_line_ids', 'state', 'amount_total', 'sap_doc_num', 'sap_doc_entry', 'sap_synced']
+                ['id', 'name', 'partner_id', 'pricelist_id', 'order_line_ids', 'state', 'amount_total', 'sap_doc_num', 'sap_doc_entry', 'sap_synced', 'invoice_type', 'note']
             );
             
             if (orders.length === 0) {
@@ -2521,13 +2573,20 @@ export class PosPerfumeScreen extends Component {
             // Update state
             this.state.currentOrder.order_id = order.id;
             this.state.currentOrder.orderNumber = order.name;
-            this.state.currentOrder.partner_id = order.partner_id ? order.partner_id[0] : null;
-            this.state.currentOrder.pricelist_id = order.pricelist_id ? order.pricelist_id[0] : null;
+            // Ensure partner_id is a number, not an array
+            const partnerId = order.partner_id ? (Array.isArray(order.partner_id) ? order.partner_id[0] : order.partner_id) : null;
+            this.state.currentOrder.partner_id = partnerId ? Number(partnerId) : null;
+            this._updateCustomerIdForSearch();
+            const pricelistId = order.pricelist_id ? (Array.isArray(order.pricelist_id) ? order.pricelist_id[0] : order.pricelist_id) : null;
+            this.state.currentOrder.pricelist_id = pricelistId ? Number(pricelistId) : null;
             this.state.currentOrder.state = order.state || 'draft';
             // Update SAP fields
             this.state.currentOrder.sap_doc_num = order.sap_doc_num || null;
             this.state.currentOrder.sap_doc_entry = order.sap_doc_entry || null;
             this.state.currentOrder.sap_synced = order.sap_synced || false;
+            // Update invoice type and notes
+            this.state.currentOrder.invoice_type = order.invoice_type || null;
+            this.state.currentOrder.note = order.note || '';
             
             // Update current order index if in previous orders list
             if (this.state.previousOrders.length > 0) {
@@ -2604,10 +2663,58 @@ export class PosPerfumeScreen extends Component {
     }
     
     /**
-     * Send via WhatsApp
+     * Send via WhatsApp using ULTRAMSG
      */
     async sendWhatsApp() {
-        this.notification.add(_t("WhatsApp integration - to be implemented"), { type: "info" });
+        try {
+            // Check if order is saved
+            if (!this.state.currentOrder.order_id) {
+                this.notification.add(
+                    _t("Please save the order first before sending via WhatsApp"),
+                    { type: "warning" }
+                );
+                return;
+            }
+            
+            // Check if customer is selected
+            if (!this.state.currentOrder.partner_id) {
+                this.notification.add(
+                    _t("Please select a customer first"),
+                    { type: "warning" }
+                );
+                return;
+            }
+            
+            // Show loading notification
+            this.notification.add(
+                _t("Generating PDF and sending via WhatsApp..."),
+                { type: "info" }
+            );
+            
+            // Call backend to send WhatsApp
+            const result = await rpc('/pos_perfume/send_whatsapp', {
+                order_id: this.state.currentOrder.order_id,
+            });
+            
+            if (result.success) {
+                this.notification.add(
+                    _t("✅ Invoice sent successfully via WhatsApp!"),
+                    { type: "success" }
+                );
+            } else {
+                this.notification.add(
+                    _t("❌ Failed to send: ") + (result.error || 'Unknown error'),
+                    { type: "danger" }
+                );
+            }
+            
+        } catch (error) {
+            console.error('Error sending WhatsApp:', error);
+            this.notification.add(
+                _t("Error sending WhatsApp: ") + error.message,
+                { type: "danger" }
+            );
+        }
     }
     
     /**
@@ -3803,6 +3910,31 @@ export class PosPerfumeScreen extends Component {
     isUnitFilterActiveHandler(filter) {
         const key = `isUnitFilterActive_${filter}`;
         return this.getHandler(key, () => () => this.isUnitFilterActive(filter));
+    }
+    
+    /**
+     * Handle invoice type change
+     */
+    onInvoiceTypeChange(ev) {
+        this.state.currentOrder.invoice_type = ev.target.value || null;
+    }
+    
+    /**
+     * Handle note change
+     */
+    onNoteChange(ev) {
+        this.state.currentOrder.note = ev.target.value || '';
+    }
+    
+    /**
+     * Get customer ID as number or null for CustomerSearch component
+     */
+    getCustomerIdForSearch() {
+        const partnerId = this.state.currentOrder.partner_id;
+        if (!partnerId) return null;
+        if (typeof partnerId === 'number') return partnerId;
+        if (Array.isArray(partnerId)) return partnerId[0] ? Number(partnerId[0]) : null;
+        return Number(partnerId) || null;
     }
 }
 

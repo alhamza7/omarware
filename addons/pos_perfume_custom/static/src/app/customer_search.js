@@ -12,7 +12,7 @@ export class CustomerSearch extends Component {
     static template = "pos_perfume_custom.CustomerSearch";
     static props = {
         onSelectCustomer: Function,
-        selectedCustomerId: { type: Number, optional: true },
+        selectedCustomerId: { optional: true },
     };
 
     setup() {
@@ -34,8 +34,9 @@ export class CustomerSearch extends Component {
         
         onMounted(async () => {
             // Load initial customer if provided
-            if (this.props.selectedCustomerId) {
-                await this.loadCustomer(this.props.selectedCustomerId);
+            const customerId = this.getCustomerId(this.props.selectedCustomerId);
+            if (customerId) {
+                await this.loadCustomer(customerId);
             }
             
             // Load recent customers for quick access
@@ -44,9 +45,12 @@ export class CustomerSearch extends Component {
         
         // Update customer when selectedCustomerId prop changes
         onWillUpdateProps(async (nextProps) => {
-            if (nextProps.selectedCustomerId !== this.props.selectedCustomerId) {
-                if (nextProps.selectedCustomerId) {
-                    await this.loadCustomer(nextProps.selectedCustomerId);
+            const currentId = this.getCustomerId(this.props.selectedCustomerId);
+            const nextId = this.getCustomerId(nextProps.selectedCustomerId);
+            // Compare as numbers to avoid false positives
+            if (nextId !== currentId && (nextId || currentId)) {
+                if (nextId) {
+                    await this.loadCustomer(nextId);
                 } else {
                     // Clear selection if customer ID is removed
                     this.state.selectedCustomer = null;
@@ -54,6 +58,16 @@ export class CustomerSearch extends Component {
                 }
             }
         });
+    }
+    
+    /**
+     * Get customer ID as number or null
+     */
+    getCustomerId(value) {
+        if (!value) return null;
+        if (typeof value === 'number') return value;
+        if (Array.isArray(value)) return value[0] ? Number(value[0]) : null;
+        return Number(value) || null;
     }
     
     /**
@@ -147,10 +161,14 @@ export class CustomerSearch extends Component {
      * Load specific customer by ID
      */
     async loadCustomer(customerId) {
+        // Ensure customerId is a number
+        const id = this.getCustomerId(customerId);
+        if (!id) return;
+        
         try {
             const customers = await this.orm.searchRead(
                 'res.partner',
-                [['id', '=', customerId]],
+                [['id', '=', id]],
                 ['id', 'name', 'phone', 'email', 'property_product_pricelist'],
                 { limit: 1 }
             );
@@ -241,9 +259,13 @@ export class CustomerSearch extends Component {
                 this.state.selectedIndex + 1,
                 this.state.customers.length - 1
             );
+            // Auto-scroll to selected item
+            this.scrollToSelectedCustomer();
         } else if (ev.key === 'ArrowUp') {
             ev.preventDefault();
             this.state.selectedIndex = Math.max(this.state.selectedIndex - 1, 0);
+            // Auto-scroll to selected item
+            this.scrollToSelectedCustomer();
         } else if (ev.key === 'Enter') {
             ev.preventDefault();
             if (this.state.customers[this.state.selectedIndex]) {
@@ -252,6 +274,32 @@ export class CustomerSearch extends Component {
         } else if (ev.key === 'Escape') {
             this.state.showDropdown = false;
         }
+    }
+    
+    /**
+     * Scroll to selected customer in dropdown
+     */
+    scrollToSelectedCustomer() {
+        setTimeout(() => {
+            const dropdown = document.querySelector('.customer-dropdown');
+            if (!dropdown) return;
+            
+            const selectedItem = dropdown.querySelector('.customer-item.selected');
+            if (selectedItem) {
+                // Calculate if item is out of view
+                const dropdownRect = dropdown.getBoundingClientRect();
+                const itemRect = selectedItem.getBoundingClientRect();
+                
+                // Scroll if item is below visible area
+                if (itemRect.bottom > dropdownRect.bottom) {
+                    selectedItem.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                }
+                // Scroll if item is above visible area
+                else if (itemRect.top < dropdownRect.top) {
+                    selectedItem.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                }
+            }
+        }, 10);
     }
     
     /**

@@ -179,6 +179,42 @@ class PosPerfumeOrder(models.Model):
     # Notes
     note = fields.Text(string='Notes')
     
+    # Invoice Type (for SAP)
+    invoice_type = fields.Selection(
+        string='نوع الفاتورة / Invoice Type',
+        selection='_get_invoice_type_selection',
+        help="نوع الفاتورة الذي سيتم إرساله إلى SAP (U_InvoiceType)"
+    )
+    
+    @api.model
+    def _get_invoice_type_selection(self):
+        """Get invoice types from SAP dynamically"""
+        try:
+            invoice_types = self.env['sap.backend'].get_invoice_types_from_sap()
+            if invoice_types:
+                return invoice_types
+            else:
+                # Default values if SAP is not available
+                return [
+                    ('retail', 'بيع تجزئة - Retail'),
+                    ('wholesale', 'بيع جملة - Wholesale'),
+                    ('delivery', 'توصيل - Delivery'),
+                    ('corporate', 'شركات - Corporate'),
+                    ('individual', 'أفراد - Individual'),
+                ]
+        except Exception as e:
+            import logging
+            _logger = logging.getLogger(__name__)
+            _logger.error(f"Error fetching invoice types: {str(e)}")
+            # Return default values on error
+            return [
+                ('retail', 'بيع تجزئة - Retail'),
+                ('wholesale', 'بيع جملة - Wholesale'),
+                ('delivery', 'توصيل - Delivery'),
+                ('corporate', 'شركات - Corporate'),
+                ('individual', 'أفراد - Individual'),
+            ]
+    
     @api.depends('order_line_ids.line_subtotal', 'order_line_ids.discount_amount')
     def _compute_amounts(self):
         """Calculate order totals from lines"""
@@ -265,7 +301,7 @@ class PosPerfumeOrder(models.Model):
             order_id = order.id
             # Read all needed fields at once to avoid multiple field cache accesses
             try:
-                order_data = order.read(['name', 'partner_id', 'user_id', 'date', 'pricelist_id', 'note'])[0]
+                order_data = order.read(['name', 'partner_id', 'user_id', 'date', 'pricelist_id', 'note', 'invoice_type'])[0]
                 order_name = order_data.get('name', f"Order-{order_id}")
             except (TypeError, AttributeError, KeyError, IndexError) as e:
                 _logger.warning(f"[POS Confirm] Error reading order data: {e}, using ID only")
@@ -294,6 +330,7 @@ class PosPerfumeOrder(models.Model):
                 'date_order': order_data.get('date') or order.date,
                 'origin': order_name,
                 'note': order_data.get('note', '') or (order.note or ''),
+                'invoice_type': order_data.get('invoice_type') or order.invoice_type or False,
                 'pricelist_id': order_data.get('pricelist_id', [False])[0] if order_data.get('pricelist_id') else (order.pricelist_id.id if order.pricelist_id else False),
             }
             

@@ -66,12 +66,16 @@
                         <group>
                             <field name="partner_id" required="1"/>
                             <field name="date"/>
+                            <field name="invoice_type" widget="radio" options="{'horizontal': true}"/>
                         </group>
                         <group>
                             <field name="user_id"/>
                             <field name="sale_order_id" readonly="1"/>
                             <field name="exchange_rate"/>
                         </group>
+                    </group>
+                    <group>
+                        <field name="note" placeholder="أدخل الملاحظات هنا... (سيتم إرسالها إلى SAP)" widget="text"/>
                     </group>
                     
                     <notebook>

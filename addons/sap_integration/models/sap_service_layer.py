@@ -754,5 +754,96 @@ class SapServiceLayerConnection:
             return response.status_code == 200
         except:
             return False
+    
+    def get_user_defined_fields(self, table_name):
+        """Get User-Defined Fields (UDFs) for a specific table
+        
+        Args:
+            table_name: The SAP table name (e.g., 'OINV' for Invoices, 'ORDR' for Orders)
+            
+        Returns:
+            list: List of UDF definitions with Name, Type, ValidValues, etc.
+        """
+        try:
+            self._ensure_session()
+            
+            url = f"{self.base_url}/UserFieldsMD"
+            headers = self._get_headers()
+            params = {
+                '$filter': f"TableName eq '{table_name}'",
+                '$select': 'Name,Description,Type,Size,ValidValuesMD,DefaultValue'
+            }
+            
+            _logger.info(f"Fetching User-Defined Fields for table {table_name}")
+            response = self.session.get(url, headers=headers, params=params, timeout=30)
+            
+            if response.status_code == 200:
+                result = response.json()
+                udfs = result.get('value', [])
+                _logger.info(f"Found {len(udfs)} User-Defined Fields for table {table_name}")
+                return udfs
+            else:
+                error_msg = f"Error fetching UDFs: {response.status_code} - {response.text}"
+                _logger.error(error_msg)
+                return []
+                
+        except Exception as e:
+            _logger.error(f"Error getting User-Defined Fields: {str(e)}", exc_info=True)
+            return []
+    
+    def get_udf_valid_values(self, field_name, table_name='OINV'):
+        """Get valid values for a User-Defined Field
+        
+        Args:
+            field_name: The UDF name (e.g., 'InvoiceType')
+            table_name: The SAP table name (default: 'OINV' for Invoices)
+            
+        Returns:
+            list: List of valid values [(value, description), ...]
+        """
+        try:
+            self._ensure_session()
+            
+            # First, get the UDF definition
+            url = f"{self.base_url}/UserFieldsMD"
+            headers = self._get_headers()
+            params = {
+                '$filter': f"TableName eq '{table_name}' and Name eq '{field_name}'"
+            }
+            
+            _logger.info(f"Fetching valid values for UDF {field_name} in table {table_name}")
+            response = self.session.get(url, headers=headers, params=params, timeout=30)
+            
+            if response.status_code == 200:
+                result = response.json()
+                udfs = result.get('value', [])
+                
+                if udfs:
+                    udf = udfs[0]
+                    valid_values = udf.get('ValidValuesMD', [])
+                    
+                    # Convert to list of tuples (value, description)
+                    values_list = [(v.get('Value', ''), v.get('Description', '')) for v in valid_values]
+                    _logger.info(f"Found {len(values_list)} valid values for {field_name}: {values_list}")
+                    return values_list
+                else:
+                    _logger.warning(f"UDF {field_name} not found in table {table_name}")
+                    return []
+            else:
+                error_msg = f"Error fetching UDF valid values: {response.status_code} - {response.text}"
+                _logger.error(error_msg)
+                return []
+                
+        except Exception as e:
+            _logger.error(f"Error getting UDF valid values: {str(e)}", exc_info=True)
+            return []
+    
+    def get_invoice_types(self):
+        """Get available invoice types from SAP (U_InvoiceType valid values)
+        
+        Returns:
+            list: List of invoice types [(value, description), ...]
+        """
+        return self.get_udf_valid_values('InvoiceType', 'OINV')
 
 

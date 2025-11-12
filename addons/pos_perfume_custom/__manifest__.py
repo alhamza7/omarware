@@ -22,9 +22,10 @@
         'stock',
         'sale',
         'mail',
-        'uom',                        # ⭐ جديد - دعم وحدات القياس
-        'uom_in_pricelist',          # ⭐ جديد - أسعار حسب UoM
-        'sap_integration',           # ⭐ جديد - معلومات SAP
+        'uom',                        # ⭐ دعم وحدات القياس
+        'uom_in_pricelist',          # ⭐ أسعار حسب UoM
+        'sap_integration',           # ⭐ معلومات SAP
+        'ultramsg_integration',      # ⭐ WhatsApp Integration
     ],
     'data': [
         'security/ir.model.access.csv',
