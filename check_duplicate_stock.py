@@ -71,3 +71,4 @@ with registry.cursor() as cr:
     print(f"Difference (duplicates): {total - unique}")
 
 
+

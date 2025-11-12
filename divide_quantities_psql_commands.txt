@@ -1,0 +1,35 @@
+-- ============================================
+-- أوامر psql لتقسيم جميع الكميات على 2
+-- PSQL Commands to Divide All Quantities by 2
+-- ============================================
+
+-- 1. الاتصال بقاعدة البيانات
+-- Connect to database:
+psql -U odoo -d lugal
+
+-- 2. بعد الاتصال، نفذ هذه الأوامر:
+-- After connecting, execute these commands:
+
+BEGIN;
+
+UPDATE stock_quant SET quantity = quantity / 2.0 WHERE quantity > 0;
+
+UPDATE stock_quant SET reserved_quantity = reserved_quantity / 2.0 WHERE reserved_quantity > 0;
+
+-- للتحقق من النتائج:
+-- To verify results:
+SELECT 
+    COUNT(*) as total_records,
+    COUNT(CASE WHEN quantity > 0 THEN 1 END) as records_with_quantity,
+    SUM(quantity) as total_quantity,
+    SUM(reserved_quantity) as total_reserved_quantity
+FROM stock_quant;
+
+-- لحفظ التغييرات:
+-- To commit changes:
+COMMIT;
+
+-- أو للتراجع:
+-- Or to rollback:
+-- ROLLBACK;
+

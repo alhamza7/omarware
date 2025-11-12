@@ -194,25 +194,31 @@ class PosPerfumeOrder(models.Model):
             if invoice_types:
                 return invoice_types
             else:
-                # Default values if SAP is not available
+                # Default values matching SAP Business One invoice types
                 return [
-                    ('retail', 'بيع تجزئة - Retail'),
-                    ('wholesale', 'بيع جملة - Wholesale'),
-                    ('delivery', 'توصيل - Delivery'),
-                    ('corporate', 'شركات - Corporate'),
-                    ('individual', 'أفراد - Individual'),
+                    ('customer_shop', 'زبون محل'),
+                    ('delivery_companies', 'شركات توصيل'),
+                    ('ta3keebat', 'تعقيبات'),
+                    ('dalmari', 'دلامري'),
+                    ('nbs', 'NBS'),
+                    ('shoroja', 'شوروجة'),
+                    ('na', 'NA'),
+                    ('promotion_offices', 'مكاتب الترويجة'),
                 ]
         except Exception as e:
             import logging
             _logger = logging.getLogger(__name__)
             _logger.error(f"Error fetching invoice types: {str(e)}")
-            # Return default values on error
+            # Return default SAP values on error
             return [
-                ('retail', 'بيع تجزئة - Retail'),
-                ('wholesale', 'بيع جملة - Wholesale'),
-                ('delivery', 'توصيل - Delivery'),
-                ('corporate', 'شركات - Corporate'),
-                ('individual', 'أفراد - Individual'),
+                ('customer_shop', 'زبون محل'),
+                ('delivery_companies', 'شركات توصيل'),
+                ('ta3keebat', 'تعقيبات'),
+                ('dalmari', 'دلامري'),
+                ('nbs', 'NBS'),
+                ('shoroja', 'شوروجة'),
+                ('na', 'NA'),
+                ('promotion_offices', 'مكاتب الترويجة'),
             ]
     
     @api.depends('order_line_ids.line_subtotal', 'order_line_ids.discount_amount')

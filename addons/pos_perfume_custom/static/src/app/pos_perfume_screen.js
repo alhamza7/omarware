@@ -118,6 +118,9 @@ export class PosPerfumeScreen extends Component {
                 row: 0,  // Current row index
                 col: 0,  // Current column index (0=Product, 1=Quantity, 2=UoM, 3=Warehouse, 4=Disc%)
             },
+            
+            // Custom notifications (top center, accumulating)
+            customNotifications: [],
         });
         
         // Initialize lines after state is created
@@ -144,6 +147,18 @@ export class PosPerfumeScreen extends Component {
         // Debounce timer for search
         this.searchTimers = {};
         this.rightSearchTimer = null;
+        
+        // Notification counter for unique IDs
+        this.notificationCounter = 0;
+        
+        // Override notification.add to use custom notifications (after state is created)
+        const originalNotificationAdd = this.notification.add.bind(this.notification);
+        this.notification.add = (message, options = {}) => {
+            const type = options.type || 'info';
+            this.addCustomNotification(message, type);
+            // Optionally keep original notification too
+            // originalNotificationAdd(message, options);
+        };
         
         onMounted(async () => {
             // Load saved table column widths and names from localStorage
@@ -395,8 +410,105 @@ export class PosPerfumeScreen extends Component {
     }
     
     /**
+     * Check if a field can be edited based on validation rules
+     * Fields are enabled sequentially - each field requires previous field to be completed
+     * Sequential order: Product → Quantity → UoM → Warehouse → Price/Discount
+     * Also: Next line's product field is disabled until current line is fully completed
+     */
+    isFieldEnabled(line, fieldName) {
+        const lines = this.state.currentOrder.lines;
+        const currentIndex = lines.findIndex(l => l.id === line.id);
+        
+        // STRICT SEQUENTIAL MODE: Only ONE line can be active at a time
+        // Check if previous line is complete before enabling ANY field in current line
+        
+        // First, check if this is NOT the first line
+        if (currentIndex > 0) {
+            const previousLine = lines[currentIndex - 1];
+            
+            if (!previousLine) {
+                return false; // Safety check
+            }
+            
+            // Previous line must be FULLY complete before ANY field in current line is enabled
+            const isPreviousComplete = !!(
+                previousLine.product_id && 
+                previousLine.quantity && 
+                previousLine.quantity > 0 &&
+                previousLine.uom_id && 
+                previousLine.uomValid !== false &&
+                previousLine.warehouse_id && 
+                previousLine.warehouseValid !== false
+            );
+            
+            // If previous line is NOT complete, ALL fields in current line are disabled
+            if (!isPreviousComplete) {
+                if (fieldName === 'product') {
+                    console.log(`🔒 Line ${currentIndex + 1} LOCKED. Previous line ${currentIndex} must be completed first.`, {
+                        previousLine: {
+                            product_id: previousLine.product_id,
+                            quantity: previousLine.quantity,
+                            uom_id: previousLine.uom_id,
+                            uomValid: previousLine.uomValid,
+                            warehouse_id: previousLine.warehouse_id,
+                            warehouseValid: previousLine.warehouseValid
+                        }
+                    });
+                }
+                return false; // Block ALL fields in this line
+            }
+        }
+        
+        // Now check field-specific requirements within the CURRENT line
+        
+        // Product field: If we reached here, previous line is complete (or this is line 1)
+        if (fieldName === 'product') {
+            return true;
+        }
+        
+        // Quantity requires product to be selected in CURRENT line
+        if (fieldName === 'quantity') {
+            return !!line.product_id;
+        }
+        
+        // UoM requires product AND quantity to be entered
+        if (fieldName === 'uom') {
+            return !!(line.product_id && line.quantity && line.quantity > 0);
+        }
+        
+        // Warehouse requires product, quantity, AND valid UoM to be selected
+        if (fieldName === 'warehouse') {
+            return !!(line.product_id && line.quantity && line.quantity > 0 && 
+                      line.uom_id && line.uomValid);
+        }
+        
+        // Price (USD) requires product, quantity, valid UoM, AND valid warehouse
+        if (fieldName === 'price_usd') {
+            return !!(line.product_id && line.quantity && line.quantity > 0 && 
+                      line.uom_id && line.uomValid && 
+                      line.warehouse_id && line.warehouseValid);
+        }
+        
+        // Price (IQD) requires product, quantity, valid UoM, AND valid warehouse
+        if (fieldName === 'price_iqd') {
+            return !!(line.product_id && line.quantity && line.quantity > 0 && 
+                      line.uom_id && line.uomValid && 
+                      line.warehouse_id && line.warehouseValid);
+        }
+        
+        // Discount requires product, quantity, valid UoM, AND valid warehouse
+        if (fieldName === 'discount') {
+            return !!(line.product_id && line.quantity && line.quantity > 0 && 
+                      line.uom_id && line.uomValid && 
+                      line.warehouse_id && line.warehouseValid);
+        }
+        
+        return true;
+    }
+    
+    /**
      * Get default warehouse from available warehouses list
-     * Priority: WH 18 > First warehouse
+     * Priority: Warehouse ID 18 > Warehouse with highest quantity > First warehouse
      */
     getDefaultWarehouse(availableWarehouses) {
         if (!availableWarehouses || availableWarehouses.length === 0) {
@@ -407,37 +519,32 @@ export class PosPerfumeScreen extends Component {
         console.log('🏭 Available warehouses:', availableWarehouses.map(w => ({
             id: w.id,
             code: w.code,
-            name: w.name
+            name: w.name,
+            quantity: w.quantity
         })));
         
-        // Try to find WH 18 first (case insensitive, multiple patterns)
-        const wh18 = availableWarehouses.find(w => {
-            const code = (w.code || '').toUpperCase().trim();
-            const name = (w.name || '').toUpperCase().trim();
-            
-            // Check multiple patterns for WH 18
-            const patterns = [
-                'WH 18', 'WH18', 'WH-18', 
-                '18', 'WAREHOUSE 18', 'مستودع 18'
-            ];
-            
-            const foundByCode = patterns.some(p => code === p || code.includes(p));
-            const foundByName = patterns.some(p => name === p || name.includes(p));
-            
-            if (foundByCode || foundByName) {
-                console.log(`✅ Found WH 18 match: code="${w.code}", name="${w.name}"`);
-            }
-            
-            return foundByCode || foundByName;
-        });
+        // Priority 1: Try to find Warehouse ID 18
+        const wh18 = availableWarehouses.find(w => w.id === 18);
         
         if (wh18) {
-            console.log('✅ Selected WH 18 as default warehouse:', wh18);
+            console.log('✅ Selected Warehouse ID 18 as default warehouse:', wh18);
             return wh18;
         }
         
+        // Priority 2: Find warehouse with highest quantity
+        const sortedByQuantity = [...availableWarehouses].sort((a, b) => {
+            const qtyA = a.quantity || 0;
+            const qtyB = b.quantity || 0;
+            return qtyB - qtyA; // Descending order
+        });
+        
+        if (sortedByQuantity.length > 0 && sortedByQuantity[0].quantity > 0) {
+            console.log('✅ Selected warehouse with highest quantity:', sortedByQuantity[0]);
+            return sortedByQuantity[0];
+        }
+        
         // Fallback to first warehouse
-        console.log('ℹ️ WH 18 not found in list, using first warehouse:', availableWarehouses[0]);
+        console.log('ℹ️ Using first warehouse as fallback:', availableWarehouses[0]);
         return availableWarehouses[0];
     }
     
@@ -587,23 +694,34 @@ export class PosPerfumeScreen extends Component {
     
     /**
      * Load complete product info using onchange controller (like Sale Order)
+     * With retry logic and timeout handling
      */
-    async loadProductInfo(lineIndex, productId) {
+    async loadProductInfo(lineIndex, productId, retryCount = 0) {
         const line = this.state.currentOrder.lines[lineIndex];
         const pricelistId = this.state.currentOrder.pricelist_id;
         const uomId = line.uom_id || null;
         const warehouseId = line.warehouse_id || null;
         
+        const MAX_RETRIES = 3;
+        const TIMEOUT = 30000; // 30 seconds
+        
         try {
-            console.log(`🔍 Loading product ${productId} with pricelist ${pricelistId}`);
+            console.log(`🔍 Loading product ${productId} with pricelist ${pricelistId} (attempt ${retryCount + 1}/${MAX_RETRIES + 1})`);
             
-            // Call controller that uses onchange (exactly like sale.order.line)
-            const result = await rpc('/pos_perfume/get_product_data', {
+            // Create a promise with timeout
+            const rpcPromise = rpc('/pos_perfume/get_product_data', {
                 product_id: productId,
                 pricelist_id: pricelistId,
                 uom_id: uomId,
                 warehouse_id: warehouseId,
             });
+            
+            const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('Request timeout')), TIMEOUT);
+            });
+            
+            // Call controller with timeout
+            const result = await Promise.race([rpcPromise, timeoutPromise]);
             
             console.log('📦 Product data received:', result);
             
@@ -680,6 +798,14 @@ export class PosPerfumeScreen extends Component {
             
         } catch (error) {
             console.error('❌ Error loading product info:', error);
+            
+            // Retry logic
+            if (retryCount < MAX_RETRIES && (error.message.includes('timeout') || error.message.includes('Connection') || error.message.includes('interrupted'))) {
+                console.log(`🔄 Retrying... (${retryCount + 1}/${MAX_RETRIES})`);
+                await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1))); // Exponential backoff
+                return this.loadProductInfo(lineIndex, productId, retryCount + 1);
+            }
+            
             this.notification.add(
                 _t('Error loading product: ') + error.message,
                 { type: 'danger' }
@@ -3935,6 +4061,67 @@ export class PosPerfumeScreen extends Component {
         if (typeof partnerId === 'number') return partnerId;
         if (Array.isArray(partnerId)) return partnerId[0] ? Number(partnerId[0]) : null;
         return Number(partnerId) || null;
+    }
+    
+    /**
+     * Add custom notification (bottom right, auto-hide)
+     */
+    addCustomNotification(message, type = 'info') {
+        // Remove previous notification if exists (only show one at a time)
+        if (this.state.customNotifications.length > 0) {
+            this.state.customNotifications = [];
+        }
+        
+        const notification = {
+            id: `notif_${Date.now()}_${++this.notificationCounter}`,
+            message: message,
+            type: type, // 'success', 'danger', 'warning', 'info'
+            timestamp: Date.now()
+        };
+        
+        this.state.customNotifications.push(notification);
+        
+        // Auto-remove after 4 seconds
+        setTimeout(() => {
+            this.removeCustomNotification(notification.id);
+        }, 4000);
+    }
+    
+    /**
+     * Remove custom notification with fade out animation
+     */
+    removeCustomNotification(notificationId) {
+        const index = this.state.customNotifications.findIndex(n => n.id === notificationId);
+        if (index !== -1) {
+            const notification = this.state.customNotifications[index];
+            
+            // Add slide-out class for animation
+            setTimeout(() => {
+                const notificationElement = document.querySelector(`[data-notification-id="${notificationId}"]`);
+                if (notificationElement) {
+                    notificationElement.classList.add('slide-out');
+                }
+                
+                // Remove from state after animation
+                setTimeout(() => {
+                    const idx = this.state.customNotifications.findIndex(n => n.id === notificationId);
+                    if (idx !== -1) {
+                        this.state.customNotifications.splice(idx, 1);
+                    }
+                }, 300); // Match animation duration
+            }, 0);
+        }
+    }
+    
+    /**
+     * Override notification.add to use custom notifications
+     */
+    showNotification(message, options = {}) {
+        const type = options.type || 'info';
+        this.addCustomNotification(message, type);
+        
+        // Also show in Odoo notification system (optional - can be removed)
+        // this.notification.add(message, options);
     }
 }
 

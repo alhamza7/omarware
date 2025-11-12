@@ -5,3 +5,4 @@ access_ultramsg_config_user,ultramsg.config.user,model_ultramsg_config,base.grou
 access_ultramsg_config_manager,ultramsg.config.manager,model_ultramsg_config,base.group_system,1,1,1,1
 
 
+

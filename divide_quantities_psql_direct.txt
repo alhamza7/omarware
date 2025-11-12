@@ -1,0 +1,60 @@
+-- ============================================
+-- أوامر psql مباشرة لتقسيم الكميات على 2
+-- Direct PSQL Commands to Divide Quantities by 2
+-- ============================================
+
+-- نفذ هذه الأوامر في psql terminal:
+
+-- 1. التحقق قبل التحديث
+SELECT 
+    COUNT(*) as total,
+    SUM(quantity) as total_qty,
+    SUM(reserved_quantity) as total_reserved
+FROM stock_quant WHERE quantity > 0;
+
+-- 2. بدء المعاملة
+BEGIN;
+
+-- 3. تحديث الكميات (استخدم ROUND للتأكد من الدقة)
+UPDATE stock_quant 
+SET quantity = ROUND((quantity / 2.0)::numeric, 2)
+WHERE quantity > 0;
+
+-- 4. تحديث الكميات المحجوزة
+UPDATE stock_quant 
+SET reserved_quantity = ROUND((reserved_quantity / 2.0)::numeric, 2)
+WHERE reserved_quantity > 0;
+
+-- 5. التحقق بعد التحديث
+SELECT 
+    COUNT(*) as total,
+    SUM(quantity) as total_qty,
+    SUM(reserved_quantity) as total_reserved
+FROM stock_quant WHERE quantity > 0;
+
+-- 6. حفظ التغييرات
+COMMIT;
+
+-- ============================================
+-- إذا لم يعمل، جرب هذا الأمر البديل:
+-- ============================================
+
+BEGIN;
+
+-- تحديث باستخدام CAST صريح
+UPDATE stock_quant 
+SET quantity = CAST(quantity AS numeric) / 2.0
+WHERE quantity > 0;
+
+UPDATE stock_quant 
+SET reserved_quantity = CAST(reserved_quantity AS numeric) / 2.0
+WHERE reserved_quantity > 0;
+
+-- التحقق
+SELECT id, product_id, location_id, quantity 
+FROM stock_quant 
+WHERE quantity > 0 
+LIMIT 5;
+
+COMMIT;
+

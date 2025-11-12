@@ -149,3 +149,4 @@ class StockDuplicateCleaner(models.TransientModel):
         }
 
 
+
