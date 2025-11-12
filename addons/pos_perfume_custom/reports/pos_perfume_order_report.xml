@@ -10,7 +10,6 @@
                     <t t-call="web.external_layout">
                         <t t-foreach="docs" t-as="doc">
                             <div class="page" dir="rtl" lang="ar" style="font-family: 'Arial', 'Tahoma', 'DejaVu Sans', sans-serif; padding: 20px; direction: rtl;">
-                                <main>
                                 <h2 style="background: #000; color: #d4af37; padding: 15px; text-align: center; margin: 0 0 20px 0;">
                                     <span t-if="doc.state == 'draft'">مسودة طلب #</span>
                                     <span t-elif="doc.state == 'sale'">فاتورة بيع #</span>
@@ -77,7 +76,6 @@
                                 <div style="background: #000; color: white; padding: 15px; text-align: center; border: 2px solid #d4af37;">
                                     <p style="margin: 0; color: #d4af37; font-size: 16px;"><strong>شكراً لتعاملكم معنا</strong></p>
                                 </div>
-                                </main>
                             </div>
                         </t>
                     </t>
