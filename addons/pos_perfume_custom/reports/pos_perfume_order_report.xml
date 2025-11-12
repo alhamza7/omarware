@@ -1,6 +1,8 @@
-
+<?xml version="1.0"?>
+<odoo>
+    <data>
         <!-- Professional Black Arabic Invoice Design -->
-        <t t-name="pos_perfume_custom.report_pos_perfume_order">
+        <template id="report_pos_perfume_order">
             <t t-call="web.external_layout">
                 <t t-foreach="docs" t-as="doc">
                     <t t-set="doc" t-value="doc.with_context(lang=doc.partner_id.lang if doc.partner_id else None)"/>
@@ -209,4 +211,6 @@
                     </div>
                 </t>
             </t>
-        </t>
+        </template>
+    </data>
+</odoo>
