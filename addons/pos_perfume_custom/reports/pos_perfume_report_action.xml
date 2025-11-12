@@ -5,7 +5,7 @@
         <record id="action_report_pos_perfume_order" model="ir.actions.report">
             <field name="name">طلب العطور</field>
             <field name="model">pos.perfume.order</field>
-            <field name="report_type">qweb-pdf</field>
+            <field name="report_type">qweb-html</field>
             <field name="report_name">pos_perfume_custom.report_pos_perfume_order</field>
             <field name="report_file">pos_perfume_custom.report_pos_perfume_order</field>
             <field name="print_report_name">'طلب - %s' % (object.name)</field>
