@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <odoo>
-    <data>
+    <data noupdate="0">
         <!-- Report Action for POS Perfume Order -->
         <record id="action_report_pos_perfume_order" model="ir.actions.report">
             <field name="name">طلب العطور (احترافي أسود)</field>
