@@ -545,7 +545,7 @@ export class PosPerfumeScreen extends Component {
             const qtyB = b.quantity || b.qty || 0;
             return qtyB - qtyA; // Descending order
         });
-        
+            
         if (sortedByQuantity.length > 0 && (sortedByQuantity[0].quantity || sortedByQuantity[0].qty || 0) > 0) {
             console.log('✅ Selected warehouse with highest quantity:', {
                 id: sortedByQuantity[0].id,
@@ -2049,43 +2049,82 @@ export class PosPerfumeScreen extends Component {
         }
         
         try {
-            // Get the sale order ID from pos.perfume.order
-            const orderIds = [this.state.currentOrder.order_id];
-            const orders = await this.orm.read(
+            const orderId = this.state.currentOrder.order_id;
+            
+            console.log('=== Print Order Debug ===');
+            console.log('Order ID:', orderId);
+            
+            // First, verify the order exists
+            const orderExists = await this.orm.call(
                 'pos.perfume.order',
-                orderIds,
-                ['sale_order_id']
+                'search_read',
+                [[['id', '=', orderId]]],
+                { fields: ['id', 'name', 'state'], limit: 1 }
             );
             
-            if (orders.length > 0 && orders[0].sale_order_id) {
-                const saleOrderId = Array.isArray(orders[0].sale_order_id) 
-                    ? orders[0].sale_order_id[0] 
-                    : orders[0].sale_order_id;
-                
-                // Print the sale order report
-                await this.action.doAction({
-                    type: 'ir.actions.report',
-                    report_type: 'qweb-pdf',
-                    report_name: 'sale.report_saleorder',
-                    res_id: saleOrderId,
-                    context: {
-                        active_ids: [saleOrderId],
-                    }
-                });
-            } else {
-                // Fallback: Open order form view
-                await this.action.doAction({
-                    type: 'ir.actions.act_window',
-                    res_model: 'pos.perfume.order',
-                    res_id: this.state.currentOrder.order_id,
-                    view_mode: 'form',
-                    views: [[false, 'form']],
-                    target: 'new',
-                });
+            console.log('Order data:', orderExists);
+            
+            if (!orderExists || orderExists.length === 0) {
+                throw new Error('Order not found');
             }
+            
+            // Check if report exists
+            const reportExists = await this.orm.call(
+                'ir.actions.report',
+                'search_read',
+                [[['report_name', '=', 'pos_perfume_custom.report_pos_perfume_order']]],
+                { fields: ['id', 'name', 'model', 'report_name'], limit: 1 }
+            );
+            
+            console.log('Report exists:', reportExists);
+            
+            if (!reportExists || reportExists.length === 0) {
+                throw new Error('Report template not found');
+            }
+            
+            console.log('Attempting to render report via action.doAction...');
+            
+            // Use action.doAction to print the report
+            await this.action.doAction({
+                type: 'ir.actions.report',
+                report_type: 'qweb-pdf',
+                report_name: 'pos_perfume_custom.report_pos_perfume_order',
+                report_file: 'pos_perfume_custom.report_pos_perfume_order',
+                context: {
+                    active_ids: [orderId],
+                }
+            });
+            
+            console.log('Report action completed');
+            this.notification.add(_t("Report sent to printer"), { type: "success" });
+            
         } catch (error) {
-            console.error('Error printing order:', error);
-            this.notification.add(_t("Error printing order: ") + error.message, { type: "danger" });
+            console.error('=== Print Order Error ===');
+            console.error('Error object:', error);
+            console.error('Error message:', error.message);
+            console.error('Error data:', error.data);
+            console.error('Error stack:', error.stack);
+            
+            let errorMessage = _t("Error printing order: ");
+            
+            if (error.data && error.data.message) {
+                errorMessage += error.data.message;
+                console.error('Server message:', error.data.message);
+                
+                if (error.data.debug) {
+                    console.error('Server debug:', error.data.debug);
+                }
+            } else if (error.message) {
+                errorMessage += error.message;
+            } else {
+                errorMessage += String(error);
+            }
+            
+            this.notification.add(errorMessage, { 
+                type: "danger",
+                sticky: true,
+                title: _t("Print Error")
+            });
         }
     }
     

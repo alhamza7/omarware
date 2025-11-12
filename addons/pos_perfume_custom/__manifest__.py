@@ -33,6 +33,7 @@
         'views/pos_perfume_views.xml',
         'views/pos_perfume_order_views.xml',
         'views/pos_perfume_session_views.xml',
+        'reports/pos_perfume_order_report.xml',
     ],
     'assets': {
         'web.assets_backend': [

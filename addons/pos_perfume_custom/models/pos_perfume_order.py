@@ -307,7 +307,7 @@ class PosPerfumeOrder(models.Model):
             order_id = order.id
             # Read all needed fields at once to avoid multiple field cache accesses
             try:
-                order_data = order.read(['name', 'partner_id', 'user_id', 'date', 'pricelist_id', 'note', 'invoice_type'])[0]
+                order_data = order.read(['name', 'partner_id', 'user_id', 'date', 'pricelist_id', 'note'])[0]
                 order_name = order_data.get('name', f"Order-{order_id}")
             except (TypeError, AttributeError, KeyError, IndexError) as e:
                 _logger.warning(f"[POS Confirm] Error reading order data: {e}, using ID only")
