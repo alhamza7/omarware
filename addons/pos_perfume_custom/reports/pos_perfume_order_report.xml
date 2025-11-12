@@ -7,8 +7,12 @@
             <field name="type">qweb</field>
             <field name="arch" type="xml">
                 <t t-name="pos_perfume_custom.report_pos_perfume_order">
-                    <t t-call="web.external_layout">
+                    <t t-call="web.html_container">
                         <t t-foreach="docs" t-as="doc">
+                            <style>
+                                @charset "UTF-8";
+                                body { direction: rtl; font-family: 'Arial', 'Tahoma', 'DejaVu Sans', sans-serif; }
+                            </style>
                             <div class="page" dir="rtl" lang="ar" style="font-family: 'Arial', 'Tahoma', 'DejaVu Sans', sans-serif; padding: 20px; direction: rtl;">
                                 <h2 style="background: #000; color: #d4af37; padding: 15px; text-align: center; margin: 0 0 20px 0;">
                                     <span t-if="doc.state == 'draft'">مسودة طلب #</span>
