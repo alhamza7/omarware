@@ -9,157 +9,72 @@
                 <t t-name="pos_perfume_custom.report_pos_perfume_order">
                     <t t-call="web.html_container">
                         <t t-foreach="docs" t-as="doc">
-                            <div class="page" dir="rtl" lang="ar" style="font-family: Arial, Tahoma, sans-serif; background: #f8f9fa; padding: 20px;">
-                                <!-- Black Header -->
-                                <div style="background: #000000; color: white; padding: 25px; margin-bottom: 25px; border-bottom: 4px solid #d4af37;">
-                                    <div style="text-align: center; margin-bottom: 15px;">
-                                        <div style="background: #d4af37; padding: 15px 40px; border-radius: 10px; display: inline-block;">
-                                            <h1 style="margin: 0; font-size: 28px; color: #000; font-weight: bold;">
-                                                <span t-if="doc.state == 'draft'">مسودة طلب #</span>
-                                                <span t-elif="doc.state == 'sale'">فاتورة بيع #</span>
-                                                <span t-else="">طلب #</span>
-                                                <span t-field="doc.name"/>
-                                            </h1>
-                                        </div>
-                                    </div>
-                                    
-                                    <div style="text-align: center; margin-bottom: 10px;">
-                                        <t t-if="doc.company_id">
-                                            <h2 style="margin: 0; font-size: 20px; color: #d4af37; font-weight: bold;">
-                                                <span t-field="doc.company_id.name"/>
-                                            </h2>
-                                        </t>
-                                    </div>
-                                    
-                                    <!-- Info Bar -->
-                                    <div style="text-align: center; font-size: 12px; padding-top: 15px; border-top: 2px solid #333;">
-                                        <span t-if="doc.date" style="margin-left: 15px;">
-                                            <span style="color: #d4af37;">📅 التاريخ:</span>
-                                            <span t-field="doc.date" t-options='{"widget": "datetime"}'/>
-                                        </span>
-                                        <span t-if="doc.user_id" style="margin-left: 15px;">
-                                            <span style="color: #d4af37;">👤 المندوب:</span>
-                                            <span t-field="doc.user_id.name"/>
-                                        </span>
-                                        <span t-if="doc.sap_doc_num" style="margin-left: 15px;">
-                                            <span style="color: #d4af37;">🔢 رقم SAP:</span>
-                                            <span style="font-weight: bold;" t-field="doc.sap_doc_num"/>
-                                        </span>
-                                    </div>
+                            <div class="page" dir="rtl" style="font-family: Arial, sans-serif; padding: 20px;">
+                                <h2 style="background: #000; color: #d4af37; padding: 15px; text-align: center; margin: 0 0 20px 0;">
+                                    <span t-if="doc.state == 'draft'">مسودة طلب #</span>
+                                    <span t-elif="doc.state == 'sale'">فاتورة بيع #</span>
+                                    <span t-else="">طلب #</span>
+                                    <span t-field="doc.name"/>
+                                </h2>
+                                
+                                <div style="background: #f8f9fa; padding: 15px; margin-bottom: 20px; border: 2px solid #000;">
+                                    <h3 style="margin: 0 0 10px 0; color: #000;">معلومات العميل</h3>
+                                    <p style="margin: 5px 0;"><strong>الاسم:</strong> <span t-field="doc.partner_id.name"/></p>
+                                    <p t-if="doc.partner_id.phone" style="margin: 5px 0;"><strong>الهاتف:</strong> <span t-field="doc.partner_id.phone"/></p>
+                                    <p t-if="doc.date" style="margin: 5px 0;"><strong>التاريخ:</strong> <span t-field="doc.date"/></p>
+                                    <p t-if="doc.user_id" style="margin: 5px 0;"><strong>المندوب:</strong> <span t-field="doc.user_id.name"/></p>
+                                    <p t-if="doc.sap_doc_num" style="margin: 5px 0;"><strong>رقم SAP:</strong> <span t-field="doc.sap_doc_num"/></p>
                                 </div>
 
-                                <!-- Customer Information -->
-                                <div style="border: 3px solid #1a1a1a; border-radius: 10px; margin-bottom: 25px; background: white; overflow: hidden;">
-                                    <div style="background: #1a1a1a; color: #d4af37; padding: 12px 20px; font-size: 15px; font-weight: bold;">
-                                        معلومات العميل
-                                    </div>
-                                    <div style="padding: 20px;">
-                                        <div style="font-size: 13px;">
-                                            <div t-if="doc.partner_id" style="margin-bottom: 10px;">
-                                                <span style="color: #1a1a1a; font-weight: bold; margin-left: 8px;">📋 الاسم:</span>
-                                                <span style="color: #333;" t-field="doc.partner_id.name"/>
-                                            </div>
-                                            <div t-if="doc.partner_id.phone" style="margin-bottom: 10px;">
-                                                <span style="color: #1a1a1a; font-weight: bold; margin-left: 8px;">📞 الهاتف:</span>
-                                                <span style="color: #333;" t-field="doc.partner_id.phone"/>
-                                            </div>
-                                            <div t-if="doc.partner_id.email">
-                                                <span style="color: #1a1a1a; font-weight: bold; margin-left: 8px;">📧 البريد:</span>
-                                                <span style="color: #333;" t-field="doc.partner_id.email"/>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- Products Table -->
-                                <div style="border: 3px solid #1a1a1a; border-radius: 10px; overflow: hidden; margin-bottom: 25px; background: white;">
-                                    <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
-                                        <thead>
-                                            <tr style="background: #000000; color: #d4af37; border-bottom: 3px solid #d4af37;">
-                                                <th style="padding: 12px 10px; text-align: center; border-left: 2px solid #333; width: 50px; font-weight: bold;">ت</th>
-                                                <th style="padding: 12px 15px; text-align: right; border-left: 2px solid #333; font-weight: bold;">المنتج</th>
-                                                <th style="padding: 12px 10px; text-align: center; border-left: 2px solid #333; width: 80px; font-weight: bold;">الكمية</th>
-                                                <th style="padding: 12px 10px; text-align: center; border-left: 2px solid #333; width: 90px; font-weight: bold;">السعر</th>
-                                                <th style="padding: 12px 10px; text-align: center; width: 100px; font-weight: bold;">المجموع</th>
+                                <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; border: 2px solid #000;">
+                                    <thead>
+                                        <tr style="background: #000; color: #d4af37;">
+                                            <th style="border: 1px solid #000; padding: 10px; text-align: center;">ت</th>
+                                            <th style="border: 1px solid #000; padding: 10px; text-align: right;">المنتج</th>
+                                            <th style="border: 1px solid #000; padding: 10px; text-align: center;">الكمية</th>
+                                            <th style="border: 1px solid #000; padding: 10px; text-align: center;">السعر</th>
+                                            <th style="border: 1px solid #000; padding: 10px; text-align: center;">المجموع</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <t t-set="num" t-value="0"/>
+                                        <t t-foreach="doc.order_line_ids" t-as="line">
+                                            <t t-set="num" t-value="num + 1"/>
+                                            <tr>
+                                                <td style="border: 1px solid #ddd; padding: 8px; text-align: center;"><t t-esc="num"/></td>
+                                                <td style="border: 1px solid #ddd; padding: 8px; text-align: right;"><span t-field="line.product_id.name"/></td>
+                                                <td style="border: 1px solid #ddd; padding: 8px; text-align: center;"><span t-field="line.quantity"/></td>
+                                                <td style="border: 1px solid #ddd; padding: 8px; text-align: center;"><span t-field="line.unit_price"/></td>
+                                                <td style="border: 1px solid #ddd; padding: 8px; text-align: center;"><span t-field="line.line_total"/></td>
                                             </tr>
-                                        </thead>
-                                        <tbody>
-                                            <t t-set="row_index" t-value="0"/>
-                                            <t t-foreach="doc.order_line_ids" t-as="line">
-                                                <t t-set="row_index" t-value="row_index + 1"/>
-                                                <tr t-att-style="'background: ' + ('#ffffff' if row_index % 2 == 1 else '#f8f9fa') + '; border-top: 2px solid #e0e0e0;'">
-                                                    <td style="padding: 10px; text-align: center; border-left: 1px solid #ddd; color: #666; font-size: 11px; font-weight: bold;">
-                                                        <t t-esc="row_index"/>
-                                                    </td>
-                                                    <td style="padding: 10px 15px; text-align: right; border-left: 1px solid #ddd;">
-                                                        <span t-if="line.product_id" t-field="line.product_id.name" style="font-weight: 600; color: #1a1a1a;"/>
-                                                    </td>
-                                                    <td style="padding: 10px; text-align: center; border-left: 1px solid #ddd; font-size: 11px; font-weight: bold; color: #1a1a1a;">
-                                                        <span t-field="line.quantity" t-options='{"precision": 2}'/>
-                                                    </td>
-                                                    <td style="padding: 10px; text-align: center; border-left: 1px solid #ddd; color: #1a1a1a; font-size: 11px; font-weight: 600;">
-                                                        <span t-field="line.unit_price" t-options='{"widget": "monetary", "display_currency": doc.currency_id}'/>
-                                                    </td>
-                                                    <td style="padding: 10px; text-align: center; color: #16a34a; font-weight: bold; font-size: 12px;">
-                                                        <span t-field="line.line_total" t-options='{"widget": "monetary", "display_currency": doc.currency_id}'/>
-                                                    </td>
-                                                </tr>
-                                            </t>
-                                        </tbody>
+                                        </t>
+                                    </tbody>
+                                </table>
+
+                                <div style="text-align: left; margin-bottom: 20px;">
+                                    <table style="width: 300px; margin-right: 0; margin-left: auto; border: 2px solid #000;">
+                                        <tr style="background: #f8f9fa;">
+                                            <td style="padding: 10px; border: 1px solid #000;"><strong>المجموع الجزئي:</strong></td>
+                                            <td style="padding: 10px; border: 1px solid #000; text-align: left;"><span t-field="doc.amount_subtotal"/></td>
+                                        </tr>
+                                        <tr t-if="doc.amount_discount > 0" style="background: #fff5f5;">
+                                            <td style="padding: 10px; border: 1px solid #000;"><strong>الخصم:</strong></td>
+                                            <td style="padding: 10px; border: 1px solid #000; text-align: left; color: #dc2626;"><span t-field="doc.amount_discount"/></td>
+                                        </tr>
+                                        <tr style="background: #000; color: #d4af37;">
+                                            <td style="padding: 12px; border: 1px solid #000;"><strong>المجموع الكلي:</strong></td>
+                                            <td style="padding: 12px; border: 1px solid #000; text-align: left; font-size: 16px;"><strong><span t-field="doc.amount_total"/></strong></td>
+                                        </tr>
                                     </table>
                                 </div>
 
-                                <!-- Totals Section -->
-                                <div style="margin-bottom: 25px;">
-                                    <div style="width: 100%; max-width: 450px; margin-right: 0; margin-left: auto; border: 3px solid #1a1a1a; border-radius: 10px; overflow: hidden; background: white;">
-                                        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
-                                            <tbody>
-                                                <tr style="background: #f8f9fa; border-bottom: 2px solid #ddd;">
-                                                    <td style="padding: 12px 20px; text-align: right; font-weight: bold; color: #1a1a1a;">المجموع الجزئي</td>
-                                                    <td style="padding: 12px 20px; text-align: left; font-weight: 600; color: #333;">
-                                                        <span t-field="doc.amount_subtotal" t-options='{"widget": "monetary", "display_currency": doc.currency_id}'/>
-                                                    </td>
-                                                </tr>
-                                                <tr t-if="doc.amount_discount and doc.amount_discount > 0" style="background: #fff5f5; border-bottom: 2px solid #ddd;">
-                                                    <td style="padding: 12px 20px; text-align: right; font-weight: bold; color: #1a1a1a;">الخصم</td>
-                                                    <td style="padding: 12px 20px; text-align: left; color: #dc2626; font-weight: 600;">
-                                                        <span t-field="doc.amount_discount" t-options='{"widget": "monetary", "display_currency": doc.currency_id}'/>
-                                                    </td>
-                                                </tr>
-                                                <tr style="background: #000000; color: #d4af37; border-top: 3px solid #d4af37;">
-                                                    <td style="padding: 15px 20px; text-align: right; font-size: 16px;">
-                                                        <strong>💰 المجموع الكلي</strong>
-                                                    </td>
-                                                    <td style="padding: 15px 20px; text-align: left; font-size: 18px;">
-                                                        <strong>
-                                                            <span t-field="doc.amount_total" t-options='{"widget": "monetary", "display_currency": doc.currency_id}'/>
-                                                        </strong>
-                                                    </td>
-                                                </tr>
-                                            </tbody>
-                                        </table>
-                                    </div>
+                                <div t-if="doc.note" style="border: 2px solid #d4af37; padding: 15px; margin-bottom: 20px; background: #fffbeb;">
+                                    <strong>ملاحظات:</strong>
+                                    <p style="margin: 8px 0 0 0;"><span t-field="doc.note"/></p>
                                 </div>
 
-                                <!-- Notes -->
-                                <div t-if="doc.note" style="border: 2px solid #d4af37; background: #fffbeb; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-                                    <h4 style="margin: 0 0 10px 0; color: #1a1a1a; font-size: 14px; font-weight: bold;">
-                                        📝 ملاحظات
-                                    </h4>
-                                    <p style="margin: 0; font-size: 12px; color: #555; white-space: pre-line;" t-field="doc.note"/>
-                                </div>
-
-                                <!-- Footer -->
-                                <div style="margin-top: 30px; padding: 20px; background: #000000; border-radius: 10px; text-align: center; color: white; border: 2px solid #d4af37;">
-                                    <p style="margin: 0 0 10px 0; font-size: 16px; color: #d4af37; font-weight: bold;">
-                                        ✨ شكراً لتعاملكم معنا ✨
-                                    </p>
-                                    <p style="margin: 0 0 8px 0; font-size: 12px; color: #ddd;" t-if="doc.company_id and doc.company_id.phone">
-                                        للاستفسارات: <span t-field="doc.company_id.phone"/>
-                                    </p>
-                                    <p style="margin: 0; font-size: 10px; color: #999;">
-                                        فاتورة صادرة من نظام محاسبة إلكتروني معتمد • Powered by Odoo
-                                    </p>
+                                <div style="background: #000; color: white; padding: 15px; text-align: center; border: 2px solid #d4af37;">
+                                    <p style="margin: 0; color: #d4af37; font-size: 16px;"><strong>شكراً لتعاملكم معنا</strong></p>
                                 </div>
                             </div>
                         </t>
