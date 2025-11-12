@@ -9,7 +9,12 @@
                 <t t-name="pos_perfume_custom.report_pos_perfume_order">
                     <t t-call="web.html_container">
                         <t t-foreach="docs" t-as="doc">
-                            <div class="page" dir="rtl" style="font-family: Arial, sans-serif; padding: 20px;">
+                            <style>
+                                @charset "UTF-8";
+                                * { direction: rtl; text-align: right; font-family: 'Arial', 'Tahoma', 'DejaVu Sans', sans-serif; }
+                                body { direction: rtl; }
+                            </style>
+                            <div class="page" dir="rtl" lang="ar" style="font-family: 'Arial', 'Tahoma', 'DejaVu Sans', sans-serif; padding: 20px; direction: rtl; unicode-bidi: embed;">
                                 <h2 style="background: #000; color: #d4af37; padding: 15px; text-align: center; margin: 0 0 20px 0;">
                                     <span t-if="doc.state == 'draft'">مسودة طلب #</span>
                                     <span t-elif="doc.state == 'sale'">فاتورة بيع #</span>
