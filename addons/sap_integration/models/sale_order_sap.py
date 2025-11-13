@@ -126,9 +126,10 @@ class SaleOrder(models.Model):
         return result
     
     def _send_to_sap(self):
-        """إرسال quotation إلى SAP ومزامنته"""
+        """إرسال quotation/sale order إلى SAP ومزامنته"""
         for quotation in self:
-            _logger.info(f">>> Starting _send_to_sap for quotation {quotation.name} <<<")
+            doc_type = "sales order draft" if quotation.state == 'draft' else ("sale order" if quotation.state == 'sale' else "quotation")
+            _logger.info(f">>> Starting _send_to_sap for {doc_type} {quotation.name} <<<")
             try:
                 # التحقق من وجود backend نشط
                 backend = self.env['sap.backend'].search([
@@ -211,25 +212,10 @@ class SaleOrder(models.Model):
                             quotation.sudo().write(update_vals)
                             _logger.info(f"Sale order {quotation.name} synced to SAP: DocNum={update_vals.get('sap_doc_num')}, DocEntry={update_vals.get('sap_doc_entry')}")
                 else:
-                    # للـ quotations: تحديث أو إنشاء quotation في SAP
-                    if quotation.sap_doc_entry and quotation.sap_doc_entry > 0:
-                        # تحديث quotation موجود
-                        _logger.info(f"Updating quotation {quotation.name} in SAP (DocEntry: {quotation.sap_doc_entry})")
-                        result = connection.update_quotation(quotation.sap_doc_entry, quotation_data)
-                        if result:
-                            # تحديث رقم Document إذا تم إرجاعه
-                            update_vals = {}
-                            if result.get('DocNum'):
-                                update_vals['sap_doc_num'] = result.get('DocNum')
-                            if result.get('DocEntry'):
-                                update_vals['sap_doc_entry'] = result.get('DocEntry')
-                            if update_vals:
-                                update_vals['sap_synced'] = True
-                                quotation.sudo().write(update_vals)
-                                _logger.info(f"Quotation {quotation.name} updated in SAP: DocNum={update_vals.get('sap_doc_num')}, DocEntry={update_vals.get('sap_doc_entry')}")
-                    else:
-                        # إنشاء quotation جديد
-                        _logger.info(f"Creating quotation {quotation.name} in SAP")
+                    # للـ draft orders: إرسال كـ Quotation في SAP (لأن Quotations يمكن أن تكون Draft)
+                    if quotation.state == 'draft':
+                        # إنشاء Quotation في SAP (يمكن أن يكون Draft status)
+                        _logger.info(f"Creating quotation (draft) {quotation.name} in SAP")
                         result = connection.create_quotation(quotation_data)
                         
                         if result:
@@ -242,7 +228,40 @@ class SaleOrder(models.Model):
                                 'sap_doc_entry': doc_entry,
                                 'sap_synced': True,
                             })
-                            _logger.info(f"Quotation {quotation.name} synced to SAP: DocNum={doc_num}, DocEntry={doc_entry}")
+                            _logger.info(f"Quotation (draft) {quotation.name} synced to SAP: DocNum={doc_num}, DocEntry={doc_entry}")
+                    else:
+                        # للـ quotations الأخرى: تحديث أو إنشاء quotation في SAP
+                        if quotation.sap_doc_entry and quotation.sap_doc_entry > 0:
+                            # تحديث quotation موجود
+                            _logger.info(f"Updating quotation {quotation.name} in SAP (DocEntry: {quotation.sap_doc_entry})")
+                            result = connection.update_quotation(quotation.sap_doc_entry, quotation_data)
+                            if result:
+                                # تحديث رقم Document إذا تم إرجاعه
+                                update_vals = {}
+                                if result.get('DocNum'):
+                                    update_vals['sap_doc_num'] = result.get('DocNum')
+                                if result.get('DocEntry'):
+                                    update_vals['sap_doc_entry'] = result.get('DocEntry')
+                                if update_vals:
+                                    update_vals['sap_synced'] = True
+                                    quotation.sudo().write(update_vals)
+                                    _logger.info(f"Quotation {quotation.name} updated in SAP: DocNum={update_vals.get('sap_doc_num')}, DocEntry={update_vals.get('sap_doc_entry')}")
+                        else:
+                            # إنشاء quotation جديد
+                            _logger.info(f"Creating quotation {quotation.name} in SAP")
+                            result = connection.create_quotation(quotation_data)
+                            
+                            if result:
+                                # حفظ رقم Document من SAP
+                                doc_num = result.get('DocNum', '')
+                                doc_entry = result.get('DocEntry', 0)
+                                
+                                quotation.sudo().write({
+                                    'sap_doc_num': doc_num,
+                                    'sap_doc_entry': doc_entry,
+                                    'sap_synced': True,
+                                })
+                                _logger.info(f"Quotation {quotation.name} synced to SAP: DocNum={doc_num}, DocEntry={doc_entry}")
                 
             except Exception as e:
                 _logger.error(f"Error sending quotation {quotation.name} to SAP: {str(e)}", exc_info=True)
@@ -266,13 +285,18 @@ class SaleOrder(models.Model):
             if not item_code:
                 _logger.warning(f"Product {line.product_id.name} (ID: {line.product_id.id}) has no default_code or barcode - ItemCode will be empty!")
             
-            # إعداد بيانات السطر الأساسية (بدون ItemDescription)
+            # إعداد بيانات السطر الأساسية
             line_data = {
                 'ItemCode': item_code,
                 'Quantity': line.product_uom_qty,
                 'UnitPrice': line.price_unit,
                 'DiscountPercent': line.discount,
             }
+            
+            # إضافة ItemDescription إذا تم تعديل اسم المنتج
+            if hasattr(line, 'custom_product_name') and line.custom_product_name:
+                line_data['ItemDescription'] = line.custom_product_name
+                _logger.info(f"Using custom product name for ItemDescription: {line.custom_product_name}")
             
             _logger.info(f"Preparing DocumentLine: ItemCode={item_code}, Quantity={line.product_uom_qty}")
             
@@ -459,4 +483,15 @@ class SaleOrder(models.Model):
                 'sticky': False,
             }
         }
+
+
+class SaleOrderLine(models.Model):
+    _inherit = 'sale.order.line'
+    
+    # Custom product name for invoice/report display and SAP ItemDescription
+    custom_product_name = fields.Char(
+        string='Custom Product Name (Invoice Only)',
+        help='Custom product name to display in invoice/report. If set, this name will be used in the report and sent to SAP as ItemDescription. The original product name remains unchanged.'
+    )
+
 

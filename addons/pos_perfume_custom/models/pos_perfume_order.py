@@ -255,12 +255,85 @@ class PosPerfumeOrder(models.Model):
     @api.model_create_multi
     def create(self, vals_list):
         """Generate sequence number for new orders"""
-        for vals in vals_list:
-            if vals.get('name', 'New') == 'New':
-                vals['name'] = self.env['ir.sequence'].next_by_code(
-                    'pos.perfume.order'
-                ) or _('New')
-        return super().create(vals_list)
+        orders = super().create(vals_list)
+        
+        # Create sale.order for draft orders to send to SAP
+        for order in orders:
+            if order.state == 'draft' and not order.sale_order_id:
+                order._create_draft_sale_order()
+        
+        return orders
+    
+    def _create_draft_sale_order(self):
+        """Create draft sale order for SAP sync"""
+        import logging
+        _logger = logging.getLogger(__name__)
+        
+        self.ensure_one()
+        
+        if self.sale_order_id:
+            _logger.info(f"[POS Draft] Order {self.name} already has sale order {self.sale_order_id.name}")
+            return self.sale_order_id
+        
+        if not self.partner_id:
+            _logger.warning(f"[POS Draft] Order {self.name} has no partner, skipping sale order creation")
+            return False
+        
+        if not self.order_line_ids:
+            _logger.warning(f"[POS Draft] Order {self.name} has no lines, skipping sale order creation")
+            return False
+        
+        try:
+            # Prepare sale order values
+            sale_vals = {
+                'partner_id': self.partner_id.id,
+                'date_order': self.date or fields.Datetime.now(),
+                'state': 'draft',  # Keep as draft for SAP
+                'pricelist_id': self.pricelist_id.id if self.pricelist_id else False,
+            }
+            
+            # Create sale order lines
+            sale_order_lines = []
+            for line in self.order_line_ids:
+                if not line.product_id:
+                    continue
+                
+                uom_id = line.product_uom_id.id if line.product_uom_id else line.product_id.uom_id.id
+                
+                line_vals = {
+                    'product_id': line.product_id.id,
+                    'product_uom_qty': line.quantity or 1.0,
+                    'product_uom_id': uom_id,  # Correct field name in Odoo
+                    'price_unit': line.unit_price or 0.0,
+                    'discount': line.discount_percent or 0.0,
+                }
+                
+                # Add custom product name if set
+                if line.custom_product_name:
+                    line_vals['custom_product_name'] = line.custom_product_name
+                
+                # Add warehouse if available
+                if line.warehouse_id and hasattr(self.env['sale.order.line'], 'product_warehouse_id'):
+                    line_vals['product_warehouse_id'] = line.warehouse_id.id
+                
+                sale_order_lines.append((0, 0, line_vals))
+            
+            sale_vals['order_line'] = sale_order_lines
+            
+            _logger.info(f"[POS Draft] Creating draft sale.order for POS order {self.name}")
+            sale_order = self.env['sale.order'].create(sale_vals)
+            _logger.info(f"[POS Draft] Draft sale order created: {sale_order.name} (ID: {sale_order.id})")
+            
+            # Link sale order to POS order
+            self.write({
+                'sale_order_id': sale_order.id,
+            })
+            
+            return sale_order
+            
+        except Exception as e:
+            _logger.error(f"[POS Draft] Error creating draft sale order: {e}", exc_info=True)
+            return False
     
     def action_quotation(self):
         """Set order to quotation state"""
@@ -329,8 +402,19 @@ class PosPerfumeOrder(models.Model):
             
             _logger.info(f"[POS Confirm] Order has {len(order_lines)} lines")
             
-            # Create Sale Order - use read data or direct access with fallback
-            sale_vals = {
+            # Check if sale order already exists (from draft)
+            if order.sale_order_id:
+                _logger.info(f"[POS Confirm] Using existing sale order {order.sale_order_id.name} (ID: {order.sale_order_id.id})")
+                sale_order = order.sale_order_id
+                
+                # Update sale order to confirmed state
+                sale_order.write({
+                    'state': 'sale',
+                })
+                _logger.info(f"[POS Confirm] Updated sale order {sale_order.name} to 'sale' state")
+            else:
+                # Create new Sale Order - use read data or direct access with fallback
+                sale_vals = {
                 'partner_id': order_data.get('partner_id', [False])[0] if order_data.get('partner_id') else order.partner_id.id,
                 'user_id': order_data.get('user_id', [False])[0] if order_data.get('user_id') else order.user_id.id,
                 'date_order': order_data.get('date') or order.date,
@@ -367,6 +451,10 @@ class PosPerfumeOrder(models.Model):
                     'price_unit': line.unit_price or 0.0,
                     'discount': line.discount_percent or 0.0,
                 }
+                
+                # Add custom product name if set
+                if line.custom_product_name:
+                    line_vals['custom_product_name'] = line.custom_product_name
                 
                 # Add warehouse info if available (check if module exists)
                 if line.warehouse_id and hasattr(self.env['sale.order.line'], 'product_warehouse_id'):
@@ -487,6 +575,12 @@ class PosPerfumeOrderLine(models.Model):
         string='Foreign Name',
         readonly=True,
         store=True
+    )
+    
+    # Custom product name for invoice/report display only
+    custom_product_name = fields.Char(
+        string='Custom Product Name (Invoice Only)',
+        help='Custom product name to display in invoice/report. If set, this name will be used in the report and sent to SAP as ItemDescription. The original product name remains unchanged.'
     )
     
     # UoM Support

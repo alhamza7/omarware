@@ -14,6 +14,7 @@
                        required="1"
                        domain="[('sale_ok', '=', True)]"
                        context="{'default_detailed_type': 'product'}"/>
+                <field name="custom_product_name" column_invisible="1"/>
                 <field name="product_code" optional="show"/>
                 <field name="product_foreign_name" optional="show" string="Foreign Name"/>
                 <field name="warehouse_id" required="1"/>

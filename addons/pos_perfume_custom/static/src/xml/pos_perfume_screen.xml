@@ -314,291 +314,41 @@
                          t-on-keydown="handleGlobalKeyDown"
                          tabindex="0"
                          style="outline: none; max-height: 600px; overflow-y: auto; overflow-x: hidden; position: relative;">
-                        <!-- Edit Table Button -->
-                        <button t-on-click="toggleOrderTableEditMode"
-                                style="position: absolute; top: 5px; right: 5px; z-index: 100; width: 20px; height: 20px; padding: 0; background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 3px; cursor: pointer; font-size: 10px; display: flex; align-items: center; justify-content: center; color: #6b7280;"
-                                t-att-title="state.orderTableEditMode ? 'Exit Edit Mode' : 'Edit Table'"
-                                onmouseover="this.style.background='#e5e7eb'"
-                                onmouseout="this.style.background='#f3f4f6'">
-                            <t t-esc="state.orderTableEditMode ? '✕' : '⚙'"/>
-                        </button>
                         <table class="order-table" style="table-layout: fixed; width: 100%;">
-                            <thead t-att-data-edit-mode="state.orderTableEditMode ? 'true' : 'false'" style="position: sticky; top: 0; z-index: 10;">
+                            <thead style="position: sticky; top: 0; z-index: 10;">
                                 <tr style="background: #2563eb; color: white;">
-                                    <th t-att-style="'width: ' + (state.orderTableColumnWidths?.row || '40px') + '; text-align: center; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none; position: relative;'">
-                                        <t t-if="state.orderTableEditMode and state.editingColumnName === 'row'">
-                                            <input type="text" 
-                                                   t-att-value="state.orderTableColumnNames?.row || '#'"
-                                                   t-on-blur="(ev) => this.saveColumnName('row', ev.target.value)"
-                                                   t-on-keydown="(ev) => this.handleColumnNameKeyDown('row', ev)"
-                                                   style="width: 100%; padding: 2px 4px; font-size: 14px; font-weight: 600; text-align: center; border: 1px solid #2563eb; border-radius: 3px; background: white; color: #1f2937;"
-                                                   autofocus="autofocus"/>
-                                        </t>
-                                        <t t-else="">
-                                            <span t-on-click="() => this.startEditingColumnName('row')"
-                                                  t-att-style="state.orderTableEditMode ? 'cursor: pointer; padding: 2px 4px; border-radius: 3px; display: inline-block;' : ''"
-                                                  t-att-title="state.orderTableEditMode ? 'Click to edit name' : ''"
-                                                  onmouseover="if (this.parentElement.parentElement.getAttribute('data-edit-mode') === 'true') { this.style.background='rgba(255,255,255,0.2)'; }"
-                                                  onmouseout="if (this.parentElement.parentElement.getAttribute('data-edit-mode') === 'true') { this.style.background=''; }">
-                                                <t t-esc="state.orderTableColumnNames?.row || '#'"/>
-                                            </span>
-                                        </t>
-                                        <t t-if="state.orderTableEditMode">
-                                            <div t-on-mousedown="(ev) => this.startOrderColumnResize('row', ev)"
-                                                 style="position: absolute; right: 0; top: 0; bottom: 0; width: 4px; cursor: col-resize; background: rgba(255,255,255,0.5); opacity: 0.5;"
-                                                 onmouseover="this.style.opacity='0.8'"
-                                                 onmouseout="this.style.opacity='0.5'"></div>
-                                        </t>
+                                    <th style="width: 40px; text-align: center; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">
+                                        #
                                     </th>
-                                    <th t-att-style="'width: ' + (state.orderTableColumnWidths?.product || '250px') + '; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none; position: relative;'">
-                                        <t t-if="state.orderTableEditMode and state.editingColumnName === 'product'">
-                                            <input type="text" 
-                                                   t-att-value="state.orderTableColumnNames?.product || 'Product'"
-                                                   t-on-blur="(ev) => this.saveColumnName('product', ev.target.value)"
-                                                   t-on-keydown="(ev) => this.handleColumnNameKeyDown('product', ev)"
-                                                   style="width: 100%; padding: 2px 4px; font-size: 14px; font-weight: 600; border: 1px solid #2563eb; border-radius: 3px; background: white; color: #1f2937;"
-                                                   autofocus="autofocus"/>
-                                        </t>
-                                        <t t-else="">
-                                            <span t-on-click="() => this.startEditingColumnName('product')"
-                                                  t-att-style="state.orderTableEditMode ? 'cursor: pointer; padding: 2px 4px; border-radius: 3px; display: inline-block;' : ''"
-                                                  t-att-title="state.orderTableEditMode ? 'Click to edit name' : ''"
-                                                  onmouseover="if (this.parentElement.parentElement.getAttribute('data-edit-mode') === 'true') { this.style.background='rgba(255,255,255,0.2)'; }"
-                                                  onmouseout="if (this.parentElement.parentElement.getAttribute('data-edit-mode') === 'true') { this.style.background=''; }">
-                                                <t t-esc="state.orderTableColumnNames?.product || 'Product'"/>
-                                            </span>
-                                        </t>
-                                        <t t-if="state.orderTableEditMode">
-                                            <div t-on-mousedown="(ev) => this.startOrderColumnResize('product', ev)"
-                                                 style="position: absolute; right: 0; top: 0; bottom: 0; width: 4px; cursor: col-resize; background: rgba(255,255,255,0.5); opacity: 0.5;"
-                                                 onmouseover="this.style.opacity='0.8'"
-                                                 onmouseout="this.style.opacity='0.5'"></div>
-                                        </t>
+                                    <th style="width: 250px; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">
+                                        Product
                                     </th>
-                                    <th t-att-style="'width: ' + (state.orderTableColumnWidths?.quantity || '90px') + '; text-align: center; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none; position: relative;'">
-                                        <t t-if="state.orderTableEditMode and state.editingColumnName === 'quantity'">
-                                            <input type="text" 
-                                                   t-att-value="state.orderTableColumnNames?.quantity || 'Quantity'"
-                                                   t-on-blur="(ev) => this.saveColumnName('quantity', ev.target.value)"
-                                                   t-on-keydown="(ev) => this.handleColumnNameKeyDown('quantity', ev)"
-                                                   style="width: 100%; padding: 2px 4px; font-size: 14px; font-weight: 600; text-align: center; border: 1px solid #2563eb; border-radius: 3px; background: white; color: #1f2937;"
-                                                   autofocus="autofocus"/>
-                                        </t>
-                                        <t t-else="">
-                                            <span t-on-click="() => this.startEditingColumnName('quantity')"
-                                                  t-att-style="state.orderTableEditMode ? 'cursor: pointer; padding: 2px 4px; border-radius: 3px; display: inline-block;' : ''"
-                                                  t-att-title="state.orderTableEditMode ? 'Click to edit name' : ''"
-                                                  onmouseover="if (this.parentElement.parentElement.getAttribute('data-edit-mode') === 'true') { this.style.background='rgba(255,255,255,0.2)'; }"
-                                                  onmouseout="if (this.parentElement.parentElement.getAttribute('data-edit-mode') === 'true') { this.style.background=''; }">
-                                                <t t-esc="state.orderTableColumnNames?.quantity || 'Quantity'"/>
-                                            </span>
-                                        </t>
-                                        <t t-if="state.orderTableEditMode">
-                                            <div t-on-mousedown="(ev) => this.startOrderColumnResize('quantity', ev)"
-                                                 style="position: absolute; right: 0; top: 0; bottom: 0; width: 4px; cursor: col-resize; background: rgba(255,255,255,0.5); opacity: 0.5;"
-                                                 onmouseover="this.style.opacity='0.8'"
-                                                 onmouseout="this.style.opacity='0.5'"></div>
-                                        </t>
+                                    <th style="width: 90px; text-align: center; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">
+                                        Quantity
                                     </th>
-                                    <th t-att-style="'width: ' + (state.orderTableColumnWidths?.uom || '100px') + '; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none; position: relative;'">
-                                        <t t-if="state.orderTableEditMode and state.editingColumnName === 'uom'">
-                                            <input type="text" 
-                                                   t-att-value="state.orderTableColumnNames?.uom || 'UoM'"
-                                                   t-on-blur="(ev) => this.saveColumnName('uom', ev.target.value)"
-                                                   t-on-keydown="(ev) => this.handleColumnNameKeyDown('uom', ev)"
-                                                   style="width: 100%; padding: 2px 4px; font-size: 14px; font-weight: 600; border: 1px solid #2563eb; border-radius: 3px; background: white; color: #1f2937;"
-                                                   autofocus="autofocus"/>
-                                        </t>
-                                        <t t-else="">
-                                            <span t-on-click="() => this.startEditingColumnName('uom')"
-                                                  t-att-style="state.orderTableEditMode ? 'cursor: pointer; padding: 2px 4px; border-radius: 3px; display: inline-block;' : ''"
-                                                  t-att-title="state.orderTableEditMode ? 'Click to edit name' : ''"
-                                                  onmouseover="if (this.parentElement.parentElement.getAttribute('data-edit-mode') === 'true') { this.style.background='rgba(255,255,255,0.2)'; }"
-                                                  onmouseout="if (this.parentElement.parentElement.getAttribute('data-edit-mode') === 'true') { this.style.background=''; }">
-                                                <t t-esc="state.orderTableColumnNames?.uom || 'UoM'"/>
-                                            </span>
-                                        </t>
-                                        <t t-if="state.orderTableEditMode">
-                                            <div t-on-mousedown="(ev) => this.startOrderColumnResize('uom', ev)"
-                                                 style="position: absolute; right: 0; top: 0; bottom: 0; width: 4px; cursor: col-resize; background: rgba(255,255,255,0.5); opacity: 0.5;"
-                                                 onmouseover="this.style.opacity='0.8'"
-                                                 onmouseout="this.style.opacity='0.5'"></div>
-                                        </t>
+                                    <th style="width: 100px; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">
+                                        UoM
                                     </th>
-                                    <th t-att-style="'width: ' + (state.orderTableColumnWidths?.warehouse || '100px') + '; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none; position: relative;'">
-                                        <t t-if="state.orderTableEditMode and state.editingColumnName === 'warehouse'">
-                                            <input type="text" 
-                                                   t-att-value="state.orderTableColumnNames?.warehouse || 'Warehouse'"
-                                                   t-on-blur="(ev) => this.saveColumnName('warehouse', ev.target.value)"
-                                                   t-on-keydown="(ev) => this.handleColumnNameKeyDown('warehouse', ev)"
-                                                   style="width: 100%; padding: 2px 4px; font-size: 14px; font-weight: 600; border: 1px solid #2563eb; border-radius: 3px; background: white; color: #1f2937;"
-                                                   autofocus="autofocus"/>
-                                        </t>
-                                        <t t-else="">
-                                            <span t-on-click="() => this.startEditingColumnName('warehouse')"
-                                                  t-att-style="state.orderTableEditMode ? 'cursor: pointer; padding: 2px 4px; border-radius: 3px; display: inline-block;' : ''"
-                                                  t-att-title="state.orderTableEditMode ? 'Click to edit name' : ''"
-                                                  onmouseover="if (this.parentElement.parentElement.getAttribute('data-edit-mode') === 'true') { this.style.background='rgba(255,255,255,0.2)'; }"
-                                                  onmouseout="if (this.parentElement.parentElement.getAttribute('data-edit-mode') === 'true') { this.style.background=''; }">
-                                                <t t-esc="state.orderTableColumnNames?.warehouse || 'Warehouse'"/>
-                                            </span>
-                                        </t>
-                                        <t t-if="state.orderTableEditMode">
-                                            <div t-on-mousedown="(ev) => this.startOrderColumnResize('warehouse', ev)"
-                                                 style="position: absolute; right: 0; top: 0; bottom: 0; width: 4px; cursor: col-resize; background: rgba(255,255,255,0.5); opacity: 0.5;"
-                                                 onmouseover="this.style.opacity='0.8'"
-                                                 onmouseout="this.style.opacity='0.5'"></div>
-                                        </t>
+                                    <th style="width: 100px; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">
+                                        Warehouse
                                     </th>
-                                    <th t-att-style="'width: ' + (state.orderTableColumnWidths?.priceUsd || '100px') + '; text-align: right; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none; position: relative;'">
-                                        <t t-if="state.orderTableEditMode and state.editingColumnName === 'priceUsd'">
-                                            <input type="text" 
-                                                   t-att-value="state.orderTableColumnNames?.priceUsd || 'Price (USD)'"
-                                                   t-on-blur="(ev) => this.saveColumnName('priceUsd', ev.target.value)"
-                                                   t-on-keydown="(ev) => this.handleColumnNameKeyDown('priceUsd', ev)"
-                                                   style="width: 100%; padding: 2px 4px; font-size: 14px; font-weight: 600; text-align: right; border: 1px solid #2563eb; border-radius: 3px; background: white; color: #1f2937;"
-                                                   autofocus="autofocus"/>
-                                        </t>
-                                        <t t-else="">
-                                            <span t-on-click="() => this.startEditingColumnName('priceUsd')"
-                                                  t-att-style="state.orderTableEditMode ? 'cursor: pointer; padding: 2px 4px; border-radius: 3px; display: inline-block;' : ''"
-                                                  t-att-title="state.orderTableEditMode ? 'Click to edit name' : ''"
-                                                  onmouseover="if (this.parentElement.parentElement.getAttribute('data-edit-mode') === 'true') { this.style.background='rgba(255,255,255,0.2)'; }"
-                                                  onmouseout="if (this.parentElement.parentElement.getAttribute('data-edit-mode') === 'true') { this.style.background=''; }">
-                                                <t t-esc="state.orderTableColumnNames?.priceUsd || 'Price (USD)'"/>
-                                            </span>
-                                        </t>
-                                        <t t-if="state.orderTableEditMode">
-                                            <div t-on-mousedown="(ev) => this.startOrderColumnResize('priceUsd', ev)"
-                                                 style="position: absolute; right: 0; top: 0; bottom: 0; width: 4px; cursor: col-resize; background: rgba(255,255,255,0.5); opacity: 0.5;"
-                                                 onmouseover="this.style.opacity='0.8'"
-                                                 onmouseout="this.style.opacity='0.5'"></div>
-                                        </t>
+                                    <th style="width: 100px; text-align: right; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">
+                                        Price (USD)
                                     </th>
-                                    <th t-att-style="'width: ' + (state.orderTableColumnWidths?.priceIqd || '100px') + '; text-align: right; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none; position: relative;'">
-                                        <t t-if="state.orderTableEditMode and state.editingColumnName === 'priceIqd'">
-                                            <input type="text" 
-                                                   t-att-value="state.orderTableColumnNames?.priceIqd || 'Price (IQD)'"
-                                                   t-on-blur="(ev) => this.saveColumnName('priceIqd', ev.target.value)"
-                                                   t-on-keydown="(ev) => this.handleColumnNameKeyDown('priceIqd', ev)"
-                                                   style="width: 100%; padding: 2px 4px; font-size: 14px; font-weight: 600; text-align: right; border: 1px solid #2563eb; border-radius: 3px; background: white; color: #1f2937;"
-                                                   autofocus="autofocus"/>
-                                        </t>
-                                        <t t-else="">
-                                            <span t-on-click="() => this.startEditingColumnName('priceIqd')"
-                                                  t-att-style="state.orderTableEditMode ? 'cursor: pointer; padding: 2px 4px; border-radius: 3px; display: inline-block;' : ''"
-                                                  t-att-title="state.orderTableEditMode ? 'Click to edit name' : ''"
-                                                  onmouseover="if (this.parentElement.parentElement.getAttribute('data-edit-mode') === 'true') { this.style.background='rgba(255,255,255,0.2)'; }"
-                                                  onmouseout="if (this.parentElement.parentElement.getAttribute('data-edit-mode') === 'true') { this.style.background=''; }">
-                                                <t t-esc="state.orderTableColumnNames?.priceIqd || 'Price (IQD)'"/>
-                                            </span>
-                                        </t>
-                                        <t t-if="state.orderTableEditMode">
-                                            <div t-on-mousedown="(ev) => this.startOrderColumnResize('priceIqd', ev)"
-                                                 style="position: absolute; right: 0; top: 0; bottom: 0; width: 4px; cursor: col-resize; background: rgba(255,255,255,0.5); opacity: 0.5;"
-                                                 onmouseover="this.style.opacity='0.8'"
-                                                 onmouseout="this.style.opacity='0.5'"></div>
-                                        </t>
+                                    <th style="width: 100px; text-align: right; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">
+                                        Price (IQD)
                                     </th>
-                                    <th t-att-style="'width: ' + (state.orderTableColumnWidths?.discount || '90px') + '; text-align: center; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none; position: relative;'">
-                                        <t t-if="state.orderTableEditMode and state.editingColumnName === 'discount'">
-                                            <input type="text" 
-                                                   t-att-value="state.orderTableColumnNames?.discount || 'Disc %'"
-                                                   t-on-blur="(ev) => this.saveColumnName('discount', ev.target.value)"
-                                                   t-on-keydown="(ev) => this.handleColumnNameKeyDown('discount', ev)"
-                                                   style="width: 100%; padding: 2px 4px; font-size: 14px; font-weight: 600; text-align: center; border: 1px solid #2563eb; border-radius: 3px; background: white; color: #1f2937;"
-                                                   autofocus="autofocus"/>
-                                        </t>
-                                        <t t-else="">
-                                            <span t-on-click="() => this.startEditingColumnName('discount')"
-                                                  t-att-style="state.orderTableEditMode ? 'cursor: pointer; padding: 2px 4px; border-radius: 3px; display: inline-block;' : ''"
-                                                  t-att-title="state.orderTableEditMode ? 'Click to edit name' : ''"
-                                                  onmouseover="if (this.parentElement.parentElement.getAttribute('data-edit-mode') === 'true') { this.style.background='rgba(255,255,255,0.2)'; }"
-                                                  onmouseout="if (this.parentElement.parentElement.getAttribute('data-edit-mode') === 'true') { this.style.background=''; }">
-                                                <t t-esc="state.orderTableColumnNames?.discount || 'Disc %'"/>
-                                            </span>
-                                        </t>
-                                        <t t-if="state.orderTableEditMode">
-                                            <div t-on-mousedown="(ev) => this.startOrderColumnResize('discount', ev)"
-                                                 style="position: absolute; right: 0; top: 0; bottom: 0; width: 4px; cursor: col-resize; background: rgba(255,255,255,0.5); opacity: 0.5;"
-                                                 onmouseover="this.style.opacity='0.8'"
-                                                 onmouseout="this.style.opacity='0.5'"></div>
-                                        </t>
+                                    <th style="width: 90px; text-align: center; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">
+                                        Disc %
                                     </th>
-                                    <th t-att-style="'width: ' + (state.orderTableColumnWidths?.total || '120px') + '; text-align: right; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none; position: relative;'">
-                                        <t t-if="state.orderTableEditMode and state.editingColumnName === 'total'">
-                                            <input type="text" 
-                                                   t-att-value="state.orderTableColumnNames?.total || 'Total'"
-                                                   t-on-blur="(ev) => this.saveColumnName('total', ev.target.value)"
-                                                   t-on-keydown="(ev) => this.handleColumnNameKeyDown('total', ev)"
-                                                   style="width: 100%; padding: 2px 4px; font-size: 14px; font-weight: 600; text-align: right; border: 1px solid #2563eb; border-radius: 3px; background: white; color: #1f2937;"
-                                                   autofocus="autofocus"/>
-                                        </t>
-                                        <t t-else="">
-                                            <span t-on-click="() => this.startEditingColumnName('total')"
-                                                  t-att-style="state.orderTableEditMode ? 'cursor: pointer; padding: 2px 4px; border-radius: 3px; display: inline-block;' : ''"
-                                                  t-att-title="state.orderTableEditMode ? 'Click to edit name' : ''"
-                                                  onmouseover="if (this.parentElement.parentElement.getAttribute('data-edit-mode') === 'true') { this.style.background='rgba(255,255,255,0.2)'; }"
-                                                  onmouseout="if (this.parentElement.parentElement.getAttribute('data-edit-mode') === 'true') { this.style.background=''; }">
-                                                <t t-esc="state.orderTableColumnNames?.total || 'Total'"/>
-                                            </span>
-                                        </t>
-                                        <t t-if="state.orderTableEditMode">
-                                            <div t-on-mousedown="(ev) => this.startOrderColumnResize('total', ev)"
-                                                 style="position: absolute; right: 0; top: 0; bottom: 0; width: 4px; cursor: col-resize; background: rgba(255,255,255,0.5); opacity: 0.5;"
-                                                 onmouseover="this.style.opacity='0.8'"
-                                                 onmouseout="this.style.opacity='0.5'"></div>
-                                        </t>
+                                    <th style="width: 120px; text-align: right; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">
+                                        Total
                                     </th>
-                                    <th t-att-style="'width: ' + (state.orderTableColumnWidths?.available || '80px') + '; text-align: center; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none; position: relative;'">
-                                        <t t-if="state.orderTableEditMode and state.editingColumnName === 'available'">
-                                            <input type="text" 
-                                                   t-att-value="state.orderTableColumnNames?.available || 'Available'"
-                                                   t-on-blur="(ev) => this.saveColumnName('available', ev.target.value)"
-                                                   t-on-keydown="(ev) => this.handleColumnNameKeyDown('available', ev)"
-                                                   style="width: 100%; padding: 2px 4px; font-size: 14px; font-weight: 600; text-align: center; border: 1px solid #2563eb; border-radius: 3px; background: white; color: #1f2937;"
-                                                   autofocus="autofocus"/>
-                                        </t>
-                                        <t t-else="">
-                                            <span t-on-click="() => this.startEditingColumnName('available')"
-                                                  t-att-style="state.orderTableEditMode ? 'cursor: pointer; padding: 2px 4px; border-radius: 3px; display: inline-block;' : ''"
-                                                  t-att-title="state.orderTableEditMode ? 'Click to edit name' : ''"
-                                                  onmouseover="if (this.parentElement.parentElement.getAttribute('data-edit-mode') === 'true') { this.style.background='rgba(255,255,255,0.2)'; }"
-                                                  onmouseout="if (this.parentElement.parentElement.getAttribute('data-edit-mode') === 'true') { this.style.background=''; }">
-                                                <t t-esc="state.orderTableColumnNames?.available || 'Available'"/>
-                                            </span>
-                                        </t>
-                                        <t t-if="state.orderTableEditMode">
-                                            <div t-on-mousedown="(ev) => this.startOrderColumnResize('available', ev)"
-                                                 style="position: absolute; right: 0; top: 0; bottom: 0; width: 4px; cursor: col-resize; background: rgba(255,255,255,0.5); opacity: 0.5;"
-                                                 onmouseover="this.style.opacity='0.8'"
-                                                 onmouseout="this.style.opacity='0.5'"></div>
-                                        </t>
+                                    <th style="width: 80px; text-align: center; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">
+                                        Available
                                     </th>
-                                    <th t-att-style="'width: ' + (state.orderTableColumnWidths?.delete || '50px') + '; text-align: center; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none; position: relative;'">
-                                        <t t-if="state.orderTableEditMode and state.editingColumnName === 'delete'">
-                                            <input type="text" 
-                                                   t-att-value="state.orderTableColumnNames?.delete || '❌'"
-                                                   t-on-blur="(ev) => this.saveColumnName('delete', ev.target.value)"
-                                                   t-on-keydown="(ev) => this.handleColumnNameKeyDown('delete', ev)"
-                                                   style="width: 100%; padding: 2px 4px; font-size: 14px; font-weight: 600; text-align: center; border: 1px solid #2563eb; border-radius: 3px; background: white; color: #1f2937;"
-                                                   autofocus="autofocus"/>
-                                        </t>
-                                        <t t-else="">
-                                            <span t-on-click="() => this.startEditingColumnName('delete')"
-                                                  t-att-style="state.orderTableEditMode ? 'cursor: pointer; padding: 2px 4px; border-radius: 3px; display: inline-block;' : ''"
-                                                  t-att-title="state.orderTableEditMode ? 'Click to edit name' : ''"
-                                                  onmouseover="if (this.parentElement.parentElement.getAttribute('data-edit-mode') === 'true') { this.style.background='rgba(255,255,255,0.2)'; }"
-                                                  onmouseout="if (this.parentElement.parentElement.getAttribute('data-edit-mode') === 'true') { this.style.background=''; }">
-                                                <t t-esc="state.orderTableColumnNames?.delete || '❌'"/>
-                                            </span>
-                                        </t>
-                                        <t t-if="state.orderTableEditMode">
-                                            <div t-on-mousedown="(ev) => this.startOrderColumnResize('delete', ev)"
-                                                 style="position: absolute; right: 0; top: 0; bottom: 0; width: 4px; cursor: col-resize; background: rgba(255,255,255,0.5); opacity: 0.5;"
-                                                 onmouseover="this.style.opacity='0.8'"
-                                                 onmouseout="this.style.opacity='0.5'"></div>
-                                        </t>
+                                    <th style="width: 50px; text-align: center; padding: 12px 8px; font-size: 14px; font-weight: 600; border: none;">
+                                        ❌
                                     </th>
                                 </tr>
                             </thead>
@@ -612,7 +362,7 @@
                                         
                                         <!-- Product Search (Dynamic like Sale Order) -->
                                         <td style="position: relative;">
-                                            <div style="display: flex; align-items: center; gap: 3px;">
+                                            <div style="display: flex; align-items: center; gap: 3px; position: relative;">
                                                 <button t-if="line.product_id"
                                                         t-on-click="openProductPopupHandler(line_index)"
                                                         title="View product details"
@@ -638,6 +388,43 @@
                                                    t-att-disabled="!this.isFieldEnabled(line, 'product')"
                                                    t-att-class="this.isFieldEnabled(line, 'product') ? 'order-cell-input' : 'order-cell-input disabled-field'"
                                                    t-att-style="this.isFieldEnabled(line, 'product') ? 'flex: 1;' : 'flex: 1; background: #f3f4f6; cursor: not-allowed; opacity: 0.6;'"/>
+                                                <!-- Edit Product Name Button -->
+                                                <button t-if="line.product_id"
+                                                        t-on-click="openEditProductNameHandler(line_index)"
+                                                        title="تغيير اسم المنتج في الفاتورة"
+                                                        style="padding: 0; background: transparent; color: #6b7280; border: none; cursor: pointer; font-size: 10px; flex-shrink: 0; width: 14px; height: 14px; display: flex; align-items: center; justify-content: center; transition: all 0.2s; margin-left: 2px;"
+                                                        onmouseover="this.style.color='#2563eb'; this.style.transform='scale(1.2)'"
+                                                        onmouseout="this.style.color='#6b7280'; this.style.transform='scale(1)'">
+                                                    ✏️
+                                                </button>
+                                            </div>
+                                            <!-- Edit Product Name Popup -->
+                                            <div t-if="line.showEditProductNamePopup" 
+                                                 style="position: absolute; z-index: 2000; background: white; border: 2px solid #2563eb; border-radius: 6px; padding: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); top: 100%; left: 0; min-width: 300px; margin-top: 4px;">
+                                                <div style="margin-bottom: 8px; font-size: 12px; font-weight: 600; color: #1f2937;">
+                                                    تغيير اسم المنتج في الفاتورة
+                                                </div>
+                                                <input type="text" 
+                                                       t-att-value="line.customProductName || line.productName"
+                                                       t-on-input="(ev) => this.onCustomProductNameInput(line_index, ev.target.value)"
+                                                       t-on-keydown="(ev) => this.handleCustomProductNameKeyDown(line_index, ev)"
+                                                       placeholder="اسم المنتج في الفاتورة..."
+                                                       style="width: 100%; padding: 8px 12px; font-size: 14px; border: 1px solid #d1d5db; border-radius: 4px; margin-bottom: 8px;"
+                                                       autofocus="autofocus"/>
+                                                <div style="display: flex; gap: 8px; justify-content: flex-end;">
+                                                    <button t-on-click="saveCustomProductNameHandler(line_index)"
+                                                            style="padding: 6px 16px; background: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500; transition: all 0.2s;"
+                                                            onmouseover="this.style.background='#1d4ed8'"
+                                                            onmouseout="this.style.background='#2563eb'">
+                                                        حفظ
+                                                    </button>
+                                                    <button t-on-click="cancelEditProductNameHandler(line_index)"
+                                                            style="padding: 6px 16px; background: #e5e7eb; color: #374151; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500; transition: all 0.2s;"
+                                                            onmouseover="this.style.background='#d1d5db'"
+                                                            onmouseout="this.style.background='#e5e7eb'">
+                                                        إلغاء
+                                                    </button>
+                                                </div>
                                             </div>
                                             <!-- Product Dropdown -->
                                             <div t-if="line.showProductDropdown" 

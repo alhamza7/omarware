@@ -79,37 +79,6 @@ export class PosPerfumeScreen extends Component {
             fullPlasticFilterActive: null,  // true/false/null for full plastic filter
             csLocFilterActive: false,  // true to show CS/LOC products, false to hide them
             
-            // Order table edit mode (for main order table)
-            orderTableEditMode: false,
-            orderTableColumnWidths: {
-                row: '40px',
-                product: '250px',
-                quantity: '90px',
-                uom: '100px',
-                warehouse: '100px',
-                priceUsd: '100px',
-                priceIqd: '100px',
-                discount: '90px',
-                total: '120px',
-                available: '80px',
-                delete: '50px'
-            },
-            orderTableColumnNames: {
-                row: '#',
-                product: 'Product',
-                quantity: 'Quantity',
-                uom: 'UoM',
-                warehouse: 'Warehouse',
-                priceUsd: 'Price (USD)',
-                priceIqd: 'Price (IQD)',
-                discount: 'Disc %',
-                total: 'Total',
-                available: 'Available',
-                delete: '❌'
-            },
-            editingColumnName: null,
-            resizingOrderColumn: null,
-            
             // UI state
             exchangeRate: 1300,
             
@@ -161,10 +130,6 @@ export class PosPerfumeScreen extends Component {
         };
         
         onMounted(async () => {
-            // Load saved table column widths and names from localStorage
-            this.loadOrderTableColumnWidths();
-            this.loadOrderTableColumnNames();
-            
             // Set user name
             if (window.odoo && window.odoo.session_info) {
                 this.state.userName = window.odoo.session_info.name || window.odoo.session_info.username || 'Cashier';
@@ -279,6 +244,8 @@ export class PosPerfumeScreen extends Component {
             discountPercent: 0,
             priceAfterDiscount: 0,
             total: 0,
+            customProductName: null,  // Custom product name for invoice/report
+            showEditProductNamePopup: false,  // Show edit product name popup
         };
     }
     
@@ -1933,15 +1900,22 @@ export class PosPerfumeScreen extends Component {
         }
         
         try {
-            const orderLines = lines.map((line, index) => [0, 0, {
-                sequence: (index + 1) * 10,
-                product_id: line.product_id,
-                product_uom_id: line.uom_id,
-                warehouse_id: line.warehouse_id,
-                quantity: line.quantity,
-                unit_price: line.unitPrice,
-                discount_percent: line.discountPercent,
-            }]);
+            const orderLines = lines.map((line, index) => {
+                const lineData = {
+                    sequence: (index + 1) * 10,
+                    product_id: line.product_id,
+                    product_uom_id: line.uom_id,
+                    warehouse_id: line.warehouse_id,
+                    quantity: line.quantity,
+                    unit_price: line.unitPrice,
+                    discount_percent: line.discountPercent,
+                };
+                // Add custom product name if set
+                if (line.customProductName && line.customProductName.trim()) {
+                    lineData.custom_product_name = line.customProductName.trim();
+                }
+                return [0, 0, lineData];
+            });
             
             const targetOrderId = this.state.currentOrder.order_id;
             let orderId;
@@ -2085,12 +2059,12 @@ export class PosPerfumeScreen extends Component {
             console.log('Attempting to render report via action.doAction...');
             
             // Use action.doAction to print the report
-            await this.action.doAction({
-                type: 'ir.actions.report',
-                report_type: 'qweb-pdf',
+                await this.action.doAction({
+                    type: 'ir.actions.report',
+                    report_type: 'qweb-pdf',
                 report_name: 'pos_perfume_custom.report_pos_perfume_order',
                 report_file: 'pos_perfume_custom.report_pos_perfume_order',
-                context: {
+                    context: {
                     active_ids: [orderId],
                 }
             });
@@ -2113,7 +2087,7 @@ export class PosPerfumeScreen extends Component {
                 
                 if (error.data.debug) {
                     console.error('Server debug:', error.data.debug);
-                }
+                    }
             } else if (error.message) {
                 errorMessage += error.message;
             } else {
@@ -2848,6 +2822,11 @@ export class PosPerfumeScreen extends Component {
                     // Set saved Warehouse (preserve the selected warehouse)
                     const savedWarehouseId = line.warehouse_id ? (Array.isArray(line.warehouse_id) ? line.warehouse_id[0] : line.warehouse_id) : null;
                     uiLine.warehouse_id = savedWarehouseId;
+                    
+                    // Set custom product name if exists
+                    if (line.custom_product_name) {
+                        uiLine.customProductName = line.custom_product_name;
+                    }
                     
                     // Load product info to get available UoMs and Warehouses, but don't override saved values
                     loadPromises.push(this.loadProductInfoWithSavedValues(i, productId, savedUomId, savedWarehouseId, line.unit_price));
@@ -3970,142 +3949,6 @@ export class PosPerfumeScreen extends Component {
         return this.getHandler(key, () => () => this.togglePlasticFilter(value));
     }
     
-    /**
-     * Load order table column widths from localStorage
-     */
-    loadOrderTableColumnWidths() {
-        try {
-            const saved = localStorage.getItem('pos_perfume_order_table_widths');
-            if (saved) {
-                const widths = JSON.parse(saved);
-                this.state.orderTableColumnWidths = { ...this.state.orderTableColumnWidths, ...widths };
-            }
-        } catch (e) {
-            console.warn('Failed to load table column widths from localStorage:', e);
-        }
-    }
-    
-    /**
-     * Load order table column names from localStorage
-     */
-    loadOrderTableColumnNames() {
-        try {
-            const saved = localStorage.getItem('pos_perfume_order_table_names');
-            if (saved) {
-                const names = JSON.parse(saved);
-                this.state.orderTableColumnNames = { ...this.state.orderTableColumnNames, ...names };
-            }
-        } catch (e) {
-            console.warn('Failed to load table column names from localStorage:', e);
-        }
-    }
-    
-    /**
-     * Save order table column widths to localStorage
-     */
-    saveOrderTableColumnWidths() {
-        try {
-            localStorage.setItem('pos_perfume_order_table_widths', JSON.stringify(this.state.orderTableColumnWidths));
-        } catch (e) {
-            console.warn('Failed to save table column widths to localStorage:', e);
-        }
-    }
-    
-    /**
-     * Save order table column names to localStorage
-     */
-    saveOrderTableColumnNames() {
-        try {
-            localStorage.setItem('pos_perfume_order_table_names', JSON.stringify(this.state.orderTableColumnNames));
-        } catch (e) {
-            console.warn('Failed to save table column names to localStorage:', e);
-        }
-    }
-    
-    /**
-     * Toggle order table edit mode
-     */
-    toggleOrderTableEditMode() {
-        this.state.orderTableEditMode = !this.state.orderTableEditMode;
-        if (!this.state.orderTableEditMode) {
-            this.state.resizingOrderColumn = null;
-            this.state.editingColumnName = null;
-            // Save widths and names when exiting edit mode
-            this.saveOrderTableColumnWidths();
-            this.saveOrderTableColumnNames();
-        }
-    }
-    
-    /**
-     * Start editing column name
-     */
-    startEditingColumnName(columnName) {
-        if (!this.state.orderTableEditMode) return;
-        this.state.editingColumnName = columnName;
-    }
-    
-    /**
-     * Save column name
-     */
-    saveColumnName(columnName, newName) {
-        if (newName && newName.trim()) {
-            this.state.orderTableColumnNames[columnName] = newName.trim();
-            this.saveOrderTableColumnNames();
-        }
-        this.state.editingColumnName = null;
-    }
-    
-    /**
-     * Handle column name input keydown
-     */
-    handleColumnNameKeyDown(columnName, event) {
-        if (event.key === 'Enter') {
-            this.saveColumnName(columnName, event.target.value);
-            event.target.blur();
-        } else if (event.key === 'Escape') {
-            this.cancelEditingColumnName();
-            event.target.blur();
-        }
-    }
-    
-    /**
-     * Cancel editing column name
-     */
-    cancelEditingColumnName() {
-        this.state.editingColumnName = null;
-    }
-    
-    /**
-     * Start order column resize
-     */
-    startOrderColumnResize(columnName, event) {
-        if (!this.state.orderTableEditMode) return;
-        event.preventDefault();
-        event.stopPropagation();
-        this.state.resizingOrderColumn = columnName;
-        
-        const startX = event.clientX;
-        const startWidth = parseInt(this.state.orderTableColumnWidths[columnName]) || 100;
-        
-        const doResize = (e) => {
-            if (this.state.resizingOrderColumn !== columnName) return;
-            const diff = e.clientX - startX;
-            const newWidth = Math.max(30, startWidth + diff);
-            this.state.orderTableColumnWidths[columnName] = newWidth + 'px';
-        };
-        
-        const stopResize = () => {
-            this.state.resizingOrderColumn = null;
-            document.removeEventListener('mousemove', doResize);
-            document.removeEventListener('mouseup', stopResize);
-            // Save widths after resize
-            this.saveOrderTableColumnWidths();
-        };
-        
-        document.addEventListener('mousemove', doResize);
-        document.addEventListener('mouseup', stopResize);
-    }
-    
     isBrandFilterActiveHandler(brand) {
         const key = `isBrandFilterActive_${brand}`;
         return this.getHandler(key, () => () => this.isBrandFilterActive(brand));
@@ -4114,6 +3957,97 @@ export class PosPerfumeScreen extends Component {
     isUnitFilterActiveHandler(filter) {
         const key = `isUnitFilterActive_${filter}`;
         return this.getHandler(key, () => () => this.isUnitFilterActive(filter));
+    }
+    
+    /**
+     * Open edit product name popup
+     */
+    openEditProductName(lineIndex) {
+        if (lineIndex < 0 || lineIndex >= this.state.currentOrder.lines.length) {
+            return;
+        }
+        const line = this.state.currentOrder.lines[lineIndex];
+        if (!line.product_id) {
+            return;
+        }
+        // Initialize customProductName if not set
+        if (!line.customProductName) {
+            line.customProductName = line.productName || '';
+        }
+        line.showEditProductNamePopup = true;
+    }
+    
+    /**
+     * Handle custom product name input
+     */
+    onCustomProductNameInput(lineIndex, value) {
+        if (lineIndex < 0 || lineIndex >= this.state.currentOrder.lines.length) {
+            return;
+        }
+        const line = this.state.currentOrder.lines[lineIndex];
+        line.customProductName = value;
+    }
+    
+    /**
+     * Handle custom product name keydown
+     */
+    handleCustomProductNameKeyDown(lineIndex, event) {
+        if (event.key === 'Enter') {
+            this.saveCustomProductName(lineIndex);
+        } else if (event.key === 'Escape') {
+            this.cancelEditProductName(lineIndex);
+        }
+    }
+    
+    /**
+     * Save custom product name
+     */
+    saveCustomProductName(lineIndex) {
+        if (lineIndex < 0 || lineIndex >= this.state.currentOrder.lines.length) {
+            return;
+        }
+        const line = this.state.currentOrder.lines[lineIndex];
+        // Trim and save
+        if (line.customProductName && line.customProductName.trim()) {
+            line.customProductName = line.customProductName.trim();
+        } else {
+            line.customProductName = null;
+        }
+        line.showEditProductNamePopup = false;
+    }
+    
+    /**
+     * Cancel edit product name
+     */
+    cancelEditProductName(lineIndex) {
+        if (lineIndex < 0 || lineIndex >= this.state.currentOrder.lines.length) {
+            return;
+        }
+        const line = this.state.currentOrder.lines[lineIndex];
+        // Reset to original product name
+        line.customProductName = null;
+        line.showEditProductNamePopup = false;
+    }
+    
+    /**
+     * Handler for openEditProductName
+     */
+    openEditProductNameHandler(lineIndex) {
+        return () => this.openEditProductName(lineIndex);
+    }
+    
+    /**
+     * Handler for saveCustomProductName
+     */
+    saveCustomProductNameHandler(lineIndex) {
+        return () => this.saveCustomProductName(lineIndex);
+    }
+    
+    /**
+     * Handler for cancelEditProductName
+     */
+    cancelEditProductNameHandler(lineIndex) {
+        return () => this.cancelEditProductName(lineIndex);
     }
     
     /**
