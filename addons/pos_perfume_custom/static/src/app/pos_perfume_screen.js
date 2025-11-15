@@ -241,6 +241,9 @@ export class PosPerfumeScreen extends Component {
             availableQty: null,
             quantity: 1,
             unitPrice: 0,
+            unitPriceDisplay: '',  // Display value for USD price input
+            priceIqd: null,  // Store IQD price separately to allow manual input
+            priceIqdDisplay: '',  // Display value for IQD price input
             discountPercent: 0,
             priceAfterDiscount: 0,
             total: 0,
@@ -654,8 +657,14 @@ export class PosPerfumeScreen extends Component {
             // Preserve saved price (don't override)
             if (savedPrice && savedPrice > 0) {
                 line.unitPrice = savedPrice;
+                line.unitPriceDisplay = savedPrice.toFixed(2);
+                line.priceIqd = Math.floor(savedPrice * this.state.exchangeRate);
+                line.priceIqdDisplay = line.priceIqd.toString();
             } else if (data.price_unit) {
                 line.unitPrice = data.price_unit;
+                line.unitPriceDisplay = data.price_unit.toFixed(2);
+                line.priceIqd = Math.floor(data.price_unit * this.state.exchangeRate);
+                line.priceIqdDisplay = line.priceIqd.toString();
             }
             
             // Calculate line
@@ -740,6 +749,9 @@ export class PosPerfumeScreen extends Component {
             // Set default values from onchange
             line.uom_id = data.product_uom_id;
             line.unitPrice = data.price_unit || 0;
+            line.unitPriceDisplay = (data.price_unit || 0).toFixed(2);
+            line.priceIqd = Math.floor((data.price_unit || 0) * this.state.exchangeRate);
+            line.priceIqdDisplay = line.priceIqd.toString();
             
             // Set UoM name and validate
             if (data.product_uom_name) {
@@ -836,6 +848,9 @@ export class PosPerfumeScreen extends Component {
         if (selectedUom) {
             console.log(`[UoM Change] Found in cache: ${selectedUom.name} = $${selectedUom.price}`);
             line.unitPrice = selectedUom.price;
+            line.unitPriceDisplay = selectedUom.price.toFixed(2);
+            line.priceIqd = Math.floor(selectedUom.price * this.state.exchangeRate);
+            line.priceIqdDisplay = line.priceIqd.toString();
             line.uomName = selectedUom.name; // Store UoM name
             this.calculateLine(line);
             this.calculateTotals();
@@ -982,6 +997,15 @@ export class PosPerfumeScreen extends Component {
                 return;
             }
             line.unitPrice = price;
+            // Update display value
+            if (line.unitPriceDisplay === undefined || line.unitPriceDisplay === '') {
+                line.unitPriceDisplay = price.toFixed(2);
+            }
+            // Update IQD price if not manually set
+            if (line.priceIqd === null || line.priceIqd === undefined) {
+                line.priceIqd = Math.floor(price * this.state.exchangeRate);
+                line.priceIqdDisplay = line.priceIqd.toString();
+            }
         } else if (field === 'discountPercent') {
             const discount = parseFloat(value) || 0;
             if (discount < 0 || discount > 100) {
@@ -1005,9 +1029,33 @@ export class PosPerfumeScreen extends Component {
      * Handle Price IQD input - convert IQD to USD
      */
     onPriceIqdInput(ev, lineIndex) {
-        const iqdValue = parseFloat(ev.target.value) || 0;
-        const usdValue = iqdValue / this.state.exchangeRate;
-        this.updateLine(lineIndex, 'unitPrice', usdValue);
+        const line = this.state.currentOrder.lines[lineIndex];
+        const inputValue = ev.target.value;
+        
+        // Store display value for free typing (numbers only, no decimal point)
+        line.priceIqdDisplay = inputValue.replace(/[^0-9]/g, '');
+        
+        // Parse the value - IQD is integer only
+        const cleanedValue = inputValue.replace(/[^0-9]/g, '');
+        const iqdValue = parseInt(cleanedValue, 10);
+        
+        if (inputValue === '' || inputValue === null || cleanedValue === '') {
+            line.priceIqd = null;
+            line.unitPrice = 0;
+        } else if (!isNaN(iqdValue) && isFinite(iqdValue) && iqdValue >= 0) {
+            // Valid integer - store it and convert to USD
+            line.priceIqd = iqdValue;
+            const usdValue = iqdValue / this.state.exchangeRate;
+            // Update unitPrice and its display
+            line.unitPrice = usdValue;
+            line.unitPriceDisplay = usdValue.toFixed(2);
+        } else {
+            line.priceIqd = null;
+            line.unitPrice = 0;
+        }
+        
+        this.calculateLine(line);
+        this.calculateTotals();
     }
     
     /**
@@ -1523,6 +1571,17 @@ export class PosPerfumeScreen extends Component {
         const lines = this.state.currentOrder.lines;
         const maxRow = lines.length - 1;
         const maxCol = 7; // 0=Product, 1=Quantity, 2=UoM, 3=Warehouse, 4=Available, 5=Price USD, 6=Price IQD, 7=Disc%
+        
+        // For price fields (columns 5 and 6), allow normal input - don't prevent default for number keys
+        if (colIndex === 5 || colIndex === 6) {
+            // Only handle navigation keys, let other keys pass through for normal input
+            if (['ArrowDown', 'ArrowUp', 'ArrowRight', 'ArrowLeft', 'Tab', 'Enter', '+', '=', 'Delete'].includes(ev.key)) {
+                // Handle navigation keys below
+            } else {
+                // Allow all other keys (numbers, decimal point, etc.) to pass through
+                return;
+            }
+        }
         
         // Arrow keys for navigation
         if (ev.key === 'ArrowDown') {
@@ -3203,10 +3262,40 @@ export class PosPerfumeScreen extends Component {
     updateLineHandler(lineIndex, field) {
         const key = `updateLine_${lineIndex}_${field}`;
         return this.getHandler(key, () => (ev) => {
-            const value = field === 'quantity' ? (parseFloat(ev.target.value) || 1) :
-                         field === 'unitPrice' ? (parseFloat(ev.target.value) || 0) :
-                         field === 'discountPercent' ? (parseFloat(ev.target.value) || 0) :
-                         ev.target.value;
+            const line = this.state.currentOrder.lines[lineIndex];
+            const inputValue = ev.target.value;
+            let value;
+            
+            if (field === 'quantity') {
+                value = parseFloat(inputValue) || 1;
+            } else if (field === 'unitPrice') {
+                // Store display value for free typing
+                line.unitPriceDisplay = inputValue;
+                
+                // Parse the value - allow partial input during typing
+                const cleanedValue = inputValue.replace(/[^0-9.]/g, '');
+                const numValue = parseFloat(cleanedValue);
+                
+                if (inputValue === '' || inputValue === null) {
+                    value = 0;
+                } else if (!isNaN(numValue) && isFinite(numValue) && numValue >= 0) {
+                    value = numValue;
+                } else {
+                    // Invalid input - try to extract valid number part
+                    const match = cleanedValue.match(/^(\d*\.?\d*)/);
+                    if (match && match[0]) {
+                        const partialValue = parseFloat(match[0]);
+                        value = (!isNaN(partialValue) && isFinite(partialValue)) ? partialValue : 0;
+                    } else {
+                        value = 0;
+                    }
+                }
+            } else if (field === 'discountPercent') {
+                value = parseFloat(inputValue) || 0;
+            } else {
+                value = inputValue;
+            }
+            
             this.updateLine(lineIndex, field, value);
         });
     }
@@ -3316,6 +3405,124 @@ export class PosPerfumeScreen extends Component {
     onPriceIqdInputHandler(lineIndex) {
         const key = `onPriceIqdInput_${lineIndex}`;
         return this.getHandler(key, () => (ev) => this.onPriceIqdInput(ev, lineIndex));
+    }
+    
+    /**
+     * Handle keypress for USD price field - allow numbers and one decimal point
+     */
+    onPriceUsdKeyPressHandler() {
+        const key = `onPriceUsdKeyPress`;
+        return this.getHandler(key, () => (ev) => {
+            const char = String.fromCharCode(ev.which || ev.keyCode);
+            // Allow: numbers (0-9), decimal point (.), backspace, delete, tab, escape, enter, arrow keys
+            if (!/[0-9.]/.test(char) && 
+                !['Backspace', 'Delete', 'Tab', 'Escape', 'Enter', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(ev.key) &&
+                !(ev.ctrlKey || ev.metaKey) && // Allow Ctrl/Cmd combinations (Ctrl+A, Ctrl+C, etc.)
+                ev.key !== 'Unidentified') { // Allow unidentified keys (for mobile)
+                ev.preventDefault();
+                return false;
+            }
+            // Allow only one decimal point
+            if (char === '.' && ev.target.value.includes('.')) {
+                ev.preventDefault();
+                return false;
+            }
+        });
+    }
+    
+    /**
+     * Handle keypress for IQD price field - allow only numbers (no decimal point)
+     */
+    onPriceIqdKeyPressHandler() {
+        const key = `onPriceIqdKeyPress`;
+        return this.getHandler(key, () => (ev) => {
+            const char = String.fromCharCode(ev.which || ev.keyCode);
+            // Allow: numbers (0-9) only, backspace, delete, tab, escape, enter, arrow keys
+            if (!/[0-9]/.test(char) && 
+                !['Backspace', 'Delete', 'Tab', 'Escape', 'Enter', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(ev.key) &&
+                !(ev.ctrlKey || ev.metaKey) && // Allow Ctrl/Cmd combinations (Ctrl+A, Ctrl+C, etc.)
+                ev.key !== 'Unidentified') { // Allow unidentified keys (for mobile)
+                ev.preventDefault();
+                return false;
+            }
+        });
+    }
+    
+    /**
+     * Handle blur for USD price field - format to 2 decimal places
+     */
+    onPriceUsdBlurHandler(lineIndex) {
+        const key = `onPriceUsdBlur_${lineIndex}`;
+        return this.getHandler(key, () => (ev) => {
+            const line = this.state.currentOrder.lines[lineIndex];
+            const inputValue = ev.target.value;
+            
+            if (inputValue === '' || inputValue === null) {
+                line.unitPrice = 0;
+                line.unitPriceDisplay = '';
+            } else {
+                const numValue = parseFloat(inputValue.replace(/[^0-9.]/g, ''));
+                if (!isNaN(numValue) && isFinite(numValue) && numValue >= 0) {
+                    line.unitPrice = numValue;
+                    line.unitPriceDisplay = numValue.toFixed(2);
+                    // Update IQD price
+                    line.priceIqd = Math.floor(numValue * this.state.exchangeRate);
+                    line.priceIqdDisplay = line.priceIqd.toString();
+                } else {
+                    // Invalid - reset to current unitPrice
+                    if (line.unitPrice) {
+                        line.unitPriceDisplay = line.unitPrice.toFixed(2);
+                    } else {
+                        line.unitPrice = 0;
+                        line.unitPriceDisplay = '';
+                    }
+                }
+            }
+            
+            this.calculateLine(line);
+            this.calculateTotals();
+        });
+    }
+    
+    /**
+     * Handle blur for IQD price field - format to integer
+     */
+    onPriceIqdBlurHandler(lineIndex) {
+        const key = `onPriceIqdBlur_${lineIndex}`;
+        return this.getHandler(key, () => (ev) => {
+            const line = this.state.currentOrder.lines[lineIndex];
+            const inputValue = ev.target.value;
+            
+            if (inputValue === '' || inputValue === null) {
+                line.priceIqd = null;
+                line.priceIqdDisplay = '';
+                line.unitPrice = 0;
+                line.unitPriceDisplay = '';
+            } else {
+                const cleanedValue = inputValue.replace(/[^0-9]/g, '');
+                const iqdValue = parseInt(cleanedValue, 10);
+                
+                if (!isNaN(iqdValue) && isFinite(iqdValue) && iqdValue >= 0) {
+                    line.priceIqd = iqdValue;
+                    line.priceIqdDisplay = iqdValue.toString();
+                    // Update USD price
+                    const usdValue = iqdValue / this.state.exchangeRate;
+                    line.unitPrice = usdValue;
+                    line.unitPriceDisplay = usdValue.toFixed(2);
+                } else {
+                    // Invalid - reset to current priceIqd
+                    if (line.priceIqd !== null && line.priceIqd !== undefined) {
+                        line.priceIqdDisplay = Math.floor(line.priceIqd).toString();
+                    } else {
+                        line.priceIqd = null;
+                        line.priceIqdDisplay = '';
+                    }
+                }
+            }
+            
+            this.calculateLine(line);
+            this.calculateTotals();
+        });
     }
     
     deleteLineHandler(lineIndex) {

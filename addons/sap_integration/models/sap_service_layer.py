@@ -464,6 +464,33 @@ class SapServiceLayerConnection:
             _logger.error(f"Error creating quotation: {str(e)}")
             raise
     
+    def create_order(self, order_data):
+        """Create sales order (draft) in SAP Service Layer"""
+        try:
+            url = f"{self.base_url}/Orders"
+            headers = self._get_headers()
+            
+            # Log DocumentLines details before sending
+            document_lines = order_data.get('DocumentLines', [])
+            _logger.info(f"Creating sales order in SAP: {url}, DocumentLines count: {len(document_lines)}")
+            for idx, line in enumerate(document_lines):
+                _logger.info(f"Sending DocumentLine[{idx}]: ItemCode={line.get('ItemCode')}, UoMEntry={line.get('UoMEntry', 'NOT SET')}, Quantity={line.get('Quantity')}, UnitPrice={line.get('UnitPrice')}")
+            
+            response = self.session.post(url, json=order_data, headers=headers, timeout=30)
+            
+            if response.status_code in [200, 201]:
+                result = response.json()
+                _logger.info(f"Sales order created: DocEntry {result.get('DocEntry')}")
+                return result
+            else:
+                error_msg = f"Error creating sales order: {response.status_code} - {response.text}"
+                _logger.error(error_msg)
+                raise Exception(error_msg)
+                
+        except Exception as e:
+            _logger.error(f"Error creating sales order: {str(e)}")
+            raise
+    
     def update_quotation(self, doc_entry, quotation_data):
         """Update quotation in SAP Service Layer"""
         try:

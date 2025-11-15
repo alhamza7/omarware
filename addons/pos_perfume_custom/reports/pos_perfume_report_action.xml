@@ -10,6 +10,16 @@
             <field name="report_file">pos_perfume_custom.report_pos_perfume_order</field>
             <field name="print_report_name">'طلب - %s' % (object.name)</field>
         </record>
+        
+        <!-- Gold Design Report Action for POS Perfume Order -->
+        <record id="action_report_pos_perfume_order_gold" model="ir.actions.report">
+            <field name="name">فاتورة ذهبية - طلب العطور</field>
+            <field name="model">pos.perfume.order</field>
+            <field name="report_type">qweb-html</field>
+            <field name="report_name">pos_perfume_custom.report_pos_perfume_order_gold</field>
+            <field name="report_file">pos_perfume_custom.report_pos_perfume_order_gold</field>
+            <field name="print_report_name">'فاتورة ذهبية - %s' % (object.name)</field>
+        </record>
     </data>
 </odoo>
 

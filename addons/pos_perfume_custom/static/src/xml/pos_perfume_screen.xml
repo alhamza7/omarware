@@ -145,9 +145,9 @@
                      t-att-data-notification-id="notification.id">
                     <div class="custom-notification-content">
                         <span class="custom-notification-icon">
-                            <t t-if="notification.type === 'success'">✓</t>
-                            <t t-elif="notification.type === 'danger'">✕</t>
-                            <t t-elif="notification.type === 'warning'">⚠</t>
+                            <t t-if="notification.type == 'success'">✓</t>
+                            <t t-elif="notification.type == 'danger'">✕</t>
+                            <t t-elif="notification.type == 'warning'">⚠</t>
                             <t t-else="">ℹ</t>
                         </span>
                         <span class="custom-notification-message" t-esc="notification.message"/>
@@ -450,7 +450,7 @@
                                                 <div t-if="line.searchingProducts" style="padding: 12px; text-align: center; color: #999;">
                                                     <i class="fa fa-spinner fa-spin"/> Searching...
                                                 </div>
-                                                <div t-if="!line.searchingProducts and (!line.searchResults or line.searchResults.length === 0)" 
+                                                <div t-if="!line.searchingProducts and (!line.searchResults or line.searchResults.length == 0)" 
                                                      style="padding: 12px; text-align: center; color: #999;">
                                                     No products found
                                                 </div>
@@ -484,9 +484,9 @@
                                                    t-on-blur="validateUomHandler(line_index)"
                                                    t-on-keydown="handleUomKeyDownHandler(line_index)"
                                                    t-att-disabled="!this.isFieldEnabled(line, 'uom')"
-                                                   t-att-class="!this.isFieldEnabled(line, 'uom') ? 'order-cell-input disabled-field' : (line.uomValid === false &amp;&amp; line.uomName ? 'order-cell-input invalid-input' : 'order-cell-input')"
+                                                   t-att-class="!this.isFieldEnabled(line, 'uom') ? 'order-cell-input disabled-field' : (line.uomValid == false &amp;&amp; line.uomName ? 'order-cell-input invalid-input' : 'order-cell-input')"
                                                    placeholder="UoM..."
-                                                   t-att-style="!this.isFieldEnabled(line, 'uom') ? 'width: 100%; background: #f3f4f6; cursor: not-allowed; opacity: 0.6;' : (line.uomValid === false &amp;&amp; line.uomName ? 'width: 100%; border: 2px solid #f44336;' : 'width: 100%;')"/>
+                                                   t-att-style="!this.isFieldEnabled(line, 'uom') ? 'width: 100%; background: #f3f4f6; cursor: not-allowed; opacity: 0.6;' : (line.uomValid == false &amp;&amp; line.uomName ? 'width: 100%; border: 2px solid #f44336;' : 'width: 100%;')"/>
                                             <!-- UoM Dropdown -->
                                             <div t-if="line.showUomDropdown and (line.filteredUoms || line.availableUoms)" 
                                                  class="uom-dropdown"
@@ -515,9 +515,9 @@
                                                    t-on-blur="validateWarehouseHandler(line_index)"
                                                    t-on-keydown="handleWarehouseKeyDownHandler(line_index)"
                                                    t-att-disabled="!this.isFieldEnabled(line, 'warehouse')"
-                                                   t-att-class="!this.isFieldEnabled(line, 'warehouse') ? 'order-cell-input disabled-field' : (line.warehouseValid === false &amp;&amp; line.warehouseCode ? 'order-cell-input invalid-input' : 'order-cell-input')"
+                                                   t-att-class="!this.isFieldEnabled(line, 'warehouse') ? 'order-cell-input disabled-field' : (line.warehouseValid == false &amp;&amp; line.warehouseCode ? 'order-cell-input invalid-input' : 'order-cell-input')"
                                                    placeholder="WH..."
-                                                   t-att-style="!this.isFieldEnabled(line, 'warehouse') ? 'width: 100%; background: #f3f4f6; cursor: not-allowed; opacity: 0.6;' : (line.warehouseValid === false &amp;&amp; line.warehouseCode ? 'width: 100%; border: 2px solid #f44336;' : 'width: 100%;')"/>
+                                                   t-att-style="!this.isFieldEnabled(line, 'warehouse') ? 'width: 100%; background: #f3f4f6; cursor: not-allowed; opacity: 0.6;' : (line.warehouseValid == false &amp;&amp; line.warehouseCode ? 'width: 100%; border: 2px solid #f44336;' : 'width: 100%;')"/>
                                             <!-- Warehouse Dropdown -->
                                             <div t-if="line.showWarehouseDropdown and (line.filteredWarehouses || line.availableWarehouses)" 
                                                  class="warehouse-dropdown"
@@ -537,32 +537,36 @@
                                         
                                         <!-- Price (USD) -->
                                         <td>
-                                            <input type="number" 
-                                                   t-att-value="line.unitPrice.toFixed(2)"
+                                            <input type="text" 
+                                                   inputmode="decimal"
+                                                   pattern="[0-9]*\.?[0-9]{0,2}"
+                                                   t-att-value="line.unitPriceDisplay || (line.unitPrice || '')"
                                                    t-att-data-row="line_index"
                                                    t-att-data-col="5"
                                                    t-on-input="updateLineHandler(line_index, 'unitPrice')"
+                                                   t-on-keypress="onPriceUsdKeyPressHandler"
+                                                   t-on-blur="onPriceUsdBlurHandler(line_index)"
                                                    t-on-focus="focusSelectHandler(line_index, 5)"
                                                    t-on-keydown="handleTableKeyDownHandler(line_index, 5)"
                                                    t-att-disabled="!this.isFieldEnabled(line, 'price_usd')"
-                                                   step="0.01"
-                                                   min="0"
                                                    t-att-class="this.isFieldEnabled(line, 'price_usd') ? 'order-cell-input' : 'order-cell-input disabled-field'"
                                                    t-att-style="this.isFieldEnabled(line, 'price_usd') ? 'text-align: right; width: 100%;' : 'text-align: right; width: 100%; background: #f3f4f6; cursor: not-allowed; opacity: 0.6;'"/>
                                         </td>
                                         
                                         <!-- Price (IQD) -->
                                         <td>
-                                            <input type="number" 
-                                                   t-att-value="(line.unitPrice * state.exchangeRate).toFixed(2)"
+                                            <input type="text" 
+                                                   inputmode="numeric"
+                                                   pattern="[0-9]*"
+                                                   t-att-value="line.priceIqdDisplay || (line.priceIqd != null &amp;&amp; line.priceIqd != undefined ? Math.floor(line.priceIqd) : (line.unitPrice ? Math.floor(line.unitPrice * state.exchangeRate) : ''))"
                                                    t-att-data-row="line_index"
                                                    t-att-data-col="6"
                                                    t-on-input="onPriceIqdInputHandler(line_index)"
+                                                   t-on-keypress="onPriceIqdKeyPressHandler"
+                                                   t-on-blur="onPriceIqdBlurHandler(line_index)"
                                                    t-on-focus="focusSelectHandler(line_index, 6)"
                                                    t-on-keydown="handleTableKeyDownHandler(line_index, 6)"
                                                    t-att-disabled="!this.isFieldEnabled(line, 'price_iqd')"
-                                                   step="0.01"
-                                                   min="0"
                                                    t-att-class="this.isFieldEnabled(line, 'price_iqd') ? 'order-cell-input' : 'order-cell-input disabled-field'"
                                                    t-att-style="this.isFieldEnabled(line, 'price_iqd') ? 'text-align: right; width: 100%;' : 'text-align: right; width: 100%; background: #f3f4f6; cursor: not-allowed; opacity: 0.6;'"/>
                                         </td>
@@ -595,7 +599,7 @@
                                         
                                         <!-- Available Quantity -->
                                         <td style="text-align: center;">
-                                            <span t-if="line.availableQty !== null" 
+                                            <span t-if="line.availableQty != null" 
                                                   t-att-style="line.availableQty > 0 ? 'color: green; font-weight: 600;' : 'color: red; font-weight: 600;'">
                                                 <t t-esc="Math.floor(line.availableQty)"/>
                                             </span>
@@ -684,22 +688,22 @@
                                 <span style="font-size: 11px; font-weight: 600; color: #6b7280; white-space: nowrap;">Plastic:</span>
                                 <div style="display: flex; gap: 4px;">
                                     <button t-on-click="() => this.togglePlasticFilter(true)"
-                                            t-att-class="state.fullPlasticFilterActive === true ? 'filter-btn-active' : 'filter-btn-inactive'"
+                                            t-att-class="state.fullPlasticFilterActive == true ? 'filter-btn-active' : 'filter-btn-inactive'"
                                             style="padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; transition: all 0.2s; white-space: nowrap; font-weight: 600;">
                                         All
                                     </button>
                                     <button t-on-click="() => this.togglePlasticFilter(false)"
-                                            t-att-class="state.fullPlasticFilterActive === false ? 'filter-btn-active' : 'filter-btn-inactive'"
+                                            t-att-class="state.fullPlasticFilterActive == false ? 'filter-btn-active' : 'filter-btn-inactive'"
                                             style="padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; transition: all 0.2s; white-space: nowrap; font-weight: 600;">
                                         Hide
                                     </button>
                                     <button t-on-click="() => this.togglePlasticFilter(null)"
-                                            t-att-class="state.fullPlasticFilterActive === null ? 'filter-btn-active' : 'filter-btn-inactive'"
+                                            t-att-class="state.fullPlasticFilterActive == null ? 'filter-btn-active' : 'filter-btn-inactive'"
                                             style="padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; transition: all 0.2s; white-space: nowrap; font-weight: 600;">
                                         Reset
                                     </button>
                                     <button t-on-click="() => this.toggleCsLocFilter()"
-                                            t-att-class="state.csLocFilterActive === true ? 'filter-btn-active' : 'filter-btn-inactive'"
+                                            t-att-class="state.csLocFilterActive == true ? 'filter-btn-active' : 'filter-btn-inactive'"
                                             style="padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; transition: all 0.2s; white-space: nowrap; font-weight: 600;">
                                         CS-LOC
                                     </button>
@@ -897,7 +901,7 @@
                 <!-- Order State Display -->
                 <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
                     <label style="font-size: 14px; color: #4b5563; font-weight: 500;">Order State:</label>
-                    <span t-att-style="state.currentOrder.state === 'draft' ? 'background: #ffc107; color: white; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 600;' : state.currentOrder.state === 'quotation' ? 'background: #17a2b8; color: white; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 600;' : state.currentOrder.state === 'sale' ? 'background: #28a745; color: white; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 600;' : 'background: #6c757d; color: white; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 600;'">
+                    <span t-att-style="state.currentOrder.state == 'draft' ? 'background: #ffc107; color: white; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 600;' : state.currentOrder.state == 'quotation' ? 'background: #17a2b8; color: white; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 600;' : state.currentOrder.state == 'sale' ? 'background: #28a745; color: white; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 600;' : 'background: #6c757d; color: white; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 600;'">
                         <t t-esc="state.currentOrder.state ? state.currentOrder.state.toUpperCase() : 'DRAFT'"/>
                     </span>
                 </div>
@@ -996,8 +1000,8 @@
                                 <tr style="border-bottom: 1px solid #e0e0e0; cursor: pointer;"
                                     onmouseover="this.style.background='#f5f5f5'"
                                     onmouseout="this.style.background=''"
-                                    t-att-class="order.id === state.currentOrder.order_id ? 'table-active' : ''"
-                                    t-att-style="order.id === state.currentOrder.order_id ? 'background: #dbeafe; border-bottom: 1px solid #e5e7eb; cursor: pointer;' : 'border-bottom: 1px solid #e5e7eb; cursor: pointer;'">
+                                    t-att-class="order.id == state.currentOrder.order_id ? 'table-active' : ''"
+                                    t-att-style="order.id == state.currentOrder.order_id ? 'background: #dbeafe; border-bottom: 1px solid #e5e7eb; cursor: pointer;' : 'border-bottom: 1px solid #e5e7eb; cursor: pointer;'">
                                     <td style="padding: 10px; font-weight: 600; color: #2563eb; font-size: 12px;">
                                         <t t-esc="order.name"/>
                                     </td>
@@ -1026,7 +1030,7 @@
                                         </t>
                                     </td>
                                     <td style="padding: 10px; text-align: center; font-size: 12px;">
-                                        <span t-att-style="order.state === 'draft' ? 'background: #ffc107; color: white; padding: 3px 8px; border-radius: 3px;' : order.state === 'quotation' ? 'background: #17a2b8; color: white; padding: 3px 8px; border-radius: 3px;' : order.state === 'sale' ? 'background: #28a745; color: white; padding: 3px 8px; border-radius: 3px;' : 'background: #6c757d; color: white; padding: 3px 8px; border-radius: 3px;'">
+                                        <span t-att-style="order.state == 'draft' ? 'background: #ffc107; color: white; padding: 3px 8px; border-radius: 3px;' : order.state == 'quotation' ? 'background: #17a2b8; color: white; padding: 3px 8px; border-radius: 3px;' : order.state == 'sale' ? 'background: #28a745; color: white; padding: 3px 8px; border-radius: 3px;' : 'background: #6c757d; color: white; padding: 3px 8px; border-radius: 3px;'">
                                             <t t-esc="order.state ? order.state.toUpperCase() : 'DRAFT'"/>
                                         </span>
                                     </td>
