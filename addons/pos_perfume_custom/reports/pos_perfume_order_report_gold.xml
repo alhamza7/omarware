@@ -401,7 +401,7 @@
                             try {
                                 window.print();
                             } catch (e) {
-                                console && console.warn && console.warn('Auto print failed', e);
+                                // ignore
                             }
                         });
                     </script>
