@@ -81,7 +81,7 @@
                             try {
                                 window.print();
                             } catch (e) {
-                                // ignore
+                                console && console.warn && console.warn('Auto print failed', e);
                             }
                         });
                     </script>
