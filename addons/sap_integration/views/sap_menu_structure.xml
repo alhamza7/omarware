@@ -1,13 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-    <data noupdate="0">
-        <!-- 
-        ════════════════════════════════════════════════════════════════
-        SAP Integration - Organized Menu Structure
-        ════════════════════════════════════════════════════════════════
-        This file reorganizes all SAP menu items into logical groups
-        for better navigation and user experience.
-        -->
+    <data>
         <!-- Main Menu - Note: menu_sap_integration is defined in sap_dashboard_views.xml -->
 
         <!-- ═══════════════════════════════════════════════════════════ -->
@@ -270,4 +263,3 @@
 
     </data>
 </odoo>
-

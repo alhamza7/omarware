@@ -663,6 +663,14 @@ class PosPerfumeOrderLine(models.Model):
         compute='_compute_available_qty',
         digits='Product Unit of Measure'
     )
+
+    # Computed display name for reports/invoices
+    display_product_name = fields.Char(
+        string='Display Product Name',
+        compute='_compute_display_product_name',
+        store=True,
+        help='Name used on POS Perfume reports: can combine product name, foreign name and code badge automatically.'
+    )
     
     @api.depends('quantity', 'unit_price', 'discount_percent')
     def _compute_amounts(self):
@@ -703,6 +711,47 @@ class PosPerfumeOrderLine(models.Model):
                 line.available_qty = sum(quants.mapped('quantity')) - sum(quants.mapped('reserved_quantity'))
             else:
                 line.available_qty = 0.0
+
+    @api.depends('product_id', 'product_id.name', 'product_code', 'product_foreign_name', 'custom_product_name')
+    def _compute_display_product_name(self):
+        """
+        Build the product name used on reports:
+        - If custom_product_name is set: use it as-is.
+        - Else, if product_code starts with 'S', append foreign_name (if any).
+        - Also append the priority code badge (ADF / R / G / N1) based on product_code.
+        """
+        for line in self:
+            # Base name
+            name = ''
+            if line.custom_product_name:
+                name = line.custom_product_name
+            elif line.product_id:
+                base_name = line.product_id.name or ''
+                foreign_name = line.product_foreign_name or ''
+                code = (line.product_code or '').upper()
+
+                # If product code starts with S → merge with foreign name
+                if code.startswith('S') and foreign_name:
+                    name = f"{base_name} / {foreign_name}"
+                else:
+                    name = base_name
+
+                # Determine badge code (matches search priority logic)
+                badge = ''
+                if code.startswith('ADF'):
+                    badge = 'ADF'
+                elif code.startswith('R'):
+                    badge = 'R'
+                elif code.startswith('G'):
+                    badge = 'G'
+                elif code.startswith('N1'):
+                    badge = 'N1'
+
+                if badge:
+                    # Add badge next to name (e.g. "Name / Foreign - ADF")
+                    name = f"{name} - {badge}"
+
+            line.display_product_name = name
     
     @api.onchange('product_id')
     def _onchange_product_id(self):

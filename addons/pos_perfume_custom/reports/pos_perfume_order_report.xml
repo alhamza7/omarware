@@ -39,8 +39,7 @@
                             <t t-foreach="doc.order_line_ids" t-as="line">
                                 <tr>
                                     <td class="text-start">
-                                        <span t-if="line.custom_product_name" t-esc="line.custom_product_name"/>
-                                        <span t-else="" t-field="line.product_id.name"/>
+                                        <span t-field="line.display_product_name"/>
                                     </td>
                                     <td class="text-end"><span t-field="line.quantity"/></td>
                                     <td class="text-end"><span t-field="line.unit_price"/></td>
@@ -76,6 +75,16 @@
                     </div>
                     
                     <div class="oe_structure"/>
+                    <!-- Auto-print when report opens in browser -->
+                    <script type="text/javascript">
+                        window.addEventListener('load', function () {
+                            try {
+                                window.print();
+                            } catch (e) {
+                                console && console.warn && console.warn('Auto print failed', e);
+                            }
+                        });
+                    </script>
                 </div>
             </t>
         </template>
