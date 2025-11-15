@@ -1,0 +1,425 @@
+<?xml version="1.0"?>
+<odoo>
+    <data noupdate="0">
+        <!-- Gold Design Document template -->
+        <template id="report_pos_perfume_order_document_gold" t-name="pos_perfume_custom.report_pos_perfume_order_document_gold">
+            <t t-call="web.external_layout">
+                <t t-set="doc" t-value="doc.with_context(lang=doc.partner_id.lang if doc.partner_id else None)"/>
+                <t t-set="layout_document_title">
+                    <span t-if="doc.state == 'draft'">مسودة طلب #</span>
+                    <span t-elif="doc.state == 'sale'">فاتورة بيع #</span>
+                    <span t-else="">طلب #</span>
+                    <span t-field="doc.name"/>
+                </t>
+                <div class="page gold-invoice" dir="rtl" style="direction: rtl; text-align: right;">
+                    <style>
+                        @page {
+                            margin: 0;
+                        }
+                        .gold-invoice {
+                            direction: rtl;
+                            text-align: right;
+                            color: #2c3e50;
+                            background: linear-gradient(to bottom, #ffffff 0%, #fffef9 100%);
+                            font-family: 'Segoe UI', 'Arial', 'DejaVu Sans', 'Tahoma', sans-serif;
+                            line-height: 1.6;
+                        }
+                        .text-start {
+                            text-align: right !important;
+                        }
+                        .text-end {
+                            text-align: left !important;
+                        }
+                        table {
+                            direction: rtl;
+                        }
+                        
+                        /* Gold Header Styles */
+                        .gold-header {
+                            background: linear-gradient(135deg, #d4af37 0%, #f4d03f 30%, #ffd700 50%, #f4d03f 70%, #d4af37 100%);
+                            color: #1a1a1a;
+                            padding: 40px 30px;
+                            border-radius: 15px;
+                            margin-bottom: 35px;
+                            box-shadow: 0 8px 25px rgba(212, 175, 55, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+                            text-align: center;
+                            position: relative;
+                            overflow: hidden;
+                        }
+                        .gold-header::before {
+                            content: '';
+                            position: absolute;
+                            top: 0;
+                            left: 0;
+                            right: 0;
+                            bottom: 0;
+                            background: linear-gradient(45deg, transparent 30%, rgba(255, 255, 255, 0.1) 50%, transparent 70%);
+                            pointer-events: none;
+                        }
+                        .gold-header h1 {
+                            color: #1a1a1a;
+                            font-size: 42px;
+                            font-weight: 900;
+                            margin: 0 0 15px 0;
+                            text-shadow: 3px 3px 6px rgba(0,0,0,0.3), 0 0 20px rgba(255, 215, 0, 0.5);
+                            letter-spacing: 2px;
+                            position: relative;
+                            z-index: 1;
+                        }
+                        .gold-header .invoice-number {
+                            font-size: 28px;
+                            margin-top: 10px;
+                            font-weight: 700;
+                            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+                            position: relative;
+                            z-index: 1;
+                        }
+                        
+                        /* Information Section */
+                        .info-section {
+                            background: linear-gradient(135deg, #fff9e6 0%, #fff5d6 50%, #fff9e6 100%);
+                            border: 3px solid #d4af37;
+                            border-radius: 12px;
+                            padding: 25px;
+                            margin-bottom: 30px;
+                            box-shadow: 0 4px 15px rgba(212, 175, 55, 0.2);
+                            position: relative;
+                        }
+                        .info-section::before {
+                            content: '';
+                            position: absolute;
+                            top: -3px;
+                            left: -3px;
+                            right: -3px;
+                            bottom: -3px;
+                            background: linear-gradient(135deg, #d4af37, #f4d03f, #d4af37);
+                            border-radius: 12px;
+                            z-index: -1;
+                            opacity: 0.3;
+                        }
+                        .info-section strong {
+                            color: #8b6914;
+                            font-weight: 700;
+                            font-size: 15px;
+                            display: inline-block;
+                            min-width: 120px;
+                        }
+                        .info-section .row {
+                            margin-bottom: 12px;
+                        }
+                        .info-section .row:last-child {
+                            margin-bottom: 0;
+                        }
+                        
+                        /* Products Table */
+                        .products-table {
+                            width: 100%;
+                            border-collapse: separate;
+                            border-spacing: 0;
+                            margin-bottom: 35px;
+                            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+                            border-radius: 12px;
+                            overflow: hidden;
+                            background: #fff;
+                        }
+                        .products-table thead {
+                            background: linear-gradient(135deg, #d4af37 0%, #f4d03f 50%, #d4af37 100%);
+                            color: #1a1a1a;
+                        }
+                        .products-table th {
+                            padding: 18px 15px;
+                            text-align: right;
+                            font-weight: 800;
+                            font-size: 15px;
+                            border: none;
+                            border-bottom: 3px solid #b8941f;
+                            text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
+                            letter-spacing: 0.5px;
+                        }
+                        .products-table th:first-child {
+                            border-top-right-radius: 12px;
+                        }
+                        .products-table th:last-child {
+                            border-top-left-radius: 12px;
+                        }
+                        .products-table td {
+                            padding: 16px 15px;
+                            border: none;
+                            border-bottom: 1px solid #f0f0f0;
+                            text-align: right;
+                            font-size: 14px;
+                            vertical-align: middle;
+                        }
+                        .products-table tbody tr {
+                            transition: all 0.3s ease;
+                        }
+                        .products-table tbody tr:nth-child(even) {
+                            background: linear-gradient(to right, #fff9e6 0%, #fffef9 100%);
+                        }
+                        .products-table tbody tr:hover {
+                            background: linear-gradient(to right, #fff5d6 0%, #fff9e6 100%);
+                            transform: scale(1.01);
+                            box-shadow: 0 2px 8px rgba(212, 175, 55, 0.2);
+                        }
+                        .products-table tbody tr:last-child td:first-child {
+                            border-bottom-right-radius: 12px;
+                        }
+                        .products-table tbody tr:last-child td:last-child {
+                            border-bottom-left-radius: 12px;
+                        }
+                        .product-name {
+                            font-weight: 600;
+                            color: #2c3e50;
+                            font-size: 15px;
+                        }
+                        .price-iqd {
+                            font-weight: 700;
+                            color: #8b6914;
+                            font-size: 15px;
+                        }
+                        
+                        /* Totals Section */
+                        .totals-section {
+                            background: linear-gradient(135deg, #fff9e6 0%, #fff5d6 50%, #fff9e6 100%);
+                            border: 3px solid #d4af37;
+                            border-radius: 12px;
+                            padding: 25px;
+                            margin-top: 35px;
+                            box-shadow: 0 4px 20px rgba(212, 175, 55, 0.25);
+                            position: relative;
+                        }
+                        .totals-section::before {
+                            content: '';
+                            position: absolute;
+                            top: -3px;
+                            left: -3px;
+                            right: -3px;
+                            bottom: -3px;
+                            background: linear-gradient(135deg, #d4af37, #f4d03f, #d4af37);
+                            border-radius: 12px;
+                            z-index: -1;
+                            opacity: 0.2;
+                        }
+                        .totals-table {
+                            width: 100%;
+                            max-width: 450px;
+                            margin-right: auto;
+                            border-collapse: separate;
+                            border-spacing: 0;
+                        }
+                        .totals-table tr {
+                            border-bottom: 2px solid #e8e8e8;
+                        }
+                        .totals-table tr:last-child {
+                            border-bottom: none;
+                        }
+                        .totals-table td {
+                            padding: 14px 18px;
+                            font-size: 15px;
+                        }
+                        .totals-table .total-label {
+                            font-weight: 700;
+                            color: #8b6914;
+                            text-align: right;
+                            font-size: 16px;
+                        }
+                        .totals-table .total-value {
+                            text-align: left;
+                            color: #2c3e50;
+                            font-weight: 600;
+                            font-size: 16px;
+                        }
+                        .grand-total {
+                            background: linear-gradient(135deg, #d4af37 0%, #f4d03f 50%, #d4af37 100%);
+                            color: #1a1a1a;
+                            font-weight: 900;
+                            font-size: 20px;
+                            border: none !important;
+                            box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
+                        }
+                        .grand-total .total-label {
+                            color: #1a1a1a;
+                            font-size: 20px;
+                            text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
+                        }
+                        .grand-total .total-value {
+                            color: #1a1a1a;
+                            font-size: 22px;
+                            text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
+                        }
+                        .currency-badge {
+                            display: inline-block;
+                            background: linear-gradient(135deg, #8b6914 0%, #b8941f 100%);
+                            color: #fff;
+                            padding: 4px 10px;
+                            border-radius: 5px;
+                            font-size: 12px;
+                            font-weight: 700;
+                            margin-right: 5px;
+                            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                        }
+                        
+                        /* Notes Section */
+                        .notes-section {
+                            background: linear-gradient(to right, #f8f9fa 0%, #fff9e6 100%);
+                            border-right: 5px solid #d4af37;
+                            padding: 20px;
+                            margin-top: 30px;
+                            border-radius: 8px;
+                            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+                        }
+                        .notes-section h4 {
+                            color: #8b6914;
+                            font-weight: 800;
+                            margin-bottom: 12px;
+                            font-size: 18px;
+                            border-bottom: 2px solid #d4af37;
+                            padding-bottom: 8px;
+                        }
+                        
+                        /* Footer */
+                        .footer-section {
+                            margin-top: 40px;
+                            padding-top: 25px;
+                            border-top: 3px solid #d4af37;
+                            text-align: center;
+                            color: #7f8c8d;
+                            font-size: 13px;
+                            font-style: italic;
+                        }
+                        
+                        /* Print Styles */
+                        @media print {
+                            .gold-invoice {
+                                background: #fff;
+                            }
+                            .products-table tbody tr:hover {
+                                transform: none;
+                            }
+                        }
+                    </style>
+                    <div class="oe_structure"/>
+                    
+                    <!-- Gold Header -->
+                    <div class="gold-header">
+                        <h1>فاتورة بيع</h1>
+                        <div class="invoice-number">
+                            <span t-if="doc.state == 'draft'">مسودة طلب #</span>
+                            <span t-elif="doc.state == 'sale'">فاتورة بيع #</span>
+                            <span t-else="">طلب #</span>
+                            <span t-if="doc.name and doc.name != 'New'" t-esc="doc.name"/>
+                            <span t-else="" t-esc="doc.id"/>
+                        </div>
+                    </div>
+                    
+                    <!-- Information Section -->
+                    <div class="info-section">
+                        <div class="row mb-2">
+                            <div t-if="doc.date" class="col" name="informations_date">
+                                <strong>التاريخ:</strong> <span t-field="doc.date" t-options='{"widget": "date"}'/>
+                            </div>
+                            <div t-if="doc.partner_id" class="col" name="informations_customer">
+                                <strong>اسم العميل:</strong> <span t-field="doc.partner_id.name"/>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div t-if="doc.partner_id and doc.partner_id.ref" class="col" name="informations_customer_ref">
+                                <strong>رقم العميل:</strong> <span t-field="doc.partner_id.ref"/>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="oe_structure"/>
+                    <table class="products-table o_has_total_table table o_main_table">
+                        <thead>
+                            <tr>
+                                <th name="th_description" class="text-end">المنتج</th>
+                                <th name="th_quantity" class="text-start text-nowrap">الكمية</th>
+                                <th name="th_uom" class="text-start text-nowrap">وحدة القياس</th>
+                                <th name="th_priceunit" class="text-start text-nowrap">السعر (دينار)</th>
+                                <th name="th_subtotal" class="text-start">المجموع (دينار)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <t t-foreach="doc.order_line_ids" t-as="line">
+                                <tr>
+                                    <td class="text-end">
+                                        <div class="product-name">
+                                            <span t-if="line.custom_product_name" t-esc="line.custom_product_name"/>
+                                            <span t-else="" t-field="line.product_id.name"/>
+                                        </div>
+                                    </td>
+                                    <td class="text-start"><span t-field="line.quantity"/></td>
+                                    <td class="text-start">
+                                        <span t-if="line.product_uom_id" t-field="line.product_uom_id.name"/>
+                                        <span t-else="">-</span>
+                                    </td>
+                                    <td class="text-start price-iqd">
+                                        <t t-esc="'{:,.0f}'.format(line.unit_price * (doc.exchange_rate or 1410))"/>
+                                    </td>
+                                    <td class="text-start price-iqd">
+                                        <t t-esc="'{:,.0f}'.format(line.line_total * (doc.exchange_rate or 1410))"/>
+                                    </td>
+                                </tr>
+                            </t>
+                        </tbody>
+                    </table>
+                    
+                    <!-- Totals Section -->
+                    <div class="totals-section">
+                        <table class="totals-table">
+                            <tr t-if="doc.amount_discount &gt; 0" class="o_taxes">
+                                <td class="total-label">الخصم</td>
+                                <td class="total-value">
+                                    <t t-esc="'{:,.0f}'.format(doc.amount_discount * (doc.exchange_rate or 1410))"/>
+                                </td>
+                            </tr>
+                            <tr class="grand-total o_total">
+                                <td class="total-label">المجموع الكلي</td>
+                                <td class="total-value">
+                                    <t t-esc="'{:,.0f}'.format(doc.amount_total * (doc.exchange_rate or 1410))"/>
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+                    <div class="oe_structure"/>
+
+                    <!-- Notes Section -->
+                    <div t-if="doc.note" class="notes-section">
+                        <h4>ملاحظات:</h4>
+                        <div t-field="doc.note" name="order_note"/>
+                    </div>
+                    
+                    <!-- Footer -->
+                    <div class="footer-section">
+                        <p>شكراً لتعاملكم معنا</p>
+                    </div>
+                    
+                    <div class="oe_structure"/>
+                </div>
+            </t>
+        </template>
+
+        <!-- Raw template that calls html_container -->
+        <template id="report_pos_perfume_order_raw_gold" t-name="pos_perfume_custom.report_pos_perfume_order_raw_gold">
+            <t t-call="web.html_container">
+                <t t-foreach="docs" t-as="doc">
+                    <t t-call="pos_perfume_custom.report_pos_perfume_order_document_gold" t-lang="doc.partner_id.lang if doc.partner_id else None"/>
+                </t>
+            </t>
+        </template>
+
+        <!-- Main report template -->
+        <record id="report_pos_perfume_order_gold" model="ir.ui.view">
+            <field name="name">report_pos_perfume_order_gold</field>
+            <field name="key">pos_perfume_custom.report_pos_perfume_order_gold</field>
+            <field name="type">qweb</field>
+            <field name="arch" type="xml">
+                <t t-name="pos_perfume_custom.report_pos_perfume_order_gold">
+                    <t t-call="pos_perfume_custom.report_pos_perfume_order_raw_gold"/>
+                </t>
+            </field>
+        </record>
+    </data>
+</odoo>
+
