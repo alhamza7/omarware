@@ -345,7 +345,8 @@
                                 <tr>
                                     <td class="text-end">
                                         <div class="product-name">
-                                            <span t-field="line.display_product_name"/>
+                                            <span t-if="line.custom_product_name" t-esc="line.custom_product_name"/>
+                                            <span t-else="" t-field="line.product_id.name"/>
                                         </div>
                                     </td>
                                     <td class="text-start"><span t-field="line.quantity"/></td>
@@ -395,16 +396,6 @@
                     </div>
                     
                     <div class="oe_structure"/>
-                    <!-- Auto-print when report opens in browser -->
-                    <script type="text/javascript">
-                        window.addEventListener('load', function () {
-                            try {
-                                window.print();
-                            } catch (e) {
-                                console && console.warn && console.warn('Auto print failed', e);
-                            }
-                        });
-                    </script>
                 </div>
             </t>
         </template>
