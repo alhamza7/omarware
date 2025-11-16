@@ -61,7 +61,11 @@
         'wizard/stock_duplicate_cleaner_views.xml',  # Stock Duplicate Cleaner Wizard
         
         # Views (Actions & Forms)
-        'views/sap_dashboard_views.xml',  # Dashboard views and actions
+        'views/sap_dashboard_views.xml',  # Dashboard views and actions (contains menu_sap_integration root)
+        
+        # Menu Structure - Load EARLY so menu items are available for wizards
+        'views/sap_menu_structure.xml',  # ⭐ Organized menu structure (must load before wizards that reference menus)
+        
         'views/sap_backend_views.xml',
         'views/sap_connector_views.xml',
         'views/sap_mapper_views.xml',  # UOM & Pricelist Mapping
@@ -89,9 +93,6 @@
         'views/sap_product_pricelist_sync_views.xml',  # Pricelist synchronization
         'views/sap_product_warehouse_info_views.xml',  # Warehouse information
         'views/product_uom_group_views.xml',  # UoM Group restriction in products/sales
-        
-        # Menu Structure - Load LAST to organize all menu items
-        'views/sap_menu_structure.xml',  # ⭐ New: Organized menu structure
     ],
     'installable': True,
     'application': True,
