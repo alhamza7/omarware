@@ -50,7 +50,13 @@
         'data/sap_backend_data.xml',
         # 'data/sap_cron_data.xml',  # Disabled - uses advanced models not yet enabled
         
-        # Wizards - Load FIRST so their actions are available
+        # Views (Actions & Forms) - Load dashboard first for root menu
+        'views/sap_dashboard_views.xml',  # Dashboard views and actions (contains menu_sap_integration root)
+        
+        # Menu Structure - Load BEFORE wizards so menu items are available when referenced
+        'views/sap_menu_structure.xml',  # ⭐ Organized menu structure (must load before wizards)
+        
+        # Wizards - Load AFTER menus so they can reference menu items
         'wizard/sap_import_wizard_views.xml',  # Main import wizard (used by other views)
         'wizard/sap_conflict_resolution_wizard_views.xml',  # Conflict Resolution Wizard
         'wizard/sap_uom_conversion_test_wizard_views.xml',  # UoM Conversion Test Wizard
@@ -61,11 +67,6 @@
         'wizard/stock_duplicate_cleaner_views.xml',  # Stock Duplicate Cleaner Wizard
         
         # Views (Actions & Forms)
-        'views/sap_dashboard_views.xml',  # Dashboard views and actions (contains menu_sap_integration root)
-        
-        # Menu Structure - Load EARLY so menu items are available for wizards
-        'views/sap_menu_structure.xml',  # ⭐ Organized menu structure (must load before wizards that reference menus)
-        
         'views/sap_backend_views.xml',
         'views/sap_connector_views.xml',
         'views/sap_mapper_views.xml',  # UOM & Pricelist Mapping
