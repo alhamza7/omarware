@@ -13,15 +13,32 @@ echo "1. سحب التحديثات من GitHub..."
 git pull origin main
 
 echo ""
-echo "2. تثبيت مكتبة passlib..."
-pip3 install passlib==1.7.4
+echo "2. التحقق من virtual environment..."
+if [ -d "venv" ]; then
+    echo "✅ تم العثور على virtual environment"
+    PIP_CMD="venv/bin/pip"
+    PYTHON_CMD="venv/bin/python"
+elif [ -d ".venv" ]; then
+    echo "✅ تم العثور على virtual environment (.venv)"
+    PIP_CMD=".venv/bin/pip"
+    PYTHON_CMD=".venv/bin/python"
+else
+    echo "⚠️  لم يتم العثور على virtual environment"
+    echo "   محاولة استخدام pip3 مع --break-system-packages..."
+    PIP_CMD="pip3 --break-system-packages"
+    PYTHON_CMD="python3"
+fi
 
 echo ""
-echo "3. تثبيت مكتبة pdfminer.six (اختياري)..."
-pip3 install pdfminer.six
+echo "3. تثبيت مكتبة passlib..."
+$PIP_CMD install passlib==1.7.4
 
 echo ""
-echo "4. التحقق من الملف المُصلح..."
+echo "4. تثبيت مكتبة pdfminer.six (اختياري)..."
+$PIP_CMD install pdfminer.six
+
+echo ""
+echo "5. التحقق من الملف المُصلح..."
 if grep -q "<data" addons/sap_integration/views/sap_menu_structure.xml; then
     echo "❌ خطأ: الملف لا يزال يحتوي على <data>"
     echo "يرجى التحقق من أن git pull تم بنجاح"
