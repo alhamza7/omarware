@@ -44,7 +44,7 @@
     <!-- Menu Item -->
     <menuitem id="menu_sap_clear_pricelist"
               name="Clear SAP Pricelists"
-              parent="sap_integration.menu_sap_tools"
+              parent="menu_sap_tools"
               action="action_sap_clear_pricelist"
               sequence="99"/>
 </odoo>

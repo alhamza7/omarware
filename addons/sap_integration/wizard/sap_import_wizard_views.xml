@@ -133,7 +133,7 @@
     <!-- Menu Item for Import Wizard -->
     <menuitem id="menu_sap_import_wizard"
               name="Import from SAP"
-              parent="sap_integration.menu_sap_tools"
+              parent="menu_sap_tools"
               action="action_sap_import_wizard"
               sequence="10"/>
     
