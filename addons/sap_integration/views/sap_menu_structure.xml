@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
 
+    <!-- SAP Integration Menu Items -->
     <menuitem id="menu_sap_dashboard"
               name="📊 Dashboard"
               parent="menu_sap_integration"
