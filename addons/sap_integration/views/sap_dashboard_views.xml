@@ -179,6 +179,12 @@
               sequence="10"
               action="action_sap_dashboard"/>
 
+    <!-- Management Tools Menu - Defined here to ensure it's available before wizards -->
+    <menuitem id="menu_sap_tools"
+              name="🔧 Management Tools"
+              parent="menu_sap_integration"
+              sequence="40"/>
+
 </odoo>
 
 

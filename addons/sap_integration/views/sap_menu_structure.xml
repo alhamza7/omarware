@@ -171,11 +171,7 @@
               sequence="3"/>
 
     <!-- Management Tools Section -->
-    <menuitem id="menu_sap_tools"
-              name="🔧 Management Tools"
-              parent="menu_sap_integration"
-              sequence="40"/>
-
+    <!-- Note: menu_sap_tools is defined in sap_dashboard_views.xml to ensure it loads before wizards -->
     <!-- Sync Management -->
     <menuitem id="menu_sap_sync_management"
               name="Sync Management"
