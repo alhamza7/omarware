@@ -1,7 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-    <!-- SAP Integration - Organized Menu Structure -->
-    <!-- Main Menu: menu_sap_integration is defined in sap_dashboard_views.xml -->
     <menuitem id="menu_sap_dashboard"
               name="📊 Dashboard"
               parent="menu_sap_integration"
