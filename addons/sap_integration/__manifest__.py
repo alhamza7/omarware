@@ -51,10 +51,10 @@
         # 'data/sap_cron_data.xml',  # Disabled - uses advanced models not yet enabled
         
         # Views (Actions & Forms) - Load dashboard first for root menu
-        'views/sap_dashboard_views.xml',  # Dashboard views and actions (contains menu_sap_integration root)
+        'views/sap_dashboard_views.xml',  # Dashboard views and actions (contains all menu items - moved from sap_menu_structure.xml)
         
-        # Menu Structure - Load BEFORE wizards so menu items are available when referenced
-        'views/sap_menu_structure.xml',  # ⭐ Organized menu structure (must load before wizards)
+        # Menu Structure - DISABLED: All menus moved to sap_dashboard_views.xml to fix Odoo 19 XML schema validation
+        # 'views/sap_menu_structure.xml',  # All menu items moved to sap_dashboard_views.xml
         
         # Wizards - Load AFTER menus so they can reference menu items
         'wizard/sap_import_wizard_views.xml',  # Main import wizard (used by other views)
