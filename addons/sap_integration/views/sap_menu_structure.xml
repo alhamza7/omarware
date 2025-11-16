@@ -91,7 +91,7 @@
               name="Sync Foreign Names to Products"
               parent="menu_sap_data_management"
               action="action_sync_all_foreign_names_to_products_wizard"
-              sequence="1.5"/>
+              sequence="2"/>
     
     <menuitem id="menu_sap_product_pricelist_sync"
               name="Product Pricelist Sync"

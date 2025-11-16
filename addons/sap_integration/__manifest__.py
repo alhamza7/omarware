@@ -51,9 +51,9 @@
         # 'data/sap_cron_data.xml',  # Disabled - uses advanced models not yet enabled
         
         # Views (Actions & Forms)
-        'views/sap_menus_minimal.xml',      # Minimal menus: defines menu_sap_integration and menu_sap_tools only
-        # 'views/sap_dashboard_views.xml',  # Full dashboard + menus (temporarily disabled due to XML schema issues on server)
-        # 'views/sap_menu_structure.xml',   # Old menu structure file (disabled)
+        'views/sap_menus_minimal.xml',      # Minimal root menus: menu_sap_integration + menu_sap_tools
+        'views/sap_menu_structure.xml',     # Full menu tree (all sections and tools), Odoo 19–compatible
+        # 'views/sap_dashboard_views.xml',  # Full dashboard view (still disabled for now)
         
         # Wizards - Load AFTER menus so they can reference menu items
         'wizard/sap_import_wizard_views.xml',  # Main import wizard (used by other views)
