@@ -45,7 +45,7 @@ find ~/Lugal-ai -type f -name "*.pyc" -delete 2>/dev/null || true
 
 # 5. التحقق من الملف المُصلح
 echo ""
-echo "3. التحقق من الملف المُصلح..."
+echo "5. التحقق من الملف المُصلح..."
 head -5 addons/sap_integration/views/sap_dashboard_views.xml
 
 # 6. تحديث المودول مع --stop-after-init
