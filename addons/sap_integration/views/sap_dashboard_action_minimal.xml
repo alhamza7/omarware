@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Minimal, Odoo 19–compatible dashboard action used by menu_sap_dashboard -->
+    <record id="action_sap_dashboard" model="ir.actions.act_window">
+        <field name="name">SAP Dashboard</field>
+        <!-- Keep the original model so we can later plug a nicer view if needed -->
+        <field name="res_model">sap.dashboard</field>
+        <field name="view_mode">tree,form</field>
+        <field name="target">current</field>
+        <field name="context">{}</field>
+    </record>
+
+</odoo>
+
+
