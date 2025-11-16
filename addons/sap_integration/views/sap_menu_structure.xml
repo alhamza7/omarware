@@ -1,26 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-    <!-- 
-    ════════════════════════════════════════════════════════════════
-    SAP Integration - Organized Menu Structure
-    ════════════════════════════════════════════════════════════════
-    This file reorganizes all SAP menu items into logical groups
-    for better navigation and user experience.
-    -->
-    <!-- Main Menu - Note: menu_sap_integration is defined in sap_dashboard_views.xml -->
-
-    <!-- ═══════════════════════════════════════════════════════════ -->
-    <!-- 📊 DASHBOARD SECTION -->
-    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- SAP Integration - Organized Menu Structure -->
+    <!-- Main Menu: menu_sap_integration is defined in sap_dashboard_views.xml -->
     <menuitem id="menu_sap_dashboard"
               name="📊 Dashboard"
               parent="menu_sap_integration"
               action="action_sap_dashboard"
               sequence="1"/>
 
-    <!-- ═══════════════════════════════════════════════════════════ -->
-    <!-- ⚙️ CONFIGURATION SECTION -->
-    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- Configuration Section -->
     <menuitem id="menu_sap_configuration"
                   name="⚙️ Configuration"
                   parent="menu_sap_integration"
@@ -50,9 +38,7 @@
               action="action_sap_pricelist_sync"
               sequence="4"/>
 
-    <!-- ═══════════════════════════════════════════════════════════ -->
-    <!-- 🔄 SYNCHRONIZATION SECTION -->
-    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- Synchronization Section -->
     <menuitem id="menu_sap_sync"
               name="🔄 Synchronization"
               parent="menu_sap_integration"
@@ -88,9 +74,7 @@
               action="action_sap_warehouse"
               sequence="5"/>
 
-    <!-- ═══════════════════════════════════════════════════════════ -->
-    <!-- 📦 DATA MANAGEMENT SECTION -->
-    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- Data Management Section -->
     <menuitem id="menu_sap_data_management"
               name="📦 Data Management"
               parent="menu_sap_integration"
@@ -188,9 +172,7 @@
               action="action_sap_sync_log"
               sequence="3"/>
 
-    <!-- ═══════════════════════════════════════════════════════════ -->
-    <!-- 🔧 MANAGEMENT TOOLS SECTION -->
-    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- Management Tools Section -->
     <menuitem id="menu_sap_tools"
               name="🔧 Management Tools"
               parent="menu_sap_integration"
@@ -232,17 +214,13 @@
               action="action_sap_uom_conversion_test"
               sequence="3"/>
 
-    <!-- ═══════════════════════════════════════════════════════════ -->
-    <!-- 👥 USER MANAGEMENT SECTION -->
-    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- User Management Section -->
     <menuitem id="menu_sap_user_management"
               name="👥 User Management"
               parent="menu_sap_integration"
               sequence="50"/>
 
-    <!-- ═══════════════════════════════════════════════════════════ -->
-    <!-- 📈 MONITORING &amp; ANALYTICS SECTION -->
-    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- Monitoring &amp; Analytics Section -->
     <menuitem id="menu_sap_monitoring"
               name="📈 Monitoring &amp; Analytics"
               parent="menu_sap_integration"
