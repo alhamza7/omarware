@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
+
     <!-- SAP Dashboard Form View -->
     <record id="view_sap_dashboard_form" model="ir.ui.view">
         <field name="name">sap.dashboard.form</field>
