@@ -328,12 +328,18 @@ class PosPerfumeController(http.Controller):
             if not config:
                 return {'success': False, 'error': 'ULTRAMSG not configured. Please contact administrator.'}
             
-            # Generate PDF report
-            report = request.env.ref('pos_perfume_custom.action_report_pos_perfume_order')
-            pdf_content, _ = report._render_qweb_pdf([order.id])
+            # Generate PDF report (use correct signature for _render_qweb_pdf)
+            # In Odoo 19, _render_qweb_pdf(report_ref, res_ids=None, data=None)
+            pdf_content, _ = request.env['ir.actions.report']._render_qweb_pdf(
+                'pos_perfume_custom.action_report_pos_perfume_order',
+                [order.id],
+            )
             
-            # Upload PDF to get public URL (we'll save it temporarily)
+            # Encode PDF as base64 so we can send it directly to ULTRAMSG without relying on a public URL
             import base64
+            pdf_base64 = base64.b64encode(pdf_content).decode('utf-8')
+            
+            # Also create an attachment in Odoo for internal viewing/archiving
             attachment = request.env['ir.attachment'].create({
                 'name': f'Invoice_{order.name}.pdf',
                 'type': 'binary',
@@ -342,10 +348,6 @@ class PosPerfumeController(http.Controller):
                 'res_id': order.id,
                 'public': True,
             })
-            
-            # Get public URL for the PDF
-            base_url = request.env['ir.config_parameter'].sudo().get_param('web.base.url')
-            pdf_url = f"{base_url}/web/content/{attachment.id}?download=true"
             
             # Prepare message
             message_body = f"""
@@ -363,7 +365,8 @@ class PosPerfumeController(http.Controller):
                 'phone': order.partner_id.phone,
                 'message_type': 'document',
                 'message_body': message_body,
-                'document_url': pdf_url,
+                # Store the Odoo attachment URL for reference (not used by ULTRAMSG)
+                'document_url': f'/web/content/{attachment.id}?download=true',
                 'document_name': f'Invoice_{order.name}.pdf',
                 'res_model': 'pos.perfume.order',
                 'res_id': order.id,
@@ -375,9 +378,18 @@ class PosPerfumeController(http.Controller):
                 phone=order.partner_id.phone,
                 message_type='document',
                 message_body=message_body,
-                document_url=pdf_url,
+                # Send the PDF content directly as base64 instead of a URL
+                document_url=pdf_base64,
                 document_name=f'Invoice_{order.name}.pdf',
             )
+            
+            # Normalize result to a dictionary
+            if not isinstance(result, dict):
+                # In unexpected cases, convert to generic error
+                return {
+                    'success': False,
+                    'error': 'Invalid response from WhatsApp service',
+                }
             
             # Update message status
             if result.get('success'):
@@ -398,9 +410,20 @@ class PosPerfumeController(http.Controller):
                     'error_message': result.get('error'),
                     'ultramsg_response': str(result.get('response')),
                 })
+                response_error = result.get('error')
+                # Ensure error is a readable string (avoid objects/lists)
+                if isinstance(response_error, (dict, list)):
+                    try:
+                        import json
+                        response_error = json.dumps(response_error, ensure_ascii=False)
+                    except Exception:
+                        response_error = str(response_error)
+                elif not isinstance(response_error, str):
+                    response_error = str(response_error)
+                
                 return {
                     'success': False,
-                    'error': result.get('error', 'Failed to send message'),
+                    'error': response_error or 'Failed to send message',
                     'message_id': message.id,
                 }
                 

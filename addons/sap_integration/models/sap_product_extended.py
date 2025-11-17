@@ -546,12 +546,21 @@ class SapProductExtended(models.Model):
             vals['default_warehouse_code'] = sap_data['DefaultWarehouseCode']
         
         # Item types
+        # Normalize SAP boolean-like flags to robust booleans
+        def _to_bool_flag(value, default_true=True):
+            if value is None or value == '':
+                return bool(default_true)
+            if isinstance(value, bool):
+                return value
+            v = str(value).strip().upper()
+            return v in ('Y', 'YES', 'TYES', '1', 'TRUE')
+
         if 'PurchaseItem' in sap_data:
-            vals['purchase_item'] = sap_data['PurchaseItem'] == 'Y'
+            vals['purchase_item'] = _to_bool_flag(sap_data['PurchaseItem'], default_true=True)
         if 'SalesItem' in sap_data:
-            vals['sales_item'] = sap_data['SalesItem'] == 'Y'
+            vals['sales_item'] = _to_bool_flag(sap_data['SalesItem'], default_true=True)
         if 'InventoryItem' in sap_data:
-            vals['inventory_item'] = sap_data['InventoryItem'] == 'Y'
+            vals['inventory_item'] = _to_bool_flag(sap_data['InventoryItem'], default_true=True)
         
         # Tax codes
         if 'TaxCodeAR' in sap_data:

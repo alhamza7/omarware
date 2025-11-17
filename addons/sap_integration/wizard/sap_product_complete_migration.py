@@ -749,9 +749,24 @@ class SapProductCompleteMigration(models.TransientModel):
         default_uom_id = sales_uom_id or inventory_uom_id or purchase_uom_id
         
         # ========== Prepare basic values ==========
-        is_active = item_data.get('Frozen', 'tNO') != 'tYES'
-        is_sales_item = item_data.get('SalesItem', 'Y') == 'Y'
-        is_purchase_item = item_data.get('PurchaseItem', 'Y') == 'Y'
+        # Active flag from SAP (Frozen = tYES => inactive)
+        is_active = (item_data.get('Frozen') or 'tNO') != 'tYES'
+
+        # Normalize SalesItem / PurchaseItem from SAP to robust booleans
+        def _to_bool_flag(value, default_true=True):
+            """
+            Convert SAP Y/N / tYES/tNO / True/False style flags to boolean.
+            If value is empty and default_true=True, treat as True.
+            """
+            if value is None or value == '':
+                return bool(default_true)
+            if isinstance(value, bool):
+                return value
+            v = str(value).strip().upper()
+            return v in ('Y', 'YES', 'TYES', '1', 'TRUE')
+
+        is_sales_item = _to_bool_flag(item_data.get('SalesItem'), default_true=True)
+        is_purchase_item = _to_bool_flag(item_data.get('PurchaseItem'), default_true=True)
         
         # Handle prices safely (in case they are None)
         sales_price = item_data.get('SalesUnitPrice', 0) or 0

@@ -376,7 +376,7 @@
                                                     <t t-esc="line.badge_text"/>
                                                 </span>
                                             <input type="text" 
-                                                   t-att-value="line.productName"
+                                                   t-att-value="line.customProductName or line.productName"
                                                    t-att-placeholder="'Search product...'"
                                                    t-att-data-line-index="line_index"
                                                    t-att-data-row="line_index"

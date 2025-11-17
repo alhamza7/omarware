@@ -1755,10 +1755,25 @@ export class PosPerfumeScreen extends Component {
                 const cell = document.querySelector(selector);
                 if (cell) {
                     cell.focus();
-                    if (cell.select && typeof cell.select === 'function') {
+                    if (cell.select && typeof cell.select === "function") {
                         cell.select();
                     }
                     this.setFocusedCell(rowIndex, colIndex);
+
+                    // Ensure the focused cell is visible inside the order table container
+                    const container = document.querySelector(".order-table-container");
+                    if (container) {
+                        const cellRect = cell.getBoundingClientRect();
+                        const containerRect = container.getBoundingClientRect();
+
+                        if (cellRect.top < containerRect.top) {
+                            // Cell is above visible area -> scroll up
+                            container.scrollTop -= (containerRect.top - cellRect.top) + 10;
+                        } else if (cellRect.bottom > containerRect.bottom) {
+                            // Cell is below visible area -> scroll down
+                            container.scrollTop += (cellRect.bottom - containerRect.bottom) + 10;
+                        }
+                    }
                 }
             }
         }, 10);
@@ -2944,8 +2959,23 @@ export class PosPerfumeScreen extends Component {
                     { type: "success" }
                 );
             } else {
+                // Normalize error to readable text (avoid [object Object])
+                let errorText = result && (result.error || result.message);
+                if (errorText && typeof errorText === "object") {
+                    // Try common structures from ULTRAMSG / Odoo errors
+                    if (errorText.error) {
+                        errorText = errorText.error;
+                    } else if (errorText.message) {
+                        errorText = errorText.message;
+                    } else {
+                        errorText = JSON.stringify(errorText);
+                    }
+                }
+                if (!errorText) {
+                    errorText = "Unknown error";
+                }
                 this.notification.add(
-                    _t("❌ Failed to send: ") + (result.error || 'Unknown error'),
+                    _t("❌ Failed to send: ") + errorText,
                     { type: "danger" }
                 );
             }
