@@ -27,10 +27,12 @@
         </record>
 
         <!-- SAP Manager Group: Full access -->
+        <!-- NOTE: implied_ids also include base.group_system so any Odoo Admin
+             (Settings > Technical) automatically gets full SAP access. -->
         <record id="group_sap_manager" model="res.groups">
             <field name="name">SAP Manager</field>
             <field name="privilege_id" ref="res_groups_privilege_sap_manager"/>
-            <field name="implied_ids" eval="[(4, ref('group_sap_user'))]"/>
+            <field name="implied_ids" eval="[(4, ref('group_sap_user')), (4, ref('base.group_system'))]"/>
             <field name="comment">Full access to SAP Integration configuration and data</field>
         </record>
 
