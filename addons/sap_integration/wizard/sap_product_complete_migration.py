@@ -505,6 +505,17 @@ class SapProductCompleteMigration(models.TransientModel):
             total_imported = 0
             total_errors = 0
             batch_number = 0
+            consecutive_empty_batches = 0
+            max_empty_batches = 3  # Stop after 3 consecutive empty batches
+            
+            # Log initial configuration
+            if self.product_limit > 0:
+                log.append(f"⚠️  Product Limit: {self.product_limit} products (will stop at this limit)")
+            else:
+                log.append(f"✅ Product Limit: UNLIMITED (will import all products from SAP)")
+            log.append("")
+            self.write({'migration_log': "\n".join(log)})
+            self.env.cr.commit()
             
             while True:
                 # Check if we reached the product limit
@@ -516,6 +527,8 @@ class SapProductCompleteMigration(models.TransientModel):
                 current_batch_size = self.batch_size
                 if self.product_limit > 0:
                     remaining = self.product_limit - total_imported
+                    if remaining <= 0:
+                        break
                     current_batch_size = min(self.batch_size, remaining)
                 
                 params = {
@@ -524,16 +537,51 @@ class SapProductCompleteMigration(models.TransientModel):
                     '$orderby': 'ItemCode'
                 }
                 
-                log.append(f"📥 Fetching batch from SAP (skip={skip})...")
+                log.append(f"📥 Fetching batch from SAP (skip={skip}, top={current_batch_size})...")
                 self.write({'migration_log': "\n".join(log)})
                 self.env.cr.commit()
                 
-                items_data = connection.get('Items', params)
+                # Retry logic for SAP API calls
+                max_retries = 3
+                items_data = None
+                for retry in range(max_retries):
+                    try:
+                        items_data = connection.get('Items', params)
+                        break
+                    except Exception as e:
+                        if retry < max_retries - 1:
+                            log.append(f"⚠️  Retry {retry + 1}/{max_retries} after error: {str(e)[:100]}")
+                            self.write({'migration_log': "\n".join(log)})
+                            self.env.cr.commit()
+                            import time
+                            time.sleep(2)  # Wait 2 seconds before retry
+                        else:
+                            error_msg = f"❌ Failed to fetch batch after {max_retries} retries: {str(e)}"
+                            log.append(error_msg)
+                            self._log_error(error_msg, e)
+                            raise
+                
+                if not items_data:
+                    log.append("❌ No data returned from SAP API")
+                    break
+                
                 batch = items_data.get('value', [])
                 
+                # Check for empty batch
                 if not batch:
-                    log.append("✓ No more products to fetch")
-                    break
+                    consecutive_empty_batches += 1
+                    log.append(f"⚠️  Empty batch received (consecutive empty: {consecutive_empty_batches}/{max_empty_batches})")
+                    
+                    if consecutive_empty_batches >= max_empty_batches:
+                        log.append(f"✓ No more products to fetch (received {max_empty_batches} consecutive empty batches)")
+                        break
+                    
+                    # Try to continue with next batch
+                    skip += current_batch_size
+                    continue
+                
+                # Reset empty batch counter on successful batch
+                consecutive_empty_batches = 0
                 
                 batch_number += 1
                 log.append(f"")
@@ -624,7 +672,12 @@ class SapProductCompleteMigration(models.TransientModel):
                 
                 # Update progress after each batch
                 log.append(f"  ✓ Batch {batch_number} complete: {len(batch)} items processed")
-                log.append(f"  📊 Total so far: {total_imported} imported, {total_errors} errors")
+                if self.product_limit > 0:
+                    remaining = self.product_limit - total_imported
+                    log.append(f"  📊 Total so far: {total_imported}/{self.product_limit} imported ({remaining} remaining), {total_errors} errors")
+                else:
+                    log.append(f"  📊 Total so far: {total_imported} imported (unlimited), {total_errors} errors")
+                log.append(f"  📍 Next batch will start from skip={skip + len(batch)}")
                 self.write({
                     'migration_log': "\n".join(log),
                     'total_products': total_imported,
