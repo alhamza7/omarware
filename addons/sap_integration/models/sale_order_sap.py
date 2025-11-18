@@ -43,13 +43,16 @@ class SaleOrder(models.Model):
             if invoice_types:
                 return invoice_types
             else:
-                # Default values if SAP is not available
+                # Default values if SAP is not available (IDs 1..8 with Arabic labels)
                 return [
-                    ('retail', 'بيع تجزئة - Retail'),
-                    ('wholesale', 'بيع جملة - Wholesale'),
-                    ('delivery', 'توصيل - Delivery'),
-                    ('corporate', 'شركات - Corporate'),
-                    ('individual', 'أفراد - Individual'),
+                    ('1', 'زبون محل'),
+                    ('2', 'شركات توصيل'),
+                    ('3', 'نقليات'),
+                    ('4', 'ديلفري'),
+                    ('5', 'NBS'),
+                    ('6', 'شورجة'),
+                    ('7', 'NA'),
+                    ('8', 'مكاتب الشورجة'),
                 ]
         except Exception as e:
             import logging
@@ -57,11 +60,14 @@ class SaleOrder(models.Model):
             _logger.error(f"Error fetching invoice types: {str(e)}")
             # Return default values on error
             return [
-                ('retail', 'بيع تجزئة - Retail'),
-                ('wholesale', 'بيع جملة - Wholesale'),
-                ('delivery', 'توصيل - Delivery'),
-                ('corporate', 'شركات - Corporate'),
-                ('individual', 'أفراد - Individual'),
+                ('1', 'زبون محل'),
+                ('2', 'شركات توصيل'),
+                ('3', 'نقليات'),
+                ('4', 'ديلفري'),
+                ('5', 'NBS'),
+                ('6', 'شورجة'),
+                ('7', 'NA'),
+                ('8', 'مكاتب الشورجة'),
             ]
     
     @api.model
@@ -421,19 +427,42 @@ class SaleOrder(models.Model):
             'DocumentLines': document_lines,
         }
         
-        # Send Odoo notes to SAP as Comments/Remarks
+        # Send Odoo notes to SAP as Comments/Remarks (will be enriched with invoice type below)
         if quotation.note:
             # 'Comments' is the standard SAP B1 field for document remarks
             quotation_data['Comments'] = quotation.note
+            _logger.info(f"Adding initial Comments to SAP quotation from sale.order {quotation.name}: {quotation.note[:200]}")
         
         # إضافة نوع الفاتورة (User-Defined Field) إذا كان متوفراً
         if quotation.invoice_type:
-            # Send both ID (code) and label to SAP:
-            # - U_InvoiceTypeId: the internal code (selection key, e.g. 'customer_shop')
-            # - U_InvoiceType: the human-readable label (e.g. 'زبون محل')
-            quotation_data['U_InvoiceTypeId'] = quotation.invoice_type
-            quotation_data['U_InvoiceType'] = dict(self._get_invoice_type_selection()).get(quotation.invoice_type, quotation.invoice_type)
-            _logger.info(f"Adding U_InvoiceTypeId={quotation.invoice_type}, U_InvoiceType={quotation_data['U_InvoiceType']} to quotation")
+            # من الآن فصاعداً، قيمة selection هي نفسها رقم SAP (مثلاً "1","2",...)
+            sap_id = quotation.invoice_type
+
+            # الاسم العربي من قائمة الاختيارات
+            label_map = dict(self._get_invoice_type_selection())
+            label_ar = label_map.get(quotation.invoice_type, quotation.invoice_type)
+
+            # إرسال:
+            # - U_InvoiceTypeId: الرقم (1..8)
+            # - U_InvoiceType: الاسم العربي كما طلبت
+            quotation_data['U_InvoiceTypeId'] = sap_id
+            quotation_data['U_InvoiceType'] = label_ar
+
+            # دمج نوع الفاتورة مع الملاحظات داخل Comments
+            comments_lines = []
+            comments_existing = (quotation_data.get('Comments') or '').strip()
+            if label_ar:
+                comments_lines.append(f"نوع الفاتورة: {label_ar}")
+            if comments_existing:
+                comments_lines.append(comments_existing)
+            if comments_lines:
+                quotation_data['Comments'] = "\n".join(comments_lines)
+
+            _logger.info(
+                f"Adding invoice type to SAP quotation from sale.order {quotation.name}: "
+                f"U_InvoiceTypeId={sap_id}, U_InvoiceType={label_ar}, "
+                f"Comments='{quotation_data.get('Comments', '')[:200]}'"
+            )
         
         # إضافة تاريخ الصلاحية إذا كان موجوداً
         if quotation.validity_date:

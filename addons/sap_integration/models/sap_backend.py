@@ -460,9 +460,19 @@ class SapBackend(models.Model):
             
             if not backend:
                 _logger.warning("No active SAP backend found")
-                return []
+                # Default to known invoice types (IDs 1..8) with Arabic labels
+                return [
+                    ('1', 'زبون محل'),
+                    ('2', 'شركات توصيل'),
+                    ('3', 'نقليات'),
+                    ('4', 'ديلفري'),
+                    ('5', 'NBS'),
+                    ('6', 'شورجة'),
+                    ('7', 'NA'),
+                    ('8', 'مكاتب الشورجة'),
+                ]
             
-            # Get connection and fetch invoice types
+            # Get connection and fetch invoice types from SAP UDF (if configured)
             connection = backend.get_connection()
             invoice_types = connection.get_invoice_types()
             
@@ -471,24 +481,30 @@ class SapBackend(models.Model):
                 return invoice_types
             else:
                 _logger.warning("No invoice types found in SAP, returning default values")
-                # إرجاع قيم افتراضية إذا لم يتم العثور على أي شيء في SAP
+                # إرجاع القيم القياسية إذا لم يتم العثور على أي شيء في SAP
                 return [
-                    ('retail', 'بيع تجزئة - Retail'),
-                    ('wholesale', 'بيع جملة - Wholesale'),
-                    ('delivery', 'توصيل - Delivery'),
-                    ('corporate', 'شركات - Corporate'),
-                    ('individual', 'أفراد - Individual'),
+                    ('1', 'زبون محل'),
+                    ('2', 'شركات توصيل'),
+                    ('3', 'نقليات'),
+                    ('4', 'ديلفري'),
+                    ('5', 'NBS'),
+                    ('6', 'شورجة'),
+                    ('7', 'NA'),
+                    ('8', 'مكاتب الشورجة'),
                 ]
                 
         except Exception as e:
             _logger.error(f"Error fetching invoice types from SAP: {str(e)}", exc_info=True)
             # إرجاع قيم افتراضية في حالة الخطأ
             return [
-                ('retail', 'بيع تجزئة - Retail'),
-                ('wholesale', 'بيع جملة - Wholesale'),
-                ('delivery', 'توصيل - Delivery'),
-                ('corporate', 'شركات - Corporate'),
-                ('individual', 'أفراد - Individual'),
+                ('1', 'زبون محل'),
+                ('2', 'شركات توصيل'),
+                ('3', 'نقليات'),
+                ('4', 'ديلفري'),
+                ('5', 'NBS'),
+                ('6', 'شورجة'),
+                ('7', 'NA'),
+                ('8', 'مكاتب الشورجة'),
             ]
 
 

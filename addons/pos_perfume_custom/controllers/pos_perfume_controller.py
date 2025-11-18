@@ -349,16 +349,34 @@ class PosPerfumeController(http.Controller):
                 'public': True,
             })
             
-            # Prepare message
-            message_body = f"""
-مرحباً {order.partner_id.name}،
-
-هذه فاتورتك من متجرنا:
-📄 رقم الطلب: {order.name}
-💰 المجموع: ${order.amount_total:.2f}
-
-شكراً لتعاملك معنا!
-            """.strip()
+            # Prepare invoice type and notes for WhatsApp (temporary)
+            invoice_type_label = ''
+            try:
+                if order.invoice_type:
+                    # Use the same selection list defined on pos.perfume.order to get Arabic label
+                    selection_map = dict(request.env['pos.perfume.order']._get_invoice_type_selection())
+                    invoice_type_label = selection_map.get(order.invoice_type, order.invoice_type)
+            except Exception as e:
+                _logger.warning(f"Failed to resolve invoice type label for WhatsApp: {e}")
+            
+            note_text = (order.note or '').strip()
+            
+            # Prepare message (include invoice type and notes temporarily)
+            message_body_lines = [
+                f"مرحباً {order.partner_id.name}،",
+                "",
+                "هذه فاتورتك من متجرنا:",
+                f"📄 رقم الطلب: {order.name}",
+                f"💰 المجموع: ${order.amount_total:.2f}",
+            ]
+            if invoice_type_label:
+                message_body_lines.append(f"📋 نوع الفاتورة: {invoice_type_label}")
+            if note_text:
+                message_body_lines.append(f"📝 الملاحظات: {note_text}")
+            message_body_lines.append("")
+            message_body_lines.append("شكراً لتعاملك معنا!")
+            
+            message_body = "\n".join(message_body_lines).strip()
             
             # Create message log
             message = request.env['ultramsg.message'].create({

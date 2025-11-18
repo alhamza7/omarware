@@ -194,16 +194,16 @@ class PosPerfumeOrder(models.Model):
             if invoice_types:
                 return invoice_types
             else:
-                # Default values matching SAP Business One invoice types
+                # Default values matching SAP Business One invoice types (IDs 1..8)
                 return [
-                    ('customer_shop', 'زبون محل'),
-                    ('delivery_companies', 'شركات توصيل'),
-                    ('ta3keebat', 'تعقيبات'),
-                    ('dalmari', 'دلامري'),
-                    ('nbs', 'NBS'),
-                    ('shoroja', 'شوروجة'),
-                    ('na', 'NA'),
-                    ('promotion_offices', 'مكاتب الترويجة'),
+                    ('1', 'زبون محل'),
+                    ('2', 'شركات توصيل'),
+                    ('3', 'نقليات'),
+                    ('4', 'ديلفري'),
+                    ('5', 'NBS'),
+                    ('6', 'شورجة'),
+                    ('7', 'NA'),
+                    ('8', 'مكاتب الشورجة'),
                 ]
         except Exception as e:
             import logging
@@ -211,14 +211,14 @@ class PosPerfumeOrder(models.Model):
             _logger.error(f"Error fetching invoice types: {str(e)}")
             # Return default SAP values on error
             return [
-                ('customer_shop', 'زبون محل'),
-                ('delivery_companies', 'شركات توصيل'),
-                ('ta3keebat', 'تعقيبات'),
-                ('dalmari', 'دلامري'),
-                ('nbs', 'NBS'),
-                ('shoroja', 'شوروجة'),
-                ('na', 'NA'),
-                ('promotion_offices', 'مكاتب الترويجة'),
+                ('1', 'زبون محل'),
+                ('2', 'شركات توصيل'),
+                ('3', 'نقليات'),
+                ('4', 'ديلفري'),
+                ('5', 'NBS'),
+                ('6', 'شورجة'),
+                ('7', 'NA'),
+                ('8', 'مكاتب الشورجة'),
             ]
     
     @api.depends('order_line_ids.line_subtotal', 'order_line_ids.discount_amount')
@@ -408,9 +408,13 @@ class PosPerfumeOrder(models.Model):
                 sale_order = order.sale_order_id
                 
                 # Update sale order to confirmed state
-                sale_order.write({
+                update_vals = {
                     'state': 'sale',
-                })
+                }
+                # Sync invoice_type from POS order to sale.order if present
+                if order.invoice_type:
+                    update_vals['invoice_type'] = order.invoice_type
+                sale_order.write(update_vals)
                 _logger.info(f"[POS Confirm] Updated sale order {sale_order.name} to 'sale' state")
             else:
                 # Create new Sale Order - use read data or direct access with fallback
@@ -420,8 +424,8 @@ class PosPerfumeOrder(models.Model):
                 'date_order': order_data.get('date') or order.date,
                 'origin': order_name,
                 'note': order_data.get('note', '') or (order.note or ''),
-                # NOTE: invoice_type is a custom field on pos.perfume.order, not on sale.order
-                # If you have a custom sale.order field for invoice_type, add it here
+                # Sync invoice_type from POS order to sale.order (field defined in sap_integration)
+                'invoice_type': order.invoice_type or False,
                 'pricelist_id': order_data.get('pricelist_id', [False])[0] if order_data.get('pricelist_id') else (order.pricelist_id.id if order.pricelist_id else False),
             }
             
