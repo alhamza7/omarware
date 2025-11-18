@@ -421,10 +421,19 @@ class SaleOrder(models.Model):
             'DocumentLines': document_lines,
         }
         
+        # Send Odoo notes to SAP as Comments/Remarks
+        if quotation.note:
+            # 'Comments' is the standard SAP B1 field for document remarks
+            quotation_data['Comments'] = quotation.note
+        
         # إضافة نوع الفاتورة (User-Defined Field) إذا كان متوفراً
         if quotation.invoice_type:
-            quotation_data['U_InvoiceType'] = quotation.invoice_type
-            _logger.info(f"Adding U_InvoiceType to quotation: {quotation.invoice_type}")
+            # Send both ID (code) and label to SAP:
+            # - U_InvoiceTypeId: the internal code (selection key, e.g. 'customer_shop')
+            # - U_InvoiceType: the human-readable label (e.g. 'زبون محل')
+            quotation_data['U_InvoiceTypeId'] = quotation.invoice_type
+            quotation_data['U_InvoiceType'] = dict(self._get_invoice_type_selection()).get(quotation.invoice_type, quotation.invoice_type)
+            _logger.info(f"Adding U_InvoiceTypeId={quotation.invoice_type}, U_InvoiceType={quotation_data['U_InvoiceType']} to quotation")
         
         # إضافة تاريخ الصلاحية إذا كان موجوداً
         if quotation.validity_date:

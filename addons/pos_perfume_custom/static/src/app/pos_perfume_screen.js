@@ -3688,11 +3688,6 @@ export class PosPerfumeScreen extends Component {
         
         let filtered = [...sourceProducts];
         
-        // 0. Always hide PR products (first, before any other filters)
-        const beforePR = filtered.length;
-        filtered = this.filterProductsByPR(filtered);
-        console.log(`[Filter] After PR filter (always hide): ${filtered.length} products (was ${beforePR})`);
-        
         // 1. Filter by brands
         const beforeBrand = filtered.length;
         filtered = this.filterProductsByBrand(filtered);

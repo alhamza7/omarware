@@ -193,48 +193,48 @@ class ProductProductExtended(models.Model):
         """
         # Normalize search term
         search_term = (search_term or '').strip()
-        
         if not search_term:
             return []
         
-        # RULE 1: "-" searches for codes starting with "S"
+        # Prepare helpers
+        upper_term = search_term.upper()
+        tokens = [t for t in upper_term.split() if t]
+        
+        # RULE 1: "-" → Products with code starting with "S"
         if search_term == '-':
             products = self.search([
                 ('sale_ok', '=', True),
                 ('default_code', '=like', 'S%')
             ], limit=limit)
         
-        # RULE 2: Pure number (e.g., "200") - search for EXACT number in name and code
+        # RULE 2: Pure number (e.g., "200") - exact numeric match logic
         elif search_term.isdigit():
-            # Use simple ilike search - Odoo will handle jsonb automatically
             products = self.search([
                 ('sale_ok', '=', True),
                 '|', '|',
-                ('name', 'ilike', ' ' + search_term + ' '),  # " 200 " in name
-                ('name', 'ilike', ' ' + search_term),  # " 200" at end
-                ('default_code', 'ilike', search_term),  # "200" anywhere in code
-            ], limit=limit * 2)  # Get more to filter
+                ('name', 'ilike', search_term),
+                ('default_code', 'ilike', search_term),
+                ('barcode', 'ilike', search_term),
+            ], limit=limit * 3)
             
-            # Filter to exact number matches only (not 2000, 1200, etc.)
+            # Filter in Python: number must appear as "مستقل" في الكود أو الاسم
+            import re
             filtered_products = []
             for p in products:
-                code = p.default_code or ''
-                name = p.name or ''
+                code = (p.default_code or '').upper()
+                name = (p.name or '').upper()
                 
-                # Check if number appears as standalone in code or name
-                # For code: check patterns like "S-200", "200-", "A200B" but not "2000"
                 code_match = False
                 if code:
-                    # Split by non-digits and check if our number is in the parts
-                    import re
                     code_parts = re.split(r'[^0-9]+', code)
                     if search_term in code_parts:
                         code_match = True
                 
-                # For name: check if number appears with spaces around it
                 name_match = False
                 if name:
-                    if (' ' + search_term + ' ') in name or (' ' + search_term) in name or (search_term + ' ') in name:
+                    if (' ' + search_term + ' ') in name or \
+                       name.startswith(search_term + ' ') or \
+                       name.endswith(' ' + search_term):
                         name_match = True
                 
                 if code_match or name_match:
@@ -242,8 +242,29 @@ class ProductProductExtended(models.Model):
             
             products = self.browse([p.id for p in filtered_products[:limit]])
         
-        # RULE 3 & 4: Text or number with symbols - search in all fields
+        # RULE 3: "-<number>" → رقم مسبوق بعلامة "-" في الكود أو الاسم (مثل S-200)
+        elif search_term.startswith('-') and search_term[1:].isdigit():
+            num = search_term[1:]
+            like_pattern = f"-%{num}%"
+            products = self.search([
+                ('sale_ok', '=', True),
+                '|',
+                ('default_code', 'ilike', like_pattern),
+                ('name', 'ilike', like_pattern),
+            ], limit=limit * 3)
+            
+            # فلترة إضافية: نضمن وجود "-<num>" فعلياً في النص
+            filtered_products = []
+            pattern = f"-{num}"
+            for p in products:
+                hay = f"{p.default_code or ''} {p.name or ''}".upper()
+                if pattern.upper() in hay:
+                    filtered_products.append(p)
+            products = self.browse([p.id for p in filtered_products[:limit]])
+        
+        # RULE 4: Text / complex query – multi-token AND search across fields
         else:
+            # أولاً نستخدم ilike عام للحصول على مجموعة مرشّحة أوسع
             products = self.search([
                 ('sale_ok', '=', True),
                 '|', '|', '|',
@@ -251,7 +272,24 @@ class ProductProductExtended(models.Model):
                 ('default_code', 'ilike', search_term),
                 ('barcode', 'ilike', search_term),
                 ('foreign_name', 'ilike', search_term) if 'foreign_name' in self._fields else ('name', 'ilike', search_term),
-            ], limit=limit)
+            ], limit=limit * 3)
+            
+            # ثم نفلتر في Python بحيث يجب أن تظهر كل الكلمات (tokens)
+            # في واحد أو أكثر من الحقول: الاسم، الاسم الأجنبي، الكود
+            if tokens:
+                filtered_products = []
+                for p in products:
+                    haystack = " ".join([
+                        (p.name or ''),
+                        getattr(p, 'foreign_name', '') or '',
+                        (p.default_code or ''),
+                    ]).upper()
+                    
+                    # كل كلمة من كلمات البحث يجب أن تكون موجودة
+                    if all(tok in haystack for tok in tokens):
+                        filtered_products.append(p)
+                
+                products = self.browse([p.id for p in filtered_products[:limit]])
         
         # Get pricelist - default to "Price list 1"
         if not pricelist_id:
