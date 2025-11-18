@@ -51,9 +51,8 @@
         # 'data/sap_cron_data.xml',  # Disabled - uses advanced models not yet enabled
         
         # Views (Actions & Forms)
-        'views/sap_menus_minimal.xml',           # Minimal root menus: menu_sap_integration + menu_sap_tools
-        'views/sap_dashboard_action_minimal.xml',# Minimal dashboard action for menu_sap_dashboard
-        'views/sap_menu_structure.xml',          # Full menu tree (all sections and tools), Odoo 19–compatible
+        'views/sap_menus_minimal.xml',            # Minimal root menus: menu_sap_integration + menu_sap_tools
+        'views/sap_dashboard_action_minimal.xml', # Minimal dashboard action for menu_sap_dashboard
         # 'views/sap_dashboard_views.xml',       # Full dashboard view (still disabled for now)
         
         # Wizards - Load AFTER menus so they can reference menu items
@@ -83,7 +82,7 @@
         'views/sap_product_views.xml',
         'views/sap_quotation_views.xml',
         'views/sap_sale_views.xml',
-        'views/sale_order_sap_views.xml',  # SAP integration for sale orders
+        'views/sale_order_sap_views.xml',         # SAP integration for sale orders
         'views/sap_warehouse_views.xml',
         
         # Reports
@@ -93,7 +92,10 @@
         'views/sap_product_extended_views.xml',  # Extended product information
         'views/sap_product_pricelist_sync_views.xml',  # Pricelist synchronization
         'views/sap_product_warehouse_info_views.xml',  # Warehouse information
-        'views/product_uom_group_views.xml',  # UoM Group restriction in products/sales
+        'views/product_uom_group_views.xml',           # UoM Group restriction in products/sales
+
+        # Full menu tree (must be loaded AFTER actions like action_sap_backend are defined)
+        'views/sap_menu_structure.xml',
     ],
     'installable': True,
     'application': True,

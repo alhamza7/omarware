@@ -406,7 +406,7 @@ class PosPerfumeOrder(models.Model):
             if order.sale_order_id:
                 _logger.info(f"[POS Confirm] Using existing sale order {order.sale_order_id.name} (ID: {order.sale_order_id.id})")
                 sale_order = order.sale_order_id
-                
+
                 # Update sale order to confirmed state
                 update_vals = {
                     'state': 'sale',
@@ -416,68 +416,69 @@ class PosPerfumeOrder(models.Model):
                     update_vals['invoice_type'] = order.invoice_type
                 sale_order.write(update_vals)
                 _logger.info(f"[POS Confirm] Updated sale order {sale_order.name} to 'sale' state")
+
             else:
                 # Create new Sale Order - use read data or direct access with fallback
                 sale_vals = {
-                'partner_id': order_data.get('partner_id', [False])[0] if order_data.get('partner_id') else order.partner_id.id,
-                'user_id': order_data.get('user_id', [False])[0] if order_data.get('user_id') else order.user_id.id,
-                'date_order': order_data.get('date') or order.date,
-                'origin': order_name,
-                'note': order_data.get('note', '') or (order.note or ''),
-                # Sync invoice_type from POS order to sale.order (field defined in sap_integration)
-                'invoice_type': order.invoice_type or False,
-                'pricelist_id': order_data.get('pricelist_id', [False])[0] if order_data.get('pricelist_id') else (order.pricelist_id.id if order.pricelist_id else False),
-            }
-            
-            # Create sale order lines
-            sale_order_lines = []
-            for line in order_lines:
-                # Ensure product exists
-                if not line.product_id:
-                    _logger.warning(f"[POS Confirm] Skipping line without product: {line.id}")
-                    continue
-                
-                # Get UoM - use product_uom_id if set, otherwise product's default UoM
-                uom_id = None
-                if line.product_uom_id:
-                    uom_id = line.product_uom_id.id
-                elif line.product_id and line.product_id.uom_id:
-                    uom_id = line.product_id.uom_id.id
-                
-                if not uom_id:
-                    _logger.error(f"[POS Confirm] No UoM for product {line.product_id.name}")
-                    raise UserError(_('Product %s does not have a unit of measure defined.') % line.product_id.name)
-                
-                line_vals = {
-                    'product_id': line.product_id.id,
-                    'product_uom_qty': line.quantity or 1.0,
-                    'product_uom_id': uom_id,  # Correct field name in Odoo
-                    'price_unit': line.unit_price or 0.0,
-                    'discount': line.discount_percent or 0.0,
+                    'partner_id': order_data.get('partner_id', [False])[0] if order_data.get('partner_id') else order.partner_id.id,
+                    'user_id': order_data.get('user_id', [False])[0] if order_data.get('user_id') else order.user_id.id,
+                    'date_order': order_data.get('date') or order.date,
+                    'origin': order_name,
+                    'note': order_data.get('note', '') or (order.note or ''),
+                    # Sync invoice_type from POS order to sale.order (field defined in sap_integration)
+                    'invoice_type': order.invoice_type or False,
+                    'pricelist_id': order_data.get('pricelist_id', [False])[0] if order_data.get('pricelist_id') else (order.pricelist_id.id if order.pricelist_id else False),
                 }
-                
-                # Add custom product name if set
-                if line.custom_product_name:
-                    line_vals['custom_product_name'] = line.custom_product_name
-                
-                # Add warehouse info if available (check if module exists)
-                if line.warehouse_id and hasattr(self.env['sale.order.line'], 'product_warehouse_id'):
-                    line_vals['product_warehouse_id'] = line.warehouse_id.id
-                
-                _logger.debug(f"[POS Confirm] Line vals: product={line.product_id.name}, qty={line.quantity}, uom={uom_id}, price={line.unit_price}")
-                sale_order_lines.append((0, 0, line_vals))
-            
-            sale_vals['order_line'] = sale_order_lines
-            
-            _logger.info(f"[POS Confirm] Creating sale.order with {len(sale_order_lines)} lines")
-            _logger.info(f"[POS Confirm] Sale vals: partner={sale_vals['partner_id']}, pricelist={sale_vals['pricelist_id']}")
-            
-            try:
-                sale_order = self.env['sale.order'].create(sale_vals)
-                _logger.info(f"[POS Confirm] Sale order created: {sale_order.name} (ID: {sale_order.id})")
-            except Exception as e:
-                _logger.error(f"[POS Confirm] Error creating sale order: {e}", exc_info=True)
-                raise
+
+                # Create sale order lines
+                sale_order_lines = []
+                for line in order_lines:
+                    # Ensure product exists
+                    if not line.product_id:
+                        _logger.warning(f"[POS Confirm] Skipping line without product: {line.id}")
+                        continue
+
+                    # Get UoM - use product_uom_id if set, otherwise product's default UoM
+                    uom_id = None
+                    if line.product_uom_id:
+                        uom_id = line.product_uom_id.id
+                    elif line.product_id and line.product_id.uom_id:
+                        uom_id = line.product_id.uom_id.id
+
+                    if not uom_id:
+                        _logger.error(f"[POS Confirm] No UoM for product {line.product_id.name}")
+                        raise UserError(_('Product %s does not have a unit of measure defined.') % line.product_id.name)
+
+                    line_vals = {
+                        'product_id': line.product_id.id,
+                        'product_uom_qty': line.quantity or 1.0,
+                        'product_uom_id': uom_id,  # Correct field name in Odoo
+                        'price_unit': line.unit_price or 0.0,
+                        'discount': line.discount_percent or 0.0,
+                    }
+
+                    # Add custom product name if set
+                    if line.custom_product_name:
+                        line_vals['custom_product_name'] = line.custom_product_name
+
+                    # Add warehouse info if available (check if module exists)
+                    if line.warehouse_id and hasattr(self.env['sale.order.line'], 'product_warehouse_id'):
+                        line_vals['product_warehouse_id'] = line.warehouse_id.id
+
+                    _logger.debug(f"[POS Confirm] Line vals: product={line.product_id.name}, qty={line.quantity}, uom={uom_id}, price={line.unit_price}")
+                    sale_order_lines.append((0, 0, line_vals))
+
+                sale_vals['order_line'] = sale_order_lines
+
+                _logger.info(f"[POS Confirm] Creating sale.order with {len(sale_order_lines)} lines")
+                _logger.info(f"[POS Confirm] Sale vals: partner={sale_vals['partner_id']}, pricelist={sale_vals['pricelist_id']}")
+
+                try:
+                    sale_order = self.env['sale.order'].create(sale_vals)
+                    _logger.info(f"[POS Confirm] Sale order created: {sale_order.name} (ID: {sale_order.id})")
+                except Exception as e:
+                    _logger.error(f"[POS Confirm] Error creating sale order: {e}", exc_info=True)
+                    raise
             
             # Update POS order - preserve current state if it's 'quotation', otherwise set to 'sale'
             current_state = order.state
