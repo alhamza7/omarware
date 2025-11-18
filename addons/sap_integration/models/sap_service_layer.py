@@ -469,26 +469,40 @@ class SapServiceLayerConnection:
                 _logger.warning(f"[SAP Send] Could not serialize quotation data to JSON: {str(json_error)}")
                 _logger.info(f"[SAP Send] Quotation data keys: {list(quotation_data.keys())}")
             
-            response = self.session.post(url, json=quotation_data, headers=headers, timeout=30)
+            _logger.info(f"[SAP Send] Sending POST request to SAP: {url} (timeout=30s)")
+            try:
+                response = self.session.post(url, json=quotation_data, headers=headers, timeout=30)
+                _logger.info(f"[SAP Send] Received response from SAP: status_code={response.status_code}")
+            except Exception as request_error:
+                _logger.error(f"[SAP Send] ❌ Request failed (timeout/connection error): {str(request_error)}", exc_info=True)
+                raise
             
             if response.status_code in [200, 201]:
-                result = response.json()
-                doc_entry = result.get('DocEntry')
-                doc_num = result.get('DocNum', 'N/A')
-                if doc_entry:
-                    # Log success with invoice type info if present
-                    inv_type_info = ""
-                    if 'U_InvType' in quotation_data:
-                        inv_type_info = f", U_InvType={quotation_data['U_InvType']}"
-                    _logger.info(f"[SAP Send] ✅ Quotation created successfully: DocEntry={doc_entry}, DocNum={doc_num}{inv_type_info}")
-                    return result
-                else:
-                    error_msg = f"Quotation creation returned 200/201 but no DocEntry in response: {response.text}"
+                try:
+                    result = response.json()
+                    _logger.info(f"[SAP Send] Response JSON keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
+                    doc_entry = result.get('DocEntry')
+                    doc_num = result.get('DocNum', 'N/A')
+                    if doc_entry:
+                        # Log success with invoice type info if present
+                        inv_type_info = ""
+                        if 'U_InvType' in quotation_data:
+                            inv_type_info = f", U_InvType={quotation_data['U_InvType']}"
+                        _logger.info(f"[SAP Send] ✅ Quotation created successfully: DocEntry={doc_entry}, DocNum={doc_num}{inv_type_info}")
+                        return result
+                    else:
+                        error_msg = f"Quotation creation returned 200/201 but no DocEntry in response: {response.text[:500]}"
+                        _logger.error(f"[SAP Send] ❌ {error_msg}")
+                        _logger.error(f"[SAP Send] Full response: {response.text}")
+                        raise Exception(error_msg)
+                except json.JSONDecodeError as json_err:
+                    error_msg = f"Failed to parse SAP response as JSON: {str(json_err)}, Response text: {response.text[:500]}"
                     _logger.error(f"[SAP Send] ❌ {error_msg}")
                     raise Exception(error_msg)
             else:
-                error_msg = f"Error creating quotation: {response.status_code} - {response.text}"
-                _logger.error(error_msg)
+                error_msg = f"Error creating quotation: {response.status_code} - {response.text[:500]}"
+                _logger.error(f"[SAP Send] ❌ {error_msg}")
+                _logger.error(f"[SAP Send] Full error response: {response.text}")
                 raise Exception(error_msg)
                 
         except Exception as e:
