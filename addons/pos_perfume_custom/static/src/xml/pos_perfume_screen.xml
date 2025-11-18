@@ -876,14 +876,14 @@
                                     t-on-change="onInvoiceTypeChange"
                                     style="flex: 1; height: 36px; padding: 7px 32px 7px 12px; font-size: 14px; border: 1px solid #d1d5db; border-radius: 6px; background-color: white; appearance: none; -webkit-appearance: none; -moz-appearance: none; position: relative;">
                                 <option value="">-- اختر نوع الفاتورة --</option>
-                                <option value="customer_shop">زبون محل</option>
-                                <option value="delivery_companies">شركات توصيل</option>
-                                <option value="ta3keebat">تعقيبات</option>
-                                <option value="dalmari">دلامري</option>
-                                <option value="nbs">NBS</option>
-                                <option value="shoroja">شوروجة</option>
-                                <option value="na">NA</option>
-                                <option value="promotion_offices">مكاتب الترويجة</option>
+                                <option value="1">زبون محل</option>
+                                <option value="2">شركات توصيل</option>
+                                <option value="3">نقليات</option>
+                                <option value="4">ديلفري</option>
+                                <option value="5">NBS</option>
+                                <option value="6">شورجة</option>
+                                <option value="7">NA</option>
+                                <option value="8">مكاتب الشورجة</option>
                             </select>
                         </div>
                         <div style="display: flex; align-items: flex-start; gap: 8px;">

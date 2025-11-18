@@ -28,47 +28,21 @@ class SaleOrder(models.Model):
         help="تم إرسال هذا Quotation إلى SAP"
     )
     
-    # Invoice Type (SAP User-Defined Field)
+    # Invoice Type (SAP User-Defined Field) - قيم ثابتة
     invoice_type = fields.Selection(
         string='نوع الفاتورة / Invoice Type',
-        selection='_get_invoice_type_selection',
-        help="نوع الفاتورة الذي سيتم إرساله إلى SAP (U_InvoiceType)"
+        selection=[
+            ('1', 'زبون محل'),
+            ('2', 'شركات توصيل'),
+            ('3', 'نقليات'),
+            ('4', 'ديلفري'),
+            ('5', 'NBS'),
+            ('6', 'شورجة'),
+            ('7', 'NA'),
+            ('8', 'مكاتب الشورجة'),
+        ],
+        help="نوع الفاتورة الذي سيتم إرساله إلى SAP (U_InvType)\nالرقم يُرسل إلى SAP، والاسم يظهر في الواجهة"
     )
-    
-    @api.model
-    def _get_invoice_type_selection(self):
-        """Get invoice types from SAP dynamically"""
-        try:
-            invoice_types = self.env['sap.backend'].get_invoice_types_from_sap()
-            if invoice_types:
-                return invoice_types
-            else:
-                # Default values if SAP is not available (IDs 1..8 with Arabic labels)
-                return [
-                    ('1', 'زبون محل'),
-                    ('2', 'شركات توصيل'),
-                    ('3', 'نقليات'),
-                    ('4', 'ديلفري'),
-                    ('5', 'NBS'),
-                    ('6', 'شورجة'),
-                    ('7', 'NA'),
-                    ('8', 'مكاتب الشورجة'),
-                ]
-        except Exception as e:
-            import logging
-            _logger = logging.getLogger(__name__)
-            _logger.error(f"Error fetching invoice types: {str(e)}")
-            # Return default values on error
-            return [
-                ('1', 'زبون محل'),
-                ('2', 'شركات توصيل'),
-                ('3', 'نقليات'),
-                ('4', 'ديلفري'),
-                ('5', 'NBS'),
-                ('6', 'شورجة'),
-                ('7', 'NA'),
-                ('8', 'مكاتب الشورجة'),
-            ]
     
     @api.model
     def create(self, vals):
@@ -136,6 +110,13 @@ class SaleOrder(models.Model):
         for quotation in self:
             doc_type = "sales order draft" if quotation.state == 'draft' else ("sale order" if quotation.state == 'sale' else "quotation")
             _logger.info(f">>> Starting _send_to_sap for {doc_type} {quotation.name} <<<")
+            
+            # Log invoice_type if present
+            if quotation.invoice_type:
+                _logger.info(f"[SAP Sync] Quotation {quotation.name} has invoice_type: {quotation.invoice_type}")
+            else:
+                _logger.info(f"[SAP Sync] Quotation {quotation.name} has NO invoice_type")
+            
             try:
                 # التحقق من وجود backend نشط
                 backend = self.env['sap.backend'].search([
@@ -234,9 +215,14 @@ class SaleOrder(models.Model):
                                 'sap_doc_entry': doc_entry,
                                 'sap_synced': True,
                             })
-                            _logger.info(f"Quotation (draft) {quotation.name} synced to SAP: DocNum={doc_num}, DocEntry={doc_entry}")
+                            
+                            # Log success with invoice type info if present
+                            inv_type_info = ""
+                            if quotation.invoice_type:
+                                inv_type_info = f", InvoiceType={quotation.invoice_type} (U_InvType sent to SAP)"
+                            _logger.info(f"✅ Quotation (draft) {quotation.name} synced to SAP: DocNum={doc_num}, DocEntry={doc_entry}{inv_type_info}")
                         else:
-                            _logger.error(f"Failed to create quotation {quotation.name} in SAP: create_quotation returned None or empty result. Check SAP logs for details.")
+                            _logger.error(f"❌ Failed to create quotation {quotation.name} in SAP: create_quotation returned None or empty result. Check SAP logs for details.")
                     else:
                         # للـ quotations الأخرى: تحديث أو إنشاء quotation في SAP
                         if quotation.sap_doc_entry and quotation.sap_doc_entry > 0:
@@ -269,7 +255,12 @@ class SaleOrder(models.Model):
                                     'sap_doc_entry': doc_entry,
                                     'sap_synced': True,
                                 })
-                                _logger.info(f"Quotation {quotation.name} synced to SAP: DocNum={doc_num}, DocEntry={doc_entry}")
+                                
+                                # Log success with invoice type info if present
+                                inv_type_info = ""
+                                if quotation.invoice_type:
+                                    inv_type_info = f", InvoiceType={quotation.invoice_type} (U_InvType sent to SAP)"
+                                _logger.info(f"✅ Quotation {quotation.name} synced to SAP: DocNum={doc_num}, DocEntry={doc_entry}{inv_type_info}")
                 
             except Exception as e:
                 _logger.error(f"Error sending quotation {quotation.name} to SAP: {str(e)}", exc_info=True)
@@ -429,46 +420,52 @@ class SaleOrder(models.Model):
             'DocumentLines': document_lines,
         }
         
-        # Send Odoo notes to SAP as Comments/Remarks (will be enriched with invoice type below)
-        if quotation.note:
-            # 'Comments' is the standard SAP B1 field for document remarks
-            quotation_data['Comments'] = quotation.note
-            _logger.info(f"Adding initial Comments to SAP quotation from sale.order {quotation.name}: {quotation.note[:200]}")
+        # إعداد Comments (الملاحظات) - بدون إضافة نوع الفاتورة
+        comments_parts = []
         
-        # إضافة نوع الفاتورة (User-Defined Field) إذا كان متوفراً
+        # إضافة ملاحظات Odoo إذا كانت موجودة
+        if quotation.note:
+            comments_parts.append(quotation.note.strip())
+            _logger.info(f"[Invoice Type] Note from sale.order {quotation.name}: {quotation.note[:100]}")
+        
+        # إضافة نوع الفاتورة (User-Defined Field) إلى U_InvType فقط
         if quotation.invoice_type:
             try:
-                # من الآن فصاعداً، قيمة selection هي نفسها رقم SAP (مثلاً "1","2",...)
-                sap_id = quotation.invoice_type
-
-                # الاسم العربي من قائمة الاختيارات
-                label_map = dict(self._get_invoice_type_selection())
-                label_ar = label_map.get(quotation.invoice_type, quotation.invoice_type)
-
-                # إرسال إلى SAP في حقل U_InvType فقط (رقم نوع الفاتورة كما هو في SAP)
-                quotation_data['U_InvType'] = sap_id
-
-                # دمج نوع الفاتورة مع الملاحظات داخل Comments
-                comments_lines = []
-                comments_existing = (quotation_data.get('Comments') or '').strip()
-                if label_ar:
-                    comments_lines.append(f"نوع الفاتورة: {label_ar}")
-                if comments_existing:
-                    comments_lines.append(comments_existing)
-                if comments_lines:
-                    quotation_data['Comments'] = "\n".join(comments_lines)
-
-                _logger.info(
-                    f"Adding invoice type to SAP quotation from sale.order {quotation.name}: "
-                    f"U_InvType={sap_id}, "
-                    f"Comments='{quotation_data.get('Comments', '')[:200]}'"
-                )
+                # قيمة invoice_type هي رقم SAP (مثلاً "1", "2", "3", ...)
+                invoice_type_id = str(quotation.invoice_type).strip()
+                
+                # قائمة الأسماء العربية الثابتة (للـ logging فقط)
+                invoice_type_labels = {
+                    '1': 'زبون محل',
+                    '2': 'شركات توصيل',
+                    '3': 'نقليات',
+                    '4': 'ديلفري',
+                    '5': 'NBS',
+                    '6': 'شورجة',
+                    '7': 'NA',
+                    '8': 'مكاتب الشورجة',
+                }
+                invoice_type_label = invoice_type_labels.get(invoice_type_id, invoice_type_id)
+                
+                # إرسال رقم نوع الفاتورة إلى حقل U_InvType في SAP فقط
+                quotation_data['U_InvType'] = invoice_type_id
+                _logger.info(f"[Invoice Type] Setting U_InvType={invoice_type_id} ({invoice_type_label}) for sale.order {quotation.name}")
+                
             except Exception as e:
-                _logger.warning(
-                    f"Error adding invoice type to SAP quotation from sale.order {quotation.name}: {str(e)}. "
-                    f"Continuing without U_InvType field."
+                _logger.error(
+                    f"[Invoice Type] ERROR adding invoice type to SAP quotation from sale.order {quotation.name}: {str(e)}",
+                    exc_info=True
                 )
                 # لا نرفع exception حتى لا نمنع إرسال الـ quotation
+        
+        # دمج جميع أجزاء Comments (الملاحظات فقط) في حقل واحد
+        if comments_parts:
+            quotation_data['Comments'] = "\n".join(comments_parts)
+            _logger.info(
+                f"[Invoice Type] Final Comments for sale.order {quotation.name}: "
+                f"U_InvType={quotation_data.get('U_InvType', 'NOT SET')}, "
+                f"Comments length={len(quotation_data['Comments'])}"
+            )
         
         # إضافة تاريخ الصلاحية إذا كان موجوداً
         if quotation.validity_date:

@@ -179,47 +179,21 @@ class PosPerfumeOrder(models.Model):
     # Notes
     note = fields.Text(string='Notes')
     
-    # Invoice Type (for SAP)
+    # Invoice Type (for SAP) - قيم ثابتة
     invoice_type = fields.Selection(
         string='نوع الفاتورة / Invoice Type',
-        selection='_get_invoice_type_selection',
-        help="نوع الفاتورة الذي سيتم إرساله إلى SAP (U_InvoiceType)"
+        selection=[
+            ('1', 'زبون محل'),
+            ('2', 'شركات توصيل'),
+            ('3', 'نقليات'),
+            ('4', 'ديلفري'),
+            ('5', 'NBS'),
+            ('6', 'شورجة'),
+            ('7', 'NA'),
+            ('8', 'مكاتب الشورجة'),
+        ],
+        help="نوع الفاتورة الذي سيتم إرساله إلى SAP (U_InvType)\nالرقم يُرسل إلى SAP، والاسم يظهر في الواجهة"
     )
-    
-    @api.model
-    def _get_invoice_type_selection(self):
-        """Get invoice types from SAP dynamically"""
-        try:
-            invoice_types = self.env['sap.backend'].get_invoice_types_from_sap()
-            if invoice_types:
-                return invoice_types
-            else:
-                # Default values matching SAP Business One invoice types (IDs 1..8)
-                return [
-                    ('1', 'زبون محل'),
-                    ('2', 'شركات توصيل'),
-                    ('3', 'نقليات'),
-                    ('4', 'ديلفري'),
-                    ('5', 'NBS'),
-                    ('6', 'شورجة'),
-                    ('7', 'NA'),
-                    ('8', 'مكاتب الشورجة'),
-                ]
-        except Exception as e:
-            import logging
-            _logger = logging.getLogger(__name__)
-            _logger.error(f"Error fetching invoice types: {str(e)}")
-            # Return default SAP values on error
-            return [
-                ('1', 'زبون محل'),
-                ('2', 'شركات توصيل'),
-                ('3', 'نقليات'),
-                ('4', 'ديلفري'),
-                ('5', 'NBS'),
-                ('6', 'شورجة'),
-                ('7', 'NA'),
-                ('8', 'مكاتب الشورجة'),
-            ]
     
     @api.depends('order_line_ids.line_subtotal', 'order_line_ids.discount_amount')
     def _compute_amounts(self):
@@ -402,6 +376,12 @@ class PosPerfumeOrder(models.Model):
             
             _logger.info(f"[POS Confirm] Order has {len(order_lines)} lines")
             
+            # Log invoice_type if present
+            if order.invoice_type:
+                _logger.info(f"[POS Confirm] Order has invoice_type: {order.invoice_type}")
+            else:
+                _logger.info(f"[POS Confirm] Order has NO invoice_type")
+            
             # Check if sale order already exists (from draft)
             if order.sale_order_id:
                 _logger.info(f"[POS Confirm] Using existing sale order {order.sale_order_id.name} (ID: {order.sale_order_id.id})")
@@ -414,6 +394,7 @@ class PosPerfumeOrder(models.Model):
                 # Sync invoice_type from POS order to sale.order if present
                 if order.invoice_type:
                     update_vals['invoice_type'] = order.invoice_type
+                    _logger.info(f"[POS Confirm] Syncing invoice_type={order.invoice_type} to sale.order {sale_order.name}")
                 sale_order.write(update_vals)
                 _logger.info(f"[POS Confirm] Updated sale order {sale_order.name} to 'sale' state")
 
@@ -429,6 +410,12 @@ class PosPerfumeOrder(models.Model):
                     'invoice_type': order.invoice_type or False,
                     'pricelist_id': order_data.get('pricelist_id', [False])[0] if order_data.get('pricelist_id') else (order.pricelist_id.id if order.pricelist_id else False),
                 }
+                
+                # Log invoice_type in sale_vals
+                if order.invoice_type:
+                    _logger.info(f"[POS Confirm] Creating sale.order with invoice_type={order.invoice_type}")
+                else:
+                    _logger.info(f"[POS Confirm] Creating sale.order WITHOUT invoice_type")
 
                 # Create sale order lines
                 sale_order_lines = []
