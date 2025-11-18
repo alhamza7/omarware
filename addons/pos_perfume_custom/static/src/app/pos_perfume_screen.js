@@ -2073,7 +2073,39 @@ export class PosPerfumeScreen extends Component {
             if (result && result.res_id) {
                 // Reload the order to get SAP document numbers
                 await this.loadOrder(orderId);
-                this.notification.add(_t("Quotation created and sent to SAP successfully!"), { type: "success" });
+                
+                // Wait a bit for SAP sync to complete (if async)
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                // Reload again to check SAP sync status
+                await this.loadOrder(orderId);
+                
+                // Check if actually synced to SAP
+                const order = await this.orm.read(
+                    'pos.perfume.order',
+                    [orderId],
+                    ['sale_order_id', 'sap_doc_num', 'sap_doc_entry', 'sap_synced']
+                );
+                
+                if (order && order[0] && order[0].sale_order_id) {
+                    // Get sale.order to check SAP sync status
+                    const saleOrderId = Array.isArray(order[0].sale_order_id) ? order[0].sale_order_id[0] : order[0].sale_order_id;
+                    const saleOrder = await this.orm.read(
+                        'sale.order',
+                        [saleOrderId],
+                        ['sap_doc_num', 'sap_doc_entry', 'sap_synced']
+                    );
+                    
+                    if (saleOrder && saleOrder[0] && saleOrder[0].sap_synced && saleOrder[0].sap_doc_num) {
+                        this.notification.add(_t("Quotation created and sent to SAP successfully! DocNum: ") + saleOrder[0].sap_doc_num, { type: "success" });
+                    } else if (saleOrder && saleOrder[0] && saleOrder[0].sap_synced) {
+                        this.notification.add(_t("Quotation created and sent to SAP successfully!"), { type: "success" });
+                    } else {
+                        this.notification.add(_t("Quotation created, but SAP sync may have failed. Please check the logs."), { type: "warning" });
+                    }
+                } else {
+                    this.notification.add(_t("Quotation saved successfully!"), { type: "success" });
+                }
             } else {
                 // Still reload even if no result
                 await this.loadOrder(orderId);

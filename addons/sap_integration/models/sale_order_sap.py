@@ -235,6 +235,8 @@ class SaleOrder(models.Model):
                                 'sap_synced': True,
                             })
                             _logger.info(f"Quotation (draft) {quotation.name} synced to SAP: DocNum={doc_num}, DocEntry={doc_entry}")
+                        else:
+                            _logger.error(f"Failed to create quotation {quotation.name} in SAP: create_quotation returned None or empty result. Check SAP logs for details.")
                     else:
                         # للـ quotations الأخرى: تحديث أو إنشاء quotation في SAP
                         if quotation.sap_doc_entry and quotation.sap_doc_entry > 0:
@@ -435,34 +437,38 @@ class SaleOrder(models.Model):
         
         # إضافة نوع الفاتورة (User-Defined Field) إذا كان متوفراً
         if quotation.invoice_type:
-            # من الآن فصاعداً، قيمة selection هي نفسها رقم SAP (مثلاً "1","2",...)
-            sap_id = quotation.invoice_type
+            try:
+                # من الآن فصاعداً، قيمة selection هي نفسها رقم SAP (مثلاً "1","2",...)
+                sap_id = quotation.invoice_type
 
-            # الاسم العربي من قائمة الاختيارات
-            label_map = dict(self._get_invoice_type_selection())
-            label_ar = label_map.get(quotation.invoice_type, quotation.invoice_type)
+                # الاسم العربي من قائمة الاختيارات
+                label_map = dict(self._get_invoice_type_selection())
+                label_ar = label_map.get(quotation.invoice_type, quotation.invoice_type)
 
-            # إرسال:
-            # - U_InvoiceTypeId: الرقم (1..8)
-            # - U_InvoiceType: الاسم العربي كما طلبت
-            quotation_data['U_InvoiceTypeId'] = sap_id
-            quotation_data['U_InvoiceType'] = label_ar
+                # إرسال إلى SAP في حقل U_InvType فقط (رقم نوع الفاتورة كما هو في SAP)
+                quotation_data['U_InvType'] = sap_id
 
-            # دمج نوع الفاتورة مع الملاحظات داخل Comments
-            comments_lines = []
-            comments_existing = (quotation_data.get('Comments') or '').strip()
-            if label_ar:
-                comments_lines.append(f"نوع الفاتورة: {label_ar}")
-            if comments_existing:
-                comments_lines.append(comments_existing)
-            if comments_lines:
-                quotation_data['Comments'] = "\n".join(comments_lines)
+                # دمج نوع الفاتورة مع الملاحظات داخل Comments
+                comments_lines = []
+                comments_existing = (quotation_data.get('Comments') or '').strip()
+                if label_ar:
+                    comments_lines.append(f"نوع الفاتورة: {label_ar}")
+                if comments_existing:
+                    comments_lines.append(comments_existing)
+                if comments_lines:
+                    quotation_data['Comments'] = "\n".join(comments_lines)
 
-            _logger.info(
-                f"Adding invoice type to SAP quotation from sale.order {quotation.name}: "
-                f"U_InvoiceTypeId={sap_id}, U_InvoiceType={label_ar}, "
-                f"Comments='{quotation_data.get('Comments', '')[:200]}'"
-            )
+                _logger.info(
+                    f"Adding invoice type to SAP quotation from sale.order {quotation.name}: "
+                    f"U_InvType={sap_id}, "
+                    f"Comments='{quotation_data.get('Comments', '')[:200]}'"
+                )
+            except Exception as e:
+                _logger.warning(
+                    f"Error adding invoice type to SAP quotation from sale.order {quotation.name}: {str(e)}. "
+                    f"Continuing without U_InvType field."
+                )
+                # لا نرفع exception حتى لا نمنع إرسال الـ quotation
         
         # إضافة تاريخ الصلاحية إذا كان موجوداً
         if quotation.validity_date:

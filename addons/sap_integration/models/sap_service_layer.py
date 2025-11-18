@@ -449,12 +449,22 @@ class SapServiceLayerConnection:
             for idx, line in enumerate(document_lines):
                 _logger.info(f"Sending DocumentLine[{idx}]: ItemCode={line.get('ItemCode')}, UoMEntry={line.get('UoMEntry', 'NOT SET')}, Quantity={line.get('Quantity')}, UnitPrice={line.get('UnitPrice')}")
             
+            # Log full quotation data (especially U_InvType if present)
+            import json
+            _logger.info(f"Full quotation data being sent to SAP: {json.dumps(quotation_data, indent=2, ensure_ascii=False)}")
+            
             response = self.session.post(url, json=quotation_data, headers=headers, timeout=30)
             
             if response.status_code in [200, 201]:
                 result = response.json()
-                _logger.info(f"Quotation created: DocEntry {result.get('DocEntry')}")
-                return result
+                doc_entry = result.get('DocEntry')
+                if doc_entry:
+                    _logger.info(f"Quotation created: DocEntry {doc_entry}, DocNum={result.get('DocNum', 'N/A')}")
+                    return result
+                else:
+                    error_msg = f"Quotation creation returned 200/201 but no DocEntry in response: {response.text}"
+                    _logger.error(error_msg)
+                    raise Exception(error_msg)
             else:
                 error_msg = f"Error creating quotation: {response.status_code} - {response.text}"
                 _logger.error(error_msg)
