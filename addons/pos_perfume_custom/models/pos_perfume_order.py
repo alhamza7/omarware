@@ -286,9 +286,12 @@ class PosPerfumeOrder(models.Model):
                 if line.custom_product_name:
                     line_vals['custom_product_name'] = line.custom_product_name
                 
-                # Add warehouse if available
-                if line.warehouse_id and hasattr(self.env['sale.order.line'], 'product_warehouse_id'):
-                    line_vals['product_warehouse_id'] = line.warehouse_id.id
+                # Add warehouse if available and field exists in sale.order.line
+                if line.warehouse_id:
+                    # Check if product_warehouse_id field exists in sale.order.line model
+                    sale_order_line_model = self.env['sale.order.line']
+                    if 'product_warehouse_id' in sale_order_line_model._fields:
+                        line_vals['product_warehouse_id'] = line.warehouse_id.id
                 
                 sale_order_lines.append((0, 0, line_vals))
             
@@ -449,8 +452,12 @@ class PosPerfumeOrder(models.Model):
                         line_vals['custom_product_name'] = line.custom_product_name
 
                     # Add warehouse info if available (check if module exists)
-                    if line.warehouse_id and hasattr(self.env['sale.order.line'], 'product_warehouse_id'):
-                        line_vals['product_warehouse_id'] = line.warehouse_id.id
+                    # Add warehouse if available and field exists in sale.order.line
+                    if line.warehouse_id:
+                        # Check if product_warehouse_id field exists in sale.order.line model
+                        sale_order_line_model = self.env['sale.order.line']
+                        if 'product_warehouse_id' in sale_order_line_model._fields:
+                            line_vals['product_warehouse_id'] = line.warehouse_id.id
 
                     _logger.debug(f"[POS Confirm] Line vals: product={line.product_id.name}, qty={line.quantity}, uom={uom_id}, price={line.unit_price}")
                     sale_order_lines.append((0, 0, line_vals))
