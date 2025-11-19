@@ -91,8 +91,18 @@ def clear_all_cache():
             
             # 7. مسح cache من sale.order و pos.perfume.order
             print("7. مسح cache من sale.order و pos.perfume.order...")
-            env['sale.order'].invalidate_model()
-            env['pos.perfume.order'].invalidate_model()
+            try:
+                env['sale.order'].invalidate_model()
+                print("   ✅ تم مسح sale.order cache")
+            except (KeyError, AttributeError) as e:
+                print(f"   ⚠️  sale.order غير متوفر (قد تكون وحدة sale غير مثبتة)")
+            
+            try:
+                env['pos.perfume.order'].invalidate_model()
+                print("   ✅ تم مسح pos.perfume.order cache")
+            except (KeyError, AttributeError) as e:
+                print(f"   ⚠️  pos.perfume.order غير متوفر (قد تكون وحدة pos_perfume_custom غير مثبتة)")
+            
             print("   ✅ تم")
             
             # Commit
