@@ -24,7 +24,8 @@ def verify_code():
     print(f"التحقق من تحميل الكود الجديد")
     print(f"{'='*60}\n")
     
-    registry = odoo.registry(db_name)
+    from odoo.orm.registry import Registry
+    registry = Registry(db_name)
     
     with registry.cursor() as cr:
         env = api.Environment(cr, odoo.SUPERUSER_ID, {})

@@ -67,8 +67,10 @@ echo ""
 echo "4. مسح الكاش من قاعدة البيانات..."
 $PYTHON_CMD odoo-bin shell -c odoo.conf -d "$DB_NAME" << 'PYTHON_SCRIPT'
 import odoo
+from odoo.orm.registry import Registry
 odoo.tools.config.parse_config(['--config=odoo.conf'])
-registry = odoo.registry(odoo.tools.config['db_name'])
+db_name = odoo.tools.config.get('db_name') or '$DB_NAME'
+registry = Registry(db_name)
 with registry.cursor() as cr:
     env = odoo.api.Environment(cr, odoo.SUPERUSER_ID, {})
     

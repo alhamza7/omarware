@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import odoo
 from odoo import api
+from odoo.orm.registry import Registry
 
 def clear_all_cache():
     """مسح جميع أنواع الكاش"""
@@ -37,7 +38,7 @@ def clear_all_cache():
     print(f"{'='*60}\n")
     
     # إنشاء registry
-    registry = odoo.registry(db_name)
+    registry = Registry(db_name)
     
     with registry.cursor() as cr:
         env = api.Environment(cr, odoo.SUPERUSER_ID, {})

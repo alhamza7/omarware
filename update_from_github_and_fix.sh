@@ -160,8 +160,10 @@ echo ""
 echo "11. التحقق من حالة الوحدات..."
 $PYTHON_CMD odoo-bin shell -c odoo.conf -d lugal << 'PYTHON_SCRIPT'
 import odoo
+from odoo.orm.registry import Registry
 odoo.tools.config.parse_config(['--config=odoo.conf'])
-registry = odoo.registry(odoo.tools.config['db_name'])
+db_name = odoo.tools.config.get('db_name') or 'lugal'
+registry = Registry(db_name)
 with registry.cursor() as cr:
     env = odoo.api.Environment(cr, odoo.SUPERUSER_ID, {})
     
