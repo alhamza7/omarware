@@ -13,12 +13,19 @@ cd ~/Lugal-ai || cd /home/lugalai/Lugal-ai || {
     exit 1
 }
 
+# قراءة اسم قاعدة البيانات من odoo.conf
+DB_NAME=$(grep "^dbfilter" odoo.conf 2>/dev/null | sed 's/.*= *\^\([^.*]*\).*/\1/' || echo "lugal")
+if [ -z "$DB_NAME" ] || [ "$DB_NAME" = "lugal.*" ]; then
+    DB_NAME="lugal"
+fi
+echo "قاعدة البيانات: $DB_NAME"
+
 echo "✅ تم العثور على مجلد المشروع: $(pwd)"
 echo ""
 
 # 1. إيقاف Odoo إذا كان يعمل
 echo "1. إيقاف Odoo..."
-pkill -f "odoo-bin.*lugal" || pkill -f "odoo-bin" || true
+pkill -f "odoo-bin.*$DB_NAME" || pkill -f "odoo-bin" || true
 sleep 3
 echo "   ✅ تم إيقاف Odoo"
 echo ""
@@ -38,7 +45,7 @@ echo ""
 
 # 3. مسح الكاش من النظام
 echo "2. مسح الكاش من النظام..."
-rm -rf ~/.local/share/Odoo/filestore/lugal/* 2>/dev/null || true
+rm -rf ~/.local/share/Odoo/filestore/$DB_NAME/* 2>/dev/null || true
 rm -rf /tmp/odoo_* 2>/dev/null || true
 rm -rf /tmp/odoo 2>/dev/null || true
 find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
@@ -49,7 +56,7 @@ echo ""
 
 # 4. تحديث الوحدات
 echo "3. تحديث الوحدات (pos_perfume_custom و sap_integration)..."
-$PYTHON_CMD odoo-bin -c odoo.conf -d lugal \
+$PYTHON_CMD odoo-bin -c odoo.conf -d "$DB_NAME" \
     -u pos_perfume_custom,sap_integration \
     --stop-after-init \
     --log-level=warn 2>&1 | tail -20
@@ -58,7 +65,7 @@ echo ""
 
 # 5. مسح الكاش من قاعدة البيانات
 echo "4. مسح الكاش من قاعدة البيانات..."
-$PYTHON_CMD odoo-bin shell -c odoo.conf -d lugal << 'PYTHON_SCRIPT'
+$PYTHON_CMD odoo-bin shell -c odoo.conf -d "$DB_NAME" << 'PYTHON_SCRIPT'
 import odoo
 odoo.tools.config.parse_config(['--config=odoo.conf'])
 registry = odoo.registry(odoo.tools.config['db_name'])
@@ -122,10 +129,10 @@ echo ""
 echo "5. إعادة تشغيل Odoo..."
 echo "   استخدم الأمر التالي لتشغيل Odoo:"
 echo ""
-echo "   $PYTHON_CMD odoo-bin -c odoo.conf -d lugal --http-port=8069"
+echo "   $PYTHON_CMD odoo-bin -c odoo.conf -d $DB_NAME --http-port=8069"
 echo ""
 echo "   أو في الخلفية:"
-echo "   nohup $PYTHON_CMD odoo-bin -c odoo.conf -d lugal --http-port=8069 > odoo.log 2>&1 &"
+echo "   nohup $PYTHON_CMD odoo-bin -c odoo.conf -d $DB_NAME --http-port=8069 > odoo.log 2>&1 &"
 echo ""
 
 echo "=========================================="

@@ -19,7 +19,18 @@ def clear_all_cache():
     
     # تحليل الإعدادات
     odoo.tools.config.parse_config(['--config=odoo.conf'])
-    db_name = odoo.tools.config['db_name'] or 'lugal'
+    # محاولة الحصول على اسم قاعدة البيانات من dbfilter أو استخدام القيمة الافتراضية
+    dbfilter = odoo.tools.config.get('dbfilter', '')
+    if dbfilter:
+        # استخراج اسم قاعدة البيانات من dbfilter (مثل ^lugal_nbs.*$ -> lugal_nbs)
+        import re
+        match = re.match(r'\^?(\w+).*\$?', dbfilter)
+        if match:
+            db_name = match.group(1)
+        else:
+            db_name = odoo.tools.config.get('db_name') or 'lugal'
+    else:
+        db_name = odoo.tools.config.get('db_name') or 'lugal'
     
     print(f"\n{'='*60}")
     print(f"مسح الكاش من قاعدة البيانات: {db_name}")
