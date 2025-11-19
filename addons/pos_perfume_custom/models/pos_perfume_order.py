@@ -301,25 +301,23 @@ class PosPerfumeOrder(models.Model):
             sale_order = self.env['sale.order'].create(sale_vals)
             _logger.info(f"[POS Draft] Draft sale order created: {sale_order.name} (ID: {sale_order.id}), state={sale_order.state}")
             
-            # Wait a moment for SAP sync to complete (if triggered automatically)
-            import time
-            time.sleep(0.5)
-            
-            # Check if SAP sync was successful
-            sale_order.invalidate_recordset(['sap_synced', 'sap_doc_num', 'sap_doc_entry'])
-            sale_order.refresh()
-            
-            if not sale_order.sap_synced:
-                _logger.warning(f"[POS Draft] Sale order {sale_order.name} was not auto-synced to SAP, attempting manual sync...")
-                try:
+            # SAP sync should happen automatically in sale.order create method
+            # We'll attempt manual sync if auto-sync didn't work, but don't block on it
+            # Note: SAP sync errors are logged but don't prevent order creation
+            try:
+                if not sale_order.sap_synced:
+                    _logger.warning(f"[POS Draft] Sale order {sale_order.name} was not auto-synced to SAP, attempting manual sync...")
                     sale_order._send_to_sap()
+                    # Refresh to get updated SAP sync status
+                    sale_order.invalidate_recordset(['sap_synced', 'sap_doc_num', 'sap_doc_entry'])
                     sale_order.refresh()
                     if sale_order.sap_synced:
                         _logger.info(f"[POS Draft] Manual SAP sync successful for {sale_order.name}")
                     else:
                         _logger.error(f"[POS Draft] Manual SAP sync failed for {sale_order.name}")
-                except Exception as sap_error:
-                    _logger.error(f"[POS Draft] Error during manual SAP sync for {sale_order.name}: {sap_error}", exc_info=True)
+            except Exception as sap_error:
+                _logger.error(f"[POS Draft] Error during SAP sync for {sale_order.name}: {sap_error}", exc_info=True)
+                # Don't raise - allow order creation to succeed even if SAP sync fails
             
             # Link sale order to POS order
             self.write({
@@ -504,25 +502,23 @@ class PosPerfumeOrder(models.Model):
                     sale_order = self.env['sale.order'].create(sale_vals)
                     _logger.info(f"[POS Confirm] Sale order created: {sale_order.name} (ID: {sale_order.id}), state={sale_order.state}")
                     
-                    # Wait a moment for SAP sync to complete (if triggered automatically)
-                    import time
-                    time.sleep(0.5)
-                    
-                    # Check if SAP sync was successful
-                    sale_order.invalidate_recordset(['sap_synced', 'sap_doc_num', 'sap_doc_entry'])
-                    sale_order.refresh()
-                    
-                    if not sale_order.sap_synced:
-                        _logger.warning(f"[POS Confirm] Sale order {sale_order.name} was not auto-synced to SAP, attempting manual sync...")
-                        try:
+                    # SAP sync should happen automatically in sale.order create method
+                    # We'll attempt manual sync if auto-sync didn't work, but don't block on it
+                    # Note: SAP sync errors are logged but don't prevent order creation
+                    try:
+                        if not sale_order.sap_synced:
+                            _logger.warning(f"[POS Confirm] Sale order {sale_order.name} was not auto-synced to SAP, attempting manual sync...")
                             sale_order._send_to_sap()
+                            # Refresh to get updated SAP sync status
+                            sale_order.invalidate_recordset(['sap_synced', 'sap_doc_num', 'sap_doc_entry'])
                             sale_order.refresh()
                             if sale_order.sap_synced:
                                 _logger.info(f"[POS Confirm] Manual SAP sync successful for {sale_order.name}")
                             else:
                                 _logger.error(f"[POS Confirm] Manual SAP sync failed for {sale_order.name}")
-                        except Exception as sap_error:
-                            _logger.error(f"[POS Confirm] Error during manual SAP sync for {sale_order.name}: {sap_error}", exc_info=True)
+                    except Exception as sap_error:
+                        _logger.error(f"[POS Confirm] Error during SAP sync for {sale_order.name}: {sap_error}", exc_info=True)
+                        # Don't raise - allow order creation to succeed even if SAP sync fails
                     
                     # Update to 'sale' state if needed (but keep as draft for quotation flow)
                     # Note: We keep it as draft if the POS order state is 'quotation'
@@ -545,6 +541,7 @@ class PosPerfumeOrder(models.Model):
             
             _logger.info(f"[POS Confirm] POS order updated to state={new_state} (was {current_state})")
             
+            # Return action with res_id for JavaScript to handle
             results.append({
                 'type': 'ir.actions.act_window',
                 'res_model': 'sale.order',
@@ -555,7 +552,17 @@ class PosPerfumeOrder(models.Model):
             })
         
         # Return single result if single record, otherwise first result
-        return results[0] if len(results) == 1 else results
+        # Also ensure we always return a dict with res_id for JavaScript compatibility
+        if len(results) == 1:
+            result = results[0]
+        elif len(results) > 1:
+            result = results[0]
+        else:
+            # Fallback: return empty action if no results
+            result = {'type': 'ir.actions.act_window_close'}
+        
+        _logger.info(f"[POS Confirm] Returning action result: {result}")
+        return result
     
     def action_cancel(self):
         """Cancel order"""

@@ -2066,9 +2066,25 @@ export class PosPerfumeScreen extends Component {
         try {
             // Call action_confirm to create sale.order (which will send to SAP automatically)
             console.log('[Quotation] Calling action_confirm for order:', orderId);
-            const result = await this.orm.call('pos.perfume.order', 'action_confirm', [[orderId]]);
-            
-            console.log('[Quotation] action_confirm result:', result);
+            let result;
+            try {
+                result = await this.orm.call('pos.perfume.order', 'action_confirm', [[orderId]]);
+                console.log('[Quotation] action_confirm result:', result);
+            } catch (rpcError) {
+                console.error('[Quotation] RPC Error in action_confirm:', rpcError);
+                // Extract error message
+                let errorMessage = 'Unknown error';
+                if (rpcError.data && rpcError.data.message) {
+                    errorMessage = rpcError.data.message;
+                } else if (rpcError.data && rpcError.data.debug) {
+                    errorMessage = rpcError.data.debug;
+                } else if (rpcError.message) {
+                    errorMessage = rpcError.message;
+                } else if (rpcError.args && rpcError.args[0]) {
+                    errorMessage = rpcError.args[0];
+                }
+                throw new Error(errorMessage);
+            }
             
             if (result && result.res_id) {
                 // Reload the order to get SAP document numbers
