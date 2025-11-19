@@ -46,22 +46,28 @@ def clear_all_cache():
         try:
             # 1. مسح ir.ui.view cache
             print("1. مسح ir.ui.view cache...")
-            env['ir.ui.view'].clear_caches()
+            env['ir.ui.view'].invalidate_model()
             print("   ✅ تم")
             
             # 2. مسح ir.qweb cache
             print("2. مسح ir.qweb cache...")
-            env['ir.qweb'].clear_caches()
+            try:
+                env['ir.qweb'].invalidate_model()
+            except:
+                pass
             print("   ✅ تم")
             
             # 3. مسح ir.http cache
             print("3. مسح ir.http cache...")
-            env['ir.http'].clear_caches()
+            try:
+                env['ir.http'].invalidate_model()
+            except:
+                pass
             print("   ✅ تم")
             
             # 4. مسح ir.actions cache
             print("4. مسح ir.actions cache...")
-            env['ir.actions.actions'].clear_caches()
+            env['ir.actions.actions'].invalidate_model()
             print("   ✅ تم")
             
             # 5. حذف assets القديمة

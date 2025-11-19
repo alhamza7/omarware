@@ -76,28 +76,28 @@ with registry.cursor() as cr:
     
     # مسح الكاش من ir_ui_view
     try:
-        env['ir.ui.view'].clear_caches()
+        env['ir.ui.view'].invalidate_model()
         print("   ✅ تم مسح ir.ui.view cache")
     except:
         pass
     
     # مسح الكاش من ir_qweb
     try:
-        env['ir.qweb'].clear_caches()
+        env['ir.qweb'].invalidate_model()
         print("   ✅ تم مسح ir.qweb cache")
     except:
         pass
     
     # مسح الكاش من ir_http
     try:
-        env['ir.http'].clear_caches()
+        env['ir.http'].invalidate_model()
         print("   ✅ تم مسح ir.http cache")
     except:
         pass
     
     # مسح الكاش من ir_actions
     try:
-        env['ir.actions.actions'].clear_caches()
+        env['ir.actions.actions'].invalidate_model()
         print("   ✅ تم مسح ir.actions cache")
     except:
         pass
