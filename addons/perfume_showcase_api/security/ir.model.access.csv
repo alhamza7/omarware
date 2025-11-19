@@ -1,0 +1,14 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_perfume_brand_user,perfume.brand.user,model_perfume_brand,base.group_user,1,1,1,1
+access_perfume_perfume_user,perfume.perfume.user,model_perfume_perfume,base.group_user,1,1,1,1
+access_perfume_note_user,perfume.note.user,model_perfume_note,base.group_user,1,1,1,1
+access_perfume_season_user,perfume.season.user,model_perfume_season,base.group_user,1,1,1,1
+access_perfume_occasion_user,perfume.occasion.user,model_perfume_occasion,base.group_user,1,1,1,1
+access_perfume_tag_user,perfume.tag.user,model_perfume_tag,base.group_user,1,1,1,1
+access_perfume_brand_public,perfume.brand.public,model_perfume_brand,,1,0,0,0
+access_perfume_perfume_public,perfume.perfume.public,model_perfume_perfume,,1,0,0,0
+access_perfume_note_public,perfume.note.public,model_perfume_note,,1,0,0,0
+access_perfume_season_public,perfume.season.public,model_perfume_season,,1,0,0,0
+access_perfume_occasion_public,perfume.occasion.public,model_perfume_occasion,,1,0,0,0
+access_perfume_tag_public,perfume.tag.public,model_perfume_tag,,1,0,0,0
+
