@@ -110,6 +110,7 @@ class SaleOrder(models.Model):
         for quotation in self:
             doc_type = "sales order draft" if quotation.state == 'draft' else ("sale order" if quotation.state == 'sale' else "quotation")
             _logger.info(f">>> Starting _send_to_sap for {doc_type} {quotation.name} <<<")
+            sync_successful = False
             
             # Log invoice_type if present
             if quotation.invoice_type:
@@ -124,21 +125,27 @@ class SaleOrder(models.Model):
                 ], limit=1)
                 
                 if not backend:
-                    _logger.warning(f"No active SAP backend found for quotation {quotation.name}")
+                    error_msg = f"❌ No active SAP backend found for quotation {quotation.name}"
+                    _logger.error(error_msg)
+                    quotation.sudo().write({'sap_synced': False})
                     return
                 
                 _logger.info(f"Found active SAP backend: {backend.name} (id={backend.id})")
                 
                 # التحقق من وجود partner مع CardCode
                 if not quotation.partner_id or not quotation.partner_id.ref:
-                    _logger.warning(f"Quotation {quotation.name} has no partner with CardCode (ref)")
+                    error_msg = f"❌ Quotation {quotation.name} has no partner with CardCode (ref). Partner: {quotation.partner_id.name if quotation.partner_id else 'None'}"
+                    _logger.error(error_msg)
+                    quotation.sudo().write({'sap_synced': False})
                     return
                 
                 _logger.info(f"Partner found: {quotation.partner_id.name}, CardCode={quotation.partner_id.ref}")
                 
                 # التحقق من وجود order lines
                 if not quotation.order_line:
-                    _logger.warning(f"Quotation {quotation.name} has no order lines")
+                    error_msg = f"❌ Quotation {quotation.name} has no order lines"
+                    _logger.error(error_msg)
+                    quotation.sudo().write({'sap_synced': False})
                     return
                 
                 _logger.info(f"Order lines found: {len(quotation.order_line)} line(s)")
@@ -170,11 +177,15 @@ class SaleOrder(models.Model):
                                 result = response.json() if response.content else {}
                                 _logger.info(f"Successfully updated sale order {quotation.name} in SAP")
                             else:
-                                _logger.warning(f"Could not update sale order {quotation.name} in SAP: {response.status_code} - {response.text}")
+                                error_msg = f"❌ Could not update sale order {quotation.name} in SAP: {response.status_code} - {response.text}"
+                                _logger.error(error_msg)
                                 result = None
+                                quotation.sudo().write({'sap_synced': False})
                         except Exception as e:
-                            _logger.warning(f"Error updating sale order {quotation.name} in SAP: {e}")
+                            error_msg = f"❌ Error updating sale order {quotation.name} in SAP: {e}"
+                            _logger.error(error_msg, exc_info=True)
                             result = None
+                            quotation.sudo().write({'sap_synced': False})
                     else:
                         # إنشاء sale order جديد في SAP (نادر الحدوث)
                         _logger.info(f"Creating sale order {quotation.name} in SAP")
@@ -184,8 +195,10 @@ class SaleOrder(models.Model):
                         if response.status_code in [200, 201]:
                             result = response.json() if response.content else {}
                         else:
-                            _logger.error(f"Error creating sale order {quotation.name} in SAP: {response.status_code} - {response.text}")
+                            error_msg = f"❌ Error creating sale order {quotation.name} in SAP: {response.status_code} - {response.text}"
+                            _logger.error(error_msg)
                             result = None
+                            quotation.sudo().write({'sap_synced': False})
                     
                     if result:
                         # تحديث رقم Document إذا تم إرجاعه
@@ -198,6 +211,7 @@ class SaleOrder(models.Model):
                             update_vals['sap_synced'] = True
                             quotation.sudo().write(update_vals)
                             _logger.info(f"Sale order {quotation.name} synced to SAP: DocNum={update_vals.get('sap_doc_num')}, DocEntry={update_vals.get('sap_doc_entry')}")
+                            sync_successful = True
                 else:
                     # للـ draft orders: إرسال كـ Quotation في SAP (لأن Quotations يمكن أن تكون Draft)
                     if quotation.state == 'draft':
@@ -221,15 +235,21 @@ class SaleOrder(models.Model):
                             if quotation.invoice_type:
                                 inv_type_info = f", InvoiceType={quotation.invoice_type} (U_InvType sent to SAP)"
                             _logger.info(f"✅ Quotation (draft) {quotation.name} synced to SAP: DocNum={doc_num}, DocEntry={doc_entry}{inv_type_info}")
+                            sync_successful = True
                         else:
-                            _logger.error(f"❌ Failed to create quotation {quotation.name} in SAP: create_quotation returned None or empty result. Check SAP logs for details.")
+                            error_msg = f"❌ Failed to create quotation {quotation.name} in SAP: create_quotation returned None or empty result. Check SAP logs for details."
+                            _logger.error(error_msg)
+                            # تعيين sap_synced = False بشكل صريح عند الفشل
+                            quotation.sudo().write({'sap_synced': False})
+                            # رفع exception لضمان تسجيل الخطأ بشكل واضح
+                            raise Exception(error_msg)
                     else:
                         # للـ quotations الأخرى: تحديث أو إنشاء quotation في SAP
                         if quotation.sap_doc_entry and quotation.sap_doc_entry > 0:
                             # تحديث quotation موجود
                             _logger.info(f"Updating quotation {quotation.name} in SAP (DocEntry: {quotation.sap_doc_entry})")
                             result = connection.update_quotation(quotation.sap_doc_entry, quotation_data)
-                            if result:
+                            if result and result.get('DocEntry'):
                                 # تحديث رقم Document إذا تم إرجاعه
                                 update_vals = {}
                                 if result.get('DocNum'):
@@ -240,6 +260,12 @@ class SaleOrder(models.Model):
                                     update_vals['sap_synced'] = True
                                     quotation.sudo().write(update_vals)
                                     _logger.info(f"Quotation {quotation.name} updated in SAP: DocNum={update_vals.get('sap_doc_num')}, DocEntry={update_vals.get('sap_doc_entry')}")
+                                    sync_successful = True
+                            else:
+                                error_msg = f"❌ Failed to update quotation {quotation.name} in SAP: update_quotation returned None or invalid result"
+                                _logger.error(error_msg)
+                                quotation.sudo().write({'sap_synced': False})
+                                raise Exception(error_msg)
                         else:
                             # إنشاء quotation جديد
                             _logger.info(f"Creating quotation {quotation.name} in SAP")
@@ -261,11 +287,32 @@ class SaleOrder(models.Model):
                                 if quotation.invoice_type:
                                     inv_type_info = f", InvoiceType={quotation.invoice_type} (U_InvType sent to SAP)"
                                 _logger.info(f"✅ Quotation {quotation.name} synced to SAP: DocNum={doc_num}, DocEntry={doc_entry}{inv_type_info}")
+                                sync_successful = True
+                            else:
+                                error_msg = f"❌ Failed to create quotation {quotation.name} in SAP: create_quotation returned None or empty result. Check SAP logs for details."
+                                _logger.error(error_msg)
+                                # تعيين sap_synced = False بشكل صريح عند الفشل
+                                quotation.sudo().write({'sap_synced': False})
+                                # رفع exception لضمان تسجيل الخطأ بشكل واضح
+                                raise Exception(error_msg)
                 
             except Exception as e:
-                _logger.error(f"Error sending quotation {quotation.name} to SAP: {str(e)}", exc_info=True)
+                error_msg = f"❌ Error sending quotation {quotation.name} to SAP: {str(e)}"
+                _logger.error(error_msg, exc_info=True)
+                sync_successful = False
+                # تعيين sap_synced = False بشكل صريح عند الفشل
+                try:
+                    quotation.sudo().write({'sap_synced': False})
+                except Exception as write_error:
+                    _logger.error(f"Failed to update sap_synced for quotation {quotation.name}: {str(write_error)}")
                 # لا نرفع exception حتى لا نمنع حفظ الـ quotation في Odoo
                 # يمكن إضافة notification للمستخدم هنا
+            finally:
+                # Log final status
+                if sync_successful:
+                    _logger.info(f"<<< Completed _send_to_sap for {doc_type} {quotation.name}: SUCCESS >>>")
+                else:
+                    _logger.error(f"<<< Completed _send_to_sap for {doc_type} {quotation.name}: FAILED - Check errors above >>>")
     
     def _prepare_quotation_data_for_sap(self, quotation, backend=None):
         """إعداد بيانات quotation للـ SAP Service Layer"""
