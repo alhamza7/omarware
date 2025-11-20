@@ -430,6 +430,15 @@ class PosPerfumeOrder(models.Model):
 
             else:
                 # Create new Sale Order - use read data or direct access with fallback
+                # ملاحظة مهمة:
+                # - إذا كان طلب الـ POS في حالة 'quotation' فهذا يعني أن المستخدم
+                #   أراد إنشاء عرض سعر فقط، فنُنشئ sale.order بحالة 'draft' ليُرسل
+                #   إلى SAP كـ Quotation.
+                # - إذا كان في أي حالة أخرى (مثلاً 'draft' عند ضغط زر Sale Order في الـ POS)
+                #   فنُنشئ sale.order بحالة 'sale' ليُرسل إلى SAP كـ Sales Order مباشرة.
+                current_state = order.state
+                sale_state = 'draft' if current_state == 'quotation' else 'sale'
+
                 sale_vals = {
                     'partner_id': order_data.get('partner_id', [False])[0] if order_data.get('partner_id') else order.partner_id.id,
                     'user_id': order_data.get('user_id', [False])[0] if order_data.get('user_id') else order.user_id.id,
@@ -439,7 +448,7 @@ class PosPerfumeOrder(models.Model):
                     # Sync invoice_type from POS order to sale.order (field defined in sap_integration)
                     'invoice_type': order.invoice_type or False,
                     'pricelist_id': order_data.get('pricelist_id', [False])[0] if order_data.get('pricelist_id') else (order.pricelist_id.id if order.pricelist_id else False),
-                    'state': 'draft',  # Keep as draft initially to trigger SAP sync, then update to 'sale' if needed
+                    'state': sale_state,
                 }
                 
                 # Log invoice_type in sale_vals

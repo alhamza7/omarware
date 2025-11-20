@@ -188,6 +188,10 @@ class SaleOrder(models.Model):
                     if quotation.sap_doc_entry and quotation.sap_doc_entry > 0:
                         # تحديث sale order موجود في SAP
                         _logger.info(f"Updating sale order {quotation.name} in SAP (DocEntry: {quotation.sap_doc_entry})")
+                        # لا نرسل CardCode عند تحديث Sales Order لأنه لا يمكن تعديله في SAP
+                        if 'CardCode' in quotation_data:
+                            _logger.info(f"Removing CardCode from update payload for sale order {quotation.name} to avoid ODBC -1029")
+                            quotation_data.pop('CardCode', None)
                         # Note: For sale orders, we might need to use update_order instead of update_quotation
                         # For now, we'll try to update using the Orders endpoint
                         try:
