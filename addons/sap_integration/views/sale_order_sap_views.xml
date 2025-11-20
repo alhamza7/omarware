@@ -32,13 +32,27 @@
                     <field name="sap_doc_entry" invisible="1"/>
                 </xpath>
                 
-                <!-- Add SAP information in notebook -->
+                <!-- Add invoice_type field before partner_id -->
+            <xpath expr="//field[@name='partner_id']" position="before">
+                <field name="invoice_type" 
+                       widget="radio" 
+                       options="{'horizontal': true}"
+                       string="نوع الفاتورة / Invoice Type"/>
+            </xpath>
+            
+            <!-- Add SAP information in notebook -->
             <xpath expr="//notebook" position="inside">
                 <page string="SAP Information" name="sap_info">
                     <group col="2">
                         <field name="sap_doc_num" string="SAP Document Number" readonly="1"/>
                         <field name="sap_doc_entry" string="SAP Doc Entry" readonly="1"/>
                         <field name="sap_synced" string="Synced to SAP" readonly="1"/>
+                    </group>
+                    <group string="ملاحظات SAP / SAP Notes">
+                        <field name="note" 
+                               placeholder="أدخل الملاحظات هنا... (سيتم إرسالها إلى SAP)"
+                               widget="text"
+                               nolabel="1"/>
                     </group>
                 </page>
             </xpath>
@@ -57,6 +71,7 @@
             <field name="arch" type="xml">
                 <xpath expr="//field[@name='partner_id']" position="after">
                     <field name="sap_doc_num" string="SAP Doc" optional="hide"/>
+                    <field name="invoice_type" string="نوع الفاتورة" optional="show"/>
                 </xpath>
             </field>
         </record>
