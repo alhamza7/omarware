@@ -388,11 +388,11 @@
                                     </div>
                                 </td>
                                 <td class="totals-label" style="width: 20%;">قيمة الفاتورة</td>
-                                <td class="totals-value" class="totals-right-col">
+                                <td class="totals-value totals-right-col">
                                     <t t-esc="'${:,.2f}'.format(doc.amount_untaxed)"/>
                                 </td>
                                 <td class="totals-label" style="width: 20%;">قيمة الفاتورة بعد الخصم ع.د-</td>
-                                <td class="totals-value" class="totals-right-col">
+                                <td class="totals-value totals-right-col">
                                     <t t-esc="'{:,.0f}'.format(doc.amount_total * (doc.exchange_rate or 1410))"/>
                                 </td>
                             </tr>
