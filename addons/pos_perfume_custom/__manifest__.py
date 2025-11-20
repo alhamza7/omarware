@@ -35,6 +35,7 @@
         'views/pos_perfume_session_views.xml',
         'reports/pos_perfume_order_report.xml',
         'reports/pos_perfume_order_report_gold.xml',
+        'reports/pos_perfume_order_report_nbs.xml',
         'reports/pos_perfume_report_action.xml',
     ],
     'assets': {
