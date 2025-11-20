@@ -120,15 +120,25 @@ class SaleOrder(models.Model):
     def _send_to_sap(self):
         """إرسال quotation/sale order إلى SAP ومزامنته"""
         for quotation in self:
-            doc_type = "sales order draft" if quotation.state == 'draft' else ("sale order" if quotation.state == 'sale' else "quotation")
+            # تحديد نوع المستند للّوج فقط (Quotation vs Sale Order)
+            if quotation.state == 'sale':
+                doc_type = "sale order"
+                doc_label = "Sale Order"
+            elif quotation.state == 'draft':
+                doc_type = "quotation (draft)"
+                doc_label = "Quotation"
+            else:
+                doc_type = "quotation"
+                doc_label = "Quotation"
+
             _logger.info(f">>> Starting _send_to_sap for {doc_type} {quotation.name} <<<")
             sync_successful = False
             
             # Log invoice_type if present
             if quotation.invoice_type:
-                _logger.info(f"[SAP Sync] Quotation {quotation.name} has invoice_type: {quotation.invoice_type}")
+                _logger.info(f"[SAP Sync] {doc_label} {quotation.name} has invoice_type: {quotation.invoice_type}")
             else:
-                _logger.info(f"[SAP Sync] Quotation {quotation.name} has NO invoice_type")
+                _logger.info(f"[SAP Sync] {doc_label} {quotation.name} has NO invoice_type")
             
             try:
                 # التحقق من وجود backend نشط
