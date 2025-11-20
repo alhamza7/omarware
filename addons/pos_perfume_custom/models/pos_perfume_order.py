@@ -520,11 +520,9 @@ class PosPerfumeOrder(models.Model):
                         _logger.error(f"[POS Confirm] Error during SAP sync for {sale_order.name}: {sap_error}", exc_info=True)
                         # Don't raise - allow order creation to succeed even if SAP sync fails
                     
-                    # Update to 'sale' state if needed (but keep as draft for quotation flow)
-                    # Note: We keep it as draft if the POS order state is 'quotation'
-                    if current_state != 'quotation':
-                        sale_order.write({'state': 'sale'})
-                        _logger.info(f"[POS Confirm] Updated sale order {sale_order.name} to 'sale' state")
+                    # Important: keep sale.order in its current state here.
+                    # Confirmation (changing state from draft/sent to sale) is handled
+                    # by calling sale.order.action_confirm() from the UI/JS layer.
                     
                 except Exception as e:
                     _logger.error(f"[POS Confirm] Error creating sale order: {e}", exc_info=True)

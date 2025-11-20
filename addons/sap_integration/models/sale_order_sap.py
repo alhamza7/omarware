@@ -81,7 +81,19 @@ class SaleOrder(models.Model):
                 continue
             
             # إذا تم تحديث بيانات مهمة
-            if any(field in vals for field in ['partner_id', 'order_line', 'date_order', 'validity_date', 'price_unit', 'discount', 'product_uom_qty']):
+            # ملاحظة: أضفنا invoice_type و note حتى يتم إرسال نوع الفاتورة والملاحظات
+            # أيضاً عند التعديل، وليس فقط عند الإرسال لأول مرة.
+            if any(field in vals for field in [
+                'partner_id',
+                'order_line',
+                'date_order',
+                'validity_date',
+                'price_unit',
+                'discount',
+                'product_uom_qty',
+                'invoice_type',
+                'note',
+            ]):
                 # للـ quotations (draft): إرسال أو تحديث
                 if order.state == 'draft':
                     if not order.sap_synced:
