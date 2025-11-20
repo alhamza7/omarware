@@ -46,32 +46,39 @@ class SaleOrder(models.Model):
     
     @api.model
     def create(self, vals):
-        """Override create to send quotation to SAP after creation"""
-        quotation = super(SaleOrder, self).create(vals)
+        """Override create to send quotation/sale order to SAP after creation"""
+        order = super(SaleOrder, self).create(vals)
         
-        _logger.info(f"=== Sale Order Created: {quotation.name}, state={quotation.state}, sap_synced={quotation.sap_synced}, partner={quotation.partner_id.name if quotation.partner_id else 'None'}, partner_ref={quotation.partner_id.ref if quotation.partner_id else 'None'}, order_lines_count={len(quotation.order_line)} ===")
+        _logger.info(f"=== Sale Order Created: {order.name}, state={order.state}, sap_synced={order.sap_synced}, partner={order.partner_id.name if order.partner_id else 'None'}, partner_ref={order.partner_id.ref if order.partner_id else 'None'}, order_lines_count={len(order.order_line)} ===")
         
-        # إرسال quotation إلى SAP إذا كان في حالة draft وبعد أن يتم حفظه بالكامل
-        # نستخدم delay لتجنب مشاكل في transaction
-        if quotation.state == 'draft' and not quotation.sap_synced:
-            _logger.info(f"Quotation {quotation.name} is in draft and not synced, checking conditions...")
+        # إرسال إلى SAP بناءً على الحالة
+        if not order.sap_synced:
             # التحقق من وجود بيانات كافية قبل الإرسال
-            if quotation.partner_id and quotation.partner_id.ref and quotation.order_line:
-                _logger.info(f"Conditions met for quotation {quotation.name}, attempting to send to SAP...")
-                # استخدام with_delay() إذا كان متاحاً، وإلا نرسل مباشرة
+            if order.partner_id and order.partner_id.ref and order.order_line:
+                # إرسال إلى SAP بناءً على الحالة
+                if order.state == 'draft':
+                    _logger.info(f"Order {order.name} is draft, will be sent as Quotation to SAP")
+                elif order.state == 'sale':
+                    _logger.info(f"Order {order.name} is already confirmed (sale), will be sent as Sales Order to SAP")
+                else:
+                    _logger.info(f"Order {order.name} in state {order.state}, attempting to send to SAP")
+                
                 try:
-                    quotation._send_to_sap()
+                    order._send_to_sap()
                 except Exception as e:
-                    _logger.warning(f"Could not send quotation {quotation.name} to SAP on create: {e}")
+                    _logger.warning(f"Could not send order {order.name} to SAP on create: {e}")
             else:
-                _logger.info(f"Conditions not met for quotation {quotation.name}: partner_id={quotation.partner_id is not None}, partner_ref={quotation.partner_id.ref if quotation.partner_id else None}, order_lines={len(quotation.order_line) if quotation.order_line else 0}")
+                _logger.info(f"Conditions not met for order {order.name}: partner_id={order.partner_id is not None}, partner_ref={order.partner_id.ref if order.partner_id else None}, order_lines={len(order.order_line) if order.order_line else 0}")
         else:
-            _logger.info(f"Quotation {quotation.name} not eligible for SAP sync: state={quotation.state}, sap_synced={quotation.sap_synced}")
+            _logger.info(f"Order {order.name} already synced to SAP, skipping")
         
-        return quotation
+        return order
     
     def write(self, vals):
         """Override write to send quotation/sale order to SAP when needed"""
+        # حفظ الحالة القديمة قبل الـ write
+        old_states = {order.id: order.state for order in self}
+        
         result = super(SaleOrder, self).write(vals)
         
         # تحديث في SAP إذا تم تحديث بيانات مهمة
@@ -80,7 +87,47 @@ class SaleOrder(models.Model):
             if not order.partner_id or not order.partner_id.ref or not order.order_line:
                 continue
             
-            # إذا تم تحديث بيانات مهمة
+            # التحقق إذا تم تغيير الحالة من draft إلى sale (تأكيد الطلب)
+            state_changed_to_sale = (
+                'state' in vals and 
+                vals['state'] == 'sale' and 
+                old_states.get(order.id) == 'draft' and
+                order.sap_doc_entry and 
+                order.sap_doc_entry > 0
+            )
+            
+            if state_changed_to_sale:
+                # تحويل Quotation إلى Sales Order في SAP
+                _logger.info(f"State changed from draft to sale for {order.name}, converting quotation to sales order in SAP (DocEntry: {order.sap_doc_entry})")
+                try:
+                    backend = self.env['sap.backend'].search([('active', '=', True)], limit=1)
+                    if backend:
+                        connection = backend.get_connection()
+                        sap_order = connection.convert_quotation_to_order(order.sap_doc_entry)
+                        
+                        if sap_order:
+                            # تحديث رقم Document من SAP Sales Order
+                            update_vals = {}
+                            if sap_order.get('DocNum'):
+                                update_vals['sap_doc_num'] = sap_order.get('DocNum')
+                            if sap_order.get('DocEntry'):
+                                update_vals['sap_doc_entry'] = sap_order.get('DocEntry')
+                            
+                            if update_vals:
+                                # استخدام sudo().write لتجنب إعادة استدعاء write
+                                order.sudo().write(update_vals)
+                                _logger.info(f"✅ Successfully converted quotation {order.name} to sales order in SAP. New DocNum: {update_vals.get('sap_doc_num')}, DocEntry: {update_vals.get('sap_doc_entry')}")
+                        else:
+                            _logger.warning(f"Failed to convert quotation {order.name} to sales order in SAP")
+                    else:
+                        _logger.warning(f"No active SAP backend found to convert quotation {order.name}")
+                except Exception as e:
+                    _logger.error(f"Error converting quotation {order.name} to sales order in SAP: {str(e)}", exc_info=True)
+                
+                # بعد التحويل، لا نحتاج لتحديث إضافي
+                continue
+            
+            # إذا تم تحديث بيانات مهمة (وليس فقط تغيير الحالة)
             # ملاحظة: أضفنا invoice_type و note حتى يتم إرسال نوع الفاتورة والملاحظات
             # أيضاً عند التعديل، وليس فقط عند الإرسال لأول مرة.
             if any(field in vals for field in [
