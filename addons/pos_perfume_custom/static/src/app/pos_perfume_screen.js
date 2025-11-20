@@ -2527,12 +2527,39 @@ export class PosPerfumeScreen extends Component {
         const orderId = await this.saveOrder('draft');
         if (orderId) {
             try {
-                // Create sale order
+                // Create or link sale order from POS order
                 const result = await this.orm.call('pos.perfume.order', 'action_confirm', [[orderId]]);
                 
                 if (result && result.res_id) {
-                    // Confirm the sale order
-                    await this.orm.call('sale.order', 'action_confirm', [[result.res_id]]);
+                    const saleOrderId = result.res_id;
+
+                    // Read sale order state before trying to confirm
+                    const saleOrders = await this.orm.read('sale.order', [saleOrderId], ['state', 'name']);
+                    if (!saleOrders.length) {
+                        throw new Error('Sale order not found');
+                    }
+
+                    const saleOrder = saleOrders[0];
+                    console.log('[ConfirmSaleOrder] New/linked sale order state:', saleOrder.state, 'Name:', saleOrder.name);
+
+                    // Only call action_confirm if the sale order is in a confirmable state
+                    if (saleOrder.state === 'draft' || saleOrder.state === 'sent') {
+                        try {
+                            await this.orm.call('sale.order', 'action_confirm', [[saleOrderId]]);
+                        } catch (confirmError) {
+                            console.error('[ConfirmSaleOrder] Error confirming sale order:', confirmError);
+                            // Try to get more details about the error
+                            let errorMsg = confirmError.message || 'Unknown error';
+                            if (confirmError.data && confirmError.data.message) {
+                                errorMsg = confirmError.data.message;
+                            } else if (confirmError.args && confirmError.args[0]) {
+                                errorMsg = confirmError.args[0];
+                            }
+                            throw new Error(`Cannot confirm sale order: ${errorMsg}`);
+                        }
+                    } else {
+                        console.log('[ConfirmSaleOrder] Sale order already confirmed, skipping action_confirm');
+                    }
                     
                     // Update POS order state to 'sale'
                     const orderIds = Array.isArray(orderId) ? [orderId[0]] : [orderId];

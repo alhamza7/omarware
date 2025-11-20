@@ -473,9 +473,12 @@ class SaleOrder(models.Model):
         _logger.info("=== End of DocumentLines ===")
         
         # إعداد بيانات الوثيقة
+        # ملاحظة: لا نرسل DocDate إلى SAP حتى لا نصطدم برسالة
+        # "Series period does not match current period" عند تحديث مستندات
+        # قديمة ضمن Series مرتبط بفترة مختلفة. SAP سيستخدم التاريخ
+        # الافتراضي أو تاريخ المستند الأصلي في النظام.
         quotation_data = {
             'CardCode': quotation.partner_id.ref or '',
-            'DocDate': quotation.date_order.strftime('%Y-%m-%d') if quotation.date_order else datetime.now().strftime('%Y-%m-%d'),
             'DocumentLines': document_lines,
         }
         
