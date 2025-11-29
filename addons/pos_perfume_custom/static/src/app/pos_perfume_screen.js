@@ -478,7 +478,7 @@ export class PosPerfumeScreen extends Component {
     
     /**
      * Get default warehouse from available warehouses list
-     * Priority: Warehouse ID 18 > Warehouse with highest quantity > First warehouse
+     * Priority: Warehouse code/name "18" > Warehouse with highest quantity > First warehouse
      */
     getDefaultWarehouse(availableWarehouses) {
         if (!availableWarehouses || availableWarehouses.length === 0) {
@@ -494,11 +494,16 @@ export class PosPerfumeScreen extends Component {
             quantity: w.quantity || w.qty || 0
         })));
         
-        // Priority 1: Try to find Warehouse ID 18
-        const wh18 = availableWarehouses.find(w => w.id === 18);
+        // Priority 1: Try to find Warehouse with code or name "18"
+        const wh18 = availableWarehouses.find(w => 
+            w.code === '18' || 
+            w.name === '18' || 
+            w.code?.includes('18') || 
+            w.name?.startsWith('18')
+        );
         
         if (wh18) {
-            console.log('✅ Found Warehouse ID 18! Selecting it as default:', {
+            console.log('✅ Found Warehouse "18"! Selecting it as default:', {
                 id: wh18.id,
                 code: wh18.code,
                 name: wh18.name,
@@ -506,7 +511,7 @@ export class PosPerfumeScreen extends Component {
             });
             return wh18;
         } else {
-            console.warn('⚠️ Warehouse ID 18 NOT found in available warehouses');
+            console.warn('⚠️ Warehouse "18" NOT found in available warehouses');
         }
         
         // Priority 2: Find warehouse with highest quantity
