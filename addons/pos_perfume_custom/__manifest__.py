@@ -62,6 +62,9 @@
             'pos_perfume_custom/static/src/xml/payment_screen_inherit.xml',
             'pos_perfume_custom/static/src/xml/product_screen_button.xml',
         ],
+        'web.report_assets_common': [
+            'pos_perfume_custom/static/src/css/report_style.css',
+        ],
     },
     'installable': True,
     'application': False,
