@@ -14,12 +14,12 @@
                        required="1"
                        domain="[('sale_ok', '=', True)]"
                        context="{'default_detailed_type': 'product'}"/>
-                <field name="custom_product_name" column_invisible="1"/>
+                <field name="custom_product_name" optional="show" string="اسم مخصص (للفاتورة فقط)" placeholder="اترك فارغاً لاستخدام الاسم الأصلي"/>
                 <field name="product_code" optional="show"/>
                 <field name="product_foreign_name" optional="show" string="Foreign Name"/>
                 <field name="warehouse_id" required="1"/>
                 <field name="available_qty" optional="show" readonly="1"/>
-                <field name="quantity"/>
+                <field name="quantity" widget="float" options="{'precision': 2}"/>
                 <field name="unit_price"/>
                 <field name="discount_percent"/>
                 <field name="price_after_discount" readonly="1"/>

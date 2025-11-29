@@ -232,3 +232,4 @@ addons/pos_perfume_custom/
 **الإصدار**: 19.0.1.0.0  
 **التاريخ**: November 2025
 
+

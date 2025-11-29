@@ -63,3 +63,4 @@ If images don't appear:
 - Clear browser cache and regenerate the report
 - Check Odoo logs for any image loading errors
 
+

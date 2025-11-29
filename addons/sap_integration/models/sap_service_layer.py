@@ -542,17 +542,30 @@ class SapServiceLayerConnection:
             url = f"{self.base_url}/Quotations({doc_entry})"
             headers = self._get_headers()
             
-            _logger.info(f"Updating quotation in SAP: {url}")
+            _logger.info(f"[SAP Update] Updating quotation {doc_entry} in SAP: {url}")
+            
+            # Log DocumentLines to verify ItemDescription is included
+            doc_lines = quotation_data.get('DocumentLines', [])
+            _logger.info(f"[SAP Update] Sending {len(doc_lines)} DocumentLines")
+            for idx, line in enumerate(doc_lines):
+                item_desc = line.get('ItemDescription', 'NOT_SET')
+                _logger.info(f"[SAP Update] DocumentLine[{idx}]: ItemCode={line.get('ItemCode')}, Quantity={line.get('Quantity')}, ItemDescription='{item_desc}'")
+            
+            # Log full payload
+            import json
+            _logger.info(f"[SAP Update] Full quotation data being sent:\n{json.dumps(quotation_data, indent=2, ensure_ascii=False)}")
+            
             response = self.session.patch(url, json=quotation_data, headers=headers, timeout=30)
             
             if response.status_code in [200, 204]:
+                _logger.info(f"[SAP Update] ✅ Successfully updated quotation {doc_entry}")
                 return response.json() if response.content else {}
             else:
-                _logger.error(f"Error updating quotation: {response.status_code} - {response.text}")
+                _logger.error(f"[SAP Update] ❌ Error updating quotation {doc_entry}: {response.status_code} - {response.text}")
                 return None
                 
         except Exception as e:
-            _logger.error(f"Error updating quotation: {str(e)}")
+            _logger.error(f"[SAP Update] ❌ Exception updating quotation {doc_entry}: {str(e)}", exc_info=True)
             return None
     
     def convert_quotation_to_order(self, doc_entry):
@@ -629,18 +642,40 @@ class SapServiceLayerConnection:
             quotation_data = response.json()
             _logger.info(f"Retrieved quotation data: DocNum={quotation_data.get('DocNum')}, CardCode={quotation_data.get('CardCode')}")
             
+            # Log DocumentLines to verify ItemDescription is preserved
+            doc_lines = quotation_data.get('DocumentLines', [])
+            _logger.info(f"[SAP Convert] Retrieved {len(doc_lines)} DocumentLines from quotation")
+            for idx, line in enumerate(doc_lines):
+                if 'ItemDescription' in line:
+                    _logger.info(f"[SAP Convert] ✅ DocumentLine[{idx}] has ItemDescription: '{line.get('ItemDescription')}'")
+                else:
+                    _logger.info(f"[SAP Convert] ⚠️ DocumentLine[{idx}] has NO ItemDescription (ItemCode: {line.get('ItemCode')})")
+            
             # Step 2: Prepare sales order data from quotation
             order_data = {
                 'CardCode': quotation_data.get('CardCode'),
                 'DocDate': quotation_data.get('DocDate'),
                 'DocDueDate': quotation_data.get('DocDueDate') or quotation_data.get('DocDate'),
-                'DocumentLines': quotation_data.get('DocumentLines', []),
+                'DocumentLines': doc_lines,
             }
             
             # Copy other relevant fields if they exist
-            for field in ['Comments', 'NumAtCard', 'Address', 'Address2', 'ShipToCode', 'PayToCode']:
+            # إضافة U_InvType (Invoice Type) للحفاظ عليه عند التحويل
+            for field in ['Comments', 'NumAtCard', 'Address', 'Address2', 'ShipToCode', 'PayToCode', 'U_InvType']:
                 if field in quotation_data:
                     order_data[field] = quotation_data[field]
+                    if field == 'U_InvType':
+                        _logger.info(f"[SAP Convert] Preserving U_InvType={quotation_data[field]} when converting quotation to order")
+                    elif field == 'Comments':
+                        _logger.info(f"[SAP Convert] Preserving Comments when converting quotation to order")
+            
+            # Log final order data DocumentLines
+            _logger.info(f"[SAP Convert] Final order_data has {len(order_data.get('DocumentLines', []))} DocumentLines")
+            for idx, line in enumerate(order_data.get('DocumentLines', [])):
+                if 'ItemDescription' in line:
+                    _logger.info(f"[SAP Convert] ✅ Final order DocumentLine[{idx}] has ItemDescription: '{line.get('ItemDescription')}'")
+                else:
+                    _logger.info(f"[SAP Convert] ⚠️ Final order DocumentLine[{idx}] has NO ItemDescription")
             
             # Step 3: Create the sales order
             url = f"{self.base_url}/Orders"

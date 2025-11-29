@@ -2913,7 +2913,7 @@ export class PosPerfumeScreen extends Component {
             const lines = lineIds.length > 0 ? await this.orm.read(
                 'pos.perfume.order.line',
                 lineIds,
-                ['product_id', 'product_uom_id', 'warehouse_id', 'quantity', 'unit_price', 'discount_percent']
+                ['product_id', 'product_uom_id', 'warehouse_id', 'quantity', 'unit_price', 'discount_percent', 'custom_product_name']
             ) : [];
             
             // Update state
@@ -3391,7 +3391,27 @@ export class PosPerfumeScreen extends Component {
             let value;
             
             if (field === 'quantity') {
-                value = parseFloat(inputValue) || 1;
+                // Store display value for free typing (same as unitPrice)
+                line.quantityDisplay = inputValue;
+                
+                // Parse the value - allow partial input during typing
+                const cleanedValue = inputValue.replace(/[^0-9.]/g, '');
+                const numValue = parseFloat(cleanedValue);
+                
+                if (inputValue === '' || inputValue === null) {
+                    value = 1; // Default to 1 for quantity
+                } else if (!isNaN(numValue) && isFinite(numValue) && numValue > 0) {
+                    value = numValue;
+                } else {
+                    // Invalid input - try to extract valid number part
+                    const match = cleanedValue.match(/^(\d*\.?\d*)/);
+                    if (match && match[0]) {
+                        const partialValue = parseFloat(match[0]);
+                        value = (!isNaN(partialValue) && isFinite(partialValue) && partialValue > 0) ? partialValue : 1;
+                    } else {
+                        value = 1;
+                    }
+                }
             } else if (field === 'unitPrice') {
                 // Store display value for free typing
                 line.unitPriceDisplay = inputValue;

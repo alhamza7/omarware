@@ -264,6 +264,9 @@ class PosPerfumeOrder(models.Model):
                 'date_order': self.date or fields.Datetime.now(),
                 'state': 'draft',  # Keep as draft for SAP
                 'pricelist_id': self.pricelist_id.id if self.pricelist_id else False,
+                # Sync invoice_type and note from POS order to sale.order
+                'invoice_type': self.invoice_type or False,
+                'note': self.note or '',
             }
             
             # Create sale order lines
@@ -412,10 +415,70 @@ class PosPerfumeOrder(models.Model):
                 update_vals = {
                     'state': 'sale',
                 }
-                # Sync invoice_type from POS order to sale.order if present
+                # Sync invoice_type and note from POS order to sale.order if present
                 if order.invoice_type:
                     update_vals['invoice_type'] = order.invoice_type
                     _logger.info(f"[POS Confirm] Syncing invoice_type={order.invoice_type} to sale.order {sale_order.name}")
+                if order.note:
+                    update_vals['note'] = order.note
+                    _logger.info(f"[POS Confirm] Syncing note to sale.order {sale_order.name}")
+                
+                # ⚠️ IMPORTANT: Check if sale.order.line has custom_product_name set
+                # This happens when user edits the quotation directly from Backend (not POS)
+                # In this case, sale.order.line.custom_product_name should take precedence
+                _logger.info(f"[POS Confirm] Checking sale.order.line for custom_product_name...")
+                for sale_line in sale_order.order_line:
+                    if sale_line.custom_product_name:
+                        _logger.info(f"[POS Confirm] ✅ sale.order.line ID {sale_line.id} has custom_product_name='{sale_line.custom_product_name}'")
+                    else:
+                        _logger.info(f"[POS Confirm] ⚠️ sale.order.line ID {sale_line.id} has NO custom_product_name")
+                
+                # Update order lines to sync any changes from POS (like quantity, price, etc.)
+                # BUT DO NOT override custom_product_name if it's already set in sale.order.line
+                _logger.info(f"[POS Confirm] Checking {len(order_lines)} POS lines for updates...")
+                
+                # Sort both lists by sequence to ensure correct matching
+                pos_lines_sorted = order_lines.sorted(lambda l: l.sequence if hasattr(l, 'sequence') else 0)
+                sale_lines_sorted = sale_order.order_line.sorted(lambda l: l.sequence if hasattr(l, 'sequence') else 0)
+                
+                _logger.info(f"[POS Confirm] POS lines count: {len(pos_lines_sorted)}, Sale lines count: {len(sale_lines_sorted)}")
+                
+                # Match lines by index (sequence order)
+                for idx, line in enumerate(pos_lines_sorted):
+                    if not line.product_id:
+                        _logger.warning(f"[POS Confirm] Line {idx} has no product, skipping")
+                        continue
+                    
+                    _logger.info(f"[POS Confirm] Processing POS line {idx}: product={line.product_id.name}, qty={line.quantity}, custom_name={line.custom_product_name}")
+                    
+                    # Get matching sale order line by index
+                    if idx < len(sale_lines_sorted):
+                        matching_sale_line = sale_lines_sorted[idx]
+                        _logger.info(f"[POS Confirm] Matched with sale.order.line ID {matching_sale_line.id}, product={matching_sale_line.product_id.name}, existing_custom_name='{matching_sale_line.custom_product_name}'")
+                        
+                        # Update existing line
+                        line_update_vals = {
+                            'product_uom_qty': line.quantity or 1.0,
+                            'price_unit': line.unit_price or 0.0,
+                            'discount': line.discount_percent or 0.0,
+                        }
+                        
+                        # ⚠️ CRITICAL: Only update custom_product_name if:
+                        # 1. POS line has custom_product_name AND
+                        # 2. Sale line does NOT have custom_product_name (to avoid overwriting backend edits)
+                        if line.custom_product_name and not matching_sale_line.custom_product_name:
+                            line_update_vals['custom_product_name'] = line.custom_product_name
+                            _logger.info(f"[POS Confirm] ✅ Setting custom_product_name='{line.custom_product_name}' from POS line")
+                        elif matching_sale_line.custom_product_name:
+                            _logger.info(f"[POS Confirm] ℹ️ Keeping existing custom_product_name='{matching_sale_line.custom_product_name}' from sale.order.line (not overwriting)")
+                        else:
+                            _logger.info(f"[POS Confirm] ⚠️ No custom_product_name in either POS or Sale line")
+                        
+                        matching_sale_line.write(line_update_vals)
+                        _logger.info(f"[POS Confirm] ✅ Line {idx} updated successfully")
+                    else:
+                        _logger.warning(f"[POS Confirm] ⚠️ No matching sale.order.line at index {idx} for product {line.product_id.name}")
+                
                 sale_order.write(update_vals)
                 _logger.info(f"[POS Confirm] Updated sale order {sale_order.name} to 'sale' state")
                 
@@ -427,6 +490,14 @@ class PosPerfumeOrder(models.Model):
                         _logger.info(f"[POS Confirm] Manual SAP sync completed for {sale_order.name}")
                     except Exception as sap_error:
                         _logger.error(f"[POS Confirm] Failed to sync sale order {sale_order.name} to SAP: {sap_error}", exc_info=True)
+                else:
+                    # Force re-sync to send updated data to SAP
+                    _logger.info(f"[POS Confirm] Re-syncing sale order {sale_order.name} to SAP with updated data...")
+                    try:
+                        sale_order._send_to_sap()
+                        _logger.info(f"[POS Confirm] Re-sync completed for {sale_order.name}")
+                    except Exception as sap_error:
+                        _logger.error(f"[POS Confirm] Failed to re-sync sale order {sale_order.name} to SAP: {sap_error}", exc_info=True)
 
             else:
                 # Create new Sale Order - use read data or direct access with fallback

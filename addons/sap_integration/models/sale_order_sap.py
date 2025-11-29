@@ -286,10 +286,26 @@ class SaleOrder(models.Model):
                             _logger.info(f"Sale order {quotation.name} synced to SAP: DocNum={update_vals.get('sap_doc_num')}, DocEntry={update_vals.get('sap_doc_entry')}")
                             sync_successful = True
                 else:
-                    # للـ draft orders: إرسال كـ Quotation في SAP (لأن Quotations يمكن أن تكون Draft)
-                    if quotation.state == 'draft':
-                        # إنشاء Quotation في SAP (يمكن أن يكون Draft status)
-                        _logger.info(f"Creating quotation (draft) {quotation.name} in SAP")
+                    # للـ quotations (draft or quotation state): تحديث أو إنشاء quotation في SAP
+                    if quotation.sap_doc_entry and quotation.sap_doc_entry > 0:
+                        # تحديث quotation موجود في SAP
+                        _logger.info(f"Updating existing quotation {quotation.name} in SAP (DocEntry: {quotation.sap_doc_entry})")
+                        result = connection.update_quotation(quotation.sap_doc_entry, quotation_data)
+                        
+                        if result is not None:  # PATCH returns empty body on success (204), so check for None instead
+                            # تحديث نجح
+                            quotation.sudo().write({'sap_synced': True})
+                            _logger.info(f"✅ Quotation {quotation.name} updated in SAP (DocEntry: {quotation.sap_doc_entry})")
+                            sync_successful = True
+                        else:
+                            error_msg = f"❌ Failed to update quotation {quotation.name} in SAP: update_quotation returned None"
+                            _logger.error(error_msg)
+                            quotation.sudo().write({'sap_synced': False})
+                            raise Exception(error_msg)
+                    else:
+                        # إنشاء quotation جديد في SAP (ليس لديه DocEntry بعد)
+                        state_label = "quotation (draft)" if quotation.state == 'draft' else "quotation"
+                        _logger.info(f"Creating new {state_label} {quotation.name} in SAP (no existing DocEntry)")
                         result = connection.create_quotation(quotation_data)
                         
                         if result:
@@ -307,67 +323,13 @@ class SaleOrder(models.Model):
                             inv_type_info = ""
                             if quotation.invoice_type:
                                 inv_type_info = f", InvoiceType={quotation.invoice_type} (U_InvType sent to SAP)"
-                            _logger.info(f"✅ Quotation (draft) {quotation.name} synced to SAP: DocNum={doc_num}, DocEntry={doc_entry}{inv_type_info}")
+                            _logger.info(f"✅ {state_label.capitalize()} {quotation.name} created in SAP: DocNum={doc_num}, DocEntry={doc_entry}{inv_type_info}")
                             sync_successful = True
                         else:
-                            error_msg = f"❌ Failed to create quotation {quotation.name} in SAP: create_quotation returned None or empty result. Check SAP logs for details."
+                            error_msg = f"❌ Failed to create {state_label} {quotation.name} in SAP: create_quotation returned None or empty result. Check SAP logs for details."
                             _logger.error(error_msg)
-                            # تعيين sap_synced = False بشكل صريح عند الفشل
                             quotation.sudo().write({'sap_synced': False})
-                            # رفع exception لضمان تسجيل الخطأ بشكل واضح
                             raise Exception(error_msg)
-                    else:
-                        # للـ quotations الأخرى: تحديث أو إنشاء quotation في SAP
-                        if quotation.sap_doc_entry and quotation.sap_doc_entry > 0:
-                            # تحديث quotation موجود
-                            _logger.info(f"Updating quotation {quotation.name} in SAP (DocEntry: {quotation.sap_doc_entry})")
-                            result = connection.update_quotation(quotation.sap_doc_entry, quotation_data)
-                            if result and result.get('DocEntry'):
-                                # تحديث رقم Document إذا تم إرجاعه
-                                update_vals = {}
-                                if result.get('DocNum'):
-                                    update_vals['sap_doc_num'] = result.get('DocNum')
-                                if result.get('DocEntry'):
-                                    update_vals['sap_doc_entry'] = result.get('DocEntry')
-                                if update_vals:
-                                    update_vals['sap_synced'] = True
-                                    quotation.sudo().write(update_vals)
-                                    _logger.info(f"Quotation {quotation.name} updated in SAP: DocNum={update_vals.get('sap_doc_num')}, DocEntry={update_vals.get('sap_doc_entry')}")
-                                    sync_successful = True
-                            else:
-                                error_msg = f"❌ Failed to update quotation {quotation.name} in SAP: update_quotation returned None or invalid result"
-                                _logger.error(error_msg)
-                                quotation.sudo().write({'sap_synced': False})
-                                raise Exception(error_msg)
-                        else:
-                            # إنشاء quotation جديد
-                            _logger.info(f"Creating quotation {quotation.name} in SAP")
-                            result = connection.create_quotation(quotation_data)
-                            
-                            if result:
-                                # حفظ رقم Document من SAP
-                                doc_num = result.get('DocNum', '')
-                                doc_entry = result.get('DocEntry', 0)
-                                
-                                quotation.sudo().write({
-                                    'sap_doc_num': doc_num,
-                                    'sap_doc_entry': doc_entry,
-                                    'sap_synced': True,
-                                })
-                                
-                                # Log success with invoice type info if present
-                                inv_type_info = ""
-                                if quotation.invoice_type:
-                                    inv_type_info = f", InvoiceType={quotation.invoice_type} (U_InvType sent to SAP)"
-                                _logger.info(f"✅ Quotation {quotation.name} synced to SAP: DocNum={doc_num}, DocEntry={doc_entry}{inv_type_info}")
-                                sync_successful = True
-                            else:
-                                error_msg = f"❌ Failed to create quotation {quotation.name} in SAP: create_quotation returned None or empty result. Check SAP logs for details."
-                                _logger.error(error_msg)
-                                # تعيين sap_synced = False بشكل صريح عند الفشل
-                                quotation.sudo().write({'sap_synced': False})
-                                # رفع exception لضمان تسجيل الخطأ بشكل واضح
-                                raise Exception(error_msg)
                 
             except Exception as e:
                 error_msg = f"❌ Error sending quotation {quotation.name} to SAP: {str(e)}"
@@ -415,7 +377,9 @@ class SaleOrder(models.Model):
             # إضافة ItemDescription إذا تم تعديل اسم المنتج
             if hasattr(line, 'custom_product_name') and line.custom_product_name:
                 line_data['ItemDescription'] = line.custom_product_name
-                _logger.info(f"Using custom product name for ItemDescription: {line.custom_product_name}")
+                _logger.info(f"✅ Using custom product name for ItemDescription: {line.custom_product_name} (Line ID: {line.id}, Product: {line.product_id.name})")
+            else:
+                _logger.info(f"⚠️ No custom product name found for line ID {line.id}, Product: {line.product_id.name}, hasattr: {hasattr(line, 'custom_product_name')}, value: {getattr(line, 'custom_product_name', 'NOT_SET')}")
             
             _logger.info(f"Preparing DocumentLine: ItemCode={item_code}, Quantity={line.product_uom_qty}")
             
