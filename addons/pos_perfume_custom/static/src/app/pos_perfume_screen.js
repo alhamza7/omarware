@@ -2160,7 +2160,7 @@ export class PosPerfumeScreen extends Component {
     }
     
     /**
-     * Print order
+     * Print order - إرسال طلب طباعة إلى SAP على DEFAULT LAYOUT
      */
     async printOrder() {
         if (!this.state.currentOrder.order_id) {
@@ -2171,61 +2171,34 @@ export class PosPerfumeScreen extends Component {
         try {
             const orderId = this.state.currentOrder.order_id;
             
-            console.log('=== Print Order Debug ===');
+            console.log('=== Print Order to SAP ===');
             console.log('Order ID:', orderId);
             
-            // First, verify the order exists
-            const orderExists = await this.orm.call(
+            // إرسال طلب الطباعة إلى SAP
+            const result = await this.orm.call(
                 'pos.perfume.order',
-                'search_read',
-                [[['id', '=', orderId]]],
-                { fields: ['id', 'name', 'state'], limit: 1 }
+                'action_print_to_sap',
+                [[orderId]]
             );
             
-            console.log('Order data:', orderExists);
+            console.log('SAP Print result:', result);
             
-            if (!orderExists || orderExists.length === 0) {
-                throw new Error('Order not found');
+            // عرض إشعار النجاح
+            this.notification.add(_t("Print request sent to SAP successfully"), { type: "success" });
+            
+            // إذا كان هناك إجراء إضافي من السيرفر، قم بتنفيذه
+            if (result && result.type) {
+                await this.action.doAction(result);
             }
-            
-            // Check if report exists
-            const reportExists = await this.orm.call(
-                'ir.actions.report',
-                'search_read',
-                [[['report_name', '=', 'pos_perfume_custom.report_pos_perfume_order']]],
-                { fields: ['id', 'name', 'model', 'report_name'], limit: 1 }
-            );
-            
-            console.log('Report exists:', reportExists);
-            
-            if (!reportExists || reportExists.length === 0) {
-                throw new Error('Report template not found');
-            }
-            
-            console.log('Attempting to render report via action.doAction...');
-            
-            // Use action.doAction to print the report
-                await this.action.doAction({
-                    type: 'ir.actions.report',
-                    report_type: 'qweb-pdf',
-                report_name: 'pos_perfume_custom.report_pos_perfume_order',
-                report_file: 'pos_perfume_custom.report_pos_perfume_order',
-                    context: {
-                    active_ids: [orderId],
-                }
-            });
-            
-            console.log('Report action completed');
-            this.notification.add(_t("Report sent to printer"), { type: "success" });
             
         } catch (error) {
-            console.error('=== Print Order Error ===');
+            console.error('=== Print Order to SAP Error ===');
             console.error('Error object:', error);
             console.error('Error message:', error.message);
             console.error('Error data:', error.data);
             console.error('Error stack:', error.stack);
             
-            let errorMessage = _t("Error printing order: ");
+            let errorMessage = _t("Error sending print request to SAP: ");
             
             if (error.data && error.data.message) {
                 errorMessage += error.data.message;
@@ -2233,7 +2206,7 @@ export class PosPerfumeScreen extends Component {
                 
                 if (error.data.debug) {
                     console.error('Server debug:', error.data.debug);
-                    }
+                }
             } else if (error.message) {
                 errorMessage += error.message;
             } else {
@@ -2243,7 +2216,7 @@ export class PosPerfumeScreen extends Component {
             this.notification.add(errorMessage, { 
                 type: "danger",
                 sticky: true,
-                title: _t("Print Error")
+                title: _t("SAP Print Error")
             });
         }
     }

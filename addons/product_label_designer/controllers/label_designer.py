@@ -13,7 +13,7 @@ class LabelDesignerController(http.Controller):
     
     @http.route('/label_designer/<int:template_id>', type='http', auth='user', website=True)
     def label_designer(self, template_id, **kwargs):
-        """Visual label designer interface"""
+        """Visual label designer interface for product labels"""
         template = request.env['product.label.template'].browse(template_id)
         
         if not template.exists():
@@ -27,9 +27,25 @@ class LabelDesignerController(http.Controller):
             'sample_product': sample_product,
         })
     
+    @http.route('/label_designer/customer/<int:template_id>', type='http', auth='user', website=True)
+    def customer_label_designer(self, template_id, **kwargs):
+        """Visual label designer interface for customer labels"""
+        template = request.env['customer.label.template'].browse(template_id)
+        
+        if not template.exists():
+            return request.not_found()
+        
+        # Get a sample customer for preview
+        sample_partner = request.env['res.partner'].search([], limit=1)
+        
+        return request.render('product_label_designer.customer_label_designer_template', {
+            'template': template,
+            'sample_partner': sample_partner,
+        })
+    
     @http.route('/label_designer/save_positions', type='json', auth='user', methods=['POST'], csrf=False)
     def save_positions(self, template_id, positions):
-        """Save element positions"""
+        """Save element positions for product labels"""
         try:
             _logger.debug('save_positions called with template_id=%s positions=%s', template_id, positions)
             template = request.env['product.label.template'].browse(template_id)
@@ -39,6 +55,20 @@ class LabelDesignerController(http.Controller):
             return {'success': False, 'error': 'Template not found'}
         except Exception as e:
             _logger.exception('save_positions failed: %s', e)
+            return {'success': False, 'error': str(e)}
+    
+    @http.route('/label_designer/customer/save_positions', type='json', auth='user', methods=['POST'], csrf=False)
+    def save_customer_positions(self, template_id, positions):
+        """Save element positions for customer labels"""
+        try:
+            _logger.debug('save_customer_positions called with template_id=%s positions=%s', template_id, positions)
+            template = request.env['customer.label.template'].browse(template_id)
+            if template.exists():
+                template.write(positions)
+                return {'success': True}
+            return {'success': False, 'error': 'Template not found'}
+        except Exception as e:
+            _logger.exception('save_customer_positions failed: %s', e)
             return {'success': False, 'error': str(e)}
     
     @http.route('/label_designer/upload_image', type='json', auth='user', methods=['POST'], csrf=False)

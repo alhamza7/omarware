@@ -682,6 +682,107 @@ class PosPerfumeOrder(models.Model):
             'view_mode': 'form',
             'target': 'current',
         }
+    
+    def action_print_to_sap(self):
+        """إرسال طلب طباعة إلى SAP على DEFAULT LAYOUT"""
+        import logging
+        _logger = logging.getLogger(__name__)
+        
+        self.ensure_one()
+        
+        # التحقق من وجود sale order مرتبط
+        if not self.sale_order_id:
+            raise UserError(_('No sale order linked to this POS order. Please save the order first.'))
+        
+        # التحقق من وجود SAP DocEntry
+        if not self.sap_doc_entry:
+            raise UserError(_('Order is not synced to SAP yet. Please confirm the order first.'))
+        
+        try:
+            # الحصول على SAP backend
+            backend = self.env['sap.backend'].search([('active', '=', True)], limit=1)
+            if not backend:
+                raise UserError(_('No active SAP backend found. Please configure SAP integration first.'))
+            
+            # تحديد نوع المستند بناءً على حالة sale order
+            if self.sale_order_id.state == 'sale':
+                doc_type = 'Orders'
+            elif self.sale_order_id.state == 'draft':
+                doc_type = 'Quotations'
+            else:
+                doc_type = 'Quotations'
+            
+            # إنشاء اتصال SAP
+            from odoo.addons.sap_integration.models.sap_service_layer import SapServiceLayerConnection
+            
+            sap_conn = SapServiceLayerConnection(
+                base_url=backend.base_url,
+                username=backend.username,
+                password=backend.password,
+                company_db=backend.company_db,
+                timeout=backend.timeout or 30,
+                verify_ssl=backend.verify_ssl
+            )
+            
+            # إرسال طلب الطباعة واسترجاع PDF من API Gateway
+            _logger.info(f"[POS Print] Sending print request to SAP API Gateway: DocEntry={self.sap_doc_entry}, DocType={doc_type}")
+            
+            # الحصول على API Gateway URL من backend
+            api_gateway_url = backend.api_gateway_url if backend.api_gateway_url else None
+            
+            result = sap_conn.print_document(
+                doc_entry=self.sap_doc_entry,
+                doc_type=doc_type,
+                print_format='DEFAULT LAYOUT',
+                return_pdf=True,
+                api_gateway_url=api_gateway_url
+            )
+            
+            _logger.info(f"[POS Print] ✅ Print request successful. PDF received: {bool(result.get('pdf_base64'))}")
+            
+            # إذا تم استرجاع PDF، نحفظه مؤقتاً ونعيده للطباعة
+            if result.get('pdf_base64'):
+                import base64
+                import tempfile
+                import os
+                
+                # تحويل base64 إلى PDF
+                pdf_data = base64.b64decode(result['pdf_base64'])
+                
+                # حفظ PDF مؤقتاً في قاعدة البيانات (كـ attachment)
+                attachment = self.env['ir.attachment'].create({
+                    'name': f'{self.name}_SAP_Print.pdf',
+                    'type': 'binary',
+                    'datas': result['pdf_base64'],
+                    'res_model': 'pos.perfume.order',
+                    'res_id': self.id,
+                    'mimetype': 'application/pdf',
+                })
+                
+                _logger.info(f"[POS Print] PDF saved as attachment ID: {attachment.id}")
+                
+                # إرجاع action لتحميل/طباعة PDF
+                return {
+                    'type': 'ir.actions.act_url',
+                    'url': f'/web/content/{attachment.id}?download=true',
+                    'target': 'new',
+                }
+            else:
+                # إذا لم يتم استرجاع PDF، نعرض إشعار
+                return {
+                    'type': 'ir.actions.client',
+                    'tag': 'display_notification',
+                    'params': {
+                        'title': _('Print Request Sent'),
+                        'message': _('Print request has been sent to SAP successfully.'),
+                        'type': 'success',
+                        'sticky': False,
+                    }
+                }
+            
+        except Exception as e:
+            _logger.error(f"[POS Print] ❌ Error sending print request to SAP: {str(e)}", exc_info=True)
+            raise UserError(_('Error sending print request to SAP: %s') % str(e))
 
 
 class PosPerfumeOrderLine(models.Model):
@@ -807,6 +908,51 @@ class PosPerfumeOrderLine(models.Model):
         compute='_compute_available_qty',
         digits='Product Unit of Measure'
     )
+    
+    # Computed fields for report compatibility
+    name = fields.Char(
+        string='Description',
+        compute='_compute_name',
+        help='Product name for report display'
+    )
+    
+    product_uom_qty = fields.Float(
+        string='Quantity (UoM)',
+        compute='_compute_report_fields',
+        help='Quantity for report compatibility'
+    )
+    
+    price_unit = fields.Float(
+        string='Unit Price',
+        compute='_compute_report_fields',
+        help='Unit price for report compatibility'
+    )
+    
+    price_subtotal = fields.Monetary(
+        string='Subtotal',
+        compute='_compute_report_fields',
+        currency_field='currency_id',
+        help='Subtotal for report compatibility'
+    )
+    
+    @api.depends('product_id', 'custom_product_name')
+    def _compute_name(self):
+        """Compute name field for report compatibility"""
+        for line in self:
+            if line.custom_product_name:
+                line.name = line.custom_product_name
+            elif line.product_id:
+                line.name = line.product_id.name
+            else:
+                line.name = ''
+    
+    @api.depends('quantity', 'unit_price', 'line_total')
+    def _compute_report_fields(self):
+        """Compute fields for report compatibility"""
+        for line in self:
+            line.product_uom_qty = line.quantity
+            line.price_unit = line.unit_price
+            line.price_subtotal = line.line_total
     
     @api.depends('quantity', 'unit_price', 'discount_percent')
     def _compute_amounts(self):

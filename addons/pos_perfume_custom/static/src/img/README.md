@@ -64,3 +64,4 @@ If images don't appear:
 - Check Odoo logs for any image loading errors
 
 
+

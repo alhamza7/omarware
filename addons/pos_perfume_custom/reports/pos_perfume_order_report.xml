@@ -15,40 +15,20 @@
                 <span t-else="" t-field="line.product_id.name"/>
             </xpath>
             
-            <!-- Replace order_line with order_line_ids -->
-            <xpath expr="//t[@t-foreach='doc.order_line']" position="attributes">
-                <attribute name="t-foreach">doc.order_line_ids</attribute>
+            <!-- Replace lines_to_report to use order_line_ids instead of _get_order_lines_to_report() -->
+            <xpath expr="//t[@t-set='lines_to_report']" position="replace">
+                <t t-set="lines_to_report" t-value="doc.order_line_ids"/>
             </xpath>
             
-            <!-- Adjust quantity field -->
-            <xpath expr="//span[@t-field='line.product_uom_qty']" position="replace">
-                <span t-field="line.quantity"/>
+            <!-- Note: product_uom_qty, price_unit, and price_subtotal are computed fields 
+                 that map to quantity, unit_price, and line_total respectively -->
+            
+            <!-- Disable taxes display -->
+            <xpath expr="//t[@t-set='display_taxes']" position="replace">
+                <t t-set="display_taxes" t-value="False"/>
             </xpath>
             
-            <!-- Adjust price field -->
-            <xpath expr="//span[@t-field='line.price_unit']" position="replace">
-                <span t-field="line.unit_price"/>
-            </xpath>
-            
-            <!-- Adjust subtotal field -->
-            <xpath expr="//span[@t-field='line.price_subtotal']" position="replace">
-                <span t-field="line.line_total"/>
-            </xpath>
-            
-            <!-- Remove tax column if exists -->
-            <xpath expr="//th[@name='th_taxes']" position="replace"/>
-            <xpath expr="//td[@name='td_taxes']" position="replace"/>
-            
-            <!-- Adjust totals -->
-            <xpath expr="//span[@t-field='doc.amount_untaxed']" position="replace">
-                <span t-field="doc.amount_subtotal"/>
-            </xpath>
-            
-            <!-- Remove tax total if exists -->
-            <xpath expr="//tr[@class='border-black o_tax_line']" position="replace"/>
-            <xpath expr="//tr[@class='border-black o_total']//span[@t-field='doc.amount_total']" position="attributes">
-                <attribute name="t-field">doc.amount_total</attribute>
-            </xpath>
+            <!-- Note: Totals are handled automatically by the template -->
         </template>
 
         <!-- Main report that uses the inherited sale template -->

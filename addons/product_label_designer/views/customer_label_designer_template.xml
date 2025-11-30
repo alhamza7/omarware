@@ -1,0 +1,237 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <template id="customer_label_designer_template" name="Customer Visual Label Designer">
+        <t t-call="web.layout">
+            <t t-set="head">
+                <link rel="stylesheet" href="/product_label_designer/static/src/css/label_designer.css"/>
+                <script type="text/javascript">
+                    window.templateData = {
+                        id: <t t-out="template.id"/>,
+                        label_width: <t t-out="template.label_width"/>,
+                        label_height: <t t-out="template.label_height"/>,
+                        bg_color: '<t t-out="template.bg_color"/>',
+                        text_color: '<t t-out="template.text_color"/>',
+                        font_size_name: <t t-out="template.font_size_name"/>,
+                        font_size_phone: <t t-out="template.font_size_phone"/>,
+                        font_size_mobile: <t t-out="template.font_size_mobile"/>,
+                        font_size_invoice_type: <t t-out="template.font_size_invoice_type"/>,
+                        show_name: <t t-out="'true' if template.show_name else 'false'"/>,
+                        show_phone: <t t-out="'true' if template.show_phone else 'false'"/>,
+                        show_mobile: <t t-out="'true' if template.show_mobile else 'false'"/>,
+                        show_invoice_type: <t t-out="'true' if template.show_invoice_type else 'false'"/>,
+                        show_logo: <t t-out="'true' if template.show_logo else 'false'"/>,
+                        name_x: <t t-out="template.name_x"/>,
+                        name_y: <t t-out="template.name_y"/>,
+                        phone_x: <t t-out="template.phone_x"/>,
+                        phone_y: <t t-out="template.phone_y"/>,
+                        mobile_x: <t t-out="template.mobile_x"/>,
+                        mobile_y: <t t-out="template.mobile_y"/>,
+                        invoice_type_x: <t t-out="template.invoice_type_x"/>,
+                        invoice_type_y: <t t-out="template.invoice_type_y"/>,
+                        logo_x: <t t-out="template.logo_x"/>,
+                        logo_y: <t t-out="template.logo_y"/>,
+                        logo_width: <t t-out="template.logo_width"/>,
+                        logo_height: <t t-out="template.logo_height"/>,
+                    };
+                </script>
+            </t>
+            <t t-set="title">Customer Label Designer</t>
+            <div class="oe_application">
+                <div class="o_main">
+                    <div class="o_main_content">
+                        <div class="container-fluid">
+                            <div class="row">
+                                <div class="col-12">
+                                    <div class="oe_view_manager">
+                                        <div class="oe_view_manager_header">
+                                            <h1>
+                                                <i class="fa fa-paint-brush"/> Customer Label Designer
+                                            </h1>
+                                        </div>
+                                        
+                                        <div id="label-designer" class="label-designer-container">
+                                            <div class="designer-sidebar">
+                                                <h2 style="margin-bottom: 20px; color: #00A09D;">
+                                                    <i class="fa fa-paint-brush"/> Label Designer
+                                                </h2>
+                                                
+                                                <h4>Template: <t t-esc="template.name"/></h4>
+                                                <p style="color: #666; font-size: 12px;">
+                                                    <t t-esc="template.label_width"/>mm × <t t-esc="template.label_height"/>mm
+                                                </p>
+                                                
+                                                <div class="designer-property-panel">
+                                                    <div class="property-group">
+                                                        <h4>Elements</h4>
+                                                        <ul class="element-list">
+                                                            <li data-element="name" class="element-item">Customer Name</li>
+                                                            <li data-element="phone" class="element-item">Phone</li>
+                                                            <li data-element="mobile" class="element-item">Mobile</li>
+                                                            <li data-element="invoice_type" class="element-item">Invoice Type</li>
+                                                            <li data-element="logo" class="element-item">Logo</li>
+                                                        </ul>
+                                                    </div>
+                                                    
+                                                    <div class="property-group">
+                                                        <h4>Selected Position</h4>
+                                                        <div class="position-inputs">
+                                                            <div>
+                                                                <label>X (mm)</label>
+                                                                <input type="number" name="position_x" class="property-input" step="0.1" readonly=""/>
+                                                            </div>
+                                                            <div>
+                                                                <label>Y (mm)</label>
+                                                                <input type="number" name="position_y" class="property-input" step="0.1" readonly=""/>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    <div class="property-group">
+                                                        <h4>Actions</h4>
+                                                        <button class="btn-designer" onclick="savePositions()">
+                                                            <i class="fa fa-save"/> Save Positions
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="designer-canvas-area">
+                                                <div class="designer-canvas" id="designer-canvas" 
+                                                     t-attf-style="width: #{template.label_width * 3.7795275591}px; height: #{template.label_height * 3.7795275591}px; background-color: #{template.bg_color};">
+                                                    
+                                                    <!-- Preview Elements -->
+                                                    <t t-if="template.show_name">
+                                                        <div class="draggable-element" data-element="name" 
+                                                             t-attf-style="left: #{template.name_x * 3.7795275591}px; top: #{template.name_y * 3.7795275591}px; font-size: #{template.font_size_name}pt; color: #{template.text_color};">
+                                                            <t t-esc="sample_partner.name or 'Customer Name'"/>
+                                                        </div>
+                                                    </t>
+                                                    
+                                                    <t t-if="template.show_phone">
+                                                        <div class="draggable-element" data-element="phone" 
+                                                             t-attf-style="left: #{template.phone_x * 3.7795275591}px; top: #{template.phone_y * 3.7795275591}px; font-size: #{template.font_size_phone}pt; color: #{template.text_color};">
+                                                            هاتف: <t t-esc="sample_partner.phone or '123456789'"/>
+                                                        </div>
+                                                    </t>
+                                                    
+                                                    <t t-if="template.show_mobile">
+                                                        <div class="draggable-element" data-element="mobile" 
+                                                             t-attf-style="left: #{template.mobile_x * 3.7795275591}px; top: #{template.mobile_y * 3.7795275591}px; font-size: #{template.font_size_mobile}pt; color: #{template.text_color};">
+                                                            موبايل: <t t-esc="sample_partner.mobile or '987654321'"/>
+                                                        </div>
+                                                    </t>
+                                                    
+                                                    <t t-if="template.show_invoice_type">
+                                                        <div class="draggable-element" data-element="invoice_type" 
+                                                             t-attf-style="left: #{template.invoice_type_x * 3.7795275591}px; top: #{template.invoice_type_y * 3.7795275591}px; font-size: #{template.font_size_invoice_type}pt; color: #{template.text_color};">
+                                                            نوع الفاتورة: زبون محل
+                                                        </div>
+                                                    </t>
+                                                    
+                                                    <t t-if="template.show_logo and template.logo_image">
+                                                        <div class="draggable-element" data-element="logo" 
+                                                             t-attf-style="left: #{template.logo_x * 3.7795275591}px; top: #{template.logo_y * 3.7795275591}px; width: #{template.logo_width * 3.7795275591}px; height: #{template.logo_height * 3.7795275591}px;">
+                                                            <img t-attf-src="data:image/png;base64,#{template.logo_image.decode()}" 
+                                                                 t-attf-style="width: 100%; height: 100%; object-fit: contain;"/>
+                                                        </div>
+                                                    </t>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <script type="text/javascript" src="/product_label_designer/static/src/js/label_designer.js"/>
+            <script type="text/javascript">
+                <![CDATA[
+                function savePositions() {
+                    const canvas = document.getElementById('designer-canvas');
+                    const elements = canvas.querySelectorAll('.draggable-element');
+                    const positions = {};
+                    
+                    elements.forEach(function(el) {
+                        const elementType = el.dataset.element;
+                        const rect = el.getBoundingClientRect();
+                        const canvasRect = canvas.getBoundingClientRect();
+                        const mmToPixel = 3.7795275591;
+                        
+                        positions[elementType + '_x'] = (rect.left - canvasRect.left) / mmToPixel;
+                        positions[elementType + '_y'] = (rect.top - canvasRect.top) / mmToPixel;
+                    });
+                    
+                    fetch('/label_designer/customer/save_positions', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            template_id: window.templateData.id,
+                            positions: positions
+                        })
+                    }).then(function(response) {
+                        return response.json();
+                    }).then(function(data) {
+                        if (data.success) {
+                            alert('تم حفظ المواضع بنجاح!');
+                        } else {
+                            alert('خطأ في الحفظ: ' + (data.error || 'Unknown error'));
+                        }
+                    });
+                }
+                
+                // Initialize drag and drop
+                document.addEventListener('DOMContentLoaded', function() {
+                    const canvas = document.getElementById('designer-canvas');
+                    const elements = canvas.querySelectorAll('.draggable-element');
+                    let activeElement = null;
+                    let isDragging = false;
+                    let startX = 0;
+                    let startY = 0;
+                    
+                    elements.forEach(function(el) {
+                        el.addEventListener('mousedown', function(e) {
+                            activeElement = el;
+                            isDragging = true;
+                            startX = e.clientX - el.offsetLeft;
+                            startY = e.clientY - el.offsetTop;
+                            el.classList.add('active');
+                            e.preventDefault();
+                        });
+                    });
+                    
+                    document.addEventListener('mousemove', function(e) {
+                        if (isDragging && activeElement) {
+                            const canvasRect = canvas.getBoundingClientRect();
+                            const newX = e.clientX - canvasRect.left - startX;
+                            const newY = e.clientY - canvasRect.top - startY;
+                            
+                            if (newX >= 0 && newY >= 0 && 
+                                newX + activeElement.offsetWidth <= canvas.offsetWidth &&
+                                newY + activeElement.offsetHeight <= canvas.offsetHeight) {
+                                activeElement.style.left = newX + 'px';
+                                activeElement.style.top = newY + 'px';
+                            }
+                        }
+                    });
+                    
+                    document.addEventListener('mouseup', function() {
+                        if (activeElement) {
+                            activeElement.classList.remove('active');
+                            activeElement = null;
+                        }
+                        isDragging = false;
+                    });
+                });
+                ]]>
+            </script>
+        </t>
+    </template>
+
+</odoo>
+
