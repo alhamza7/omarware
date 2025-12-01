@@ -16,7 +16,7 @@ Product Label Designer
     'author': 'Lugal AI',
     'website': 'https://www.lugal-ai.com',
     'license': 'LGPL-3',
-    'depends': ['product', 'stock', 'web', 'base', 'contacts'],
+    'depends': ['product', 'stock', 'web', 'base'],
     'data': [
         'security/ir.model.access.csv',
         'security/customer_label_access.xml',
