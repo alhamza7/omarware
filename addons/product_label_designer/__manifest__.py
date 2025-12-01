@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'Product Label Designer',
-    'version': '19.0.1.0.1',
+    'version': '19.0.1.0.6',
     'category': 'Inventory/Inventory',
     'summary': 'Design and print professional product labels with custom backgrounds',
     'description': """
@@ -29,6 +29,7 @@ Product Label Designer
         'wizard/quick_print_wizard_views.xml',
         'reports/label_reports.xml',
         'reports/customer_label_reports.xml',
+        'reports/customer_label_direct_print.xml',
         'reports/label_html_reports.xml',
         'reports/label_templates.xml',
         'reports/customer_label_templates.xml',
@@ -39,6 +40,8 @@ Product Label Designer
         'web.assets_backend': [
             'product_label_designer/static/src/css/label_designer.css',
             'product_label_designer/static/src/js/label_designer.js',
+            'product_label_designer/static/src/js/note_with_suggestions.js',
+            'product_label_designer/static/src/xml/note_with_suggestions.xml',
         ],
     },
     'installable': True,

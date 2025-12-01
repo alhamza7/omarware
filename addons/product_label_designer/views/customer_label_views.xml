@@ -9,6 +9,7 @@
             <list string="Customer Label Templates">
                 <field name="sequence" widget="handle"/>
                 <field name="name"/>
+                <field name="is_default"/>
                 <field name="label_width"/>
                 <field name="label_height"/>
                 <field name="active"/>
@@ -32,6 +33,7 @@
                         <group>
                             <field name="name"/>
                             <field name="sequence"/>
+                            <field name="is_default"/>
                         </group>
                         <group>
                             <field name="label_width"/>
@@ -46,11 +48,22 @@
                                     <field name="show_phone"/>
                                     <field name="show_mobile"/>
                                     <field name="show_invoice_type"/>
+                                    <field name="show_note"/>
                                     <field name="show_logo"/>
                                 </group>
+                                <group string="Show/Hide Labels (العناوين)">
+                                    <field name="show_phone_label"/>
+                                    <field name="show_mobile_label"/>
+                                    <field name="show_invoice_type_label"/>
+                                    <field name="show_note_label"/>
+                                </group>
                                 <group string="Colors">
-                                    <field name="text_color" widget="color"/>
                                     <field name="bg_color" widget="color"/>
+                                    <field name="name_color" widget="color"/>
+                                    <field name="phone_color" widget="color"/>
+                                    <field name="mobile_color" widget="color"/>
+                                    <field name="invoice_type_color" widget="color"/>
+                                    <field name="note_color" widget="color"/>
                                 </group>
                             </group>
                             <group>
@@ -59,12 +72,14 @@
                                     <field name="font_size_phone"/>
                                     <field name="font_size_mobile"/>
                                     <field name="font_size_invoice_type"/>
+                                    <field name="font_size_note"/>
                                 </group>
                                 <group string="Text Alignment">
                                     <field name="name_align"/>
                                     <field name="phone_align"/>
                                     <field name="mobile_align"/>
                                     <field name="invoice_type_align"/>
+                                    <field name="note_align"/>
                                 </group>
                             </group>
                             <group>
@@ -73,12 +88,14 @@
                                     <field name="phone_bold"/>
                                     <field name="mobile_bold"/>
                                     <field name="invoice_type_bold"/>
+                                    <field name="note_bold"/>
                                 </group>
                                 <group string="Font Style (Italic)">
                                     <field name="name_italic"/>
                                     <field name="phone_italic"/>
                                     <field name="mobile_italic"/>
                                     <field name="invoice_type_italic"/>
+                                    <field name="note_italic"/>
                                 </group>
                             </group>
                         </page>
@@ -100,26 +117,40 @@
                         </page>
                         <page string="Visual Designer" name="designer">
                             <group>
-                                <group string="Name Position">
+                                <group string="Name Position &amp; Size">
                                     <field name="name_x"/>
                                     <field name="name_y"/>
+                                    <field name="name_width"/>
+                                    <field name="name_height"/>
                                 </group>
-                                <group string="Phone Position">
+                                <group string="Phone Position &amp; Size">
                                     <field name="phone_x"/>
                                     <field name="phone_y"/>
+                                    <field name="phone_width"/>
+                                    <field name="phone_height"/>
                                 </group>
                             </group>
                             <group>
-                                <group string="Mobile Position">
+                                <group string="Mobile Position &amp; Size">
                                     <field name="mobile_x"/>
                                     <field name="mobile_y"/>
+                                    <field name="mobile_width"/>
+                                    <field name="mobile_height"/>
                                 </group>
-                                <group string="Invoice Type Position">
+                                <group string="Invoice Type Position &amp; Size">
                                     <field name="invoice_type_x"/>
                                     <field name="invoice_type_y"/>
+                                    <field name="invoice_type_width"/>
+                                    <field name="invoice_type_height"/>
                                 </group>
                             </group>
                             <group>
+                                <group string="Note Position &amp; Size">
+                                    <field name="note_x"/>
+                                    <field name="note_y"/>
+                                    <field name="note_width"/>
+                                    <field name="note_height"/>
+                                </group>
                                 <group string="Logo Position &amp; Size">
                                     <field name="logo_x"/>
                                     <field name="logo_y"/>

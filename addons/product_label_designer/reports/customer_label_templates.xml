@@ -59,6 +59,7 @@
                     font-weight: <t t-esc="'bold' if template.name_bold else 'normal'"/>;
                     font-style: <t t-esc="'italic' if template.name_italic else 'normal'"/>;
                     text-align: <t t-esc="template.name_align"/>;
+                    color: <t t-esc="template.name_color or template.text_color or '#000000'"/>;
                     direction: rtl;
                 }
                 
@@ -70,6 +71,7 @@
                     font-weight: <t t-esc="'bold' if template.phone_bold else 'normal'"/>;
                     font-style: <t t-esc="'italic' if template.phone_italic else 'normal'"/>;
                     text-align: <t t-esc="template.phone_align"/>;
+                    color: <t t-esc="template.phone_color or template.text_color or '#000000'"/>;
                     direction: rtl;
                 }
                 
@@ -81,6 +83,7 @@
                     font-weight: <t t-esc="'bold' if template.mobile_bold else 'normal'"/>;
                     font-style: <t t-esc="'italic' if template.mobile_italic else 'normal'"/>;
                     text-align: <t t-esc="template.mobile_align"/>;
+                    color: <t t-esc="template.mobile_color or template.text_color or '#000000'"/>;
                     direction: rtl;
                 }
                 
@@ -92,7 +95,21 @@
                     font-weight: <t t-esc="'bold' if template.invoice_type_bold else 'normal'"/>;
                     font-style: <t t-esc="'italic' if template.invoice_type_italic else 'normal'"/>;
                     text-align: <t t-esc="template.invoice_type_align"/>;
+                    color: <t t-esc="template.invoice_type_color or template.text_color or '#000000'"/>;
                     direction: rtl;
+                }
+                
+                .customer-note {
+                    position: absolute;
+                    left: <t t-esc="template.note_x"/>mm;
+                    top: <t t-esc="template.note_y"/>mm;
+                    font-size: <t t-esc="template.font_size_note"/>pt;
+                    font-weight: <t t-esc="'bold' if template.note_bold else 'normal'"/>;
+                    font-style: <t t-esc="'italic' if template.note_italic else 'normal'"/>;
+                    text-align: <t t-esc="template.note_align"/>;
+                    color: <t t-esc="template.note_color or template.text_color or '#000000'"/>;
+                    direction: rtl;
+                    max-width: <t t-esc="template.label_width - template.note_x - 5"/>mm;
                 }
             </style>
             
@@ -124,7 +141,7 @@
                                     <t t-set="phone_value" t-value="customer_info.get('phone', '') or partner.phone or ''"/>
                                     <t t-if="phone_value">
                                         <div class="customer-phone">
-                                            <t t-esc="'هاتف: ' + phone_value"/>
+                                            <t t-if="template.show_phone_label">هاتف: </t><t t-esc="phone_value"/>
                                         </div>
                                     </t>
                                 </t>
@@ -135,7 +152,7 @@
                                     <t t-set="mobile_value" t-value="customer_info.get('mobile', '') or partner.mobile or ''"/>
                                     <t t-if="mobile_value">
                                         <div class="customer-mobile">
-                                            <t t-esc="'موبايل: ' + mobile_value"/>
+                                            <t t-if="template.show_mobile_label">موبايل: </t><t t-esc="mobile_value"/>
                                         </div>
                                     </t>
                                 </t>
@@ -143,18 +160,27 @@
                                 <!-- Invoice Type -->
                                 <t t-if="template.show_invoice_type">
                                     <t t-set="customer_info" t-value="customer_data.get(str(partner.id), {})"/>
-                                    <t t-set="invoice_type_display" t-value="customer_info.get('invoice_type_display', '') or partner.get_invoice_type_display_name() or ''"/>
+                                    <t t-set="invoice_type_code" t-value="customer_info.get('invoice_type', '')"/>
+                                    <t t-set="invoice_type_display" t-value="customer_info.get('invoice_type_display', '')"/>
+                                    <t t-if="not invoice_type_display and invoice_type_code">
+                                        <t t-set="invoice_type_map" t-value="{'1': 'زبون محل', '2': 'شركات توصيل', '3': 'نقليات', '4': 'ديلفري', '5': 'NBS', '6': 'شورجة', '7': 'NA', '8': 'مكاتب الشورجة'}"/>
+                                        <t t-set="invoice_type_display" t-value="invoice_type_map.get(invoice_type_code, '')"/>
+                                    </t>
+                                    <t t-if="not invoice_type_display">
+                                        <t t-set="invoice_type_display" t-value="partner.get_invoice_type_display_name() or ''"/>
+                                    </t>
+                                    <!-- Show invoice type if display name exists -->
                                     <t t-if="invoice_type_display">
                                         <div class="customer-invoice-type">
-                                            <t t-esc="'نوع الفاتورة: ' + invoice_type_display"/>
+                                            <t t-if="template.show_invoice_type_label">نوع الفاتورة: </t><t t-esc="invoice_type_display"/>
                                         </div>
                                     </t>
                                 </t>
                                 
                                 <!-- Notes -->
-                                <t t-if="note">
-                                    <div class="customer-note" style="position: absolute; left: 5mm; top: 50mm; font-size: 10pt; color: #666; direction: rtl;">
-                                        <t t-esc="'ملاحظات: ' + note"/>
+                                <t t-if="template.show_note and note">
+                                    <div class="customer-note">
+                                        <t t-if="template.show_note_label">ملاحظات: </t><t t-esc="note"/>
                                     </div>
                                 </t>
                             </div>
@@ -237,6 +263,7 @@
                     font-weight: <t t-esc="'bold' if template.name_bold else 'normal'"/>;
                     font-style: <t t-esc="'italic' if template.name_italic else 'normal'"/>;
                     text-align: <t t-esc="template.name_align"/>;
+                    color: <t t-esc="template.name_color or template.text_color or '#000000'"/>;
                     direction: rtl;
                     max-width: <t t-esc="template.label_width - template.name_x - 5"/>mm;
                 }
@@ -249,6 +276,7 @@
                     font-weight: <t t-esc="'bold' if template.phone_bold else 'normal'"/>;
                     font-style: <t t-esc="'italic' if template.phone_italic else 'normal'"/>;
                     text-align: <t t-esc="template.phone_align"/>;
+                    color: <t t-esc="template.phone_color or template.text_color or '#000000'"/>;
                     direction: rtl;
                     max-width: <t t-esc="template.label_width - template.phone_x - 5"/>mm;
                 }
@@ -261,6 +289,7 @@
                     font-weight: <t t-esc="'bold' if template.mobile_bold else 'normal'"/>;
                     font-style: <t t-esc="'italic' if template.mobile_italic else 'normal'"/>;
                     text-align: <t t-esc="template.mobile_align"/>;
+                    color: <t t-esc="template.mobile_color or template.text_color or '#000000'"/>;
                     direction: rtl;
                     max-width: <t t-esc="template.label_width - template.mobile_x - 5"/>mm;
                 }
@@ -273,8 +302,22 @@
                     font-weight: <t t-esc="'bold' if template.invoice_type_bold else 'normal'"/>;
                     font-style: <t t-esc="'italic' if template.invoice_type_italic else 'normal'"/>;
                     text-align: <t t-esc="template.invoice_type_align"/>;
+                    color: <t t-esc="template.invoice_type_color or template.text_color or '#000000'"/>;
                     direction: rtl;
                     max-width: <t t-esc="template.label_width - template.invoice_type_x - 5"/>mm;
+                }
+                
+                .customer-note {
+                    position: absolute;
+                    left: <t t-esc="template.note_x"/>mm;
+                    top: <t t-esc="template.note_y"/>mm;
+                    font-size: <t t-esc="template.font_size_note"/>pt;
+                    font-weight: <t t-esc="'bold' if template.note_bold else 'normal'"/>;
+                    font-style: <t t-esc="'italic' if template.note_italic else 'normal'"/>;
+                    text-align: <t t-esc="template.note_align"/>;
+                    color: <t t-esc="template.note_color or template.text_color or '#000000'"/>;
+                    direction: rtl;
+                    max-width: <t t-esc="template.label_width - template.note_x - 5"/>mm;
                 }
             </style>
             
@@ -325,7 +368,7 @@
                                             <t t-set="phone_value" t-value="customer_info.get('phone', '') or partner.phone or ''"/>
                                             <t t-if="phone_value">
                                                 <div class="customer-phone">
-                                                    <t t-esc="'هاتف: ' + phone_value"/>
+                                                    <t t-if="template.show_phone_label">هاتف: </t><t t-esc="phone_value"/>
                                                 </div>
                                             </t>
                                         </t>
@@ -336,7 +379,7 @@
                                             <t t-set="mobile_value" t-value="customer_info.get('mobile', '') or partner.mobile or ''"/>
                                             <t t-if="mobile_value">
                                                 <div class="customer-mobile">
-                                                    <t t-esc="'موبايل: ' + mobile_value"/>
+                                                    <t t-if="template.show_mobile_label">موبايل: </t><t t-esc="mobile_value"/>
                                                 </div>
                                             </t>
                                         </t>
@@ -344,18 +387,27 @@
                                         <!-- Invoice Type -->
                                         <t t-if="template.show_invoice_type">
                                             <t t-set="customer_info" t-value="customer_data.get(str(partner.id), {})"/>
-                                            <t t-set="invoice_type_display" t-value="customer_info.get('invoice_type_display', '') or partner.get_invoice_type_display_name() or ''"/>
+                                            <t t-set="invoice_type_code" t-value="customer_info.get('invoice_type', '')"/>
+                                            <t t-set="invoice_type_display" t-value="customer_info.get('invoice_type_display', '')"/>
+                                            <t t-if="not invoice_type_display and invoice_type_code">
+                                                <t t-set="invoice_type_map" t-value="{'1': 'زبون محل', '2': 'شركات توصيل', '3': 'نقليات', '4': 'ديلفري', '5': 'NBS', '6': 'شورجة', '7': 'NA', '8': 'مكاتب الشورجة'}"/>
+                                                <t t-set="invoice_type_display" t-value="invoice_type_map.get(invoice_type_code, '')"/>
+                                            </t>
+                                            <t t-if="not invoice_type_display">
+                                                <t t-set="invoice_type_display" t-value="partner.get_invoice_type_display_name() or ''"/>
+                                            </t>
+                                            <!-- Show invoice type if display name exists -->
                                             <t t-if="invoice_type_display">
                                                 <div class="customer-invoice-type">
-                                                    <t t-esc="'نوع الفاتورة: ' + invoice_type_display"/>
+                                                    <t t-if="template.show_invoice_type_label">نوع الفاتورة: </t><t t-esc="invoice_type_display"/>
                                                 </div>
                                             </t>
                                         </t>
                                         
                                         <!-- Notes -->
-                                        <t t-if="note">
-                                            <div class="customer-note" style="position: absolute; left: 5mm; top: 50mm; font-size: 10pt; color: #666; direction: rtl; max-width: 70mm;">
-                                                <t t-esc="'ملاحظات: ' + note"/>
+                                        <t t-if="template.show_note and note">
+                                            <div class="customer-note">
+                                                <t t-if="template.show_note_label">ملاحظات: </t><t t-esc="note"/>
                                             </div>
                                         </t>
                                     </div>

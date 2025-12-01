@@ -10,7 +10,6 @@
                 <field name="partner_id" readonly="1" options="{'no_create': True, 'no_open': True}"/>
                 <field name="phone_override"/>
                 <field name="mobile_override"/>
-                <field name="invoice_type" widget="radio" options="{'horizontal': true}"/>
             </list>
         </field>
     </record>
@@ -30,8 +29,7 @@
                             <field name="copies"/>
                         </group>
                         <group>
-                            <field name="invoice_type" widget="radio" options="{'horizontal': true}"/>
-                            <field name="note" placeholder="أدخل الملاحظات هنا..." widget="text"/>
+                            <field name="note" placeholder="أدخل الملاحظات هنا أو اختر من القائمة..." widget="note_with_suggestions"/>
                         </group>
                     </group>
                     
@@ -50,7 +48,6 @@
                                             <field name="partner_id" readonly="1"/>
                                             <field name="phone_override"/>
                                             <field name="mobile_override"/>
-                                            <field name="invoice_type" widget="radio" options="{'horizontal': true}"/>
                                         </group>
                                     </sheet>
                                 </form>

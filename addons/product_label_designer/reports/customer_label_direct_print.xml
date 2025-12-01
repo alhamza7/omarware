@@ -1,0 +1,245 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Direct Print Template - Uses actual label dimensions -->
+    <template id="report_customer_label_direct">
+        <t t-call="web.basic_layout">
+            <t t-set="template" t-value="template or env['customer.label.template'].get_default_template()"/>
+            <t t-set="copies" t-value="copies or 1"/>
+            <t t-set="customer_data" t-value="customer_data or {}"/>
+            <t t-set="note" t-value="note or ''"/>
+            
+            <style>
+                @page {
+                    size: <t t-esc="template.label_width"/>mm <t t-esc="template.label_height"/>mm;
+                    margin: 0;
+                }
+                
+                * { 
+                    margin: 0; 
+                    padding: 0; 
+                    box-sizing: border-box; 
+                }
+                
+                body { 
+                    margin: 0; 
+                    padding: 0; 
+                    width: <t t-esc="template.label_width"/>mm;
+                    height: <t t-esc="template.label_height"/>mm;
+                }
+                
+                @media print {
+                    body {
+                        margin: 0;
+                        padding: 0;
+                    }
+                    
+                    .customer-label {
+                        page-break-after: always;
+                        page-break-inside: avoid;
+                    }
+                }
+                
+                .customer-label {
+                    width: <t t-esc="template.label_width"/>mm;
+                    height: <t t-esc="template.label_height"/>mm;
+                    background-color: <t t-esc="template.bg_color"/>;
+                    position: relative;
+                    font-family: Arial, 'DejaVu Sans', sans-serif;
+                    color: <t t-esc="template.text_color"/>;
+                    overflow: hidden;
+                    page-break-after: always;
+                }
+                
+                .label-bg {
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    z-index: 0;
+                    background-size: cover;
+                    background-position: center;
+                }
+                
+                .label-content {
+                    position: relative;
+                    z-index: 1;
+                    width: 100%;
+                    height: 100%;
+                }
+                
+                .logo {
+                    position: absolute;
+                    left: <t t-esc="template.logo_x"/>mm;
+                    top: <t t-esc="template.logo_y"/>mm;
+                    width: <t t-esc="template.logo_width"/>mm;
+                    height: <t t-esc="template.logo_height"/>mm;
+                    object-fit: contain;
+                }
+                
+                .customer-name {
+                    position: absolute;
+                    left: <t t-esc="template.name_x"/>mm;
+                    top: <t t-esc="template.name_y"/>mm;
+                    font-size: <t t-esc="template.font_size_name"/>pt;
+                    font-weight: <t t-esc="'bold' if template.name_bold else 'normal'"/>;
+                    font-style: <t t-esc="'italic' if template.name_italic else 'normal'"/>;
+                    text-align: <t t-esc="template.name_align"/>;
+                    color: <t t-esc="template.name_color or template.text_color or '#000000'"/>;
+                    direction: rtl;
+                    max-width: <t t-esc="template.label_width - template.name_x - 5"/>mm;
+                }
+                
+                .customer-phone {
+                    position: absolute;
+                    left: <t t-esc="template.phone_x"/>mm;
+                    top: <t t-esc="template.phone_y"/>mm;
+                    font-size: <t t-esc="template.font_size_phone"/>pt;
+                    font-weight: <t t-esc="'bold' if template.phone_bold else 'normal'"/>;
+                    font-style: <t t-esc="'italic' if template.phone_italic else 'normal'"/>;
+                    text-align: <t t-esc="template.phone_align"/>;
+                    color: <t t-esc="template.phone_color or template.text_color or '#000000'"/>;
+                    direction: rtl;
+                    max-width: <t t-esc="template.label_width - template.phone_x - 5"/>mm;
+                }
+                
+                .customer-mobile {
+                    position: absolute;
+                    left: <t t-esc="template.mobile_x"/>mm;
+                    top: <t t-esc="template.mobile_y"/>mm;
+                    font-size: <t t-esc="template.font_size_mobile"/>pt;
+                    font-weight: <t t-esc="'bold' if template.mobile_bold else 'normal'"/>;
+                    font-style: <t t-esc="'italic' if template.mobile_italic else 'normal'"/>;
+                    text-align: <t t-esc="template.mobile_align"/>;
+                    color: <t t-esc="template.mobile_color or template.text_color or '#000000'"/>;
+                    direction: rtl;
+                    max-width: <t t-esc="template.label_width - template.mobile_x - 5"/>mm;
+                }
+                
+                .customer-invoice-type {
+                    position: absolute;
+                    left: <t t-esc="template.invoice_type_x"/>mm;
+                    top: <t t-esc="template.invoice_type_y"/>mm;
+                    font-size: <t t-esc="template.font_size_invoice_type"/>pt;
+                    font-weight: <t t-esc="'bold' if template.invoice_type_bold else 'normal'"/>;
+                    font-style: <t t-esc="'italic' if template.invoice_type_italic else 'normal'"/>;
+                    text-align: <t t-esc="template.invoice_type_align"/>;
+                    color: <t t-esc="template.invoice_type_color or template.text_color or '#000000'"/>;
+                    direction: rtl;
+                    max-width: <t t-esc="template.label_width - template.invoice_type_x - 5"/>mm;
+                }
+                
+                .customer-note {
+                    position: absolute;
+                    left: <t t-esc="template.note_x"/>mm;
+                    top: <t t-esc="template.note_y"/>mm;
+                    font-size: <t t-esc="template.font_size_note"/>pt;
+                    font-weight: <t t-esc="'bold' if template.note_bold else 'normal'"/>;
+                    font-style: <t t-esc="'italic' if template.note_italic else 'normal'"/>;
+                    text-align: <t t-esc="template.note_align"/>;
+                    color: <t t-esc="template.note_color or template.text_color or '#000000'"/>;
+                    direction: rtl;
+                    max-width: <t t-esc="template.label_width - template.note_x - 5"/>mm;
+                }
+            </style>
+            
+            <div class="page">
+                <t t-foreach="docs" t-as="partner">
+                    <t t-foreach="range(copies)" t-as="copy">
+                        <div class="customer-label">
+                            <!-- Background -->
+                            <t t-if="template.background_image">
+                                <div class="label-bg" t-attf-style="background-image: url(data:image/png;base64,#{template.background_image.decode()});"/>
+                            </t>
+                            
+                            <div class="label-content">
+                                <!-- Logo -->
+                                <t t-if="template.show_logo and template.logo_image">
+                                    <img class="logo" t-attf-src="data:image/png;base64,#{template.logo_image.decode()}" alt="Logo"/>
+                                </t>
+                                
+                                <!-- Customer Name -->
+                                <t t-if="template.show_name">
+                                    <div class="customer-name">
+                                        <t t-esc="partner.name"/>
+                                    </div>
+                                </t>
+                                
+                                <!-- Phone -->
+                                <t t-if="template.show_phone">
+                                    <t t-set="customer_info" t-value="customer_data.get(str(partner.id), {})"/>
+                                    <t t-set="phone_value" t-value="customer_info.get('phone', '') or partner.phone or ''"/>
+                                    <t t-if="phone_value">
+                                        <div class="customer-phone">
+                                            <t t-if="template.show_phone_label">هاتف: </t><t t-esc="phone_value"/>
+                                        </div>
+                                    </t>
+                                </t>
+                                
+                                <!-- Mobile -->
+                                <t t-if="template.show_mobile">
+                                    <t t-set="customer_info" t-value="customer_data.get(str(partner.id), {})"/>
+                                    <t t-set="mobile_value" t-value="customer_info.get('mobile', '') or partner.mobile or ''"/>
+                                    <t t-if="mobile_value">
+                                        <div class="customer-mobile">
+                                            <t t-if="template.show_mobile_label">موبايل: </t><t t-esc="mobile_value"/>
+                                        </div>
+                                    </t>
+                                </t>
+                                
+                                <!-- Invoice Type -->
+                                <t t-if="template.show_invoice_type">
+                                    <t t-set="customer_info" t-value="customer_data.get(str(partner.id), {})"/>
+                                    <t t-set="invoice_type_code" t-value="customer_info.get('invoice_type', '')"/>
+                                    <t t-set="invoice_type_display" t-value="customer_info.get('invoice_type_display', '')"/>
+                                    <!-- Map invoice type code to display name if needed -->
+                                    <t t-if="not invoice_type_display and invoice_type_code">
+                                        <t t-set="invoice_type_map" t-value="invoice_type_map or {'1': 'زبون محل', '2': 'شركات توصيل', '3': 'نقليات', '4': 'ديلفري', '5': 'NBS', '6': 'شورجة', '7': 'NA', '8': 'مكاتب الشورجة'}"/>
+                                        <t t-set="invoice_type_display" t-value="invoice_type_map.get(str(invoice_type_code), '')"/>
+                                    </t>
+                                    <!-- Fallback to partner method if still no display -->
+                                    <t t-if="not invoice_type_display">
+                                        <t t-set="invoice_type_display" t-value="partner.get_invoice_type_display_name() or ''"/>
+                                    </t>
+                                    <!-- Always show if we have code or display -->
+                                    <t t-if="invoice_type_display or invoice_type_code">
+                                        <div class="customer-invoice-type">
+                                            <t t-if="template.show_invoice_type_label">نوع الفاتورة: </t>
+                                            <t t-if="invoice_type_display" t-esc="invoice_type_display"/>
+                                            <t t-if="not invoice_type_display and invoice_type_code" t-esc="invoice_type_code"/>
+                                        </div>
+                                    </t>
+                                </t>
+                                
+                                <!-- Notes -->
+                                <t t-if="template.show_note and note">
+                                    <div class="customer-note">
+                                        <t t-if="template.show_note_label">ملاحظات: </t><t t-esc="note"/>
+                                    </div>
+                                </t>
+                            </div>
+                        </div>
+                    </t>
+                </t>
+            </div>
+            
+            <script type="text/javascript">
+                // Auto print when page loads
+                window.onload = function() {
+                    setTimeout(function() {
+                        window.print();
+                    }, 500);
+                };
+                
+                // Close window after printing (optional)
+                window.onafterprint = function() {
+                    // Uncomment to auto-close after printing
+                    // window.close();
+                };
+            </script>
+        </t>
+    </template>
+
+</odoo>
+

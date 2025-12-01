@@ -73,7 +73,7 @@ class LabelDesignerController(http.Controller):
     
     @http.route('/label_designer/upload_image', type='json', auth='user', methods=['POST'], csrf=False)
     def upload_image(self, template_id, image_type, image_data):
-        """Upload background or logo image"""
+        """Upload background or logo image for product labels"""
         try:
             _logger.debug('upload_image called with template_id=%s image_type=%s size=%s', template_id, image_type, len(image_data) if image_data else 0)
             template = request.env['product.label.template'].browse(template_id)
@@ -92,7 +92,7 @@ class LabelDesignerController(http.Controller):
     
     @http.route('/label_designer/remove_image', type='json', auth='user', methods=['POST'], csrf=False)
     def remove_image(self, template_id, image_type):
-        """Remove background or logo image"""
+        """Remove background or logo image for product labels"""
         try:
             _logger.debug('remove_image called with template_id=%s image_type=%s', template_id, image_type)
             template = request.env['product.label.template'].browse(template_id)
@@ -107,6 +107,44 @@ class LabelDesignerController(http.Controller):
             return {'success': False, 'error': 'Template not found'}
         except Exception as e:
             _logger.exception('remove_image failed: %s', e)
+            return {'success': False, 'error': str(e)}
+    
+    @http.route('/label_designer/customer/upload_image', type='json', auth='user', methods=['POST'], csrf=False)
+    def upload_customer_image(self, template_id, image_type, image_data):
+        """Upload background or logo image for customer labels"""
+        try:
+            _logger.debug('upload_customer_image called with template_id=%s image_type=%s size=%s', template_id, image_type, len(image_data) if image_data else 0)
+            template = request.env['customer.label.template'].browse(template_id)
+            if template.exists():
+                if image_type == 'background':
+                    template.write({'background_image': image_data})
+                elif image_type == 'logo':
+                    template.write({'logo_image': image_data})
+                else:
+                    return {'success': False, 'error': 'Invalid image type'}
+                return {'success': True}
+            return {'success': False, 'error': 'Template not found'}
+        except Exception as e:
+            _logger.exception('upload_customer_image failed: %s', e)
+            return {'success': False, 'error': str(e)}
+    
+    @http.route('/label_designer/customer/remove_image', type='json', auth='user', methods=['POST'], csrf=False)
+    def remove_customer_image(self, template_id, image_type):
+        """Remove background or logo image for customer labels"""
+        try:
+            _logger.debug('remove_customer_image called with template_id=%s image_type=%s', template_id, image_type)
+            template = request.env['customer.label.template'].browse(template_id)
+            if template.exists():
+                if image_type == 'background':
+                    template.write({'background_image': False})
+                elif image_type == 'logo':
+                    template.write({'logo_image': False})
+                else:
+                    return {'success': False, 'error': 'Invalid image type'}
+                return {'success': True}
+            return {'success': False, 'error': 'Template not found'}
+        except Exception as e:
+            _logger.exception('remove_customer_image failed: %s', e)
             return {'success': False, 'error': str(e)}
     
     @http.route('/label_designer/preview', type='json', auth='user', methods=['POST'], csrf=False)

@@ -39,6 +39,38 @@
     transition: border-color 0.2s;
 }
 
+.draggable-element:not([data-is-image="true"]) {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.draggable-element[style*="text-align: right"],
+.draggable-element[data-align="right"] {
+    justify-content: flex-end;
+}
+
+.draggable-element[style*="text-align: left"],
+.draggable-element[data-align="left"] {
+    justify-content: flex-start;
+}
+
+.draggable-element[style*="text-align: center"],
+.draggable-element[data-align="center"] {
+    justify-content: center;
+}
+
+.draggable-element[dir="rtl"] {
+    direction: rtl !important;
+    unicode-bidi: embed;
+}
+
+.draggable-element[dir="ltr"] {
+    direction: ltr !important;
+    unicode-bidi: embed;
+}
+
 .draggable-element:hover,
 .draggable-element.active {
     border-color: #00A09D;
