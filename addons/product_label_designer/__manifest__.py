@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'Product Label Designer',
-    'version': '19.0.1.0.6',
+    'version': '19.0.1.0.7',
     'category': 'Inventory/Inventory',
-    'summary': 'Design and print professional product labels with custom backgrounds',
+    'summary': 'Design and print professional product labels with custom backgrounds + SAP Integration',
     'description': """
 Product Label Designer
 ======================
@@ -12,11 +12,17 @@ Product Label Designer
 * Print labels with barcode support
 * Multiple label sizes
 * Full Arabic support
+* **NEW: SAP Integration** - Continuous label printing with direct SAP barcode lookup
+* Real-time product data sync from SAP
+* Auto-print on barcode scan
     """,
     'author': 'Lugal AI',
     'website': 'https://www.lugal-ai.com',
     'license': 'LGPL-3',
-    'depends': ['product', 'stock', 'web', 'base'],
+    'depends': ['product', 'stock', 'web', 'base', 'sap_integration'],
+    'external_dependencies': {
+        'python': [],
+    },
     'data': [
         'security/ir.model.access.csv',
         'security/customer_label_access.xml',
@@ -24,6 +30,8 @@ Product Label Designer
         'views/customer_label_views.xml',
         'views/label_designer_template.xml',
         'views/customer_label_designer_template.xml',
+        'views/sap_label_printer_interface.xml',
+        'views/product_barcode_alternative_views.xml',
         'wizard/print_label_wizard_views.xml',
         'wizard/print_customer_label_wizard_views.xml',
         'wizard/quick_print_wizard_views.xml',

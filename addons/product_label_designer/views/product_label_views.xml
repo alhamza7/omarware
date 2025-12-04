@@ -108,6 +108,58 @@
                                 </group>
                             </group>
                         </page>
+                        <page string="SAP Integration" name="sap_integration">
+                            <group>
+                                <group string="SAP Connection Settings">
+                                    <field name="sap_mode_enabled"/>
+                                    <field name="sap_backend_id" 
+                                           options="{'no_create': True, 'no_open': True}"
+                                           invisible="not sap_mode_enabled"
+                                           required="sap_mode_enabled"
+                                           domain="[('active', '=', True)]"/>
+                                </group>
+                                <group string="SAP UoM Display">
+                                    <field name="show_sap_uom" invisible="not sap_mode_enabled"/>
+                                    <field name="sap_uom_format" invisible="not show_sap_uom or not sap_mode_enabled"/>
+                                </group>
+                            </group>
+                            <group invisible="not sap_mode_enabled">
+                                <div class="alert alert-success" style="margin: 10px;">
+                                    <p><strong>✓ وضع SAP مُفعّل</strong></p>
+                                    <p>سيتم استخدام هذا القالب للطباعة المستمرة من SAP</p>
+                                    <p><strong>الميزات:</strong></p>
+                                    <ul>
+                                        <li>مسح الباركود التلقائي</li>
+                                        <li>البحث في SAP مباشرة عن طريق Barcode أو ItemCode</li>
+                                        <li>طباعة فورية بدون تدخل</li>
+                                        <li>عرض اسم المنتج ووحدة القياس من SAP</li>
+                                        <li>إنشاء أو تحديث المنتج في Odoo تلقائياً</li>
+                                    </ul>
+                                </div>
+                            </group>
+                            <group invisible="not sap_mode_enabled" string="SAP Element Positions &amp; Styling">
+                                <group string="SAP Product Name">
+                                    <field name="sap_name_x" invisible="not sap_mode_enabled"/>
+                                    <field name="sap_name_y" invisible="not sap_mode_enabled"/>
+                                    <field name="sap_name_width" invisible="not sap_mode_enabled"/>
+                                    <field name="sap_name_height" invisible="not sap_mode_enabled"/>
+                                    <field name="font_size_sap_name" invisible="not sap_mode_enabled"/>
+                                    <field name="sap_name_align" invisible="not sap_mode_enabled"/>
+                                    <field name="sap_name_bold" invisible="not sap_mode_enabled"/>
+                                    <field name="sap_name_italic" invisible="not sap_mode_enabled"/>
+                                </group>
+                                <group string="SAP Unit of Measure" invisible="not show_sap_uom">
+                                    <field name="sap_uom_x" invisible="not show_sap_uom or not sap_mode_enabled"/>
+                                    <field name="sap_uom_y" invisible="not show_sap_uom or not sap_mode_enabled"/>
+                                    <field name="sap_uom_width" invisible="not show_sap_uom or not sap_mode_enabled"/>
+                                    <field name="sap_uom_height" invisible="not show_sap_uom or not sap_mode_enabled"/>
+                                    <field name="font_size_sap_uom" invisible="not show_sap_uom or not sap_mode_enabled"/>
+                                    <field name="sap_uom_align" invisible="not show_sap_uom or not sap_mode_enabled"/>
+                                    <field name="sap_uom_bold" invisible="not show_sap_uom or not sap_mode_enabled"/>
+                                    <field name="sap_uom_italic" invisible="not show_sap_uom or not sap_mode_enabled"/>
+                                </group>
+                            </group>
+                        </page>
                         <page string="Visual Designer" name="designer">
                             <group>
                                 <group string="Name Position">
@@ -215,6 +267,18 @@
     
     <menuitem id="menu_print_labels" name="Select Products" parent="menu_label_root"
               action="action_print_product_labels" sequence="20"/>
+    
+    <!-- SAP Continuous Printing Menu -->
+    <record id="action_sap_label_printer" model="ir.actions.act_url">
+        <field name="name">SAP Label Printer</field>
+        <field name="url">/sap/label/printer</field>
+        <field name="target">new</field>
+    </record>
+    
+    <menuitem id="menu_sap_label_printer" name="SAP Label Printer (Barcode Scan)" 
+              parent="menu_label_root"
+              action="action_sap_label_printer" 
+              sequence="5"/>
 
     <!-- Add foreign name field to product form -->
     <record id="view_product_form_foreign_name" model="ir.ui.view">
@@ -224,6 +288,9 @@
         <field name="arch" type="xml">
             <xpath expr="//field[@name='name']" position="after">
                 <field name="foreign_name" placeholder="e.g., Perfume Bottle 30ml"/>
+                <field name="sap_product_name" readonly="1" invisible="not sap_product_name"/>
+                <field name="sap_uom" readonly="1" invisible="not sap_uom"/>
+                <field name="last_sap_sync" readonly="1" invisible="not last_sap_sync"/>
             </xpath>
         </field>
     </record>

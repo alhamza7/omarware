@@ -68,6 +68,12 @@ class SapUomSync(models.Model):
     sap_data = fields.Text('SAP Data (JSON)', help="Raw data from SAP")
     odoo_data = fields.Text('Odoo Data (JSON)', help="Raw data from Odoo")
     
+    # SQL Constraints to prevent duplicates
+    _sql_constraints = [
+        ('unique_backend_sap_uom', 'UNIQUE(backend_id, sap_uom_id)',
+         'A UoM sync record with this SAP UoM ID already exists for this backend!'),
+    ]
+    
     @api.depends('sap_group_ids')
     def _compute_primary_group(self):
         """Compute primary group (first one) for backward compatibility"""

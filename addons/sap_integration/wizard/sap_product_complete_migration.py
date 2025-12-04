@@ -621,6 +621,13 @@ class SapProductCompleteMigration(models.TransientModel):
                             total_errors += 1
                             continue
                         
+                        # Sync alternative barcodes (sub-unit barcodes)
+                        try:
+                            self._sync_alternative_barcodes(product, item_data, connection)
+                        except Exception as barcode_error:
+                            _logger.warning(f"Could not sync alternative barcodes for {item_code}: {str(barcode_error)}")
+                            # Don't fail the whole import for barcode sync issues
+                        
                         # Import extended info (in separate try/catch to isolate errors)
                         try:
                             extended = self.env['sap.product.extended'].create_or_update_from_sap(
@@ -831,6 +838,88 @@ class SapProductCompleteMigration(models.TransientModel):
             product = self.env['product.product'].create(vals)
         
         return product
+    
+    def _sync_alternative_barcodes(self, product, item_data, connection):
+        """
+        Sync alternative barcodes from SAP to Odoo
+        This handles sub-unit barcodes (e.g., barcode for a carton vs. single unit)
+        """
+        if not product or not item_data:
+            return
+        
+        item_code = item_data.get('ItemCode')
+        if not item_code:
+            return
+        
+        try:
+            # Get the alternative barcode model
+            AltBarcode = self.env['product.barcode.alternative']
+            
+            # Since ItemBarCodeCollection is NOT a navigation property in SAP B1 10,
+            # we need to check if it's included in the item_data directly
+            barcodes_collection = item_data.get('ItemBarCodeCollection', [])
+            
+            if not barcodes_collection:
+                # Try fetching the item again with more details if not already included
+                # Note: In SAP B1 10, this might still not work, but we try anyway
+                try:
+                    full_item = connection.get(f"Items('{item_code}')")
+                    barcodes_collection = full_item.get('ItemBarCodeCollection', [])
+                except:
+                    pass
+            
+            # Remove existing alternative barcodes for this product
+            # We'll recreate them from SAP data
+            existing_alt_barcodes = AltBarcode.search([('product_id', '=', product.id)])
+            if existing_alt_barcodes:
+                existing_alt_barcodes.unlink()
+            
+            # Process each barcode from SAP
+            main_barcode = product.barcode
+            synced_count = 0
+            
+            for bc_entry in barcodes_collection:
+                barcode_val = bc_entry.get('Barcode') or bc_entry.get('BarcodeValue')
+                
+                # Skip if no barcode or if it's the main barcode
+                if not barcode_val or barcode_val == main_barcode:
+                    continue
+                
+                uom_entry = bc_entry.get('UoMEntry') or bc_entry.get('UomEntry')
+                free_text = bc_entry.get('FreeText') or bc_entry.get('UoMName', '')
+                
+                # Try to map SAP UoM to Odoo UoM
+                uom_id = None
+                if free_text:
+                    # Search for UoM by name
+                    odoo_uom = self.env['uom.uom'].search([
+                        '|',
+                        ('name', '=', free_text),
+                        ('name', 'ilike', free_text)
+                    ], limit=1)
+                    
+                    if odoo_uom:
+                        uom_id = odoo_uom.id
+                
+                # Create alternative barcode entry
+                AltBarcode.create({
+                    'product_id': product.id,
+                    'barcode': barcode_val,
+                    'uom_name': free_text,
+                    'uom_id': uom_id,
+                    'sap_uom_entry': uom_entry,
+                    'active': True,
+                    'last_sync': fields.Datetime.now(),
+                })
+                
+                synced_count += 1
+            
+            if synced_count > 0:
+                _logger.info(f"Synced {synced_count} alternative barcode(s) for product {item_code}")
+            
+        except Exception as e:
+            _logger.warning(f"Could not sync alternative barcodes for {item_code}: {str(e)}")
+            # Don't raise - this is not critical, continue with migration
     
     def _map_sap_uom_to_odoo(self, sap_uom_code):
         """Map SAP UoM code to Odoo UoM ID"""

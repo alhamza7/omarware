@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from odoo import http
+from odoo import http, fields
 from odoo.http import request
 import logging
 import json
@@ -164,4 +164,90 @@ class LabelDesignerController(http.Controller):
         except Exception as e:
             _logger.exception('preview_label failed: %s', e)
             return {'success': False, 'error': str(e)}
+    
+    # SAP Continuous Label Printing Routes
+    
+    @http.route('/sap/label/printer', type='http', auth='user', website=True)
+    def sap_label_printer_interface(self, **kwargs):
+        """Continuous SAP label printing interface"""
+        # Get default or first SAP-enabled template
+        template = request.env['product.label.template'].search([
+            ('sap_mode_enabled', '=', True),
+            ('active', '=', True)
+        ], limit=1)
+        
+        if not template:
+            # Get first active template
+            template = request.env['product.label.template'].search([
+                ('active', '=', True)
+            ], limit=1)
+        
+        return request.render('product_label_designer.sap_label_printer_interface', {
+            'template': template,
+        })
+    
+    @http.route('/sap/label/lookup', type='json', auth='user', methods=['POST'], csrf=False)
+    def sap_product_lookup(self, barcode, template_id):
+        """Lookup product from SAP by barcode and prepare for printing"""
+        try:
+            _logger.info(f'SAP lookup for barcode: {barcode}, template: {template_id}')
+            
+            template = request.env['product.label.template'].browse(template_id)
+            if not template.exists():
+                return {'success': False, 'error': 'Template not found'}
+            
+            # Get product info from SAP (this also creates/updates product in Odoo)
+            sap_result = template.get_sap_product_info(barcode)
+            
+            if not sap_result.get('success'):
+                return sap_result
+            
+            # The product should now exist in Odoo (created/updated by get_sap_product_info)
+            product_id = sap_result.get('product_id')
+            
+            # Generate print URL
+            print_url = f'/report/pdf/product_label_designer.report_label_simple/{product_id}?template_id={template_id}'
+            
+            return {
+                'success': True,
+                'product_id': product_id,
+                'product_name': sap_result.get('product_name', ''),
+                'sap_product_name': sap_result.get('sap_product_name', ''),
+                'sap_uom': sap_result.get('sap_uom', ''),
+                'barcode': barcode,
+                'print_url': print_url,
+            }
+            
+        except Exception as e:
+            _logger.exception(f'SAP lookup failed: {e}')
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
+    @http.route('/sap/label/print', type='json', auth='user', methods=['POST'], csrf=False)
+    def sap_print_label(self, product_id, template_id):
+        """Trigger immediate label printing"""
+        try:
+            product = request.env['product.product'].browse(product_id)
+            template = request.env['product.label.template'].browse(template_id)
+            
+            if not product.exists() or not template.exists():
+                return {'success': False, 'error': 'Product or template not found'}
+            
+            # Generate label PDF
+            pdf = request.env.ref('product_label_designer.action_report_label_simple')._render_qweb_pdf([product.id], data={'template_id': template_id})[0]
+            
+            return {
+                'success': True,
+                'product_id': product.id,
+                'product_name': product.sap_product_name or product.name,
+            }
+            
+        except Exception as e:
+            _logger.exception(f'SAP print failed: {e}')
+            return {
+                'success': False,
+                'error': str(e)
+            }
 
