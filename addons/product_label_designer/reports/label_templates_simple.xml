@@ -93,7 +93,7 @@
                             <!-- Barcode -->
                             <t t-if="template.show_barcode and o.barcode">
                                 <div class="product-barcode">
-                                    <img t-att-src="'/report/barcode/?type=%s&amp;value=%s&amp;width=%s&amp;height=%s' % ('Code128', o.barcode, 200, 50)" style="max-width: 60mm; height: auto;"/>
+                                    <img t-att-src="'/report/barcode/?type=%s&amp;value=%s&amp;width=%s&amp;height=%s' % ('Code128', o.barcode, 200, 50)" style="max-width: 100%; height: auto;"/>
                                 </div>
                             </t>
                         </div>
@@ -200,7 +200,7 @@
                             <!-- Barcode -->
                             <t t-if="template.show_barcode and o.barcode">
                                 <div class="product-barcode">
-                                    <img t-att-src="'/report/barcode/?type=%s&amp;value=%s&amp;width=%s&amp;height=%s' % ('Code128', o.barcode, 200, 50)" style="max-width: 60mm; height: auto;"/>
+                                    <img t-att-src="'/report/barcode/?type=%s&amp;value=%s&amp;width=%s&amp;height=%s' % ('Code128', o.barcode, 200, 50)" style="max-width: 100%; height: auto;"/>
                                 </div>
                             </t>
                         </div>
