@@ -23,23 +23,34 @@
                         show_barcode: <t t-out="'true' if template.show_barcode else 'false'"/>,
                         show_qr: <t t-out="'true' if template.show_qr else 'false'"/>,
                         show_logo: <t t-out="'true' if template.show_logo else 'false'"/>,
+                        // Positions
                         name_x: <t t-out="template.name_x"/>,
                         name_y: <t t-out="template.name_y"/>,
+                        name_rotation: <t t-out="template.name_rotation or 0"/>,
                         foreign_name_x: <t t-out="template.foreign_name_x"/>,
                         foreign_name_y: <t t-out="template.foreign_name_y"/>,
+                        foreign_name_rotation: <t t-out="template.foreign_name_rotation or 0"/>,
                         code_x: <t t-out="template.code_x"/>,
                         code_y: <t t-out="template.code_y"/>,
+                        code_rotation: <t t-out="template.code_rotation or 0"/>,
                         price_x: <t t-out="template.price_x"/>,
                         price_y: <t t-out="template.price_y"/>,
+                        price_rotation: <t t-out="template.price_rotation or 0"/>,
                         barcode_x: <t t-out="template.barcode_x"/>,
                         barcode_y: <t t-out="template.barcode_y"/>,
+                        barcode_width: <t t-out="template.barcode_width or 60"/>,
+                        barcode_height: <t t-out="template.barcode_height or 12"/>,
+                        barcode_rotation: <t t-out="template.barcode_rotation or 0"/>,
+                        barcode_scale: <t t-out="template.barcode_scale or 1"/>,
                         qr_x: <t t-out="template.qr_x"/>,
                         qr_y: <t t-out="template.qr_y"/>,
                         qr_size: <t t-out="template.qr_size"/>,
+                        qr_rotation: <t t-out="template.qr_rotation or 0"/>,
                         logo_x: <t t-out="template.logo_x"/>,
                         logo_y: <t t-out="template.logo_y"/>,
                         logo_width: <t t-out="template.logo_width"/>,
                         logo_height: <t t-out="template.logo_height"/>,
+                        logo_rotation: <t t-out="template.logo_rotation or 0"/>,
                         background_image: <t t-if="template.background_image">'<t t-out="template.background_image.decode()"/>'</t><t t-else="">null</t>,
                         logo_image: <t t-if="template.logo_image">'<t t-out="template.logo_image.decode()"/>'</t><t t-else="">null</t>,
                     };
@@ -50,6 +61,11 @@
                     console.log('Show Logo:', window.templateData.show_logo);
                     console.log('Has Background:', window.templateData.background_image !== null);
                     console.log('Has Logo Image:', window.templateData.logo_image !== null);
+                    console.log('Rotation fields available:', {
+                        name: window.templateData.name_rotation,
+                        barcode: window.templateData.barcode_rotation,
+                        price: window.templateData.price_rotation
+                    });
                     console.log('===========================');
                 </script>
                 <script src="/product_label_designer/static/src/js/label_designer.js"/>
@@ -84,6 +100,26 @@
                                     <input type="number" name="position_y" class="property-input" step="0.1" readonly=""/>
                                 </div>
                             </div>
+                        </div>
+                        
+                        <div class="property-group">
+                            <h4>🔄 Rotation &amp; Scale</h4>
+                            <div class="position-inputs">
+                                <div>
+                                    <label>Rotation (°)</label>
+                                    <input type="number" name="rotation" class="property-input" step="1" min="0" max="360" 
+                                           onchange="window.labelDesigner.updateRotation(this.value)"/>
+                                </div>
+                                <div id="scale-controls" style="display: none;">
+                                    <label>Scale</label>
+                                    <input type="number" name="scale" class="property-input" step="0.1" min="0.1" max="3" 
+                                           onchange="window.labelDesigner.updateScale(this.value)"/>
+                                </div>
+                            </div>
+                            <p style="font-size: 11px; color: #666; margin-top: 5px;">
+                                💡 Hold Shift + drag to rotate<br/>
+                                💡 Hold Ctrl + scroll to scale
+                            </p>
                         </div>
                         
                         <div class="property-group">
@@ -139,6 +175,9 @@
                                 <li>Shift + Arrows: Move 10mm</li>
                                 <li>Click to select</li>
                                 <li>Drag to move</li>
+                                <li>🔄 Shift + Drag: Rotate</li>
+                                <li>📏 Ctrl + Scroll: Scale</li>
+                                <li>R key: Reset rotation</li>
                             </ul>
                         </div>
                         

@@ -110,18 +110,20 @@
             <t t-set="copies" t-value="int(data.get('copies', 1)) if data else 1"/>
             
             <style>
+                /* Import MCS_Taybah font from Google Fonts or alternative Arabic font */
+                @import url('https://fonts.googleapis.com/css2?family=Markazi+Text:wght@400;700&display=swap');
+                /* Fallback: Try to use local MCS_Taybah if installed */
+                @font-face {
+                    font-family: 'MCS_Taybah_Local';
+                    src: local('MCS_Taybah S_U Normal'), local('MCS Taybah'), local('mcs_taybah');
+                    font-weight: normal;
+                    font-style: normal;
+                }
+                
                 @page {
                     size: <t t-esc="template.label_width"/>mm <t t-esc="template.label_height"/>mm;
                     margin: 0;
                     padding: 0;
-                }
-                
-                /* Import MCS_Taybah font */
-                @font-face {
-                    font-family: 'MCS_Taybah';
-                    src: local('MCS_Taybah S_U Normal'), local('MCS Taybah'), local('mcs_taybah');
-                    font-weight: normal;
-                    font-style: normal;
                 }
                 
                 * { 
@@ -142,7 +144,7 @@
                     height: <t t-esc="template.label_height"/>mm;
                     background-color: <t t-esc="template.bg_color"/>;
                     position: relative;
-                    font-family: 'MCS_Taybah', 'Arial', 'DejaVu Sans', sans-serif;
+                    font-family: 'MCS_Taybah_Local', 'Markazi Text', 'Arial', 'DejaVu Sans', sans-serif;
                     color: <t t-esc="template.text_color"/>;
                     page-break-after: always;
                     overflow: hidden;
@@ -165,7 +167,7 @@
                     left: <t t-esc="template.name_x"/>mm;
                     top: <t t-esc="template.name_y"/>mm;
                     width: <t t-esc="template.label_width - template.name_x - 5"/>mm;
-                    font-family: 'MCS_Taybah', 'Arial', 'DejaVu Sans', sans-serif !important;
+                    font-family: 'MCS_Taybah_Local', 'Markazi Text', 'Arial', 'DejaVu Sans', sans-serif !important;
                     font-size: <t t-esc="template.font_size_name"/>pt;
                     font-weight: <t t-esc="'bold' if template.name_bold else 'normal'"/>;
                     text-align: center !important;
@@ -190,7 +192,7 @@
                     position: absolute;
                     left: <t t-esc="template.code_x"/>mm;
                     top: <t t-esc="template.code_y"/>mm;
-                    font-family: 'MCS_Taybah', 'Arial', 'DejaVu Sans', sans-serif;
+                    font-family: 'MCS_Taybah_Local', 'Markazi Text', 'Arial', 'DejaVu Sans', sans-serif;
                     font-size: <t t-esc="template.font_size_code"/>pt;
                     font-weight: <t t-esc="'bold' if template.code_bold else 'normal'"/>;
                     text-align: <t t-esc="template.code_align"/>;
@@ -202,7 +204,7 @@
                     position: absolute;
                     left: <t t-esc="template.price_x"/>mm;
                     top: <t t-esc="template.price_y"/>mm;
-                    font-family: 'MCS_Taybah', 'Arial', 'DejaVu Sans', sans-serif;
+                    font-family: 'MCS_Taybah_Local', 'Markazi Text', 'Arial', 'DejaVu Sans', sans-serif;
                     font-size: <t t-esc="template.font_size_price"/>pt;
                     color: <t t-esc="template.price_color"/>;
                     font-weight: <t t-esc="'bold' if template.price_bold else 'normal'"/>;
