@@ -185,29 +185,23 @@ class ProductLabelTemplate(models.Model):
             'target': 'new',
         }
     
-    def get_sap_product_info(self, barcode):
+    def get_product_info_by_barcode(self, barcode):
         """
-        Get product information from synced data (no direct SAP connection)
-        Searches in local Odoo database for products synced from SAP
+        Get product information from local database only
+        Searches in local Odoo database for products
         Returns: dict with product_name, uom, and other info
         """
         self.ensure_one()
         
-        if not self.sap_mode_enabled:
-            return {
-                'success': False,
-                'error': 'SAP mode not enabled for this template'
-            }
-        
         try:
-            _logger.info(f"Searching synced products for barcode: {barcode}")
+            _logger.info(f"Searching local products for barcode: {barcode}")
             
-            # Search in local Odoo database only (no SAP connection)
+            # Search in local Odoo database only
             # 1. Check main barcode
             product = self.env['product.product'].search([('barcode', '=', barcode)], limit=1)
             alt_barcode = None
             
-            # 2. If not found, check alternative barcodes (sub-unit barcodes)
+            # 2. If not found, check alternative barcodes
             if not product:
                 alt_barcode = self.env['product.barcode.alternative'].search([
                     ('barcode', '=', barcode),
@@ -218,48 +212,44 @@ class ProductLabelTemplate(models.Model):
                     product = alt_barcode.product_id
                     _logger.info(f"✓ Product found via alternative barcode: {product.default_code}")
             
-            # 3. If product found in synced data
+            # 3. If product found
             if product:
-                _logger.info(f"✓ Product found in synced data: {product.default_code}")
+                _logger.info(f"✓ Product found in local data: {product.default_code}")
                 
                 # Get UoM from alternative barcode if available
                 uom_name = ''
-                if alt_barcode:
-                    # Use UoM from alternative barcode (sub-unit)
-                    uom_name = alt_barcode.uom_name or product.sap_uom or ''
-                else:
-                    # Use main UoM
-                    uom_name = product.sap_uom or ''
+                if alt_barcode and alt_barcode.uom_name:
+                    uom_name = alt_barcode.uom_name
                 
                 return {
                     'success': True,
                     'product_id': product.id,
                     'product_name': product.name,
-                    'sap_product_name': product.sap_product_name or product.name,
-                    'sap_uom': uom_name,
+                    'display_name': product.name,
+                    'uom': uom_name,
                     'barcode': barcode,
                     'price': product.list_price,
                     'code': product.default_code,
-                    'sap_item_code': product.default_code,
                 }
             
-            # Not found in synced data
-            _logger.warning(f"✗ Product not found in synced data for barcode: {barcode}")
+            # Not found
+            _logger.warning(f"✗ Product not found for barcode: {barcode}")
             return {
                 'success': False,
-                'error': f'المنتج غير موجود في البيانات المُزامنة.\n\n'
-                        f'الباركود: {barcode}\n\n'
-                        f'الحل:\n'
-                        f'1. قم بمزامنة المنتجات من SAP:\n'
-                        f'   Inventory → Configuration → SAP Product Migration\n'
-                        f'2. أو تأكد من أن الباركود صحيح'
+                'error': f'المنتج غير موجود.\n\nالباركود: {barcode}\n\nتأكد من أن المنتج موجود في النظام.'
             }
             
         except Exception as e:
-            _logger.error(f"Error searching synced products for barcode {barcode}: {str(e)}", exc_info=True)
+            _logger.error(f"Error searching products for barcode {barcode}: {str(e)}", exc_info=True)
             return {
                 'success': False,
                 'error': f'خطأ في البحث عن المنتج: {str(e)}'
+            }
+    
+    # Keep old method name for backward compatibility
+    def get_sap_product_info(self, barcode):
+        """Legacy method name - redirects to get_product_info_by_barcode"""
+        return self.get_product_info_by_barcode(barcode)
         }
 
 
@@ -299,23 +289,29 @@ class ProductProduct(models.Model):
             return f"http://localhost:8069/product/{self.id}"
     
     @api.model
-    def get_sap_product_info_from_barcode(self, barcode):
+    def get_product_info_from_barcode(self, barcode):
         """
-        Public method to get product info from synced data by barcode.
+        Public method to get product info from local data by barcode.
         Can be called via RPC from the web interface.
-        No direct SAP connection - uses synced data only.
+        Works with any active template.
         """
-        # Find a SAP-enabled template
+        # Find any active template
         template = self.env['product.label.template'].search([
-            ('sap_mode_enabled', '=', True),
+            ('active', '=', True),
         ], limit=1)
         
         if not template:
             return {
                 'success': False,
-                'error': 'لا يوجد قالب مُفعّل لطباعة الليبلات. قم بتفعيل SAP Mode في قالب الليبلات.'
+                'error': 'لا يوجد قالب نشط. قم بإنشاء قالب للطباعة.'
             }
         
-        # Use the template's method (which now searches synced data only)
-        return template.get_sap_product_info(barcode)
+        # Use the template's method (searches local data only)
+        return template.get_product_info_by_barcode(barcode)
+    
+    # Legacy method name for compatibility
+    @api.model
+    def get_sap_product_info_from_barcode(self, barcode):
+        """Legacy method - redirects to get_product_info_from_barcode"""
+        return self.get_product_info_from_barcode(barcode)
 

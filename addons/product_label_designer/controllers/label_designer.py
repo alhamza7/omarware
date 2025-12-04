@@ -188,22 +188,22 @@ class LabelDesignerController(http.Controller):
     
     @http.route('/sap/label/lookup', type='json', auth='user', methods=['POST'], csrf=False)
     def sap_product_lookup(self, barcode, template_id):
-        """Lookup product from SAP by barcode and prepare for printing"""
+        """Lookup product by barcode from local data and prepare for printing"""
         try:
-            _logger.info(f'SAP lookup for barcode: {barcode}, template: {template_id}')
+            _logger.info(f'Product lookup for barcode: {barcode}, template: {template_id}')
             
             template = request.env['product.label.template'].browse(template_id)
             if not template.exists():
                 return {'success': False, 'error': 'Template not found'}
             
-            # Get product info from SAP (this also creates/updates product in Odoo)
-            sap_result = template.get_sap_product_info(barcode)
+            # Get product info from local data
+            result = template.get_product_info_by_barcode(barcode)
             
-            if not sap_result.get('success'):
-                return sap_result
+            if not result.get('success'):
+                return result
             
-            # The product should now exist in Odoo (created/updated by get_sap_product_info)
-            product_id = sap_result.get('product_id')
+            # Product found in local data
+            product_id = result.get('product_id')
             
             # Generate print URL
             print_url = f'/report/pdf/product_label_designer.report_label_simple/{product_id}?template_id={template_id}'
@@ -211,9 +211,9 @@ class LabelDesignerController(http.Controller):
             return {
                 'success': True,
                 'product_id': product_id,
-                'product_name': sap_result.get('product_name', ''),
-                'sap_product_name': sap_result.get('sap_product_name', ''),
-                'sap_uom': sap_result.get('sap_uom', ''),
+                'product_name': result.get('product_name', ''),
+                'display_name': result.get('display_name', ''),
+                'uom': result.get('uom', ''),
                 'barcode': barcode,
                 'print_url': print_url,
             }

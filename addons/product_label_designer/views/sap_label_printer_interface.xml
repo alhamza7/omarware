@@ -237,16 +237,16 @@
                         if (productInfo) {
                             html += `
                                 <div class="product-info">
-                                    <h3>${productInfo.sap_product_name || productInfo.product_name}</h3>
+                                    <h3>${productInfo.display_name || productInfo.product_name}</h3>
                                     <div class="detail">
                                         <span class="label">الباركود:</span>
                                         <span>${productInfo.barcode}</span>
                                     </div>`;
-                            if (productInfo.sap_uom) {
+                            if (productInfo.uom) {
                                 html += `
                                     <div class="detail">
-                                        <span class="label">وحدة القياس (SAP):</span>
-                                        <span>${productInfo.sap_uom}</span>
+                                        <span class="label">وحدة القياس:</span>
+                                        <span>${productInfo.uom}</span>
                                     </div>`;
                             }
                             html += `
@@ -339,7 +339,7 @@
             <div class="printer-container">
                 <div class="printer-header">
                     <h1>🖨️ طابعة ليبلات المنتجات</h1>
-                    <p class="subtitle">امسح الباركود لطباعة الليبل تلقائياً (يعتمد على البيانات المُزامنة)</p>
+                    <p class="subtitle">امسح الباركود لطباعة الليبل تلقائياً (بحث محلي فقط)</p>
                 </div>
                 
                 <div class="scan-area">
@@ -356,7 +356,7 @@
                     </p>
                     <p style="margin-top: 10px; color: #28a745; font-weight: bold; font-size: 14px;">
                         <i class="fa fa-database"></i>
-                        البحث في البيانات المُزامنة فقط - لا حاجة للاتصال بـ SAP
+                        البحث في البيانات المحلية - سريع وفوري
                     </p>
                 </div>
                 
