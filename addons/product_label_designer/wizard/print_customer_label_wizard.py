@@ -17,7 +17,7 @@ class PrintCustomerLabelWizard(models.TransientModel):
     print_mode = fields.Selection([
         ('single', 'Single Labels'),
         ('a4_sheet', 'A4 Sheet (Multiple Labels)')
-    ], string='Print Mode', default='a4_sheet', required=True)
+    ], string='Print Mode', default='single', required=True)
     
     # Invoice Type - نفس الأنواع في pos_perfume
     invoice_type = fields.Selection([
