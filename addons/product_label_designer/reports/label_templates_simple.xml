@@ -217,14 +217,16 @@
                     position: absolute;
                     left: <t t-esc="template.barcode_x"/>mm;
                     top: <t t-esc="template.barcode_y"/>mm;
-                    max-width: <t t-esc="template.label_width - template.barcode_x - 2"/>mm;
+                    width: <t t-esc="template.barcode_width or 60"/>mm;
+                    height: <t t-esc="template.barcode_height or 12"/>mm;
                     transform: rotate(<t t-esc="template.barcode_rotation or 0"/>deg) scale(<t t-esc="template.barcode_scale or 1"/>);
                     transform-origin: left top;
                 }
                 
                 .product-barcode img {
-                    max-width: 100%;
-                    height: auto;
+                    width: 100%;
+                    height: 100%;
+                    object-fit: contain;
                     display: block;
                 }
                 
@@ -285,7 +287,7 @@
                                 <t t-set="display_barcode" t-value="data.get('scanned_barcode') or o.barcode"/>
                                 <t t-if="display_barcode">
                                     <div class="product-barcode">
-                                        <img t-att-src="'/report/barcode/?type=%s&amp;value=%s&amp;width=%s&amp;height=%s' % ('Code128', display_barcode, int((template.barcode_width or 60) * 10), int((template.barcode_height or 12) * 10))"/>
+                                        <img t-att-src="'/report/barcode/?type=%s&amp;value=%s&amp;width=%s&amp;height=%s' % ('Code128', display_barcode, 600, 100)" alt="Barcode"/>
                                     </div>
                                 </t>
                             </t>
