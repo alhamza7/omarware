@@ -260,7 +260,7 @@ class ProductLabelTemplate(models.Model):
             return {
                 'success': False,
                 'error': f'خطأ في البحث عن المنتج: {str(e)}'
-            }
+        }
 
 
 class ProductProduct(models.Model):
