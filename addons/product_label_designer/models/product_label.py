@@ -38,59 +38,28 @@ class ProductLabelTemplate(models.Model):
     label_margin = fields.Float(string='Margin between Labels (mm)', default=2.0)
     
     # Visual Designer - Element Positions (in mm from top-left)
-    # Product Name
     name_x = fields.Float(string='Name X Position', default=5.0)
     name_y = fields.Float(string='Name Y Position', default=5.0)
-    name_width = fields.Float(string='Name Width (mm)', default=70.0, help='Width of name element')
-    name_height = fields.Float(string='Name Height (mm)', default=10.0, help='Height of name element')
-    
-    # Foreign Name
     foreign_name_x = fields.Float(string='Foreign Name X Position', default=5.0)
     foreign_name_y = fields.Float(string='Foreign Name Y Position', default=12.0)
-    foreign_name_width = fields.Float(string='Foreign Name Width (mm)', default=70.0, help='Width of foreign name element')
-    foreign_name_height = fields.Float(string='Foreign Name Height (mm)', default=8.0, help='Height of foreign name element')
-    
-    # Product Code
     code_x = fields.Float(string='Code X Position', default=40.0)
     code_y = fields.Float(string='Code Y Position', default=25.0)
-    code_width = fields.Float(string='Code Width (mm)', default=30.0, help='Width of code element')
-    code_height = fields.Float(string='Code Height (mm)', default=8.0, help='Height of code element')
-    
-    # Price
     price_x = fields.Float(string='Price X Position', default=40.0)
     price_y = fields.Float(string='Price Y Position', default=35.0)
-    price_width = fields.Float(string='Price Width (mm)', default=30.0, help='Width of price element')
-    price_height = fields.Float(string='Price Height (mm)', default=8.0, help='Height of price element')
-    
-    # Barcode
     barcode_x = fields.Float(string='Barcode X Position', default=5.0)
     barcode_y = fields.Float(string='Barcode Y Position', default=45.0)
-    barcode_width = fields.Float(string='Barcode Width (mm)', default=60.0, help='Width of barcode element')
-    barcode_height = fields.Float(string='Barcode Height (mm)', default=12.0, help='Height of barcode element')
-    
-    # QR Code
     qr_x = fields.Float(string='QR Code X Position', default=60.0)
     qr_y = fields.Float(string='QR Code Y Position', default=45.0)
     qr_size = fields.Float(string='QR Code Size (mm)', default=15.0)
-    
-    # Logo
     logo_x = fields.Float(string='Logo X Position', default=5.0)
     logo_y = fields.Float(string='Logo Y Position', default=5.0)
     logo_width = fields.Float(string='Logo Width', default=20.0)
     logo_height = fields.Float(string='Logo Height', default=15.0)
     
-    # Colors - Global
-    bg_color = fields.Char(string='Background Color', default='#FFFFFF')
-    
-    # Colors - Individual elements
-    name_color = fields.Char(string='Name Color', default='#000000')
-    foreign_name_color = fields.Char(string='Foreign Name Color', default='#000000')
-    code_color = fields.Char(string='Code Color', default='#000000')
+    # Colors
+    text_color = fields.Char(string='Text Color', default='#000000')
     price_color = fields.Char(string='Price Color', default='#00A09D')
-    
-    # Legacy field for backward compatibility
-    text_color = fields.Char(string='Text Color (Legacy)', default='#000000', 
-                            help='Use individual color fields instead')
+    bg_color = fields.Char(string='Background Color', default='#FFFFFF')
     
     # Fonts
     font_size_name = fields.Integer(string='Name Font Size', default=14)
@@ -106,22 +75,11 @@ class ProductLabelTemplate(models.Model):
         ('right', 'Right')
     ], string='Name Alignment', default='right')
     
-    # Text Direction
-    name_direction = fields.Selection([
-        ('ltr', 'Left to Right (LTR)'),
-        ('rtl', 'Right to Left (RTL)')
-    ], string='Name Direction', default='rtl')
-    
     foreign_name_align = fields.Selection([
         ('left', 'Left'),
         ('center', 'Center'),
         ('right', 'Right')
     ], string='Foreign Name Alignment', default='left')
-    
-    foreign_name_direction = fields.Selection([
-        ('ltr', 'Left to Right (LTR)'),
-        ('rtl', 'Right to Left (RTL)')
-    ], string='Foreign Name Direction', default='ltr')
     
     code_align = fields.Selection([
         ('left', 'Left'),
@@ -129,21 +87,11 @@ class ProductLabelTemplate(models.Model):
         ('right', 'Right')
     ], string='Code Alignment', default='center')
     
-    code_direction = fields.Selection([
-        ('ltr', 'Left to Right (LTR)'),
-        ('rtl', 'Right to Left (RTL)')
-    ], string='Code Direction', default='ltr')
-    
     price_align = fields.Selection([
         ('left', 'Left'),
         ('center', 'Center'),
         ('right', 'Right')
     ], string='Price Alignment', default='center')
-    
-    price_direction = fields.Selection([
-        ('ltr', 'Left to Right (LTR)'),
-        ('rtl', 'Right to Left (RTL)')
-    ], string='Price Direction', default='ltr')
     
     # Font Weight
     name_bold = fields.Boolean(string='Name Bold', default=True)
