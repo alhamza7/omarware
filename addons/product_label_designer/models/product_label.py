@@ -250,7 +250,6 @@ class ProductLabelTemplate(models.Model):
     def get_sap_product_info(self, barcode):
         """Legacy method name - redirects to get_product_info_by_barcode"""
         return self.get_product_info_by_barcode(barcode)
-        }
 
 
 class ProductProduct(models.Model):
