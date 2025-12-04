@@ -73,7 +73,7 @@ class ProductLabelTemplate(models.Model):
         ('left', 'Left'),
         ('center', 'Center'),
         ('right', 'Right')
-    ], string='Name Alignment', default='right')
+    ], string='Name Alignment', default='center')
     
     foreign_name_align = fields.Selection([
         ('left', 'Left'),

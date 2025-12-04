@@ -156,11 +156,11 @@
                     position: absolute;
                     left: <t t-esc="template.name_x"/>mm;
                     top: <t t-esc="template.name_y"/>mm;
+                    width: <t t-esc="template.label_width - template.name_x - 5"/>mm;
                     font-size: <t t-esc="template.font_size_name"/>pt;
                     font-weight: <t t-esc="'bold' if template.name_bold else 'normal'"/>;
-                    text-align: <t t-esc="template.name_align"/>;
-                    direction: rtl;
-                    max-width: <t t-esc="template.label_width - template.name_x - 5"/>mm;
+                    text-align: center !important;
+                    direction: ltr !important;
                     white-space: nowrap;
                     overflow: hidden;
                     text-overflow: ellipsis;
