@@ -43,3 +43,5 @@ venv\Scripts\python.exe odoo-bin -c odoo.conf -d lugal --http-port=8070 -u produ
    - `زبون محل` (بدون "نوع الفاتورة:")
 
 
+
+

@@ -34,3 +34,5 @@ def migrate(cr, version):
             _logger.warning("Error dropping invoice_type from print_customer_label_wizard_line: %s", str(e))
 
 
+
+

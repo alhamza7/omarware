@@ -26,6 +26,8 @@
                     padding: 0; 
                     width: <t t-esc="template.label_width"/>mm;
                     height: <t t-esc="template.label_height"/>mm;
+                    /* Override inherited direction - each element controls its own direction */
+                    direction: ltr !important;
                 }
                 
                 @media print {
@@ -80,67 +82,87 @@
                 
                 .customer-name {
                     position: absolute;
-                    left: <t t-esc="template.name_x"/>mm;
                     top: <t t-esc="template.name_y"/>mm;
                     font-size: <t t-esc="template.font_size_name"/>pt;
                     font-weight: <t t-esc="'bold' if template.name_bold else 'normal'"/>;
                     font-style: <t t-esc="'italic' if template.name_italic else 'normal'"/>;
-                    text-align: <t t-esc="template.name_align"/>;
                     color: <t t-esc="template.name_color or template.text_color or '#000000'"/>;
-                    direction: rtl;
-                    max-width: <t t-esc="template.label_width - template.name_x - 5"/>mm;
+                    direction: <t t-esc="template.name_direction or 'rtl'"/> !important;
+                    unicode-bidi: isolate;
+                    /* Full width with padding for proper alignment */
+                    left: 0;
+                    right: 0;
+                    padding-left: <t t-esc="template.name_x"/>mm;
+                    padding-right: <t t-esc="5"/>mm;
+                    text-align: <t t-esc="template.name_align"/>;
                 }
                 
                 .customer-phone {
                     position: absolute;
-                    left: <t t-esc="template.phone_x"/>mm;
                     top: <t t-esc="template.phone_y"/>mm;
                     font-size: <t t-esc="template.font_size_phone"/>pt;
                     font-weight: <t t-esc="'bold' if template.phone_bold else 'normal'"/>;
                     font-style: <t t-esc="'italic' if template.phone_italic else 'normal'"/>;
-                    text-align: <t t-esc="template.phone_align"/>;
                     color: <t t-esc="template.phone_color or template.text_color or '#000000'"/>;
-                    direction: rtl;
-                    max-width: <t t-esc="template.label_width - template.phone_x - 5"/>mm;
+                    direction: <t t-esc="template.phone_direction or 'rtl'"/> !important;
+                    unicode-bidi: isolate;
+                    /* Full width with padding for proper alignment */
+                    left: 0;
+                    right: 0;
+                    padding-left: <t t-esc="template.phone_x"/>mm;
+                    padding-right: <t t-esc="5"/>mm;
+                    text-align: <t t-esc="template.phone_align"/>;
                 }
                 
                 .customer-mobile {
                     position: absolute;
-                    left: <t t-esc="template.mobile_x"/>mm;
                     top: <t t-esc="template.mobile_y"/>mm;
                     font-size: <t t-esc="template.font_size_mobile"/>pt;
                     font-weight: <t t-esc="'bold' if template.mobile_bold else 'normal'"/>;
                     font-style: <t t-esc="'italic' if template.mobile_italic else 'normal'"/>;
-                    text-align: <t t-esc="template.mobile_align"/>;
                     color: <t t-esc="template.mobile_color or template.text_color or '#000000'"/>;
-                    direction: rtl;
-                    max-width: <t t-esc="template.label_width - template.mobile_x - 5"/>mm;
+                    direction: <t t-esc="template.mobile_direction or 'rtl'"/> !important;
+                    unicode-bidi: isolate;
+                    /* Full width with padding for proper alignment */
+                    left: 0;
+                    right: 0;
+                    padding-left: <t t-esc="template.mobile_x"/>mm;
+                    padding-right: <t t-esc="5"/>mm;
+                    text-align: <t t-esc="template.mobile_align"/>;
                 }
                 
                 .customer-invoice-type {
                     position: absolute;
-                    left: <t t-esc="template.invoice_type_x"/>mm;
                     top: <t t-esc="template.invoice_type_y"/>mm;
                     font-size: <t t-esc="template.font_size_invoice_type"/>pt;
                     font-weight: <t t-esc="'bold' if template.invoice_type_bold else 'normal'"/>;
                     font-style: <t t-esc="'italic' if template.invoice_type_italic else 'normal'"/>;
-                    text-align: <t t-esc="template.invoice_type_align"/>;
                     color: <t t-esc="template.invoice_type_color or template.text_color or '#000000'"/>;
-                    direction: rtl;
-                    max-width: <t t-esc="template.label_width - template.invoice_type_x - 5"/>mm;
+                    direction: <t t-esc="template.invoice_type_direction or 'rtl'"/> !important;
+                    unicode-bidi: isolate;
+                    /* Full width with padding for proper alignment */
+                    left: 0;
+                    right: 0;
+                    padding-left: <t t-esc="template.invoice_type_x"/>mm;
+                    padding-right: <t t-esc="5"/>mm;
+                    text-align: <t t-esc="template.invoice_type_align"/>;
                 }
                 
                 .customer-note {
                     position: absolute;
-                    left: <t t-esc="template.note_x"/>mm;
                     top: <t t-esc="template.note_y"/>mm;
                     font-size: <t t-esc="template.font_size_note"/>pt;
                     font-weight: <t t-esc="'bold' if template.note_bold else 'normal'"/>;
                     font-style: <t t-esc="'italic' if template.note_italic else 'normal'"/>;
-                    text-align: <t t-esc="template.note_align"/>;
                     color: <t t-esc="template.note_color or template.text_color or '#000000'"/>;
-                    direction: rtl;
-                    max-width: <t t-esc="template.label_width - template.note_x - 5"/>mm;
+                    direction: <t t-esc="template.note_direction or 'rtl'"/> !important;
+                    unicode-bidi: isolate;
+                    /* Full width with padding for proper alignment */
+                    left: 0;
+                    right: 0;
+                    padding-left: <t t-esc="template.note_x"/>mm;
+                    padding-right: <t t-esc="5"/>mm;
+                    text-align: <t t-esc="template.note_align"/>;
                 }
             </style>
             
@@ -161,7 +183,7 @@
                                 
                                 <!-- Customer Name -->
                                 <t t-if="template.show_name">
-                                    <div class="customer-name">
+                                    <div class="customer-name" t-att-dir="template.name_direction or 'rtl'">
                                         <t t-esc="partner.name"/>
                                     </div>
                                 </t>
@@ -171,7 +193,7 @@
                                     <t t-set="customer_info" t-value="customer_data.get(str(partner.id), {})"/>
                                     <t t-set="phone_value" t-value="customer_info.get('phone', '') or partner.phone or ''"/>
                                     <t t-if="phone_value">
-                                        <div class="customer-phone">
+                                        <div class="customer-phone" t-att-dir="template.phone_direction or 'rtl'">
                                             <t t-if="template.show_phone_label">هاتف: </t><t t-esc="phone_value"/>
                                         </div>
                                     </t>
@@ -182,7 +204,7 @@
                                     <t t-set="customer_info" t-value="customer_data.get(str(partner.id), {})"/>
                                     <t t-set="mobile_value" t-value="customer_info.get('mobile', '') or partner.mobile or ''"/>
                                     <t t-if="mobile_value">
-                                        <div class="customer-mobile">
+                                        <div class="customer-mobile" t-att-dir="template.mobile_direction or 'rtl'">
                                             <t t-if="template.show_mobile_label">موبايل: </t><t t-esc="mobile_value"/>
                                         </div>
                                     </t>
@@ -204,7 +226,7 @@
                                     </t>
                                     <!-- Always show if we have code or display -->
                                     <t t-if="invoice_type_display or invoice_type_code">
-                                        <div class="customer-invoice-type">
+                                        <div class="customer-invoice-type" t-att-dir="template.invoice_type_direction or 'rtl'">
                                             <t t-if="template.show_invoice_type_label">نوع الفاتورة: </t>
                                             <t t-if="invoice_type_display" t-esc="invoice_type_display"/>
                                             <t t-if="not invoice_type_display and invoice_type_code" t-esc="invoice_type_code"/>
@@ -214,7 +236,7 @@
                                 
                                 <!-- Notes -->
                                 <t t-if="template.show_note and note">
-                                    <div class="customer-note">
+                                    <div class="customer-note" t-att-dir="template.note_direction or 'rtl'">
                                         <t t-if="template.show_note_label">ملاحظات: </t><t t-esc="note"/>
                                     </div>
                                 </t>

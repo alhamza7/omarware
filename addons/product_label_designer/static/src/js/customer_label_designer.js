@@ -292,12 +292,6 @@ class CustomerLabelDesigner {
             element.style.overflow = 'hidden';
             element.style.wordWrap = 'break-word';
             element.style.whiteSpace = 'normal';
-            
-            // For center alignment, force LTR direction
-            if (textAlign === 'center') {
-                element.style.direction = 'ltr';
-                element.setAttribute('dir', 'ltr');
-            }
         }
         
         // Add resize handle for all elements
@@ -649,15 +643,6 @@ class CustomerLabelDesigner {
         const isImage = this.activeElement.querySelector('img') !== null;
         if (isImage) return;
         
-        // If alignment is center, don't allow direction change (center requires LTR)
-        const currentAlign = this.activeElement.style.textAlign || 
-                            this.activeElement.getAttribute('data-align') || 
-                            'right';
-        if (currentAlign === 'center') {
-            alert('Center alignment requires LTR direction. Please change alignment first.');
-            return;
-        }
-        
         // Store original direction
         if (!this.activeElement.dataset.originalDirection) {
             this.activeElement.dataset.originalDirection = direction;
@@ -732,37 +717,6 @@ class CustomerLabelDesigner {
         // Apply alignment
         this.activeElement.style.textAlign = align;
         this.activeElement.setAttribute('data-align', align);
-        
-        // Get current direction (before changing it)
-        let currentDirection = this.activeElement.getAttribute('dir') || 
-                              this.activeElement.style.direction || 
-                              'rtl';
-        
-        // When center is selected, use LTR direction to ensure proper centering
-        if (align === 'center') {
-            currentDirection = 'ltr';
-            this.activeElement.style.direction = 'ltr';
-            this.activeElement.setAttribute('dir', 'ltr');
-            // Update direction button state
-            document.querySelectorAll('.direction-btn').forEach(btn => {
-                btn.classList.toggle('primary', btn.dataset.direction === 'ltr');
-            });
-            // Save direction
-            this.saveDirection('ltr');
-        } else {
-            // For right/left, restore the original direction if it was changed for center
-            // Otherwise keep current direction
-            if (!this.activeElement.dataset.originalDirection) {
-                this.activeElement.dataset.originalDirection = currentDirection;
-            }
-            const originalDirection = this.activeElement.dataset.originalDirection || 'rtl';
-            this.activeElement.style.direction = originalDirection;
-            this.activeElement.setAttribute('dir', originalDirection);
-            // Update direction button state
-            document.querySelectorAll('.direction-btn').forEach(btn => {
-                btn.classList.toggle('primary', btn.dataset.direction === originalDirection);
-            });
-        }
         
         // Force reflow to apply changes
         this.activeElement.offsetHeight;
