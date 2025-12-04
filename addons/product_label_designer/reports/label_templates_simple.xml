@@ -287,7 +287,17 @@
                                 <t t-set="display_barcode" t-value="data.get('scanned_barcode') or o.barcode"/>
                                 <t t-if="display_barcode">
                                     <div class="product-barcode">
-                                        <img t-att-src="'/report/barcode/?type=%s&amp;value=%s&amp;width=%s&amp;height=%s' % ('Code128', display_barcode, 600, 100)" alt="Barcode"/>
+                                        <!-- Debug: Show barcode value -->
+                                        <div style="position: absolute; bottom: -15px; left: 0; font-size: 8pt; color: #666;">
+                                            <t t-esc="display_barcode"/>
+                                        </div>
+                                        <img t-attf-src="/report/barcode/?type=Code128&amp;value={{display_barcode}}&amp;width=600&amp;height=100&amp;humanreadable=1" style="width: 100%; height: 100%; object-fit: contain;"/>
+                                    </div>
+                                </t>
+                                <t t-else="">
+                                    <!-- Debug: No barcode -->
+                                    <div style="position: absolute; left: 5mm; top: 10mm; font-size: 10pt; color: red;">
+                                        No barcode available
                                     </div>
                                 </t>
                             </t>
