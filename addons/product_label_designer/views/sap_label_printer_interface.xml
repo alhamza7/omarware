@@ -302,16 +302,44 @@
                             if (result.success) {
                                 showStatus('success', '✓ تم العثور على المنتج - جاري الطباعة...', result);
                                 
-                                // Auto-print by opening print URL in hidden iframe
+                                // Auto-print by opening print URL in iframe and triggering print
                                 const printFrame = document.createElement('iframe');
-                                printFrame.style.display = 'none';
+                                printFrame.style.position = 'fixed';
+                                printFrame.style.right = '0';
+                                printFrame.style.bottom = '0';
+                                printFrame.style.width = '0';
+                                printFrame.style.height = '0';
+                                printFrame.style.border = '0';
+                                
+                                // When iframe loads, trigger print
+                                printFrame.onload = function() {
+                                    try {
+                                        // Wait a bit for PDF to fully load
+                                        setTimeout(() => {
+                                            try {
+                                                printFrame.contentWindow.print();
+                                            } catch (e) {
+                                                console.error('Print error:', e);
+                                                // Fallback: open in new window
+                                                window.open(result.print_url, '_blank');
+                                            }
+                                        }, 500);
+                                    } catch (e) {
+                                        console.error('Print error:', e);
+                                    }
+                                };
+                                
                                 printFrame.src = result.print_url;
                                 document.body.appendChild(printFrame);
                                 
                                 // Remove iframe after printing
                                 setTimeout(() => {
-                                    document.body.removeChild(printFrame);
-                                }, 3000);
+                                    try {
+                                        document.body.removeChild(printFrame);
+                                    } catch (e) {
+                                        console.error('Error removing iframe:', e);
+                                    }
+                                }, 5000);
                                 
                                 totalPrinted++;
                                 successCount++;

@@ -205,8 +205,8 @@ class LabelDesignerController(http.Controller):
             # Product found in local data
             product_id = result.get('product_id')
             
-            # Generate print URL
-            print_url = f'/report/pdf/product_label_designer.report_label_simple/{product_id}?template_id={template_id}'
+            # Generate print URL (use HTML report for auto-print)
+            print_url = f'/report/html/product_label_designer.report_label_simple_html/{product_id}?template_id={template_id}'
             
             return {
                 'success': True,

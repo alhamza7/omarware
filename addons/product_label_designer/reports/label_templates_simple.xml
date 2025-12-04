@@ -103,6 +103,122 @@
         </t>
     </template>
 
+    <!-- SIMPLE LABEL REPORT HTML (for direct printing with auto-print) -->
+    <template id="report_label_simple_html">
+        <t t-call="web.html_container">
+            <t t-set="template" t-value="env['product.label.template'].browse(int(data.get('template_id'))) if data and data.get('template_id') else env['product.label.template'].get_default_template()"/>
+            <t t-set="copies" t-value="int(data.get('copies', 1)) if data else 1"/>
+            
+            <style>
+                @page {
+                    size: <t t-esc="template.label_width"/>mm <t t-esc="template.label_height"/>mm;
+                    margin: 0;
+                }
+                
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body { margin: 0; padding: 0; }
+                
+                .product-label {
+                    width: <t t-esc="template.label_width"/>mm;
+                    height: <t t-esc="template.label_height"/>mm;
+                    background-color: <t t-esc="template.bg_color"/>;
+                    position: relative;
+                    font-family: Arial, 'DejaVu Sans', sans-serif;
+                    color: <t t-esc="template.text_color"/>;
+                    page-break-after: always;
+                    overflow: hidden;
+                }
+                
+                .label-content {
+                    position: relative;
+                    z-index: 1;
+                    width: 100%;
+                    height: 100%;
+                }
+                
+                .product-name {
+                    position: absolute;
+                    left: <t t-esc="template.name_x"/>mm;
+                    top: <t t-esc="template.name_y"/>mm;
+                    font-size: <t t-esc="template.font_size_name"/>pt;
+                    font-weight: <t t-esc="'bold' if template.name_bold else 'normal'"/>;
+                    text-align: <t t-esc="template.name_align"/>;
+                    direction: rtl;
+                }
+                
+                .product-code {
+                    position: absolute;
+                    left: <t t-esc="template.code_x"/>mm;
+                    top: <t t-esc="template.code_y"/>mm;
+                    font-size: <t t-esc="template.font_size_code"/>pt;
+                    font-weight: <t t-esc="'bold' if template.code_bold else 'normal'"/>;
+                    text-align: <t t-esc="template.code_align"/>;
+                }
+                
+                .product-price {
+                    position: absolute;
+                    left: <t t-esc="template.price_x"/>mm;
+                    top: <t t-esc="template.price_y"/>mm;
+                    font-size: <t t-esc="template.font_size_price"/>pt;
+                    color: <t t-esc="template.price_color"/>;
+                    font-weight: <t t-esc="'bold' if template.price_bold else 'normal'"/>;
+                    text-align: <t t-esc="template.price_align"/>;
+                }
+                
+                .product-barcode {
+                    position: absolute;
+                    left: <t t-esc="template.barcode_x"/>mm;
+                    top: <t t-esc="template.barcode_y"/>mm;
+                }
+            </style>
+            
+            <t t-foreach="docs" t-as="o">
+                <t t-foreach="range(copies)" t-as="copy">
+                    <div class="product-label">
+                        <div class="label-content">
+                            <!-- Product Name (Arabic) -->
+                            <t t-if="template.show_name">
+                                <div class="product-name">
+                                    <t t-esc="o.name"/>
+                                </div>
+                            </t>
+                            
+                            <!-- Product Code -->
+                            <t t-if="template.show_code and o.default_code">
+                                <div class="product-code">
+                                    <t t-esc="o.default_code"/>
+                                </div>
+                            </t>
+                            
+                            <!-- Price -->
+                            <t t-if="template.show_price">
+                                <div class="product-price">
+                                    <t t-esc="'%.2f' % o.list_price"/>
+                                </div>
+                            </t>
+                            
+                            <!-- Barcode -->
+                            <t t-if="template.show_barcode and o.barcode">
+                                <div class="product-barcode">
+                                    <img t-att-src="'/report/barcode/?type=%s&amp;value=%s&amp;width=%s&amp;height=%s' % ('Code128', o.barcode, 200, 50)" style="max-width: 60mm; height: auto;"/>
+                                </div>
+                            </t>
+                        </div>
+                    </div>
+                </t>
+            </t>
+            
+            <!-- Auto-print script -->
+            <script type="text/javascript">
+                window.addEventListener('load', function() {
+                    setTimeout(function() {
+                        window.print();
+                    }, 500);
+                });
+            </script>
+        </t>
+    </template>
+
     <!-- SIMPLE TEST TEMPLATE -->
     <template id="report_product_label_simple_test">
         <t t-call="web.html_container">
