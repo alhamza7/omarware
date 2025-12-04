@@ -113,10 +113,21 @@
                 @page {
                     size: <t t-esc="template.label_width"/>mm <t t-esc="template.label_height"/>mm;
                     margin: 0;
+                    padding: 0;
                 }
                 
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { margin: 0; padding: 0; }
+                * { 
+                    margin: 0; 
+                    padding: 0; 
+                    box-sizing: border-box; 
+                }
+                
+                html, body { 
+                    margin: 0; 
+                    padding: 0;
+                    width: <t t-esc="template.label_width"/>mm;
+                    height: <t t-esc="template.label_height"/>mm;
+                }
                 
                 .product-label {
                     width: <t t-esc="template.label_width"/>mm;
@@ -127,6 +138,11 @@
                     color: <t t-esc="template.text_color"/>;
                     page-break-after: always;
                     overflow: hidden;
+                    display: block;
+                }
+                
+                .product-label:last-child {
+                    page-break-after: avoid;
                 }
                 
                 .label-content {
@@ -144,6 +160,10 @@
                     font-weight: <t t-esc="'bold' if template.name_bold else 'normal'"/>;
                     text-align: <t t-esc="template.name_align"/>;
                     direction: rtl;
+                    max-width: <t t-esc="template.label_width - template.name_x - 5"/>mm;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
                 }
                 
                 .product-code {
@@ -169,6 +189,37 @@
                     position: absolute;
                     left: <t t-esc="template.barcode_x"/>mm;
                     top: <t t-esc="template.barcode_y"/>mm;
+                    max-width: <t t-esc="template.label_width - template.barcode_x - 2"/>mm;
+                }
+                
+                .product-barcode img {
+                    max-width: 100%;
+                    height: auto;
+                    display: block;
+                }
+                
+                @media print {
+                    @page {
+                        size: <t t-esc="template.label_width"/>mm <t t-esc="template.label_height"/>mm;
+                        margin: 0;
+                    }
+                    
+                    html, body {
+                        width: <t t-esc="template.label_width"/>mm;
+                        height: <t t-esc="template.label_height"/>mm;
+                        margin: 0;
+                        padding: 0;
+                    }
+                    
+                    .product-label {
+                        width: <t t-esc="template.label_width"/>mm;
+                        height: <t t-esc="template.label_height"/>mm;
+                        page-break-after: always;
+                    }
+                    
+                    .product-label:last-child {
+                        page-break-after: avoid;
+                    }
                 }
             </style>
             
@@ -200,7 +251,7 @@
                             <!-- Barcode -->
                             <t t-if="template.show_barcode and o.barcode">
                                 <div class="product-barcode">
-                                    <img t-att-src="'/report/barcode/?type=%s&amp;value=%s&amp;width=%s&amp;height=%s' % ('Code128', o.barcode, 200, 50)" style="max-width: 100%; height: auto;"/>
+                                    <img t-att-src="'/report/barcode/?type=%s&amp;value=%s&amp;width=%s&amp;height=%s' % ('Code128', o.barcode, 200, 50)"/>
                                 </div>
                             </t>
                         </div>
