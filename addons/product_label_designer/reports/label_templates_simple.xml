@@ -156,11 +156,31 @@
                     position: absolute;
                     left: <t t-esc="template.name_x"/>mm;
                     top: <t t-esc="template.name_y"/>mm;
+                    width: <t t-esc="template.name_width"/>mm;
+                    height: <t t-esc="template.name_height"/>mm;
                     font-size: <t t-esc="template.font_size_name"/>pt;
                     font-weight: <t t-esc="'bold' if template.name_bold else 'normal'"/>;
+                    font-style: <t t-esc="'italic' if template.name_italic else 'normal'"/>;
                     text-align: <t t-esc="template.name_align"/>;
-                    direction: rtl;
-                    max-width: <t t-esc="template.label_width - template.name_x - 5"/>mm;
+                    direction: <t t-esc="template.name_direction if hasattr(template, 'name_direction') and template.name_direction else 'rtl'"/>;
+                    color: <t t-esc="template.name_color if hasattr(template, 'name_color') and template.name_color else template.text_color"/>;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+                
+                .product-foreign-name {
+                    position: absolute;
+                    left: <t t-esc="template.foreign_name_x"/>mm;
+                    top: <t t-esc="template.foreign_name_y"/>mm;
+                    width: <t t-esc="template.foreign_name_width if hasattr(template, 'foreign_name_width') else '70'"/>mm;
+                    height: <t t-esc="template.foreign_name_height if hasattr(template, 'foreign_name_height') else '8'"/>mm;
+                    font-size: <t t-esc="template.font_size_foreign_name"/>pt;
+                    font-weight: <t t-esc="'bold' if template.foreign_name_bold else 'normal'"/>;
+                    font-style: <t t-esc="'italic' if template.foreign_name_italic else 'normal'"/>;
+                    text-align: <t t-esc="template.foreign_name_align"/>;
+                    direction: <t t-esc="template.foreign_name_direction if hasattr(template, 'foreign_name_direction') and template.foreign_name_direction else 'ltr'"/>;
+                    color: <t t-esc="template.foreign_name_color if hasattr(template, 'foreign_name_color') and template.foreign_name_color else template.text_color"/>;
                     white-space: nowrap;
                     overflow: hidden;
                     text-overflow: ellipsis;
@@ -170,26 +190,36 @@
                     position: absolute;
                     left: <t t-esc="template.code_x"/>mm;
                     top: <t t-esc="template.code_y"/>mm;
+                    width: <t t-esc="template.code_width if hasattr(template, 'code_width') else '30'"/>mm;
+                    height: <t t-esc="template.code_height if hasattr(template, 'code_height') else '8'"/>mm;
                     font-size: <t t-esc="template.font_size_code"/>pt;
                     font-weight: <t t-esc="'bold' if template.code_bold else 'normal'"/>;
+                    font-style: <t t-esc="'italic' if template.code_italic else 'normal'"/>;
                     text-align: <t t-esc="template.code_align"/>;
+                    direction: <t t-esc="template.code_direction if hasattr(template, 'code_direction') and template.code_direction else 'ltr'"/>;
+                    color: <t t-esc="template.code_color if hasattr(template, 'code_color') and template.code_color else template.text_color"/>;
                 }
                 
                 .product-price {
                     position: absolute;
                     left: <t t-esc="template.price_x"/>mm;
                     top: <t t-esc="template.price_y"/>mm;
+                    width: <t t-esc="template.price_width if hasattr(template, 'price_width') else '30'"/>mm;
+                    height: <t t-esc="template.price_height if hasattr(template, 'price_height') else '8'"/>mm;
                     font-size: <t t-esc="template.font_size_price"/>pt;
                     color: <t t-esc="template.price_color"/>;
                     font-weight: <t t-esc="'bold' if template.price_bold else 'normal'"/>;
+                    font-style: <t t-esc="'italic' if template.price_italic else 'normal'"/>;
                     text-align: <t t-esc="template.price_align"/>;
+                    direction: <t t-esc="template.price_direction if hasattr(template, 'price_direction') and template.price_direction else 'ltr'"/>;
                 }
                 
                 .product-barcode {
                     position: absolute;
                     left: <t t-esc="template.barcode_x"/>mm;
                     top: <t t-esc="template.barcode_y"/>mm;
-                    max-width: <t t-esc="template.label_width - template.barcode_x - 2"/>mm;
+                    width: <t t-esc="template.barcode_width if hasattr(template, 'barcode_width') else (template.label_width - template.barcode_x - 2)"/>mm;
+                    max-height: <t t-esc="template.barcode_height if hasattr(template, 'barcode_height') else '12'"/>mm;
                 }
                 
                 .product-barcode img {
@@ -231,6 +261,13 @@
                             <t t-if="template.show_name">
                                 <div class="product-name">
                                     <t t-esc="o.name"/>
+                                </div>
+                            </t>
+                            
+                            <!-- Product Foreign Name -->
+                            <t t-if="template.show_foreign_name and o.foreign_name">
+                                <div class="product-foreign-name">
+                                    <t t-esc="o.foreign_name"/>
                                 </div>
                             </t>
                             
