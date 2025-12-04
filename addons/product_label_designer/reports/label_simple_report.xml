@@ -1,6 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
 
+    <!-- Simple Label Report for SAP Printing -->
+    <record id="action_report_label_simple" model="ir.actions.report">
+        <field name="name">Simple Label</field>
+        <field name="model">product.product</field>
+        <field name="report_type">qweb-pdf</field>
+        <field name="report_name">product_label_designer.report_label_simple</field>
+        <field name="report_file">product_label_designer.report_label_simple</field>
+        <field name="paperformat_id" ref="paperformat_label_80x60"/>
+    </record>
+
     <!-- Simple Test Report -->
     <record id="action_report_simple_test" model="ir.actions.report">
         <field name="name">Simple Test</field>
