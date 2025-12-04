@@ -206,7 +206,9 @@ class LabelDesignerController(http.Controller):
             product_id = result.get('product_id')
             
             # Generate print URL (use HTML report for auto-print)
-            print_url = f'/report/html/product_label_designer.report_label_simple_html/{product_id}?template_id={template_id}'
+            # Pass scanned barcode as URL parameter so it can be printed instead of product barcode
+            import urllib.parse
+            print_url = f'/report/html/product_label_designer.report_label_simple_html/{product_id}?template_id={template_id}&scanned_barcode={urllib.parse.quote(barcode)}'
             
             return {
                 'success': True,

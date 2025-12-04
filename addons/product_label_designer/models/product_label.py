@@ -40,21 +40,37 @@ class ProductLabelTemplate(models.Model):
     # Visual Designer - Element Positions (in mm from top-left)
     name_x = fields.Float(string='Name X Position', default=5.0)
     name_y = fields.Float(string='Name Y Position', default=5.0)
+    name_rotation = fields.Float(string='Name Rotation (degrees)', default=0.0, help='Rotation angle in degrees (0-360)')
+    
     foreign_name_x = fields.Float(string='Foreign Name X Position', default=5.0)
     foreign_name_y = fields.Float(string='Foreign Name Y Position', default=12.0)
+    foreign_name_rotation = fields.Float(string='Foreign Name Rotation (degrees)', default=0.0)
+    
     code_x = fields.Float(string='Code X Position', default=40.0)
     code_y = fields.Float(string='Code Y Position', default=25.0)
+    code_rotation = fields.Float(string='Code Rotation (degrees)', default=0.0)
+    
     price_x = fields.Float(string='Price X Position', default=40.0)
     price_y = fields.Float(string='Price Y Position', default=35.0)
+    price_rotation = fields.Float(string='Price Rotation (degrees)', default=0.0)
+    
     barcode_x = fields.Float(string='Barcode X Position', default=5.0)
     barcode_y = fields.Float(string='Barcode Y Position', default=45.0)
+    barcode_width = fields.Float(string='Barcode Width (mm)', default=60.0, help='Width of barcode')
+    barcode_height = fields.Float(string='Barcode Height (mm)', default=12.0, help='Height of barcode')
+    barcode_rotation = fields.Float(string='Barcode Rotation (degrees)', default=0.0, help='Rotation (e.g., 90 for vertical)')
+    barcode_scale = fields.Float(string='Barcode Scale', default=1.0, help='Scale factor (0.5 = 50%, 2.0 = 200%)')
+    
     qr_x = fields.Float(string='QR Code X Position', default=60.0)
     qr_y = fields.Float(string='QR Code Y Position', default=45.0)
     qr_size = fields.Float(string='QR Code Size (mm)', default=15.0)
+    qr_rotation = fields.Float(string='QR Rotation (degrees)', default=0.0)
+    
     logo_x = fields.Float(string='Logo X Position', default=5.0)
     logo_y = fields.Float(string='Logo Y Position', default=5.0)
     logo_width = fields.Float(string='Logo Width', default=20.0)
     logo_height = fields.Float(string='Logo Height', default=15.0)
+    logo_rotation = fields.Float(string='Logo Rotation (degrees)', default=0.0)
     
     # Colors
     text_color = fields.Char(string='Text Color', default='#000000')

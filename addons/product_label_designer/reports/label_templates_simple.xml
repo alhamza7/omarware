@@ -116,6 +116,14 @@
                     padding: 0;
                 }
                 
+                /* Import MCS_Taybah font */
+                @font-face {
+                    font-family: 'MCS_Taybah';
+                    src: local('MCS_Taybah S_U Normal'), local('MCS Taybah'), local('mcs_taybah');
+                    font-weight: normal;
+                    font-style: normal;
+                }
+                
                 * { 
                     margin: 0; 
                     padding: 0; 
@@ -134,7 +142,7 @@
                     height: <t t-esc="template.label_height"/>mm;
                     background-color: <t t-esc="template.bg_color"/>;
                     position: relative;
-                    font-family: Arial, 'DejaVu Sans', sans-serif;
+                    font-family: 'MCS_Taybah', 'Arial', 'DejaVu Sans', sans-serif;
                     color: <t t-esc="template.text_color"/>;
                     page-break-after: always;
                     overflow: hidden;
@@ -157,6 +165,7 @@
                     left: <t t-esc="template.name_x"/>mm;
                     top: <t t-esc="template.name_y"/>mm;
                     width: <t t-esc="template.label_width - template.name_x - 5"/>mm;
+                    font-family: 'MCS_Taybah', 'Arial', 'DejaVu Sans', sans-serif !important;
                     font-size: <t t-esc="template.font_size_name"/>pt;
                     font-weight: <t t-esc="'bold' if template.name_bold else 'normal'"/>;
                     text-align: center !important;
@@ -164,25 +173,42 @@
                     white-space: nowrap;
                     overflow: hidden;
                     text-overflow: ellipsis;
+                    transform: rotate(<t t-esc="template.name_rotation or 0"/>deg);
+                    transform-origin: left top;
+                }
+                
+                /* Auto font sizing based on text length */
+                .product-name.short-text {
+                    font-size: calc(<t t-esc="template.font_size_name"/> * 1.5)pt !important;
+                }
+                
+                .product-name.long-text {
+                    font-size: calc(<t t-esc="template.font_size_name"/> * 0.7)pt !important;
                 }
                 
                 .product-code {
                     position: absolute;
                     left: <t t-esc="template.code_x"/>mm;
                     top: <t t-esc="template.code_y"/>mm;
+                    font-family: 'MCS_Taybah', 'Arial', 'DejaVu Sans', sans-serif;
                     font-size: <t t-esc="template.font_size_code"/>pt;
                     font-weight: <t t-esc="'bold' if template.code_bold else 'normal'"/>;
                     text-align: <t t-esc="template.code_align"/>;
+                    transform: rotate(<t t-esc="template.code_rotation or 0"/>deg);
+                    transform-origin: left top;
                 }
                 
                 .product-price {
                     position: absolute;
                     left: <t t-esc="template.price_x"/>mm;
                     top: <t t-esc="template.price_y"/>mm;
+                    font-family: 'MCS_Taybah', 'Arial', 'DejaVu Sans', sans-serif;
                     font-size: <t t-esc="template.font_size_price"/>pt;
                     color: <t t-esc="template.price_color"/>;
                     font-weight: <t t-esc="'bold' if template.price_bold else 'normal'"/>;
                     text-align: <t t-esc="template.price_align"/>;
+                    transform: rotate(<t t-esc="template.price_rotation or 0"/>deg);
+                    transform-origin: left top;
                 }
                 
                 .product-barcode {
@@ -190,6 +216,8 @@
                     left: <t t-esc="template.barcode_x"/>mm;
                     top: <t t-esc="template.barcode_y"/>mm;
                     max-width: <t t-esc="template.label_width - template.barcode_x - 2"/>mm;
+                    transform: rotate(<t t-esc="template.barcode_rotation or 0"/>deg) scale(<t t-esc="template.barcode_scale or 1"/>);
+                    transform-origin: left top;
                 }
                 
                 .product-barcode img {
@@ -227,14 +255,16 @@
                 <t t-foreach="range(copies)" t-as="copy">
                     <div class="product-label">
                         <div class="label-content">
-                            <!-- Product Name (Arabic) -->
+                            <!-- Product Name (Arabic) with auto font sizing -->
                             <t t-if="template.show_name">
-                                <div class="product-name">
+                                <t t-set="name_length" t-value="len(o.name or '')"/>
+                                <t t-set="size_class" t-value="'short-text' if name_length &lt; 15 else ('long-text' if name_length &gt; 30 else '')"/>
+                                <div t-attf-class="product-name {{size_class}}">
                                     <t t-esc="o.name"/>
                                 </div>
                             </t>
                             
-                            <!-- Product Code -->
+                            <!-- Product Code (optional) -->
                             <t t-if="template.show_code and o.default_code">
                                 <div class="product-code">
                                     <t t-esc="o.default_code"/>
@@ -248,11 +278,14 @@
                                 </div>
                             </t>
                             
-                            <!-- Barcode -->
-                            <t t-if="template.show_barcode and o.barcode">
-                                <div class="product-barcode">
-                                    <img t-att-src="'/report/barcode/?type=%s&amp;value=%s&amp;width=%s&amp;height=%s' % ('Code128', o.barcode, 200, 50)"/>
-                                </div>
+                            <!-- Barcode (shows the ACTUAL scanned barcode from context/data) -->
+                            <t t-if="template.show_barcode">
+                                <t t-set="display_barcode" t-value="data.get('scanned_barcode') or o.barcode"/>
+                                <t t-if="display_barcode">
+                                    <div class="product-barcode">
+                                        <img t-att-src="'/report/barcode/?type=%s&amp;value=%s&amp;width=%s&amp;height=%s' % ('Code128', display_barcode, int((template.barcode_width or 60) * 10), int((template.barcode_height or 12) * 10))"/>
+                                    </div>
+                                </t>
                             </t>
                         </div>
                     </div>

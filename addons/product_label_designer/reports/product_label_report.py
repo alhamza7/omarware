@@ -81,17 +81,24 @@ class ReportProductLabelSimpleHTML(models.AbstractModel):
         
         # Get template from data or URL parameters
         template_id = data.get('template_id')
+        scanned_barcode = data.get('scanned_barcode')  # Get the actual scanned barcode
         
         # If not in data, try to get from request URL parameters
-        if not template_id:
+        if not template_id or not scanned_barcode:
             try:
                 from odoo.http import request
                 if request and hasattr(request, 'httprequest'):
-                    template_id = request.httprequest.args.get('template_id')
-                    if template_id:
-                        _logger.info(f"Got template_id from URL: {template_id}")
+                    if not template_id:
+                        template_id = request.httprequest.args.get('template_id')
+                        if template_id:
+                            _logger.info(f"Got template_id from URL: {template_id}")
+                    if not scanned_barcode:
+                        scanned_barcode = request.httprequest.args.get('scanned_barcode')
+                        if scanned_barcode:
+                            _logger.info(f"Got scanned_barcode from URL: {scanned_barcode}")
+                            data['scanned_barcode'] = scanned_barcode
             except (ImportError, AttributeError, TypeError) as e:
-                _logger.warning(f"Error getting template_id from request: {str(e)}")
+                _logger.warning(f"Error getting parameters from request: {str(e)}")
         
         # Get template object
         if template_id:
@@ -112,7 +119,7 @@ class ReportProductLabelSimpleHTML(models.AbstractModel):
         # Get number of copies
         copies = int(data.get('copies', 1))
         
-        _logger.info(f"Report values (HTML): products={products.ids}, template={template.id}, copies={copies}")
+        _logger.info(f"Report values (HTML): products={products.ids}, template={template.id}, copies={copies}, scanned_barcode={scanned_barcode}")
         
         return {
             'doc_ids': docids,
