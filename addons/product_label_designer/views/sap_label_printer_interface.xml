@@ -338,8 +338,8 @@
             
             <div class="printer-container">
                 <div class="printer-header">
-                    <h1>🖨️ طابعة ليبلات SAP المستمرة</h1>
-                    <p class="subtitle">امسح الباركود لطباعة الليبل تلقائياً</p>
+                    <h1>🖨️ طابعة ليبلات المنتجات</h1>
+                    <p class="subtitle">امسح الباركود لطباعة الليبل تلقائياً (يعتمد على البيانات المُزامنة)</p>
                 </div>
                 
                 <div class="scan-area">
@@ -353,6 +353,10 @@
                     <p style="margin-top: 15px; color: #666;">
                         <i class="fa fa-info-circle"></i>
                         استخدم قارئ الباركود أو اكتب الباركود واضغط Enter
+                    </p>
+                    <p style="margin-top: 10px; color: #28a745; font-weight: bold; font-size: 14px;">
+                        <i class="fa fa-database"></i>
+                        البحث في البيانات المُزامنة فقط - لا حاجة للاتصال بـ SAP
                     </p>
                 </div>
                 
