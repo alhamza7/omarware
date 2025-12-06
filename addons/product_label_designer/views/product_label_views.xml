@@ -226,8 +226,7 @@
                                 </group>
                             </group>
                             <group>
-                                <group string="Sub UoM Position &amp; Size" invisible="not show_sub_uom">
-                                    <field name="show_sub_uom" invisible="1"/>
+                                <group string="Sub UoM Position &amp; Size">
                                     <field name="sub_uom_x"/>
                                     <field name="sub_uom_y"/>
                                     <field name="sub_uom_width"/>
