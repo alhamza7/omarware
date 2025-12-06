@@ -350,11 +350,11 @@
                             <t t-if="template.show_sub_uom">
                                 <t t-set="scanned_barcode" t-value="data.get('scanned_barcode')"/>
                                 <t t-if="scanned_barcode">
-                                    <!-- Get sub_uom_name from alternative barcode -->
+                                    <!-- Get uom_name from alternative barcode -->
                                     <t t-set="alt_barcode" t-value="env['product.barcode.alternative'].search([('barcode', '=', scanned_barcode.strip().strip('/')), ('product_id', '=', o.id)], limit=1)"/>
-                                    <t t-if="alt_barcode and alt_barcode.sub_uom_name">
+                                    <t t-if="alt_barcode and alt_barcode.uom_name">
                                         <div class="product-sub-uom">
-                                            <t t-esc="alt_barcode.sub_uom_name"/>
+                                            <t t-esc="alt_barcode.uom_name"/>
                                         </div>
                                     </t>
                                 </t>
