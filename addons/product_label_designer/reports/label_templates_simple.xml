@@ -282,7 +282,7 @@
                                 </div>
                             </t>
                             
-                            <!-- Barcode - Now using QR Code -->
+                            <!-- Barcode - Using QR Code -->
                             <t t-if="template.show_barcode">
                                 <t t-set="raw_barcode" t-value="data.get('scanned_barcode') or o.barcode"/>
                                 <!-- Clean barcode: remove leading/trailing slashes and spaces -->
