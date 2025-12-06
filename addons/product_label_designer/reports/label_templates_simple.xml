@@ -296,7 +296,7 @@
                                             <t t-esc="display_barcode"/>
                                         </div>
                                         <!-- QR Code with product code and barcode -->
-                                        <img t-att-src="'/report/barcode/QR/%s?width=300&amp;height=300' % quote_plus(qr_content)" style="width: 100%; height: 100%; object-fit: contain;"/>
+                                        <img t-att-src="'/report/barcode/QR/%s?width=300&amp;height=300' % qr_content" style="width: 100%; height: 100%; object-fit: contain;"/>
                                     </div>
                                 </t>
                                 <t t-else="">
@@ -314,7 +314,7 @@
                                 <t t-set="qr_content" t-value="'%s|%s' % (o.default_code or 'N/A', display_barcode)"/>
                                 <t t-if="display_barcode">
                                     <div t-attf-style="position: absolute; left: {{template.qr_x}}mm; top: {{template.qr_y}}mm; width: {{template.qr_size}}mm; height: {{template.qr_size}}mm; transform: rotate({{template.qr_rotation or 0}}deg); transform-origin: left top;">
-                                        <img t-att-src="'/report/barcode/QR/%s?width=300&amp;height=300' % quote_plus(qr_content)" style="width: 100%; height: 100%; object-fit: contain;"/>
+                                        <img t-att-src="'/report/barcode/QR/%s?width=300&amp;height=300' % qr_content" style="width: 100%; height: 100%; object-fit: contain;"/>
                                     </div>
                                 </t>
                             </t>
