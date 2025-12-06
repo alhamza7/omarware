@@ -36,6 +36,7 @@
                         <group>
                             <field name="label_width"/>
                             <field name="label_height"/>
+                            <field name="rotate_label"/>
                         </group>
                     </group>
                     <notebook>

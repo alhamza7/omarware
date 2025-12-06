@@ -20,6 +20,11 @@
                     color: <t t-esc="template.text_color"/>;
                     page-break-after: always;
                     overflow: hidden;
+                    <t t-if="template.rotate_label">
+                    /* Rotate entire label 180 degrees */
+                    transform: rotate(180deg);
+                    transform-origin: center center;
+                    </t>
                 }
                 
                 .label-content {
@@ -149,6 +154,11 @@
                     page-break-after: always;
                     overflow: hidden;
                     display: block;
+                    <t t-if="template.rotate_label">
+                    /* Rotate entire label 180 degrees */
+                    transform: rotate(180deg);
+                    transform-origin: center center;
+                    </t>
                 }
                 
                 .product-label:last-child {

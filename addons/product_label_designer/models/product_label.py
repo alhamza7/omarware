@@ -19,6 +19,13 @@ class ProductLabelTemplate(models.Model):
     label_width = fields.Float(string='Width (mm)', default=80.0, required=True)
     label_height = fields.Float(string='Height (mm)', default=60.0, required=True)
     
+    # Rotation
+    rotate_label = fields.Boolean(
+        string='Rotate Label 180°',
+        default=False,
+        help='Rotate the entire label 180 degrees for printing (useful for upside-down label printers)'
+    )
+    
     # Images
     background_image = fields.Binary(string='Background Image', attachment=True)
     logo_image = fields.Binary(string='Logo', attachment=True)
