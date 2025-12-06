@@ -287,8 +287,8 @@
                                 <t t-set="raw_barcode" t-value="data.get('scanned_barcode') or o.barcode"/>
                                 <!-- Clean barcode: remove leading/trailing slashes and spaces -->
                                 <t t-set="display_barcode" t-value="raw_barcode.strip().strip('/') if raw_barcode else ''"/>
-                                <!-- Create QR content: Product Code + Barcode -->
-                                <t t-set="qr_content" t-value="'%s|%s' % (o.default_code or 'N/A', display_barcode)"/>
+                                <!-- Create QR content: Product Code + Barcode (using space as separator for compatibility) -->
+                                <t t-set="qr_content" t-value="'%s %s' % (o.default_code or 'N/A', display_barcode)"/>
                                 <t t-if="display_barcode">
                                     <div class="product-barcode">
                                         <!-- Debug: Show content -->
@@ -311,7 +311,7 @@
                             <t t-if="template.show_qr and not template.show_barcode">
                                 <t t-set="raw_barcode" t-value="data.get('scanned_barcode') or o.barcode"/>
                                 <t t-set="display_barcode" t-value="raw_barcode.strip().strip('/') if raw_barcode else ''"/>
-                                <t t-set="qr_content" t-value="'%s|%s' % (o.default_code or 'N/A', display_barcode)"/>
+                                <t t-set="qr_content" t-value="'%s %s' % (o.default_code or 'N/A', display_barcode)"/>
                                 <t t-if="display_barcode">
                                     <div t-attf-style="position: absolute; left: {{template.qr_x}}mm; top: {{template.qr_y}}mm; width: {{template.qr_size}}mm; height: {{template.qr_size}}mm; transform: rotate({{template.qr_rotation or 0}}deg); transform-origin: left top;">
                                         <img t-attf-src="/report/barcode/QR/{{qr_content}}?width=300&amp;height=300" style="width: 100%; height: 100%; object-fit: contain;"/>
