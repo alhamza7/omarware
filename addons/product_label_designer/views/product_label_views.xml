@@ -225,12 +225,13 @@
                                     <field name="price_rotation"/>
                                 </group>
                             </group>
-                            <group invisible="not show_sub_uom">
-                                <group string="Sub UoM Position &amp; Size">
-                                    <field name="sub_uom_x" invisible="not show_sub_uom"/>
-                                    <field name="sub_uom_y" invisible="not show_sub_uom"/>
-                                    <field name="sub_uom_width" invisible="not show_sub_uom"/>
-                                    <field name="sub_uom_rotation" invisible="not show_sub_uom"/>
+                            <group>
+                                <group string="Sub UoM Position &amp; Size" invisible="not show_sub_uom">
+                                    <field name="show_sub_uom" invisible="1"/>
+                                    <field name="sub_uom_x"/>
+                                    <field name="sub_uom_y"/>
+                                    <field name="sub_uom_width"/>
+                                    <field name="sub_uom_rotation"/>
                                 </group>
                                 <group/>
                             </group>

@@ -124,12 +124,17 @@
                     src: url('/product_label_designer/static/src/fonts/MCS-Taybah-S_U-normal..ttf') format('truetype');
                     font-weight: normal;
                     font-style: normal;
+                    font-display: swap;
                 }
                 
-                /* Fallback: Try to use local MCS_Taybah if installed */
+                /* Fallback: Local system font (for PDF generation) */
                 @font-face {
                     font-family: 'MCS_Taybah_Local';
-                    src: local('MCS_Taybah S_U Normal'), local('MCS Taybah'), local('mcs_taybah');
+                    src: local('MCS_Taybah S_U Normal'), 
+                         local('MCS-Taybah-S_U-normal'), 
+                         local('MCS Taybah'), 
+                         local('mcs_taybah'),
+                         local('MCS-Taybah-S_U-normal..');
                     font-weight: normal;
                     font-style: normal;
                 }
