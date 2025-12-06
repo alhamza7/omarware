@@ -210,7 +210,11 @@ class ProductLabelTemplate(models.Model):
         self.ensure_one()
         
         try:
-            _logger.info(f"Searching local products for barcode: {barcode}")
+            # Clean barcode: remove leading/trailing slashes and spaces
+            original_barcode = barcode
+            barcode = str(barcode).strip().strip('/')
+            
+            _logger.info(f"Searching local products for barcode: {barcode} (original: {original_barcode})")
             
             # Search in local Odoo database only
             # 1. Check main barcode
@@ -243,13 +247,13 @@ class ProductLabelTemplate(models.Model):
                     'product_name': product.name,
                     'display_name': product.name,
                     'uom': uom_name,
-                    'barcode': barcode,
+                    'barcode': barcode,  # Use cleaned barcode for QR code
                     'price': product.list_price,
                     'code': product.default_code,
                 }
             
             # Not found
-            _logger.warning(f"✗ Product not found for barcode: {barcode}")
+            _logger.warning(f"✗ Product not found for barcode: {barcode} (original: {original_barcode})")
             return {
                 'success': False,
                 'error': f'المنتج غير موجود.\n\nالباركود: {barcode}\n\nتأكد من أن المنتج موجود في النظام.'

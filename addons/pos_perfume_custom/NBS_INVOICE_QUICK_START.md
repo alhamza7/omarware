@@ -176,3 +176,4 @@ venv\Scripts\python.exe odoo-bin -c odoo.conf -d lugal --http-port=8070 -u pos_p
 
 
 
+
