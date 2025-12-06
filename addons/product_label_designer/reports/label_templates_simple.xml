@@ -282,7 +282,7 @@
                                 </div>
                             </t>
                             
-                            <!-- Barcode - Using QR Code with base64 (Odoo's native method) -->
+                            <!-- Barcode - Using QR Code with pure Python library -->
                             <t t-if="template.show_barcode">
                                 <t t-set="raw_barcode" t-value="data.get('scanned_barcode') or o.barcode"/>
                                 <!-- Clean barcode: remove leading/trailing slashes and spaces -->
@@ -290,9 +290,8 @@
                                 <!-- Create QR content: Product Code + Barcode -->
                                 <t t-set="qr_content" t-value="'%s|%s' % (o.default_code or 'N/A', display_barcode)"/>
                                 <t t-if="display_barcode">
-                                    <!-- Generate QR code as base64 using Odoo's native method -->
-                                    <t t-set="qr_code_base64" t-value="env['ir.actions.report'].barcode('QR', qr_content, width=300, height=300)"/>
-                                    <t t-set="qr_data_uri" t-value="'data:image/png;base64,' + (qr_code_base64.decode('ascii') if isinstance(qr_code_base64, bytes) else str(qr_code_base64))"/>
+                                    <!-- Generate QR code using pure Python qrcode library -->
+                                    <t t-set="qr_data_uri" t-value="generate_qr(qr_content, 300)"/>
                                     
                                     <div class="product-barcode">
                                         <!-- Debug: Show content -->
@@ -300,7 +299,8 @@
                                             <t t-esc="display_barcode"/>
                                         </div>
                                         <!-- QR Code using base64 data URI -->
-                                        <img t-att-src="qr_data_uri" style="width: 100%; height: 100%; object-fit: contain;" alt="QR Code"/>
+                                        <img t-if="qr_data_uri" t-att-src="qr_data_uri" style="width: 100%; height: 100%; object-fit: contain;" alt="QR Code"/>
+                                        <div t-else="" style="color: red; font-size: 8pt;">QR code error</div>
                                     </div>
                                 </t>
                                 <t t-else="">
@@ -317,12 +317,12 @@
                                 <t t-set="display_barcode" t-value="raw_barcode.strip().strip('/') if raw_barcode else ''"/>
                                 <t t-set="qr_content" t-value="'%s|%s' % (o.default_code or 'N/A', display_barcode)"/>
                                 <t t-if="display_barcode">
-                                    <!-- Generate QR code as base64 using Odoo's native method -->
-                                    <t t-set="qr_code_base64" t-value="env['ir.actions.report'].barcode('QR', qr_content, width=300, height=300)"/>
-                                    <t t-set="qr_data_uri" t-value="'data:image/png;base64,' + (qr_code_base64.decode('ascii') if isinstance(qr_code_base64, bytes) else str(qr_code_base64))"/>
+                                    <!-- Generate QR code using pure Python qrcode library -->
+                                    <t t-set="qr_data_uri" t-value="generate_qr(qr_content, 300)"/>
                                     
                                     <div t-attf-style="position: absolute; left: {{template.qr_x}}mm; top: {{template.qr_y}}mm; width: {{template.qr_size}}mm; height: {{template.qr_size}}mm; transform: rotate({{template.qr_rotation or 0}}deg); transform-origin: left top;">
-                                        <img t-att-src="qr_data_uri" style="width: 100%; height: 100%; object-fit: contain;" alt="QR Code"/>
+                                        <img t-if="qr_data_uri" t-att-src="qr_data_uri" style="width: 100%; height: 100%; object-fit: contain;" alt="QR Code"/>
+                                        <div t-else="" style="color: red; font-size: 8pt;">QR error</div>
                                     </div>
                                 </t>
                             </t>

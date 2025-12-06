@@ -2,6 +2,8 @@
 
 from odoo import models, api
 import logging
+import base64
+import io
 
 _logger = logging.getLogger(__name__)
 
@@ -10,6 +12,46 @@ class ReportProductLabelSimple(models.AbstractModel):
     """Report handler for simple product label printing (used by SAP integration)"""
     _name = 'report.product_label_designer.report_label_simple'
     _description = 'Product Label Simple Report'
+
+    @api.model
+    def _generate_qr_code_base64(self, data, size=300):
+        """
+        Generate QR code using pure Python qrcode library (no reportlab dependency).
+        Returns base64 encoded PNG image.
+        """
+        try:
+            import qrcode
+            from PIL import Image
+            
+            # Create QR code
+            qr = qrcode.QRCode(
+                version=1,
+                error_correction=qrcode.constants.ERROR_CORRECT_L,
+                box_size=10,
+                border=4,
+            )
+            qr.add_data(data)
+            qr.make(fit=True)
+            
+            # Create image
+            img = qr.make_image(fill_color="black", back_color="white")
+            
+            # Resize to requested size
+            img = img.resize((size, size), Image.Resampling.LANCZOS)
+            
+            # Convert to base64
+            buffer = io.BytesIO()
+            img.save(buffer, format='PNG')
+            buffer.seek(0)
+            img_base64 = base64.b64encode(buffer.read()).decode('ascii')
+            
+            return f"data:image/png;base64,{img_base64}"
+        except ImportError:
+            _logger.error("qrcode library not installed. Install with: pip install qrcode[pil]")
+            return None
+        except Exception as e:
+            _logger.error(f"Error generating QR code: {str(e)}")
+            return None
 
     @api.model
     def _get_report_values(self, docids, data=None):
@@ -62,6 +104,7 @@ class ReportProductLabelSimple(models.AbstractModel):
             'data': data,
             'template': template,
             'copies': copies,
+            'generate_qr': self._generate_qr_code_base64,  # Add helper function
         }
 
 
@@ -69,6 +112,46 @@ class ReportProductLabelSimpleHTML(models.AbstractModel):
     """Report handler for simple product label printing HTML (with auto-print)"""
     _name = 'report.product_label_designer.report_label_simple_html'
     _description = 'Product Label Simple Report HTML'
+
+    @api.model
+    def _generate_qr_code_base64(self, data, size=300):
+        """
+        Generate QR code using pure Python qrcode library (no reportlab dependency).
+        Returns base64 encoded PNG image.
+        """
+        try:
+            import qrcode
+            from PIL import Image
+            
+            # Create QR code
+            qr = qrcode.QRCode(
+                version=1,
+                error_correction=qrcode.constants.ERROR_CORRECT_L,
+                box_size=10,
+                border=4,
+            )
+            qr.add_data(data)
+            qr.make(fit=True)
+            
+            # Create image
+            img = qr.make_image(fill_color="black", back_color="white")
+            
+            # Resize to requested size
+            img = img.resize((size, size), Image.Resampling.LANCZOS)
+            
+            # Convert to base64
+            buffer = io.BytesIO()
+            img.save(buffer, format='PNG')
+            buffer.seek(0)
+            img_base64 = base64.b64encode(buffer.read()).decode('ascii')
+            
+            return f"data:image/png;base64,{img_base64}"
+        except ImportError:
+            _logger.error("qrcode library not installed. Install with: pip install qrcode[pil]")
+            return None
+        except Exception as e:
+            _logger.error(f"Error generating QR code: {str(e)}")
+            return None
 
     @api.model
     def _get_report_values(self, docids, data=None):
@@ -128,5 +211,6 @@ class ReportProductLabelSimpleHTML(models.AbstractModel):
             'data': data,
             'template': template,
             'copies': copies,
+            'generate_qr': self._generate_qr_code_base64,  # Add helper function
         }
 
