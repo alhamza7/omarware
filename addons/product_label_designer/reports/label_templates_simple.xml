@@ -117,6 +117,15 @@
             <style>
                 /* Import MCS_Taybah font from Google Fonts or alternative Arabic font */
                 @import url('https://fonts.googleapis.com/css2?family=Markazi+Text:wght@400;700&amp;display=swap');
+                
+                /* Primary font: MCS-Taybah-S_U-normal from module fonts */
+                @font-face {
+                    font-family: 'MCS_Taybah_Primary';
+                    src: url('/product_label_designer/static/src/fonts/MCS-Taybah-S_U-normal..ttf') format('truetype');
+                    font-weight: normal;
+                    font-style: normal;
+                }
+                
                 /* Fallback: Try to use local MCS_Taybah if installed */
                 @font-face {
                     font-family: 'MCS_Taybah_Local';
@@ -149,7 +158,7 @@
                     height: <t t-esc="template.label_height"/>mm;
                     background-color: <t t-esc="template.bg_color"/>;
                     position: relative;
-                    font-family: 'MCS_Taybah_Local', 'Markazi Text', 'Arial', 'DejaVu Sans', sans-serif;
+                    font-family: 'MCS_Taybah_Primary', 'MCS_Taybah_Local', 'Markazi Text', 'Arial', 'DejaVu Sans', sans-serif;
                     color: <t t-esc="template.text_color"/>;
                     page-break-after: always;
                     overflow: hidden;
@@ -176,43 +185,73 @@
                     position: absolute;
                     left: <t t-esc="template.name_x"/>mm;
                     top: <t t-esc="template.name_y"/>mm;
-                    width: <t t-esc="template.label_width - template.name_x - 5"/>mm;
-                    font-family: 'MCS_Taybah_Local', 'Markazi Text', 'Arial', 'DejaVu Sans', sans-serif !important;
+                    width: <t t-esc="template.name_width"/>mm;
+                    max-height: <t t-esc="template.name_height"/>mm;
+                    font-family: 'MCS_Taybah_Primary', 'MCS_Taybah_Local', 'Markazi Text', 'Arial', 'DejaVu Sans', sans-serif !important;
                     font-size: <t t-esc="template.font_size_name"/>pt;
                     font-weight: <t t-esc="'bold' if template.name_bold else 'normal'"/>;
                     text-align: center !important;
                     direction: ltr !important;
+                    <t t-if="template.name_wrap">
+                    white-space: normal;
+                    word-wrap: break-word;
+                    overflow-wrap: break-word;
+                    </t>
+                    <t t-else="">
                     white-space: nowrap;
+                    </t>
                     overflow: hidden;
                     text-overflow: ellipsis;
                     transform: rotate(<t t-esc="template.name_rotation or 0"/>deg);
                     transform-origin: left top;
-                    /* Auto-sizing is now handled inline per product */
+                    line-height: 1.2;
                 }
                 
                 .product-code {
                     position: absolute;
                     left: <t t-esc="template.code_x"/>mm;
                     top: <t t-esc="template.code_y"/>mm;
-                    font-family: 'MCS_Taybah_Local', 'Markazi Text', 'Arial', 'DejaVu Sans', sans-serif;
+                    width: <t t-esc="template.code_width"/>mm;
+                    font-family: 'MCS_Taybah_Primary', 'MCS_Taybah_Local', 'Markazi Text', 'Arial', 'DejaVu Sans', sans-serif;
                     font-size: <t t-esc="template.font_size_code"/>pt;
                     font-weight: <t t-esc="'bold' if template.code_bold else 'normal'"/>;
                     text-align: <t t-esc="template.code_align"/>;
                     transform: rotate(<t t-esc="template.code_rotation or 0"/>deg);
                     transform-origin: left top;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
                 }
                 
                 .product-price {
                     position: absolute;
                     left: <t t-esc="template.price_x"/>mm;
                     top: <t t-esc="template.price_y"/>mm;
-                    font-family: 'MCS_Taybah_Local', 'Markazi Text', 'Arial', 'DejaVu Sans', sans-serif;
+                    width: <t t-esc="template.price_width"/>mm;
+                    font-family: 'MCS_Taybah_Primary', 'MCS_Taybah_Local', 'Markazi Text', 'Arial', 'DejaVu Sans', sans-serif;
                     font-size: <t t-esc="template.font_size_price"/>pt;
                     color: <t t-esc="template.price_color"/>;
                     font-weight: <t t-esc="'bold' if template.price_bold else 'normal'"/>;
                     text-align: <t t-esc="template.price_align"/>;
                     transform: rotate(<t t-esc="template.price_rotation or 0"/>deg);
                     transform-origin: left top;
+                }
+                
+                .product-sub-uom {
+                    position: absolute;
+                    left: <t t-esc="template.sub_uom_x"/>mm;
+                    top: <t t-esc="template.sub_uom_y"/>mm;
+                    width: <t t-esc="template.sub_uom_width"/>mm;
+                    font-family: 'MCS_Taybah_Primary', 'MCS_Taybah_Local', 'Markazi Text', 'Arial', 'DejaVu Sans', sans-serif;
+                    font-size: <t t-esc="template.font_size_sub_uom"/>pt;
+                    font-weight: normal;
+                    text-align: center;
+                    transform: rotate(<t t-esc="template.sub_uom_rotation or 0"/>deg);
+                    transform-origin: left top;
+                    color: #555;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
                 }
                 
                 .product-barcode {
@@ -300,6 +339,20 @@
                                 <div class="product-price">
                                     <t t-esc="'%.2f' % o.list_price"/>
                                 </div>
+                            </t>
+                            
+                            <!-- Sub Unit of Measure (from alternative barcodes) -->
+                            <t t-if="template.show_sub_uom">
+                                <t t-set="scanned_barcode" t-value="data.get('scanned_barcode')"/>
+                                <t t-if="scanned_barcode">
+                                    <!-- Get sub_uom_name from alternative barcode -->
+                                    <t t-set="alt_barcode" t-value="env['product.barcode.alternative'].search([('barcode', '=', scanned_barcode.strip().strip('/')), ('product_id', '=', o.id)], limit=1)"/>
+                                    <t t-if="alt_barcode and alt_barcode.sub_uom_name">
+                                        <div class="product-sub-uom">
+                                            <t t-esc="alt_barcode.sub_uom_name"/>
+                                        </div>
+                                    </t>
+                                </t>
                             </t>
                             
                             <!-- Barcode - Using QR Code with pure Python library -->

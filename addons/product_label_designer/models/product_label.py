@@ -38,6 +38,7 @@ class ProductLabelTemplate(models.Model):
     show_barcode = fields.Boolean(string='Show Barcode', default=True)
     show_qr = fields.Boolean(string='Show QR Code', default=False)
     show_logo = fields.Boolean(string='Show Logo', default=True)
+    show_sub_uom = fields.Boolean(string='Show Sub Unit of Measure', default=False, help='Display sub-unit name from alternative barcodes table')
     
     # Layout Settings for A4 Printing
     labels_per_row = fields.Integer(string='Labels per Row', default=2)
@@ -47,19 +48,32 @@ class ProductLabelTemplate(models.Model):
     # Visual Designer - Element Positions (in mm from top-left)
     name_x = fields.Float(string='Name X Position', default=5.0)
     name_y = fields.Float(string='Name Y Position', default=5.0)
+    name_width = fields.Float(string='Name Width (mm)', default=70.0, help='Maximum width for name text')
+    name_height = fields.Float(string='Name Height (mm)', default=15.0, help='Maximum height for name area')
+    name_wrap = fields.Boolean(string='Name Text Wrap', default=True, help='Allow text to wrap to multiple lines')
     name_rotation = fields.Float(string='Name Rotation (degrees)', default=0.0, help='Rotation angle in degrees (0-360)')
     
     foreign_name_x = fields.Float(string='Foreign Name X Position', default=5.0)
     foreign_name_y = fields.Float(string='Foreign Name Y Position', default=12.0)
+    foreign_name_width = fields.Float(string='Foreign Name Width (mm)', default=70.0)
+    foreign_name_height = fields.Float(string='Foreign Name Height (mm)', default=12.0)
+    foreign_name_wrap = fields.Boolean(string='Foreign Name Wrap', default=True)
     foreign_name_rotation = fields.Float(string='Foreign Name Rotation (degrees)', default=0.0)
     
     code_x = fields.Float(string='Code X Position', default=40.0)
     code_y = fields.Float(string='Code Y Position', default=25.0)
+    code_width = fields.Float(string='Code Width (mm)', default=35.0)
     code_rotation = fields.Float(string='Code Rotation (degrees)', default=0.0)
     
     price_x = fields.Float(string='Price X Position', default=40.0)
     price_y = fields.Float(string='Price Y Position', default=35.0)
+    price_width = fields.Float(string='Price Width (mm)', default=35.0)
     price_rotation = fields.Float(string='Price Rotation (degrees)', default=0.0)
+    
+    sub_uom_x = fields.Float(string='Sub UoM X Position', default=5.0)
+    sub_uom_y = fields.Float(string='Sub UoM Y Position', default=20.0)
+    sub_uom_width = fields.Float(string='Sub UoM Width (mm)', default=70.0)
+    sub_uom_rotation = fields.Float(string='Sub UoM Rotation (degrees)', default=0.0)
     
     barcode_x = fields.Float(string='Barcode X Position', default=5.0)
     barcode_y = fields.Float(string='Barcode Y Position', default=45.0)
@@ -90,6 +104,7 @@ class ProductLabelTemplate(models.Model):
     font_size_code = fields.Integer(string='Code Font Size', default=24)
     font_size_price = fields.Integer(string='Price Font Size', default=18)
     font_size_barcode = fields.Integer(string='Barcode Font Size', default=10)
+    font_size_sub_uom = fields.Integer(string='Sub UoM Font Size', default=10, help='Font size for sub unit of measure')
     
     # Text Alignment
     name_align = fields.Selection([

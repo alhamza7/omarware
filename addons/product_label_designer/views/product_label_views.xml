@@ -47,6 +47,7 @@
                                     <field name="show_foreign_name"/>
                                     <field name="show_code"/>
                                     <field name="show_price"/>
+                                    <field name="show_sub_uom"/>
                                     <field name="show_barcode"/>
                                     <field name="show_qr"/>
                                     <field name="show_logo"/>
@@ -63,6 +64,7 @@
                                     <field name="font_size_foreign_name"/>
                                     <field name="font_size_code"/>
                                     <field name="font_size_price"/>
+                                    <field name="font_size_sub_uom" invisible="not show_sub_uom"/>
                                     <field name="font_size_barcode"/>
                                 </group>
                                 <group string="Text Alignment">
@@ -192,24 +194,45 @@
                         </page>
                         <page string="Visual Designer" name="designer">
                             <group>
-                                <group string="Name Position">
+                                <group string="Name Position & Size">
                                     <field name="name_x"/>
                                     <field name="name_y"/>
+                                    <field name="name_width"/>
+                                    <field name="name_height"/>
+                                    <field name="name_wrap"/>
+                                    <field name="name_rotation"/>
                                 </group>
-                                <group string="Foreign Name Position">
+                                <group string="Foreign Name Position & Size">
                                     <field name="foreign_name_x"/>
                                     <field name="foreign_name_y"/>
+                                    <field name="foreign_name_width"/>
+                                    <field name="foreign_name_height"/>
+                                    <field name="foreign_name_wrap"/>
+                                    <field name="foreign_name_rotation"/>
                                 </group>
                             </group>
                             <group>
-                                <group string="Code Position">
+                                <group string="Code Position & Size">
                                     <field name="code_x"/>
                                     <field name="code_y"/>
+                                    <field name="code_width"/>
+                                    <field name="code_rotation"/>
                                 </group>
-                                <group string="Price Position">
+                                <group string="Price Position & Size">
                                     <field name="price_x"/>
                                     <field name="price_y"/>
+                                    <field name="price_width"/>
+                                    <field name="price_rotation"/>
                                 </group>
+                            </group>
+                            <group invisible="not show_sub_uom">
+                                <group string="Sub UoM Position & Size">
+                                    <field name="sub_uom_x" invisible="not show_sub_uom"/>
+                                    <field name="sub_uom_y" invisible="not show_sub_uom"/>
+                                    <field name="sub_uom_width" invisible="not show_sub_uom"/>
+                                    <field name="sub_uom_rotation" invisible="not show_sub_uom"/>
+                                </group>
+                                <group/>
                             </group>
                             <group>
                                 <group string="Barcode Position">
