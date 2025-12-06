@@ -121,6 +121,60 @@ class ProductLabelTemplate(models.Model):
     code_italic = fields.Boolean(string='Code Italic', default=False)
     price_italic = fields.Boolean(string='Price Italic', default=False)
     
+    # Auto Font Sizing Settings (Smart font adjustment based on text length)
+    enable_auto_font_sizing = fields.Boolean(
+        string='Enable Auto Font Sizing',
+        default=True,
+        help='Automatically adjust font size based on text length'
+    )
+    # Font multipliers for different text lengths
+    font_multiplier_very_short = fields.Float(
+        string='Very Short Text (< 10 chars)',
+        default=1.8,
+        help='Font size multiplier for very short text (less than 10 characters)'
+    )
+    font_multiplier_short = fields.Float(
+        string='Short Text (10-20 chars)',
+        default=1.4,
+        help='Font size multiplier for short text (10-20 characters)'
+    )
+    font_multiplier_medium = fields.Float(
+        string='Medium Text (21-35 chars)',
+        default=1.0,
+        help='Font size multiplier for medium text (21-35 characters)'
+    )
+    font_multiplier_long = fields.Float(
+        string='Long Text (36-50 chars)',
+        default=0.75,
+        help='Font size multiplier for long text (36-50 characters)'
+    )
+    font_multiplier_very_long = fields.Float(
+        string='Very Long Text (> 50 chars)',
+        default=0.6,
+        help='Font size multiplier for very long text (more than 50 characters)'
+    )
+    # Character count thresholds
+    char_threshold_very_short = fields.Integer(
+        string='Very Short Threshold',
+        default=10,
+        help='Character count threshold for very short text'
+    )
+    char_threshold_short = fields.Integer(
+        string='Short Threshold',
+        default=20,
+        help='Character count threshold for short text'
+    )
+    char_threshold_medium = fields.Integer(
+        string='Medium Threshold',
+        default=35,
+        help='Character count threshold for medium text'
+    )
+    char_threshold_long = fields.Integer(
+        string='Long Threshold',
+        default=50,
+        help='Character count threshold for long text'
+    )
+    
     # Price settings
     show_currency_symbol = fields.Boolean(string='Show Currency Symbol', default=False)
     

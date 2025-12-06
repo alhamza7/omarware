@@ -90,6 +90,35 @@
                                     <field name="show_currency_symbol"/>
                                 </group>
                             </group>
+                            <separator string="Auto Font Sizing (Smart Text Adjustment)"/>
+                            <group>
+                                <group>
+                                    <field name="enable_auto_font_sizing"/>
+                                    <div class="alert alert-info" role="alert">
+                                        <p><strong>ℹ️ Auto Font Sizing:</strong> يقوم تلقائياً بتعديل حجم خط اسم المنتج بناءً على طول النص</p>
+                                        <ul>
+                                            <li>نص قصير = خط أكبر</li>
+                                            <li>نص طويل = خط أصغر</li>
+                                            <li>يضمن احتواء النص داخل المساحة المتاحة</li>
+                                        </ul>
+                                    </div>
+                                </group>
+                            </group>
+                            <group invisible="not enable_auto_font_sizing">
+                                <group string="Font Multipliers (نسب التكبير/التصغير)">
+                                    <field name="font_multiplier_very_short"/>
+                                    <field name="font_multiplier_short"/>
+                                    <field name="font_multiplier_medium"/>
+                                    <field name="font_multiplier_long"/>
+                                    <field name="font_multiplier_very_long"/>
+                                </group>
+                                <group string="Character Thresholds (حدود عدد الأحرف)">
+                                    <field name="char_threshold_very_short"/>
+                                    <field name="char_threshold_short"/>
+                                    <field name="char_threshold_medium"/>
+                                    <field name="char_threshold_long"/>
+                                </group>
+                            </group>
                         </page>
                         <page string="A4 Layout" name="a4_layout">
                             <group>

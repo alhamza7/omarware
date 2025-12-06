@@ -255,11 +255,27 @@
                             <t t-if="template.show_name">
                                 <t t-set="name_text" t-value="o.name or ''"/>
                                 <t t-set="name_length" t-value="len(name_text)"/>
-                                <!-- Smart font sizing: very short (< 10), short (10-20), medium (21-35), long (36-50), very long (> 50) -->
-                                <t t-set="font_multiplier" t-value="1.8 if name_length &lt; 10 else (1.4 if name_length &lt;= 20 else (1.0 if name_length &lt;= 35 else (0.75 if name_length &lt;= 50 else 0.6)))"/>
-                                <div class="product-name" t-attf-style="font-size: calc({{template.font_size_name}}pt * {{font_multiplier}}) !important; line-height: 1.2;">
-                                    <t t-esc="name_text"/>
-                                </div>
+                                
+                                <!-- Calculate font multiplier based on template settings -->
+                                <t t-if="template.enable_auto_font_sizing">
+                                    <!-- Dynamic font sizing using template settings -->
+                                    <t t-set="font_multiplier" t-value="
+                                        template.font_multiplier_very_short if name_length &lt; template.char_threshold_very_short else (
+                                        template.font_multiplier_short if name_length &lt;= template.char_threshold_short else (
+                                        template.font_multiplier_medium if name_length &lt;= template.char_threshold_medium else (
+                                        template.font_multiplier_long if name_length &lt;= template.char_threshold_long else 
+                                        template.font_multiplier_very_long
+                                    )))"/>
+                                    <div class="product-name" t-attf-style="font-size: calc({{template.font_size_name}}pt * {{font_multiplier}}) !important; line-height: 1.2;">
+                                        <t t-esc="name_text"/>
+                                    </div>
+                                </t>
+                                <t t-else="">
+                                    <!-- Fixed font size (auto sizing disabled) -->
+                                    <div class="product-name">
+                                        <t t-esc="name_text"/>
+                                    </div>
+                                </t>
                             </t>
                             
                             <!-- Product Code (optional) -->
