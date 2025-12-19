@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- SAP Duplicate Cleaner Form View -->
+    <record id="view_sap_duplicate_cleaner_form" model="ir.ui.view">
+        <field name="name">sap.duplicate.cleaner.form</field>
+        <field name="model">sap.duplicate.cleaner</field>
+        <field name="arch" type="xml">
+            <form string="حذف التكرارات">
+                <header>
+                    <button name="action_check_duplicates" string="فحص التكرارات" type="object" class="btn-primary"/>
+                    <button name="action_clean_duplicates" string="حذف التكرارات" type="object" class="btn-danger" 
+                            confirm="هل أنت متأكد من حذف جميع التكرارات؟ هذا الإجراء لا يمكن التراجع عنه!"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group string="خيارات الحذف">
+                            <field name="clean_products"/>
+                            <field name="clean_pricelists"/>
+                            <field name="clean_pricelist_items"/>
+                            <field name="clean_uom"/>
+                            <field name="clean_warehouse_info"/>
+                        </group>
+                        <group string="النتائج">
+                            <field name="products_deleted"/>
+                            <field name="pricelists_deleted"/>
+                            <field name="pricelist_items_deleted"/>
+                            <field name="uom_deleted"/>
+                            <field name="warehouse_info_deleted"/>
+                        </group>
+                    </group>
+                    <group string="سجل النتائج" invisible="not result_log">
+                        <field name="result_log" nolabel="1" widget="text"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- SAP Duplicate Cleaner Action -->
+    <record id="action_sap_duplicate_cleaner" model="ir.actions.act_window">
+        <field name="name">حذف التكرارات</field>
+        <field name="res_model">sap.duplicate.cleaner</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+
+    <!-- Menu Item -->
+    <menuitem id="menu_sap_duplicate_cleaner"
+              name="حذف التكرارات"
+              parent="menu_sap_tools"
+              action="action_sap_duplicate_cleaner"
+              sequence="100"/>
+
+</odoo>
+

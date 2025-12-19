@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_nbs_edit_request_tree" model="ir.ui.view">
+        <field name="name">nbs.edit.request.tree</field>
+        <field name="model">nbs.edit.request</field>
+        <field name="arch" type="xml">
+            <tree string="Edit Requests">
+                <field name="document_id"/>
+                <field name="requester_id"/>
+                <field name="state"/>
+                <field name="request_date"/>
+            </tree>
+        </field>
+    </record>
+
+    <record id="action_nbs_edit_request" model="ir.actions.act_window">
+        <field name="name">Edit Requests</field>
+        <field name="res_model">nbs.edit.request</field>
+        <field name="view_mode">tree,form</field>
+    </record>
+
+    <menuitem id="menu_nbs_edit_request"
+              name="Edit Requests"
+              parent="menu_nbs_documents"
+              action="action_nbs_edit_request"
+              sequence="20"/>
+</odoo>
+
+

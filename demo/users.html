@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>المستخدمون والأقسام - نظام NBS</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Cairo', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: white;
+            text-align: center;
+            font-size: 48px;
+            margin-bottom: 20px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .subtitle {
+            color: white;
+            text-align: center;
+            font-size: 20px;
+            margin-bottom: 50px;
+            opacity: 0.95;
+        }
+
+        .departments-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+            margin-bottom: 60px;
+        }
+
+        .dept-card {
+            background: white;
+            padding: 35px;
+            border-radius: 20px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            transition: transform 0.3s;
+        }
+
+        .dept-card:hover {
+            transform: translateY(-10px);
+        }
+
+        .dept-header {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            margin-bottom: 25px;
+            padding-bottom: 20px;
+            border-bottom: 3px solid #e9ecef;
+        }
+
+        .dept-icon {
+            width: 70px;
+            height: 70px;
+            border-radius: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            color: white;
+        }
+
+        .dept-supply { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+        .dept-finance { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+        .dept-qc { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }
+        .dept-hr { background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); }
+
+        .dept-name {
+            font-size: 24px;
+            font-weight: 700;
+            color: #333;
+        }
+
+        .dept-code {
+            font-size: 14px;
+            color: #666;
+            background: #f8f9fa;
+            padding: 4px 12px;
+            border-radius: 12px;
+        }
+
+        .dept-stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+
+        .dept-stat {
+            text-align: center;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 12px;
+        }
+
+        .dept-stat-number {
+            font-size: 28px;
+            font-weight: 900;
+            color: #667eea;
+        }
+
+        .dept-stat-label {
+            font-size: 13px;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .users-list {
+            margin-top: 20px;
+        }
+
+        .users-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .user-item {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            transition: all 0.2s;
+        }
+
+        .user-item:hover {
+            background: #e9ecef;
+            transform: translateX(-5px);
+        }
+
+        .user-avatar {
+            width: 45px;
+            height: 45px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 700;
+        }
+
+        .user-info {
+            flex: 1;
+        }
+
+        .user-name {
+            font-weight: 700;
+            color: #333;
+        }
+
+        .user-role {
+            font-size: 13px;
+            color: #666;
+        }
+
+        .role-badge {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .role-admin {
+            background: #dc3545;
+            color: white;
+        }
+
+        .role-manager {
+            background: #ffc107;
+            color: #333;
+        }
+
+        .role-user {
+            background: #28a745;
+            color: white;
+        }
+
+        .back-link {
+            position: fixed;
+            top: 30px;
+            left: 30px;
+            background: white;
+            color: #667eea;
+            padding: 12px 25px;
+            border-radius: 50px;
+            text-decoration: none;
+            font-weight: 700;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.2);
+            transition: all 0.3s;
+            z-index: 1000;
+        }
+
+        .back-link:hover {
+            transform: scale(1.05);
+            box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+        }
+    </style>
+</head>
+<body>
+    <a href="index.html" class="back-link">
+        <i class="fas fa-arrow-left"></i> العودة
+    </a>
+
+    <div class="container">
+        <h1><i class="fas fa-users"></i> المستخدمون والأقسام</h1>
+        <p class="subtitle">28 مستخدم نشط عبر 4 أقسام</p>
+
+        <div class="departments-grid">
+            <!-- Supply Chain -->
+            <div class="dept-card">
+                <div class="dept-header">
+                    <div class="dept-icon dept-supply">
+                        <i class="fas fa-truck"></i>
+                    </div>
+                    <div>
+                        <div class="dept-name">سلسلة التوريد</div>
+                        <div class="dept-code">SC</div>
+                    </div>
+                </div>
+
+                <div class="dept-stats">
+                    <div class="dept-stat">
+                        <div class="dept-stat-number">847</div>
+                        <div class="dept-stat-label">مستند</div>
+                    </div>
+                    <div class="dept-stat">
+                        <div class="dept-stat-number">9</div>
+                        <div class="dept-stat-label">مستخدم</div>
+                    </div>
+                    <div class="dept-stat">
+                        <div class="dept-stat-number">34</div>
+                        <div class="dept-stat-label">هذا الشهر</div>
+                    </div>
+                </div>
+
+                <div class="users-list">
+                    <div class="users-title">
+                        <i class="fas fa-users"></i> الفريق
+                    </div>
+                    
+                    <div class="user-item">
+                        <div class="user-avatar">أ.م</div>
+                        <div class="user-info">
+                            <div class="user-name">أحمد المدير</div>
+                            <div class="user-role">مشرف القسم</div>
+                        </div>
+                        <span class="role-badge role-manager">مشرف</span>
+                    </div>
+
+                    <div class="user-item">
+                        <div class="user-avatar">م.أ</div>
+                        <div class="user-info">
+                            <div class="user-name">محمد أحمد</div>
+                            <div class="user-role">موظف استيراد</div>
+                        </div>
+                        <span class="role-badge role-user">مستخدم</span>
+                    </div>
+
+                    <div class="user-item">
+                        <div class="user-avatar">خ.ي</div>
+                        <div class="user-info">
+                            <div class="user-name">خالد يوسف</div>
+                            <div class="user-role">مسؤول المشتريات</div>
+                        </div>
+                        <span class="role-badge role-user">مستخدم</span>
+                    </div>
+
+                    <div class="user-item">
+                        <div class="user-avatar">ن.س</div>
+                        <div class="user-info">
+                            <div class="user-name">نورة سعيد</div>
+                            <div class="user-role">منسقة شحن</div>
+                        </div>
+                        <span class="role-badge role-user">مستخدم</span>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 15px; color: #666; font-size: 14px;">
+                        + 5 مستخدمين آخرين
+                    </div>
+                </div>
+            </div>
+
+            <!-- Finance -->
+            <div class="dept-card">
+                <div class="dept-header">
+                    <div class="dept-icon dept-finance">
+                        <i class="fas fa-dollar-sign"></i>
+                    </div>
+                    <div>
+                        <div class="dept-name">المالية</div>
+                        <div class="dept-code">FIN</div>
+                    </div>
+                </div>
+
+                <div class="dept-stats">
+                    <div class="dept-stat">
+                        <div class="dept-stat-number">1,234</div>
+                        <div class="dept-stat-label">مستند</div>
+                    </div>
+                    <div class="dept-stat">
+                        <div class="dept-stat-number">7</div>
+                        <div class="dept-stat-label">مستخدم</div>
+                    </div>
+                    <div class="dept-stat">
+                        <div class="dept-stat-number">56</div>
+                        <div class="dept-stat-label">هذا الشهر</div>
+                    </div>
+                </div>
+
+                <div class="users-list">
+                    <div class="users-title">
+                        <i class="fas fa-users"></i> الفريق
+                    </div>
+                    
+                    <div class="user-item">
+                        <div class="user-avatar">ع.ر</div>
+                        <div class="user-info">
+                            <div class="user-name">عبدالرحمن المالكي</div>
+                            <div class="user-role">مدير مالي</div>
+                        </div>
+                        <span class="role-badge role-manager">مشرف</span>
+                    </div>
+
+                    <div class="user-item">
+                        <div class="user-avatar">س.خ</div>
+                        <div class="user-info">
+                            <div class="user-name">سارة خالد</div>
+                            <div class="user-role">محاسبة رئيسية</div>
+                        </div>
+                        <span class="role-badge role-user">مستخدم</span>
+                    </div>
+
+                    <div class="user-item">
+                        <div class="user-avatar">ف.ع</div>
+                        <div class="user-info">
+                            <div class="user-name">فهد العتيبي</div>
+                            <div class="user-role">محاسب</div>
+                        </div>
+                        <span class="role-badge role-user">مستخدم</span>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 15px; color: #666; font-size: 14px;">
+                        + 4 مستخدمين آخرين
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quality Control -->
+            <div class="dept-card">
+                <div class="dept-header">
+                    <div class="dept-icon dept-qc">
+                        <i class="fas fa-check-circle"></i>
+                    </div>
+                    <div>
+                        <div class="dept-name">مراقبة الجودة</div>
+                        <div class="dept-code">QC</div>
+                    </div>
+                </div>
+
+                <div class="dept-stats">
+                    <div class="dept-stat">
+                        <div class="dept-stat-number">521</div>
+                        <div class="dept-stat-label">مستند</div>
+                    </div>
+                    <div class="dept-stat">
+                        <div class="dept-stat-number">6</div>
+                        <div class="dept-stat-label">مستخدم</div>
+                    </div>
+                    <div class="dept-stat">
+                        <div class="dept-stat-number">28</div>
+                        <div class="dept-stat-label">هذا الشهر</div>
+                    </div>
+                </div>
+
+                <div class="users-list">
+                    <div class="users-title">
+                        <i class="fas fa-users"></i> الفريق
+                    </div>
+                    
+                    <div class="user-item">
+                        <div class="user-avatar">م.ع</div>
+                        <div class="user-info">
+                            <div class="user-name">مريم علي</div>
+                            <div class="user-role">رئيسة قسم الجودة</div>
+                        </div>
+                        <span class="role-badge role-manager">مشرف</span>
+                    </div>
+
+                    <div class="user-item">
+                        <div class="user-avatar">ع.م</div>
+                        <div class="user-info">
+                            <div class="user-name">علي محمود</div>
+                            <div class="user-role">مفتش جودة</div>
+                        </div>
+                        <span class="role-badge role-user">مستخدم</span>
+                    </div>
+
+                    <div class="user-item">
+                        <div class="user-avatar">ل.ح</div>
+                        <div class="user-info">
+                            <div class="user-name">ليلى حسن</div>
+                            <div class="user-role">مفتشة جودة</div>
+                        </div>
+                        <span class="role-badge role-user">مستخدم</span>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 15px; color: #666; font-size: 14px;">
+                        + 3 مستخدمين آخرين
+                    </div>
+                </div>
+            </div>
+
+            <!-- Human Resources -->
+            <div class="dept-card">
+                <div class="dept-header">
+                    <div class="dept-icon dept-hr">
+                        <i class="fas fa-user-friends"></i>
+                    </div>
+                    <div>
+                        <div class="dept-name">الموارد البشرية</div>
+                        <div class="dept-code">HR</div>
+                    </div>
+                </div>
+
+                <div class="dept-stats">
+                    <div class="dept-stat">
+                        <div class="dept-stat-number">245</div>
+                        <div class="dept-stat-label">مستند</div>
+                    </div>
+                    <div class="dept-stat">
+                        <div class="dept-stat-number">6</div>
+                        <div class="dept-stat-label">مستخدم</div>
+                    </div>
+                    <div class="dept-stat">
+                        <div class="dept-stat-number">19</div>
+                        <div class="dept-stat-label">هذا الشهر</div>
+                    </div>
+                </div>
+
+                <div class="users-list">
+                    <div class="users-title">
+                        <i class="fas fa-users"></i> الفريق
+                    </div>
+                    
+                    <div class="user-item">
+                        <div class="user-avatar">ه.م</div>
+                        <div class="user-info">
+                            <div class="user-name">هند محمد</div>
+                            <div class="user-role">مديرة الموارد البشرية</div>
+                        </div>
+                        <span class="role-badge role-manager">مشرف</span>
+                    </div>
+
+                    <div class="user-item">
+                        <div class="user-avatar">ف.ع</div>
+                        <div class="user-info">
+                            <div class="user-name">فاطمة عبدالله</div>
+                            <div class="user-role">مسؤولة توظيف</div>
+                        </div>
+                        <span class="role-badge role-user">مستخدم</span>
+                    </div>
+
+                    <div class="user-item">
+                        <div class="user-avatar">ر.ص</div>
+                        <div class="user-info">
+                            <div class="user-name">راشد الصالح</div>
+                            <div class="user-role">مسؤول رواتب</div>
+                        </div>
+                        <span class="role-badge role-user">مستخدم</span>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 15px; color: #666; font-size: 14px;">
+                        + 3 مستخدمين آخرين
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Admin Section -->
+        <div style="background: white; padding: 40px; border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.2);">
+            <h2 style="font-size: 32px; margin-bottom: 30px; color: #333; text-align: center;">
+                <i class="fas fa-user-shield"></i> المديرون العامون
+            </h2>
+            
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 25px;">
+                <div class="user-item" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                    <div class="user-avatar" style="background: white; color: #667eea;">
+                        A
+                    </div>
+                    <div class="user-info">
+                        <div class="user-name" style="color: white;">Admin (أنت)</div>
+                        <div class="user-role" style="color: rgba(255,255,255,0.9);">مدير النظام</div>
+                    </div>
+                    <span class="role-badge role-admin">مدير</span>
+                </div>
+
+                <div class="user-item">
+                    <div class="user-avatar">ي.ع</div>
+                    <div class="user-info">
+                        <div class="user-name">يوسف العمري</div>
+                        <div class="user-role">المدير التنفيذي</div>
+                    </div>
+                    <span class="role-badge role-admin">مدير</span>
+                </div>
+
+                <div class="user-item">
+                    <div class="user-avatar">م.س</div>
+                    <div class="user-info">
+                        <div class="user-name">منى السعيد</div>
+                        <div class="user-role">مديرة العمليات</div>
+                    </div>
+                    <span class="role-badge role-admin">مدير</span>
+                </div>
+            </div>
+
+            <div style="margin-top: 40px; padding: 30px; background: #f8f9fa; border-radius: 15px;">
+                <h3 style="color: #667eea; margin-bottom: 20px; font-size: 24px;">
+                    <i class="fas fa-info-circle"></i> معلومات الصلاحيات
+                </h3>
+                <div style="display: grid; gap: 15px;">
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <span class="role-badge role-admin"><i class="fas fa-crown"></i> مدير</span>
+                        <span style="color: #666;">صلاحية كاملة على جميع الأقسام والمستندات</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <span class="role-badge role-manager"><i class="fas fa-user-tie"></i> مشرف</span>
+                        <span style="color: #666;">موافقة طلبات التعديل، أرشفة المستندات، إدارة القسم</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <span class="role-badge role-user"><i class="fas fa-user"></i> مستخدم</span>
+                        <span style="color: #666;">رفع وعرض وتحميل المستندات، طلب تعديلات</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- CTA -->
+        <div style="text-align: center; margin-top: 60px;">
+            <a href="http://localhost:5173" target="_blank" style="background: white; color: #667eea; padding: 20px 50px; border-radius: 50px; text-decoration: none; font-weight: 700; font-size: 20px; display: inline-block; box-shadow: 0 10px 30px rgba(0,0,0,0.2);">
+                <i class="fas fa-rocket"></i> جرب النظام الآن
+            </a>
+        </div>
+    </div>
+</body>
+</html>
+
+
+

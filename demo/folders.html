@@ -1,0 +1,910 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>الإضبارات والعلاقات - نظام NBS</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Cairo', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: white;
+            text-align: center;
+            font-size: 48px;
+            margin-bottom: 20px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .subtitle {
+            color: white;
+            text-align: center;
+            font-size: 20px;
+            margin-bottom: 50px;
+            opacity: 0.95;
+        }
+
+        .main-content {
+            background: white;
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
+
+        .section {
+            margin-bottom: 60px;
+        }
+
+        .section-title {
+            font-size: 32px;
+            color: #333;
+            margin-bottom: 30px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding-bottom: 15px;
+            border-bottom: 3px solid #667eea;
+        }
+
+        .section-icon {
+            width: 60px;
+            height: 60px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 28px;
+        }
+
+        /* Folders */
+        .folders-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 25px;
+        }
+
+        .folder-card {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 20px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+            transition: all 0.3s;
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .folder-card::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: linear-gradient(45deg, transparent, rgba(255,255,255,0.1), transparent);
+            transform: rotate(45deg);
+            transition: all 0.6s;
+        }
+
+        .folder-card:hover::before {
+            left: 100%;
+        }
+
+        .folder-card:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 15px 40px rgba(0,0,0,0.25);
+        }
+
+        .folder-card.shipment { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+        .folder-card.project { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+        .folder-card.client { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }
+        .folder-card.contract { background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); }
+
+        .folder-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 20px;
+        }
+
+        .folder-icon {
+            font-size: 48px;
+            opacity: 0.9;
+        }
+
+        .folder-badge {
+            background: rgba(255,255,255,0.3);
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 700;
+        }
+
+        .folder-title {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+
+        .folder-code {
+            font-size: 14px;
+            opacity: 0.8;
+            font-family: 'Courier New', monospace;
+            margin-bottom: 15px;
+        }
+
+        .folder-desc {
+            font-size: 15px;
+            opacity: 0.9;
+            margin-bottom: 20px;
+            line-height: 1.6;
+        }
+
+        .folder-stats {
+            display: flex;
+            gap: 20px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(255,255,255,0.3);
+        }
+
+        .folder-stat {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }
+
+        .folder-stat i {
+            font-size: 16px;
+        }
+
+        /* Document Relations */
+        .relation-container {
+            background: #f8f9fa;
+            padding: 30px;
+            border-radius: 15px;
+            margin-bottom: 25px;
+        }
+
+        .relation-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 25px;
+        }
+
+        .relation-title {
+            font-size: 24px;
+            font-weight: 700;
+            color: #333;
+        }
+
+        .relation-diagram {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 30px;
+            flex-wrap: wrap;
+            padding: 30px;
+            background: white;
+            border-radius: 12px;
+        }
+
+        .doc-node {
+            background: white;
+            border: 3px solid #667eea;
+            padding: 20px;
+            border-radius: 15px;
+            min-width: 200px;
+            text-align: center;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            position: relative;
+        }
+
+        .doc-node.main {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            transform: scale(1.1);
+        }
+
+        .doc-node-title {
+            font-weight: 700;
+            margin-bottom: 8px;
+            font-size: 16px;
+        }
+
+        .doc-node-meta {
+            font-size: 13px;
+            opacity: 0.8;
+        }
+
+        .relation-arrow {
+            font-size: 32px;
+            color: #667eea;
+        }
+
+        .relation-type {
+            background: #667eea;
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            position: absolute;
+            top: -15px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        /* Attachments */
+        .attachments-list {
+            display: grid;
+            gap: 15px;
+        }
+
+        .attachment-item {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            border: 2px solid #e9ecef;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            transition: all 0.2s;
+        }
+
+        .attachment-item:hover {
+            border-color: #667eea;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+
+        .attachment-icon {
+            width: 60px;
+            height: 60px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            color: white;
+        }
+
+        .attachment-icon.pdf { background: #dc3545; }
+        .attachment-icon.image { background: #17a2b8; }
+        .attachment-icon.excel { background: #28a745; }
+        .attachment-icon.word { background: #0066cc; }
+
+        .attachment-info {
+            flex: 1;
+        }
+
+        .attachment-name {
+            font-weight: 700;
+            font-size: 18px;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .attachment-meta {
+            font-size: 14px;
+            color: #666;
+        }
+
+        .attachment-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 16px;
+        }
+
+        .btn-download {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-view {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-icon:hover {
+            transform: scale(1.15);
+        }
+
+        /* Example Box */
+        .example-box {
+            background: #fff3cd;
+            border: 3px solid #ffc107;
+            border-radius: 15px;
+            padding: 25px;
+            margin-top: 30px;
+        }
+
+        .example-title {
+            color: #856404;
+            font-weight: 700;
+            font-size: 20px;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .example-content {
+            color: #666;
+            line-height: 1.8;
+        }
+
+        .back-link {
+            position: fixed;
+            bottom: 30px;
+            left: 30px;
+            background: white;
+            color: #667eea;
+            padding: 15px 30px;
+            border-radius: 50px;
+            text-decoration: none;
+            font-weight: 700;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.3);
+            transition: all 0.3s;
+            z-index: 1000;
+        }
+
+        .back-link:hover {
+            transform: scale(1.05);
+        }
+    </style>
+</head>
+<body>
+    <a href="index.html" class="back-link">
+        <i class="fas fa-home"></i> الصفحة الرئيسية
+    </a>
+
+    <div class="container">
+        <h1><i class="fas fa-folder-open"></i> الإضبارات والعلاقات</h1>
+        <p class="subtitle">نظام متكامل لتنظيم المستندات وربطها ببعضها</p>
+
+        <div class="main-content">
+            <!-- Folders Section -->
+            <div class="section">
+                <h2 class="section-title">
+                    <div class="section-icon"><i class="fas fa-folder"></i></div>
+                    الإضبارات النشطة
+                </h2>
+                
+                <div class="folders-grid">
+                    <div class="folder-card shipment">
+                        <div class="folder-header">
+                            <div class="folder-icon"><i class="fas fa-ship"></i></div>
+                            <div class="folder-badge">شحنة</div>
+                        </div>
+                        <div class="folder-title">شحنة ديسمبر 2025 - حاوية 001</div>
+                        <div class="folder-code">SHIP-2025-12-001</div>
+                        <div class="folder-desc">
+                            إضبارة كاملة لشحنة بضائع من دبي إلى جدة - تشمل جميع المستندات المتعلقة
+                        </div>
+                        <div class="folder-stats">
+                            <div class="folder-stat">
+                                <i class="fas fa-file"></i>
+                                <strong>12 مستند</strong>
+                            </div>
+                            <div class="folder-stat">
+                                <i class="fas fa-user"></i>
+                                محمد أحمد
+                            </div>
+                            <div class="folder-stat">
+                                <i class="fas fa-calendar"></i>
+                                2025-12-15
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="folder-card project">
+                        <div class="folder-header">
+                            <div class="folder-icon"><i class="fas fa-briefcase"></i></div>
+                            <div class="folder-badge">مشروع</div>
+                        </div>
+                        <div class="folder-title">مشروع توسعة المستودع الرئيسي</div>
+                        <div class="folder-code">PROJ-2025-003</div>
+                        <div class="folder-desc">
+                            جميع مستندات مشروع التوسعة - عقود، فواتير، تقارير، رخص
+                        </div>
+                        <div class="folder-stats">
+                            <div class="folder-stat">
+                                <i class="fas fa-file"></i>
+                                <strong>28 مستند</strong>
+                            </div>
+                            <div class="folder-stat">
+                                <i class="fas fa-user"></i>
+                                سارة خالد
+                            </div>
+                            <div class="folder-stat">
+                                <i class="fas fa-calendar"></i>
+                                2025-11-01
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="folder-card client">
+                        <div class="folder-header">
+                            <div class="folder-icon"><i class="fas fa-building"></i></div>
+                            <div class="folder-badge">عميل</div>
+                        </div>
+                        <div class="folder-title">عميل ABC Trading Company</div>
+                        <div class="folder-code">CLIENT-ABC-001</div>
+                        <div class="folder-desc">
+                            جميع مستندات التعامل مع عميل ABC - عقود، فواتير، مراسلات
+                        </div>
+                        <div class="folder-stats">
+                            <div class="folder-stat">
+                                <i class="fas fa-file"></i>
+                                <strong>45 مستند</strong>
+                            </div>
+                            <div class="folder-stat">
+                                <i class="fas fa-user"></i>
+                                خالد يوسف
+                            </div>
+                            <div class="folder-stat">
+                                <i class="fas fa-calendar"></i>
+                                2025-01-15
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="folder-card contract">
+                        <div class="folder-header">
+                            <div class="folder-icon"><i class="fas fa-file-contract"></i></div>
+                            <div class="folder-badge">عقد</div>
+                        </div>
+                        <div class="folder-title">عقد توريد - مورد XYZ</div>
+                        <div class="folder-code">CONTRACT-XYZ-2025</div>
+                        <div class="folder-desc">
+                            عقد التوريد السنوي مع جميع الملاحق والتعديلات
+                        </div>
+                        <div class="folder-stats">
+                            <div class="folder-stat">
+                                <i class="fas fa-file"></i>
+                                <strong>8 مستند</strong>
+                            </div>
+                            <div class="folder-stat">
+                                <i class="fas fa-user"></i>
+                                عبدالرحمن المالكي
+                            </div>
+                            <div class="folder-stat">
+                                <i class="fas fa-calendar"></i>
+                                2025-01-01
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Document Relations -->
+            <div class="section">
+                <h2 class="section-title">
+                    <div class="section-icon"><i class="fas fa-link"></i></div>
+                    علاقات المستندات
+                </h2>
+
+                <div class="relation-container">
+                    <div class="relation-header">
+                        <div class="relation-title">
+                            مثال: شحنة حاوية MSCU7832651
+                        </div>
+                    </div>
+
+                    <div class="relation-diagram">
+                        <div class="doc-node">
+                            <div class="relation-type">أمر شراء</div>
+                            <div class="doc-node-title">
+                                <i class="fas fa-shopping-cart"></i> PO-2025-1234
+                            </div>
+                            <div class="doc-node-meta">2025-11-20</div>
+                        </div>
+
+                        <div class="relation-arrow"><i class="fas fa-arrow-left"></i></div>
+
+                        <div class="doc-node main">
+                            <div class="doc-node-title">
+                                <i class="fas fa-ship"></i> بوليصة الشحن
+                            </div>
+                            <div class="doc-node-meta">MSCU7832651</div>
+                            <div class="doc-node-meta">NBS-SC-00847</div>
+                        </div>
+
+                        <div class="relation-arrow"><i class="fas fa-arrow-right"></i></div>
+
+                        <div class="doc-node">
+                            <div class="relation-type">فاتورة</div>
+                            <div class="doc-node-title">
+                                <i class="fas fa-file-invoice-dollar"></i> INV-2025-5678
+                            </div>
+                            <div class="doc-node-meta">2025-12-10</div>
+                        </div>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-top: 25px;">
+                        <div class="doc-node">
+                            <div class="relation-type">تقرير جودة</div>
+                            <div class="doc-node-title">
+                                <i class="fas fa-clipboard-check"></i> QC-2025-456
+                            </div>
+                            <div class="doc-node-meta">فحص البضائع</div>
+                        </div>
+
+                        <div class="doc-node">
+                            <div class="relation-type">بيان جمركي</div>
+                            <div class="doc-node-title">
+                                <i class="fas fa-passport"></i> CUSTOMS-789
+                            </div>
+                            <div class="doc-node-meta">تخليص جمركي</div>
+                        </div>
+
+                        <div class="doc-node">
+                            <div class="relation-type">إيصال استلام</div>
+                            <div class="doc-node-title">
+                                <i class="fas fa-check-square"></i> REC-2025-321
+                            </div>
+                            <div class="doc-node-meta">إثبات الاستلام</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="example-box">
+                    <div class="example-title">
+                        <i class="fas fa-lightbulb"></i> أنواع العلاقات المدعومة
+                    </div>
+                    <div class="example-content">
+                        <strong>• مستند أصلي/فرعي:</strong> للوثائق الهرمية (عقد رئيسي → ملاحق)<br>
+                        <strong>• مرفق:</strong> مستندات داعمة ملحقة<br>
+                        <strong>• مرجع:</strong> مستندات مرجعية<br>
+                        <strong>• بديل:</strong> عند استبدال مستند بآخر<br>
+                        <strong>• تعديل:</strong> للتعديلات والملاحق<br>
+                        <strong>• ذو صلة:</strong> مستندات مرتبطة بنفس الموضوع
+                    </div>
+                </div>
+            </div>
+
+            <!-- Attachments Section -->
+            <div class="section">
+                <h2 class="section-title">
+                    <div class="section-icon"><i class="fas fa-paperclip"></i></div>
+                    المرفقات
+                </h2>
+
+                <div class="relation-container">
+                    <div class="relation-header">
+                        <div class="relation-title">
+                            مرفقات بوليصة الشحن NBS-SC-00847
+                        </div>
+                        <button class="btn-sm" style="background: #667eea; color: white; padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer; font-weight: 700; font-family: 'Cairo', sans-serif;">
+                            <i class="fas fa-plus"></i> إضافة مرفق
+                        </button>
+                    </div>
+
+                    <div class="attachments-list">
+                        <div class="attachment-item">
+                            <div class="attachment-icon pdf">
+                                <i class="fas fa-file-pdf"></i>
+                            </div>
+                            <div class="attachment-info">
+                                <div class="attachment-name">صورة من جواز السفر البحري</div>
+                                <div class="attachment-meta">
+                                    <i class="fas fa-file"></i> PDF • 2.4 MB • 
+                                    <i class="fas fa-user"></i> محمد أحمد • 
+                                    <i class="fas fa-calendar"></i> 2025-12-17 10:35
+                                </div>
+                            </div>
+                            <div class="attachment-actions">
+                                <button class="btn-icon btn-view" onclick="showToast('عرض', 'info')">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                                <button class="btn-icon btn-download" onclick="showToast('تحميل', 'success')">
+                                    <i class="fas fa-download"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="attachment-item">
+                            <div class="attachment-icon image">
+                                <i class="fas fa-image"></i>
+                            </div>
+                            <div class="attachment-info">
+                                <div class="attachment-name">صورة الحاوية من الميناء</div>
+                                <div class="attachment-meta">
+                                    <i class="fas fa-file"></i> JPG • 1.8 MB • 
+                                    <i class="fas fa-user"></i> محمد أحمد • 
+                                    <i class="fas fa-calendar"></i> 2025-12-17 10:40
+                                </div>
+                            </div>
+                            <div class="attachment-actions">
+                                <button class="btn-icon btn-view" onclick="showToast('عرض', 'info')">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                                <button class="btn-icon btn-download" onclick="showToast('تحميل', 'success')">
+                                    <i class="fas fa-download"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="attachment-item">
+                            <div class="attachment-icon excel">
+                                <i class="fas fa-file-excel"></i>
+                            </div>
+                            <div class="attachment-info">
+                                <div class="attachment-name">كشف البضائع التفصيلي</div>
+                                <div class="attachment-meta">
+                                    <i class="fas fa-file"></i> XLSX • 856 KB • 
+                                    <i class="fas fa-user"></i> خالد يوسف • 
+                                    <i class="fas fa-calendar"></i> 2025-12-17 11:20
+                                </div>
+                            </div>
+                            <div class="attachment-actions">
+                                <button class="btn-icon btn-view" onclick="showToast('عرض', 'info')">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                                <button class="btn-icon btn-download" onclick="showToast('تحميل', 'success')">
+                                    <i class="fas fa-download"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="attachment-item">
+                            <div class="attachment-icon word">
+                                <i class="fas fa-file-word"></i>
+                            </div>
+                            <div class="attachment-info">
+                                <div class="attachment-name">خطاب الشحن من المورد</div>
+                                <div class="attachment-meta">
+                                    <i class="fas fa-file"></i> DOCX • 124 KB • 
+                                    <i class="fas fa-user"></i> نورة سعيد • 
+                                    <i class="fas fa-calendar"></i> 2025-12-17 14:00
+                                </div>
+                            </div>
+                            <div class="attachment-actions">
+                                <button class="btn-icon btn-view" onclick="showToast('عرض', 'info')">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                                <button class="btn-icon btn-download" onclick="showToast('تحميل', 'success')">
+                                    <i class="fas fa-download"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Hierarchy Example -->
+            <div class="section">
+                <h2 class="section-title">
+                    <div class="section-icon"><i class="fas fa-sitemap"></i></div>
+                    التسلسل الهرمي
+                </h2>
+
+                <div class="relation-container">
+                    <div style="padding: 30px; background: white; border-radius: 15px;">
+                        <div style="text-align: center; margin-bottom: 40px;">
+                            <div class="doc-node main" style="display: inline-block; margin-bottom: 30px;">
+                                <div class="doc-node-title">
+                                    <i class="fas fa-file-contract"></i> عقد التوريد الرئيسي 2025
+                                </div>
+                                <div class="doc-node-meta">NBS-FIN-00100</div>
+                            </div>
+                        </div>
+
+                        <div style="display: flex; justify-content: center; margin-bottom: 20px;">
+                            <i class="fas fa-arrow-down" style="font-size: 32px; color: #667eea;"></i>
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;">
+                            <div class="doc-node">
+                                <div class="relation-type">ملحق 1</div>
+                                <div class="doc-node-title">
+                                    <i class="fas fa-file"></i> ملحق الأسعار
+                                </div>
+                                <div class="doc-node-meta">NBS-FIN-00101</div>
+                            </div>
+
+                            <div class="doc-node">
+                                <div class="relation-type">ملحق 2</div>
+                                <div class="doc-node-title">
+                                    <i class="fas fa-file"></i> شروط الدفع
+                                </div>
+                                <div class="doc-node-meta">NBS-FIN-00102</div>
+                            </div>
+
+                            <div class="doc-node">
+                                <div class="relation-type">ملحق 3</div>
+                                <div class="doc-node-title">
+                                    <i class="fas fa-file"></i> جدول التسليم
+                                </div>
+                                <div class="doc-node-meta">NBS-FIN-00103</div>
+                            </div>
+                        </div>
+
+                        <div style="display: flex; justify-content: center; margin: 20px 0;">
+                            <i class="fas fa-arrow-down" style="font-size: 32px; color: #667eea;"></i>
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; max-width: 700px; margin: 0 auto;">
+                            <div class="doc-node">
+                                <div class="relation-type">تعديل</div>
+                                <div class="doc-node-title">
+                                    <i class="fas fa-edit"></i> تعديل الأسعار
+                                </div>
+                                <div class="doc-node-meta">NBS-FIN-00104</div>
+                            </div>
+
+                            <div class="doc-node">
+                                <div class="relation-type">تعديل</div>
+                                <div class="doc-node-title">
+                                    <i class="fas fa-edit"></i> تمديد المدة
+                                </div>
+                                <div class="doc-node-meta">NBS-FIN-00105</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Use Cases -->
+            <div class="section">
+                <h2 class="section-title">
+                    <div class="section-icon"><i class="fas fa-tasks"></i></div>
+                    حالات استخدام واقعية
+                </h2>
+
+                <div style="display: grid; gap: 25px;">
+                    <div style="background: #f8f9fa; padding: 30px; border-radius: 15px; border-right: 5px solid #667eea;">
+                        <h3 style="color: #667eea; font-size: 22px; margin-bottom: 15px;">
+                            <i class="fas fa-ship"></i> حالة 1: إضبارة شحنة كاملة
+                        </h3>
+                        <p style="color: #666; line-height: 1.8;">
+                            <strong>المشكلة:</strong> شحنة واحدة تحتوي على 12 مستند مختلف (أمر شراء، بوليصة، فاتورة، جمارك، فحص جودة...)<br>
+                            <strong>الحل:</strong> إنشاء إضبارة "SHIP-2025-12-001" وإضافة جميع المستندات لها<br>
+                            <strong>النتيجة:</strong> وصول سريع لجميع المستندات المتعلقة بالشحنة من مكان واحد
+                        </p>
+                    </div>
+
+                    <div style="background: #f8f9fa; padding: 30px; border-radius: 15px; border-right: 5px solid #28a745;">
+                        <h3 style="color: #28a745; font-size: 22px; margin-bottom: 15px;">
+                            <i class="fas fa-link"></i> حالة 2: ربط المستندات المترابطة
+                        </h3>
+                        <p style="color: #666; line-height: 1.8;">
+                            <strong>المشكلة:</strong> أمر شراء، بوليصة شحن، وفاتورة - كلها مرتبطة ولكن في ملفات منفصلة<br>
+                            <strong>الحل:</strong> ربط المستندات الثلاثة ببعضها عبر نظام العلاقات<br>
+                            <strong>النتيجة:</strong> عند فتح أي مستند، ترى المستندات المرتبطة مباشرة
+                        </p>
+                    </div>
+
+                    <div style="background: #f8f9fa; padding: 30px; border-radius: 15px; border-right: 5px solid #ffc107;">
+                        <h3 style="color: #856404; font-size: 22px; margin-bottom: 15px;">
+                            <i class="fas fa-paperclip"></i> حالة 3: إضافة مرفقات داعمة
+                        </h3>
+                        <p style="color: #666; line-height: 1.8;">
+                            <strong>المشكلة:</strong> بوليصة الشحن تحتاج صور الحاوية + كشف البضائع + خطاب المورد<br>
+                            <strong>الحل:</strong> إضافة المستندات الداعمة كمرفقات للبوليصة الأساسية<br>
+                            <strong>النتيجة:</strong> جميع الملفات المتعلقة موجودة في مكان واحد
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- API Info -->
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 40px; border-radius: 20px; margin-top: 50px;">
+                <h3 style="font-size: 28px; margin-bottom: 25px; text-align: center;">
+                    <i class="fas fa-code"></i> API Endpoints للإضبارات والعلاقات
+                </h3>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; font-family: 'Courier New', monospace; font-size: 14px;">
+                    <div style="background: rgba(255,255,255,0.15); padding: 15px; border-radius: 10px;">
+                        <strong>GET /api/folders</strong><br>
+                        قائمة الإضبارات
+                    </div>
+                    <div style="background: rgba(255,255,255,0.15); padding: 15px; border-radius: 10px;">
+                        <strong>POST /api/folders/create</strong><br>
+                        إنشاء إضبارة جديدة
+                    </div>
+                    <div style="background: rgba(255,255,255,0.15); padding: 15px; border-radius: 10px;">
+                        <strong>POST /api/documents/{id}/add-relation</strong><br>
+                        ربط مستند بآخر
+                    </div>
+                    <div style="background: rgba(255,255,255,0.15); padding: 15px; border-radius: 10px;">
+                        <strong>POST /api/documents/{id}/add-attachment</strong><br>
+                        إضافة مرفق
+                    </div>
+                    <div style="background: rgba(255,255,255,0.15); padding: 15px; border-radius: 10px;">
+                        <strong>GET /api/documents/{id}/relations</strong><br>
+                        جميع العلاقات
+                    </div>
+                    <div style="background: rgba(255,255,255,0.15); padding: 15px; border-radius: 10px;">
+                        <strong>GET /api/documents/{id}/attachments</strong><br>
+                        جميع المرفقات
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function showToast(action, type) {
+            const colors = {
+                success: '#28a745',
+                info: '#667eea',
+                warning: '#ffc107'
+            };
+            
+            const toast = document.createElement('div');
+            toast.style.cssText = `
+                position: fixed;
+                top: 30px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: ${colors[type] || colors.success};
+                color: white;
+                padding: 20px 40px;
+                border-radius: 50px;
+                box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+                z-index: 9999;
+                font-weight: 700;
+                font-size: 18px;
+                animation: slideDown 0.3s ease-out;
+            `;
+            toast.innerHTML = `<i class="fas fa-check-circle"></i> تم ${action} بنجاح`;
+            document.body.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.style.animation = 'slideUp 0.3s ease-out';
+                setTimeout(() => toast.remove(), 300);
+            }, 2500);
+        }
+
+        // Add animations
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes slideDown {
+                from { opacity: 0; transform: translate(-50%, -30px); }
+                to { opacity: 1; transform: translate(-50%, 0); }
+            }
+            @keyframes slideUp {
+                from { opacity: 1; transform: translate(-50%, 0); }
+                to { opacity: 0; transform: translate(-50%, -30px); }
+            }
+        `;
+        document.head.appendChild(style);
+    </script>
+</body>
+</html>
+
+
+

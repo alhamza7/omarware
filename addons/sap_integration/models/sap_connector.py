@@ -21,6 +21,8 @@ class SapConnector(models.Model):
     sync_customers = fields.Boolean('Sync Customers', default=True)
     sync_suppliers = fields.Boolean('Sync Suppliers', default=True)
     sync_products = fields.Boolean('Sync Products', default=True)
+    sync_pricelists = fields.Boolean('Sync Pricelists', default=False,
+                                     help="Sync pricelists after products (like in complete migration)")
     sync_quotations = fields.Boolean('Sync Quotations', default=True)
     sync_sales = fields.Boolean('Sync Sales Orders', default=True)
     sync_invoices = fields.Boolean('Sync Invoices', default=True)
@@ -47,6 +49,7 @@ class SapConnector(models.Model):
     customers_synced = fields.Integer('Customers Synced', readonly=True, default=0)
     suppliers_synced = fields.Integer('Suppliers Synced', readonly=True, default=0)
     products_synced = fields.Integer('Products Synced', readonly=True, default=0)
+    pricelists_synced = fields.Integer('Pricelists Synced', readonly=True, default=0)
     quotations_synced = fields.Integer('Quotations Synced', readonly=True, default=0)
     sales_synced = fields.Integer('Sales Orders Synced', readonly=True, default=0)
     invoices_synced = fields.Integer('Invoices Synced', readonly=True, default=0)
@@ -83,6 +86,7 @@ class SapConnector(models.Model):
             self.customers_synced = 0
             self.suppliers_synced = 0
             self.products_synced = 0
+            self.pricelists_synced = 0
             self.quotations_synced = 0
             self.sales_synced = 0
             self.invoices_synced = 0
@@ -98,6 +102,10 @@ class SapConnector(models.Model):
             # Sync products
             if self.sync_products:
                 self.sync_products_from_sap()
+            
+            # Sync pricelists (after products, like in complete migration)
+            if self.sync_pricelists:
+                self.sync_pricelists_from_sap()
             
             # Sync quotations
             if self.sync_quotations:
@@ -295,6 +303,7 @@ class SapConnector(models.Model):
             product_count = 0
             has_more = True
             batch_size = self.backend_id.batch_size or 100
+            processed_item_codes = set()  # Track processed items to prevent duplicates
             
             _logger.info(f"Starting product sync from SAP (batch_size: {batch_size})")
             
@@ -321,6 +330,21 @@ class SapConnector(models.Model):
                     try:
                         item_code = product_data.get('ItemCode')
                         item_name = product_data.get('ItemName', 'Unknown')
+                        
+                        # Skip products without ItemCode to prevent duplicates
+                        if not item_code or not str(item_code).strip():
+                            _logger.warning(f"Skipping product without ItemCode: {item_name}")
+                            continue
+                        
+                        # Normalize item_code (remove whitespace)
+                        item_code = str(item_code).strip()
+                        
+                        # Check if this item was already processed in this sync session
+                        if item_code in processed_item_codes:
+                            _logger.warning(f"Duplicate ItemCode detected in batch: {item_code} - {item_name}. Skipping to prevent duplicate.")
+                            continue
+                        
+                        processed_item_codes.add(item_code)
                         _logger.info(f"Processing product: {item_code} - {item_name}")
                         
                         # Use product model import method
@@ -351,6 +375,27 @@ class SapConnector(models.Model):
             
         except Exception as e:
             _logger.error(f"Error syncing products: {str(e)}")
+            raise
+    
+    def sync_pricelists_from_sap(self):
+        """Sync pricelists from SAP (like in complete migration Stage 3)"""
+        try:
+            _logger.info("Starting pricelist sync from SAP")
+            
+            # Use the same method as complete migration
+            pricelist_sync = self.env['sap.product.pricelist.sync']
+            result = pricelist_sync.import_all_pricelists_from_sap(
+                self.backend_id, 
+                self.backend_id.batch_size or 100
+            )
+            
+            # Update counter
+            self.pricelists_synced = result.get('created_prices', 0) + result.get('updated_prices', 0)
+            
+            _logger.info(f"Pricelist sync completed: {result.get('created_prices', 0)} created, {result.get('updated_prices', 0)} updated")
+            
+        except Exception as e:
+            _logger.error(f"Error syncing pricelists: {str(e)}")
             raise
     
     def sync_quotations_from_sap(self):
@@ -423,6 +468,7 @@ class SapConnector(models.Model):
             'customers_synced': self.customers_synced,
             'suppliers_synced': self.suppliers_synced,
             'products_synced': self.products_synced,
+            'pricelists_synced': self.pricelists_synced,
             'quotations_synced': self.quotations_synced,
             'sales_synced': self.sales_synced,
             'invoices_synced': self.invoices_synced,

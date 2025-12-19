@@ -507,6 +507,7 @@ class SapProductCompleteMigration(models.TransientModel):
             batch_number = 0
             consecutive_empty_batches = 0
             max_empty_batches = 3  # Stop after 3 consecutive empty batches
+            processed_item_codes = set()  # Track processed items to prevent duplicates
             
             # Log initial configuration
             if self.product_limit > 0:
@@ -609,9 +610,20 @@ class SapProductCompleteMigration(models.TransientModel):
                         item_code = item_data.get('ItemCode')
                         item_name = item_data.get('ItemName', item_code)
                         
-                        # Skip if no item code
-                        if not item_code:
+                        # Skip products without ItemCode to prevent duplicates
+                        if not item_code or not str(item_code).strip():
+                            _logger.warning(f"Skipping product without ItemCode: {item_name}")
                             continue
+                        
+                        # Normalize item_code (remove whitespace)
+                        item_code = str(item_code).strip()
+                        
+                        # Check if this item was already processed in this sync session
+                        if item_code in processed_item_codes:
+                            _logger.warning(f"Duplicate ItemCode detected in batch: {item_code} - {item_name}. Skipping to prevent duplicate.")
+                            continue
+                        
+                        processed_item_codes.add(item_code)
                         
                         # Import basic product
                         product = self._import_single_product(item_data)
@@ -726,6 +738,13 @@ class SapProductCompleteMigration(models.TransientModel):
         """Import or update a single product with all SAP fields"""
         item_code = item_data.get('ItemCode')
         
+        # Validate item_code to prevent duplicates
+        if not item_code or not str(item_code).strip():
+            raise UserError(f"Product ItemCode is empty or invalid. Cannot import product without ItemCode.")
+        
+        # Normalize item_code (remove whitespace)
+        item_code = str(item_code).strip()
+        
         # Validate required fields
         item_name = (item_data.get('ItemName') or '').strip()
         foreign_name = (item_data.get('ForeignName') or '').strip()
@@ -737,7 +756,7 @@ class SapProductCompleteMigration(models.TransientModel):
             item_name = f"Product {item_code}"
             _logger.warning(f"Item {item_code} has no name, using: {item_name}")
         
-        # Search for existing
+        # Search for existing (using normalized item_code)
         product = self.env['product.product'].search([
             ('default_code', '=', item_code)
         ], limit=1)
@@ -790,7 +809,7 @@ class SapProductCompleteMigration(models.TransientModel):
         
         vals = {
             'name': item_name,
-            'default_code': item_code,
+            'default_code': item_code,  # Already normalized (no whitespace)
             'list_price': float(sales_price),  # سعر البيع من SAP
             'standard_price': float(purchase_price),  # سعر الشراء من SAP
             'type': 'consu',  # Consumable = Storable products (displayed as "Goods" in UI)
@@ -848,8 +867,11 @@ class SapProductCompleteMigration(models.TransientModel):
             return
         
         item_code = item_data.get('ItemCode')
-        if not item_code:
+        if not item_code or not str(item_code).strip():
             return
+        
+        # Normalize item_code (remove whitespace)
+        item_code = str(item_code).strip()
         
         try:
             # Get the alternative barcode model

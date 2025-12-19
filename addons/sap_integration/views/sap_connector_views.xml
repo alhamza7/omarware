@@ -45,6 +45,7 @@
                             <field name="sync_customers"/>
                             <field name="sync_suppliers"/>
                             <field name="sync_products"/>
+                            <field name="sync_pricelists"/>
                             <field name="sync_quotations"/>
                             <field name="sync_sales"/>
                             <field name="sync_invoices"/>
@@ -55,6 +56,7 @@
                             <field name="customers_synced"/>
                             <field name="suppliers_synced"/>
                             <field name="products_synced"/>
+                            <field name="pricelists_synced"/>
                         </group>
                         <group>
                             <field name="quotations_synced"/>

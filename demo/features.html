@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>المميزات التفاعلية - نظام NBS</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Cairo', sans-serif;
+            background: #f5f7fa;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 60px;
+        }
+
+        .header h1 {
+            font-size: 48px;
+            color: #667eea;
+            margin-bottom: 15px;
+        }
+
+        .header p {
+            font-size: 20px;
+            color: #666;
+        }
+
+        .demo-section {
+            background: white;
+            padding: 40px;
+            border-radius: 20px;
+            margin-bottom: 40px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+        }
+
+        .section-title {
+            font-size: 32px;
+            color: #333;
+            margin-bottom: 30px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .section-icon {
+            width: 60px;
+            height: 60px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 28px;
+        }
+
+        /* Search Demo */
+        .search-box {
+            width: 100%;
+            padding: 20px 25px;
+            font-size: 20px;
+            border: 3px solid #667eea;
+            border-radius: 50px;
+            outline: none;
+            font-family: 'Cairo', sans-serif;
+            transition: all 0.3s;
+        }
+
+        .search-box:focus {
+            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.2);
+        }
+
+        .search-filters {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 25px;
+        }
+
+        .filter-select {
+            padding: 15px;
+            border: 2px solid #e9ecef;
+            border-radius: 12px;
+            font-family: 'Cairo', sans-serif;
+            font-size: 16px;
+            outline: none;
+            transition: all 0.2s;
+        }
+
+        .filter-select:focus {
+            border-color: #667eea;
+        }
+
+        .search-results {
+            margin-top: 30px;
+        }
+
+        .result-item {
+            padding: 25px;
+            background: #f8f9fa;
+            border-radius: 15px;
+            margin-bottom: 15px;
+            border-right: 4px solid #667eea;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+
+        .result-item:hover {
+            background: #e9ecef;
+            transform: translateX(-5px);
+        }
+
+        .result-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 12px;
+        }
+
+        .result-meta {
+            display: flex;
+            gap: 20px;
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 15px;
+        }
+
+        .highlight {
+            background: yellow;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+
+        /* Barcode Demo */
+        .barcode-container {
+            text-align: center;
+            padding: 40px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 20px;
+            color: white;
+        }
+
+        .barcode-display {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            margin: 30px auto;
+            max-width: 500px;
+        }
+
+        .barcode-image {
+            width: 100%;
+            height: 120px;
+            background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100"><rect x="10" y="10" width="4" height="80" fill="black"/><rect x="18" y="10" width="2" height="80" fill="black"/><rect x="24" y="10" width="6" height="80" fill="black"/><rect x="34" y="10" width="2" height="80" fill="black"/><rect x="40" y="10" width="4" height="80" fill="black"/><rect x="48" y="10" width="2" height="80" fill="black"/><rect x="54" y="10" width="8" height="80" fill="black"/><rect x="66" y="10" width="2" height="80" fill="black"/><rect x="72" y="10" width="4" height="80" fill="black"/><rect x="80" y="10" width="6" height="80" fill="black"/><rect x="90" y="10" width="2" height="80" fill="black"/><rect x="96" y="10" width="4" height="80" fill="black"/><rect x="104" y="10" width="2" height="80" fill="black"/><rect x="110" y="10" width="6" height="80" fill="black"/><rect x="120" y="10" width="4" height="80" fill="black"/><rect x="128" y="10" width="2" height="80" fill="black"/><rect x="134" y="10" width="8" height="80" fill="black"/><rect x="146" y="10" width="2" height="80" fill="black"/><rect x="152" y="10" width="4" height="80" fill="black"/><rect x="160" y="10" width="6" height="80" fill="black"/><rect x="170" y="10" width="2" height="80" fill="black"/><rect x="176" y="10" width="4" height="80" fill="black"/></svg>') center/contain no-repeat;
+        }
+
+        .barcode-text {
+            color: #333;
+            font-size: 24px;
+            font-weight: 700;
+            margin-top: 15px;
+            letter-spacing: 3px;
+        }
+
+        .scan-button {
+            background: white;
+            color: #667eea;
+            padding: 18px 40px;
+            border: none;
+            border-radius: 50px;
+            font-size: 18px;
+            font-weight: 700;
+            cursor: pointer;
+            margin-top: 25px;
+            font-family: 'Cairo', sans-serif;
+            transition: all 0.3s;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.2);
+        }
+
+        .scan-button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+        }
+
+        /* Notifications Demo */
+        .notifications-panel {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+        }
+
+        .notif-item {
+            display: flex;
+            gap: 20px;
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 15px;
+            border-right: 4px solid #667eea;
+            background: #f8f9fa;
+            transition: all 0.2s;
+        }
+
+        .notif-item:hover {
+            background: #e9ecef;
+        }
+
+        .notif-item.unread {
+            background: #e7f3ff;
+            border-right-color: #0066cc;
+        }
+
+        .notif-icon {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+            color: white;
+        }
+
+        .notif-upload { background: #28a745; }
+        .notif-edit { background: #ffc107; }
+        .notif-approve { background: #0066cc; }
+        .notif-version { background: #17a2b8; }
+
+        .notif-content {
+            flex: 1;
+        }
+
+        .notif-title {
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .notif-message {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .notif-time {
+            font-size: 13px;
+            color: #999;
+            margin-top: 8px;
+        }
+
+        .unread-badge {
+            background: #0066cc;
+            color: white;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 700;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><i class="fas fa-magic"></i> المميزات التفاعلية</h1>
+            <p>جرب قوة نظام NBS للأرشفة</p>
+        </div>
+
+        <!-- Search Demo -->
+        <div class="demo-section">
+            <h2 class="section-title">
+                <div class="section-icon"><i class="fas fa-search"></i></div>
+                بحث متقدم ذكي
+            </h2>
+            
+            <input type="text" class="search-box" placeholder="ابحث في العنوان، المحتوى، الباركود، الأرقام..." id="searchInput">
+            
+            <div class="search-filters">
+                <select class="filter-select">
+                    <option>كل الأقسام</option>
+                    <option>سلسلة التوريد</option>
+                    <option>المالية</option>
+                    <option>مراقبة الجودة</option>
+                    <option>الموارد البشرية</option>
+                </select>
+                
+                <select class="filter-select">
+                    <option>كل الأنواع</option>
+                    <option>بوليصة شحن</option>
+                    <option>فاتورة</option>
+                    <option>تقرير جودة</option>
+                    <option>عقد</option>
+                </select>
+                
+                <select class="filter-select">
+                    <option>البحث في: الكل</option>
+                    <option>العنوان فقط</option>
+                    <option>المحتوى (OCR)</option>
+                    <option>الباركود</option>
+                </select>
+            </div>
+
+            <div class="search-results" id="searchResults" style="display: none;">
+                <h3 style="margin-top: 30px; margin-bottom: 20px; color: #333;">
+                    <i class="fas fa-check-circle" style="color: #28a745;"></i> 
+                    تم العثور على 3 مستندات
+                </h3>
+                
+                <div class="result-item">
+                    <div class="result-title">
+                        <i class="fas fa-file-pdf" style="color: #dc3545;"></i> 
+                        بوليصة شحن - <span class="highlight">حاوية</span> MSCU7832651
+                    </div>
+                    <div class="result-meta">
+                        <span><i class="fas fa-building"></i> سلسلة التوريد</span>
+                        <span><i class="fas fa-barcode"></i> NBS-SC-00847</span>
+                        <span><i class="fas fa-user"></i> محمد أحمد</span>
+                        <span><i class="fas fa-calendar"></i> 2025-12-17</span>
+                    </div>
+                    <div style="color: #666; margin-top: 10px; padding: 12px; background: white; border-radius: 8px;">
+                        <strong>من المحتوى:</strong> ...BL Number: MSCU7832651, Container: 40'HC, <span class="highlight">حاوية</span> شحن بضائع متنوعة...
+                    </div>
+                </div>
+
+                <div class="result-item">
+                    <div class="result-title">
+                        <i class="fas fa-file-alt" style="color: #28a745;"></i> 
+                        تقرير فحص <span class="highlight">حاوية</span> - QC-2025-456
+                    </div>
+                    <div class="result-meta">
+                        <span><i class="fas fa-building"></i> مراقبة الجودة</span>
+                        <span><i class="fas fa-barcode"></i> NBS-QC-00518</span>
+                        <span><i class="fas fa-user"></i> علي محمود</span>
+                        <span><i class="fas fa-calendar"></i> 2025-12-15</span>
+                    </div>
+                    <div style="color: #666; margin-top: 10px; padding: 12px; background: white; border-radius: 8px;">
+                        <strong>من المحتوى:</strong> ...فحص <span class="highlight">الحاوية</span> رقم MSCU7832600 - النتيجة: مطابق للمواصفات...
+                    </div>
+                </div>
+
+                <div class="result-item">
+                    <div class="result-title">
+                        <i class="fas fa-file-invoice-dollar" style="color: #0066cc;"></i> 
+                        مستند <span class="highlight">حاوية</span> - تفريغ في ميناء جدة
+                    </div>
+                    <div class="result-meta">
+                        <span><i class="fas fa-building"></i> سلسلة التوريد</span>
+                        <span><i class="fas fa-barcode"></i> NBS-SC-00841</span>
+                        <span><i class="fas fa-user"></i> خالد يوسف</span>
+                        <span><i class="fas fa-calendar"></i> 2025-12-14</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Barcode Demo -->
+        <div class="demo-section">
+            <h2 class="section-title">
+                <div class="section-icon"><i class="fas fa-qrcode"></i></div>
+                نظام الباركود الذكي
+            </h2>
+            
+            <div class="barcode-container">
+                <h3 style="font-size: 28px; margin-bottom: 20px;">
+                    مسح الباركود للوصول الفوري
+                </h3>
+                <p style="opacity: 0.9; margin-bottom: 30px;">
+                    كل مستند يحصل على باركود فريد تلقائياً
+                </p>
+                
+                <div class="barcode-display">
+                    <div class="barcode-image"></div>
+                    <div class="barcode-text">NBS-SC-00847</div>
+                </div>
+                
+                <button class="scan-button" onclick="simulateScan()">
+                    <i class="fas fa-camera"></i> مسح باركود
+                </button>
+                
+                <div id="scanResult" style="margin-top: 30px; display: none;">
+                    <div style="background: white; color: #28a745; padding: 25px; border-radius: 15px; font-weight: 700; font-size: 20px;">
+                        <i class="fas fa-check-circle"></i> تم العثور على المستند!
+                        <div style="color: #333; font-size: 16px; margin-top: 15px; font-weight: normal;">
+                            بوليصة شحن - حاوية MSCU7832651
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Notifications Demo -->
+        <div class="demo-section">
+            <h2 class="section-title">
+                <div class="section-icon"><i class="fas fa-bell"></i></div>
+                مركز الإشعارات
+                <span class="unread-badge">7 جديد</span>
+            </h2>
+            
+            <div class="notifications-panel">
+                <div class="notif-item unread">
+                    <div class="notif-icon notif-upload">
+                        <i class="fas fa-upload"></i>
+                    </div>
+                    <div class="notif-content">
+                        <div class="notif-title">مستند جديد تم رفعه</div>
+                        <div class="notif-message">محمد أحمد رفع "بوليصة شحن - حاوية MSCU7832651" في قسم سلسلة التوريد</div>
+                        <div class="notif-time"><i class="fas fa-clock"></i> منذ 5 دقائق</div>
+                    </div>
+                    <div class="unread-badge">جديد</div>
+                </div>
+
+                <div class="notif-item unread">
+                    <div class="notif-icon notif-edit">
+                        <i class="fas fa-edit"></i>
+                    </div>
+                    <div class="notif-content">
+                        <div class="notif-title">طلب تعديل معلق</div>
+                        <div class="notif-message">محمد أحمد طلب تعديل على "بوليصة شحن" - يحتاج موافقة</div>
+                        <div class="notif-time"><i class="fas fa-clock"></i> منذ ساعة</div>
+                    </div>
+                    <div class="unread-badge">جديد</div>
+                </div>
+
+                <div class="notif-item">
+                    <div class="notif-icon notif-approve">
+                        <i class="fas fa-check"></i>
+                    </div>
+                    <div class="notif-content">
+                        <div class="notif-title">تم الموافقة على طلبك</div>
+                        <div class="notif-message">أحمد المدير وافق على طلب التعديل - رمز فك القفل متاح</div>
+                        <div class="notif-time"><i class="fas fa-clock"></i> منذ 3 ساعات</div>
+                    </div>
+                </div>
+
+                <div class="notif-item">
+                    <div class="notif-icon notif-version">
+                        <i class="fas fa-file-upload"></i>
+                    </div>
+                    <div class="notif-content">
+                        <div class="notif-title">نسخة جديدة متاحة</div>
+                        <div class="notif-message">محمد أحمد رفع نسخة محدثة (V2) من "بوليصة شحن"</div>
+                        <div class="notif-time"><i class="fas fa-clock"></i> منذ 5 ساعات</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Audit Log Demo -->
+        <div class="demo-section">
+            <h2 class="section-title">
+                <div class="section-icon"><i class="fas fa-clipboard-list"></i></div>
+                سجل التدقيق الكامل
+            </h2>
+            
+            <div style="overflow-x: auto;">
+                <table style="width: 100%; border-collapse: collapse;">
+                    <thead style="background: #667eea; color: white;">
+                        <tr>
+                            <th style="padding: 15px; text-align: right;">التاريخ والوقت</th>
+                            <th style="padding: 15px; text-align: right;">المستخدم</th>
+                            <th style="padding: 15px; text-align: right;">الإجراء</th>
+                            <th style="padding: 15px; text-align: right;">المستند</th>
+                            <th style="padding: 15px; text-align: right;">القسم</th>
+                            <th style="padding: 15px; text-align: right;">IP Address</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr style="border-bottom: 1px solid #e9ecef;">
+                            <td style="padding: 15px;">2025-12-17 13:00:45</td>
+                            <td style="padding: 15px;">محمد أحمد</td>
+                            <td style="padding: 15px;"><span style="background: #28a745; color: white; padding: 5px 12px; border-radius: 8px;">نسخة جديدة</span></td>
+                            <td style="padding: 15px;">NBS-SC-00847</td>
+                            <td style="padding: 15px;">سلسلة التوريد</td>
+                            <td style="padding: 15px; font-family: monospace;">192.168.1.45</td>
+                        </tr>
+                        <tr style="border-bottom: 1px solid #e9ecef;">
+                            <td style="padding: 15px;">2025-12-17 12:15:22</td>
+                            <td style="padding: 15px;">أحمد المدير</td>
+                            <td style="padding: 15px;"><span style="background: #0066cc; color: white; padding: 5px 12px; border-radius: 8px;">موافقة</span></td>
+                            <td style="padding: 15px;">NBS-SC-00847</td>
+                            <td style="padding: 15px;">سلسلة التوريد</td>
+                            <td style="padding: 15px; font-family: monospace;">192.168.1.10</td>
+                        </tr>
+                        <tr style="border-bottom: 1px solid #e9ecef;">
+                            <td style="padding: 15px;">2025-12-17 11:45:13</td>
+                            <td style="padding: 15px;">محمد أحمد</td>
+                            <td style="padding: 15px;"><span style="background: #ffc107; color: #333; padding: 5px 12px; border-radius: 8px;">طلب تعديل</span></td>
+                            <td style="padding: 15px;">NBS-SC-00847</td>
+                            <td style="padding: 15px;">سلسلة التوريد</td>
+                            <td style="padding: 15px; font-family: monospace;">192.168.1.45</td>
+                        </tr>
+                        <tr style="border-bottom: 1px solid #e9ecef;">
+                            <td style="padding: 15px;">2025-12-17 10:30:08</td>
+                            <td style="padding: 15px;">محمد أحمد</td>
+                            <td style="padding: 15px;"><span style="background: #17a2b8; color: white; padding: 5px 12px; border-radius: 8px;">رفع</span></td>
+                            <td style="padding: 15px;">NBS-SC-00847</td>
+                            <td style="padding: 15px;">سلسلة التوريد</td>
+                            <td style="padding: 15px; font-family: monospace;">192.168.1.45</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div style="margin-top: 25px; padding: 20px; background: #fff3cd; border-radius: 12px; border: 2px solid #ffc107;">
+                <i class="fas fa-shield-alt" style="color: #856404; margin-left: 10px;"></i>
+                <strong style="color: #856404;">ميزة أمان:</strong>
+                <span style="color: #666;"> جميع العمليات مسجلة مع IP، User-Agent، والتاريخ الدقيق. لا يمكن حذف أو تعديل سجلات التدقيق.</span>
+            </div>
+        </div>
+
+        <!-- Back Button -->
+        <div style="text-align: center; margin-top: 40px;">
+            <a href="index.html" style="background: white; color: #667eea; padding: 15px 40px; border-radius: 50px; text-decoration: none; font-weight: 700; display: inline-block; box-shadow: 0 5px 20px rgba(0,0,0,0.2);">
+                <i class="fas fa-arrow-right"></i> العودة للصفحة الرئيسية
+            </a>
+        </div>
+    </div>
+
+    <script>
+        // Search simulation
+        document.getElementById('searchInput').addEventListener('input', function(e) {
+            const results = document.getElementById('searchResults');
+            if (e.target.value.length > 2) {
+                results.style.display = 'block';
+                results.style.animation = 'fadeIn 0.3s';
+            } else {
+                results.style.display = 'none';
+            }
+        });
+
+        // Barcode scan simulation
+        function simulateScan() {
+            const result = document.getElementById('scanResult');
+            result.style.display = 'block';
+            result.style.animation = 'fadeIn 0.5s';
+            
+            setTimeout(() => {
+                result.style.display = 'none';
+            }, 5000);
+        }
+
+        // Add fadeIn animation
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes fadeIn {
+                from { opacity: 0; transform: translateY(20px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+        `;
+        document.head.appendChild(style);
+    </script>
+</body>
+</html>
+
+
+

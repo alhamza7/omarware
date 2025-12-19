@@ -34,18 +34,22 @@ class SapProductDirectImport(models.TransientModel):
             if not isinstance(product_data, dict):
                 raise UserError(f"Product data must be a dictionary, got {type(product_data)}")
             
+            # Validate item_code to prevent duplicates
+            if not item_code or not str(item_code).strip():
+                raise UserError(f"Product ItemCode is empty or invalid. Cannot import product without ItemCode.")
+            
             # Extract basic info
             item_name = product_data.get('ItemName', item_code)
             
-            # Check if product already exists
+            # Check if product already exists (using exact match to prevent duplicates)
             product = self.env['product.product'].search([
-                ('default_code', '=', item_code)
+                ('default_code', '=', str(item_code).strip())
             ], limit=1)
             
             # Prepare product data
             product_vals = {
                 'name': item_name,
-                'default_code': item_code,
+                'default_code': str(item_code).strip(),  # Ensure no whitespace
                 'sale_ok': True,
                 'purchase_ok': True,
                 'available_in_pos': True,  # Make product available in Point of Sale

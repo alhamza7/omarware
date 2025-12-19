@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>سير العمل الكامل - نظام NBS</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Cairo', sans-serif;
+            background: #f5f7fa;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        h1 {
+            text-align: center;
+            font-size: 48px;
+            color: #667eea;
+            margin-bottom: 20px;
+        }
+
+        .subtitle {
+            text-align: center;
+            font-size: 20px;
+            color: #666;
+            margin-bottom: 60px;
+        }
+
+        .timeline {
+            position: relative;
+            padding: 40px 0;
+        }
+
+        .timeline::before {
+            content: '';
+            position: absolute;
+            right: 50%;
+            transform: translateX(50%);
+            width: 4px;
+            height: 100%;
+            background: #667eea;
+        }
+
+        .timeline-item {
+            display: flex;
+            margin-bottom: 80px;
+            position: relative;
+        }
+
+        .timeline-item:nth-child(odd) {
+            flex-direction: row-reverse;
+        }
+
+        .timeline-content {
+            width: 45%;
+            background: white;
+            padding: 35px;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            position: relative;
+        }
+
+        .timeline-icon {
+            position: absolute;
+            right: 50%;
+            transform: translateX(50%);
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 32px;
+            border: 6px solid #f5f7fa;
+            z-index: 10;
+        }
+
+        .step-number {
+            background: #667eea;
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 900;
+            margin-bottom: 15px;
+        }
+
+        .step-title {
+            font-size: 28px;
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 15px;
+        }
+
+        .step-meta {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: #666;
+        }
+
+        .step-meta span {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .step-desc {
+            color: #666;
+            line-height: 1.8;
+            margin-bottom: 20px;
+        }
+
+        .step-details {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 12px;
+            border-right: 4px solid #667eea;
+        }
+
+        .step-details h4 {
+            color: #667eea;
+            margin-bottom: 12px;
+            font-size: 18px;
+        }
+
+        .step-details ul {
+            list-style: none;
+            padding-right: 20px;
+        }
+
+        .step-details li {
+            margin-bottom: 10px;
+            position: relative;
+            padding-right: 25px;
+        }
+
+        .step-details li::before {
+            content: '✓';
+            position: absolute;
+            right: 0;
+            color: #28a745;
+            font-weight: 900;
+        }
+
+        .notification-box {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            border-radius: 12px;
+            padding: 15px 20px;
+            margin-top: 15px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .notification-box i {
+            font-size: 24px;
+            color: #ffc107;
+        }
+
+        .token-box {
+            background: #d4edda;
+            border: 2px solid #28a745;
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 15px;
+            text-align: center;
+        }
+
+        .token-code {
+            font-family: 'Courier New', monospace;
+            font-size: 20px;
+            font-weight: 700;
+            color: #155724;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 10px;
+            letter-spacing: 2px;
+        }
+
+        .version-history {
+            margin-top: 20px;
+        }
+
+        .version-item {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            border-right: 4px solid #667eea;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .version-badge {
+            background: #667eea;
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-weight: 700;
+        }
+
+        @media (max-width: 768px) {
+            .timeline::before {
+                right: 30px;
+            }
+
+            .timeline-item {
+                flex-direction: column !important;
+            }
+
+            .timeline-content {
+                width: 100%;
+                margin-right: 60px;
+            }
+
+            .timeline-icon {
+                right: 30px;
+                transform: translateX(0);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1><i class="fas fa-project-diagram"></i> سير العمل الكامل</h1>
+        <p class="subtitle">رحلة المستند من الرفع إلى الأرشفة - مثال حي</p>
+
+        <div class="timeline">
+            <!-- Step 1: Upload -->
+            <div class="timeline-item">
+                <div class="timeline-icon">
+                    <i class="fas fa-upload"></i>
+                </div>
+                <div class="timeline-content">
+                    <div class="step-number">1</div>
+                    <h3 class="step-title">رفع المستند</h3>
+                    <div class="step-meta">
+                        <span><i class="fas fa-user"></i> محمد أحمد</span>
+                        <span><i class="fas fa-building"></i> سلسلة التوريد</span>
+                        <span><i class="fas fa-clock"></i> 2025-12-17 10:30</span>
+                    </div>
+                    <p class="step-desc">
+                        قام محمد برفع بوليصة شحن جديدة للحاوية MSCU7832651. النظام استقبل المستند وبدأ المعالجة التلقائية.
+                    </p>
+                    <div class="step-details">
+                        <h4>ما حدث تلقائياً:</h4>
+                        <ul>
+                            <li>توليد باركود فريد: <strong>NBS-SC-00847</strong></li>
+                            <li>حفظ الملف في المخزن الآمن</li>
+                            <li>قفل المستند (لا تعديل مباشر)</li>
+                            <li>إرسال للـ OCR لاستخراج النصوص</li>
+                            <li>فهرسة في OpenSearch</li>
+                            <li>تسجيل في Audit Log</li>
+                        </ul>
+                    </div>
+                    <div class="notification-box">
+                        <i class="fas fa-check-circle"></i>
+                        <div>
+                            <strong>إشعار للمشرفين:</strong><br>
+                            محمد أحمد رفع مستند جديد "بوليصة شحن - حاوية MSCU7832651"
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 2: OCR Processing -->
+            <div class="timeline-item">
+                <div class="timeline-icon">
+                    <i class="fas fa-robot"></i>
+                </div>
+                <div class="timeline-content">
+                    <div class="step-number">2</div>
+                    <h3 class="step-title">المعالجة التلقائية (OCR)</h3>
+                    <div class="step-meta">
+                        <span><i class="fas fa-cog"></i> نظام تلقائي</span>
+                        <span><i class="fas fa-clock"></i> 2025-12-17 10:31</span>
+                    </div>
+                    <p class="step-desc">
+                        محرك OCR (Tesseract) استخرج النصوص من PDF بدعم العربية والإنجليزية. تم تخزين النص للبحث السريع.
+                    </p>
+                    <div class="step-details">
+                        <h4>النصوص المستخرجة:</h4>
+                        <ul>
+                            <li>BL Number: MSCU7832651</li>
+                            <li>Container: 40'HC</li>
+                            <li>Vessel: MSC ISTANBUL</li>
+                            <li>Port of Loading: Jebel Ali</li>
+                            <li>Port of Discharge: Jeddah</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 3: Edit Request -->
+            <div class="timeline-item">
+                <div class="timeline-icon">
+                    <i class="fas fa-edit"></i>
+                </div>
+                <div class="timeline-content">
+                    <div class="step-number">3</div>
+                    <h3 class="step-title">طلب تعديل</h3>
+                    <div class="step-meta">
+                        <span><i class="fas fa-user"></i> محمد أحمد</span>
+                        <span><i class="fas fa-clock"></i> 2025-12-17 11:45</span>
+                    </div>
+                    <p class="step-desc">
+                        محمد اكتشف خطأ في رقم الحاوية ويريد تصحيحه. قام بإنشاء طلب تعديل مع توضيح السبب.
+                    </p>
+                    <div class="step-details">
+                        <h4>تفاصيل الطلب:</h4>
+                        <ul>
+                            <li>السبب: "رقم الحاوية خاطئ - الرقم الصحيح MSCU7832652"</li>
+                            <li>الحالة: قيد الانتظار</li>
+                            <li>طلب رقم: #ER-2025-00123</li>
+                        </ul>
+                    </div>
+                    <div class="notification-box">
+                        <i class="fas fa-bell"></i>
+                        <div>
+                            <strong>إشعار للمشرف أحمد المدير:</strong><br>
+                            طلب تعديل جديد من محمد أحمد على "بوليصة شحن - حاوية MSCU7832651"
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 4: Manager Review -->
+            <div class="timeline-item">
+                <div class="timeline-icon">
+                    <i class="fas fa-user-tie"></i>
+                </div>
+                <div class="timeline-content">
+                    <div class="step-number">4</div>
+                    <h3 class="step-title">مراجعة وموافقة المشرف</h3>
+                    <div class="step-meta">
+                        <span><i class="fas fa-user-shield"></i> أحمد المدير</span>
+                        <span><i class="fas fa-clock"></i> 2025-12-17 12:15</span>
+                    </div>
+                    <p class="step-desc">
+                        المشرف أحمد راجع الطلب، تحقق من السبب، ووافق على التعديل. النظام ولد رمز فك قفل لمرة واحدة.
+                    </p>
+                    <div class="step-details">
+                        <h4>إجراءات التلقائية:</h4>
+                        <ul>
+                            <li>توليد رمز فك قفل (صالح 24 ساعة)</li>
+                            <li>فك قفل المستند مؤقتاً</li>
+                            <li>إشعار المستخدم محمد</li>
+                            <li>تسجيل الموافقة في Audit Log</li>
+                        </ul>
+                    </div>
+                    <div class="token-box">
+                        <div style="font-weight: 700; color: #155724; margin-bottom: 10px;">
+                            <i class="fas fa-key"></i> رمز فك القفل (يُستخدم مرة واحدة)
+                        </div>
+                        <div class="token-code">
+                            A7X9-K2M5-P8Q3-Z1Y6
+                        </div>
+                        <div style="margin-top: 10px; font-size: 14px; color: #666;">
+                            صالح حتى: 2025-12-18 12:15 (24 ساعة)
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 5: Upload New Version -->
+            <div class="timeline-item">
+                <div class="timeline-icon">
+                    <i class="fas fa-file-upload"></i>
+                </div>
+                <div class="timeline-content">
+                    <div class="step-number">5</div>
+                    <h3 class="step-title">رفع نسخة جديدة</h3>
+                    <div class="step-meta">
+                        <span><i class="fas fa-user"></i> محمد أحمد</span>
+                        <span><i class="fas fa-clock"></i> 2025-12-17 13:00</span>
+                    </div>
+                    <p class="step-desc">
+                        محمد استخدم رمز فك القفل ورفع نسخة محدثة من البوليصة بالرقم الصحيح. النظام حفظ النسخة القديمة.
+                    </p>
+                    <div class="step-details">
+                        <h4>إجراءات تلقائية:</h4>
+                        <ul>
+                            <li>التحقق من صحة الرمز</li>
+                            <li>إنشاء نسخة جديدة (Version 2)</li>
+                            <li>حفظ النسخة القديمة (Version 1)</li>
+                            <li>استهلاك رمز فك القفل</li>
+                            <li>إعادة قفل المستند</li>
+                            <li>تسجيل في Audit Log</li>
+                        </ul>
+                    </div>
+                    <div class="version-history">
+                        <h4 style="margin-bottom: 15px; color: #667eea;">
+                            <i class="fas fa-history"></i> تاريخ الإصدارات
+                        </h4>
+                        <div class="version-item">
+                            <div>
+                                <span class="version-badge">V2</span>
+                                <strong style="margin-right: 15px;">النسخة المحدثة</strong>
+                                <span style="color: #666; font-size: 14px;">- رقم الحاوية الصحيح</span>
+                            </div>
+                            <span style="color: #28a745; font-weight: 700;">
+                                <i class="fas fa-check"></i> نشط
+                            </span>
+                        </div>
+                        <div class="version-item">
+                            <div>
+                                <span class="version-badge" style="background: #6c757d;">V1</span>
+                                <strong style="margin-right: 15px;">النسخة الأصلية</strong>
+                                <span style="color: #666; font-size: 14px;">- محفوظة للسجل</span>
+                            </div>
+                            <span style="color: #6c757d;">
+                                <i class="fas fa-archive"></i> مؤرشف
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 6: Notifications -->
+            <div class="timeline-item">
+                <div class="timeline-icon">
+                    <i class="fas fa-bell"></i>
+                </div>
+                <div class="timeline-content">
+                    <div class="step-number">6</div>
+                    <h3 class="step-title">الإشعارات الفورية</h3>
+                    <div class="step-meta">
+                        <span><i class="fas fa-broadcast-tower"></i> نظام الإشعارات</span>
+                        <span><i class="fas fa-clock"></i> فوري</span>
+                    </div>
+                    <p class="step-desc">
+                        جميع المستخدمين المعنيين استلموا إشعارات فورية في كل خطوة من سير العمل.
+                    </p>
+                    <div class="step-details">
+                        <h4>الإشعارات المرسلة:</h4>
+                        <ul>
+                            <li>للمشرف: "مستند جديد تم رفعه - يحتاج مراجعة"</li>
+                            <li>لمحمد: "تم الموافقة على طلبك - رمز فك القفل مرفق"</li>
+                            <li>للمشرف: "نسخة جديدة تم رفعها من محمد أحمد"</li>
+                            <li>للفريق: "تم تحديث بوليصة الشحن MSCU7832651"</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 7: Audit Log -->
+            <div class="timeline-item">
+                <div class="timeline-icon">
+                    <i class="fas fa-clipboard-list"></i>
+                </div>
+                <div class="timeline-content">
+                    <div class="step-number">7</div>
+                    <h3 class="step-title">سجل التدقيق الشامل</h3>
+                    <div class="step-meta">
+                        <span><i class="fas fa-database"></i> نظام التدقيق</span>
+                        <span><i class="fas fa-lock"></i> محمي</span>
+                    </div>
+                    <p class="step-desc">
+                        كل خطوة في سير العمل تم تسجيلها بالكامل مع جميع التفاصيل لأغراض الامتثال والمراجعة.
+                    </p>
+                    <div class="step-details">
+                        <h4>السجلات المحفوظة:</h4>
+                        <ul>
+                            <li>10:30 - محمد أحمد - رفع مستند - IP: 192.168.1.45</li>
+                            <li>10:31 - النظام - OCR processing completed</li>
+                            <li>11:45 - محمد أحمد - طلب تعديل</li>
+                            <li>12:15 - أحمد المدير - موافقة على الطلب</li>
+                            <li>12:15 - النظام - توليد رمز فك قفل</li>
+                            <li>13:00 - محمد أحمد - رفع نسخة جديدة (V2)</li>
+                            <li>13:00 - النظام - إعادة قفل المستند</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 8: Search & Access -->
+            <div class="timeline-item">
+                <div class="timeline-icon">
+                    <i class="fas fa-search"></i>
+                </div>
+                <div class="timeline-content">
+                    <div class="step-number">8</div>
+                    <h3 class="step-title">البحث والوصول</h3>
+                    <div class="step-meta">
+                        <span><i class="fas fa-users"></i> أي مستخدم مصرح</span>
+                        <span><i class="fas fa-infinity"></i> دائماً</span>
+                    </div>
+                    <p class="step-desc">
+                        الآن يمكن لأي مستخدم في قسم سلسلة التوريد البحث والوصول للمستند بعدة طرق.
+                    </p>
+                    <div class="step-details">
+                        <h4>طرق الوصول:</h4>
+                        <ul>
+                            <li>البحث بالعنوان: "بوليصة شحن MSCU7832652"</li>
+                            <li>البحث بالباركود: NBS-SC-00847</li>
+                            <li>البحث في المحتوى: "Jebel Ali"</li>
+                            <li>الفلترة: قسم + نوع + تاريخ</li>
+                            <li>مسح الباركود بالكاميرا</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Final Step -->
+            <div class="timeline-item">
+                <div class="timeline-icon">
+                    <i class="fas fa-check-double"></i>
+                </div>
+                <div class="timeline-content">
+                    <div class="step-number">✓</div>
+                    <h3 class="step-title" style="color: #28a745;">العملية مكتملة</h3>
+                    <div class="step-desc">
+                        المستند الآن نشط، محدث، مقفل، ومتاح لجميع المصرحين في القسم. جميع الإصدارات محفوظة وقابلة للتحميل.
+                    </div>
+                    <div style="margin-top: 25px; padding: 25px; background: #d4edda; border-radius: 15px; text-align: center;">
+                        <i class="fas fa-trophy" style="font-size: 48px; color: #28a745; margin-bottom: 15px;"></i>
+                        <h4 style="color: #155724; font-size: 24px; font-weight: 700;">
+                            نظام أرشفة محكم وشفاف بالكامل!
+                        </h4>
+                        <p style="color: #155724; margin-top: 10px;">
+                            ✓ لا حذف نهائي &nbsp; ✓ سجل كامل &nbsp; ✓ موافقات محكمة
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- CTA -->
+        <div style="text-align: center; margin: 80px 0;">
+            <h2 style="font-size: 36px; margin-bottom: 30px; color: #333;">
+                جرب النظام بنفسك!
+            </h2>
+            <a href="http://localhost:5173" target="_blank" class="btn btn-primary" style="padding: 20px 60px; font-size: 20px; text-decoration: none; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 50px; display: inline-block; box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);">
+                <i class="fas fa-rocket"></i> افتح النظام الآن
+            </a>
+            <p style="margin-top: 20px; color: #666;">
+                <i class="fas fa-user"></i> Username: admin &nbsp;|&nbsp; <i class="fas fa-lock"></i> Password: admin
+            </p>
+        </div>
+    </div>
+
+    <script>
+        // Animate timeline items on scroll
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.style.opacity = '1';
+                    entry.target.style.transform = 'translateY(0)';
+                }
+            });
+        }, { threshold: 0.2 });
+
+        document.querySelectorAll('.timeline-item').forEach(item => {
+            item.style.opacity = '0';
+            item.style.transform = 'translateY(50px)';
+            item.style.transition = 'all 0.6s ease-out';
+            observer.observe(item);
+        });
+    </script>
+</body>
+</html>
+
+
+

@@ -64,6 +64,7 @@
         'wizard/quick_product_update_views.xml',  # Quick Product Update Wizard
         'wizard/clear_pricelist_wizard_views.xml',  # Clear Pricelist Wizard
         'wizard/stock_duplicate_cleaner_views.xml',  # Stock Duplicate Cleaner Wizard
+        'wizard/sap_duplicate_cleaner_views.xml',  # SAP Duplicate Cleaner Wizard
         
         # Views (Actions & Forms)
         'views/sap_backend_views.xml',
