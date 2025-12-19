@@ -37,5 +37,6 @@ from . import sale_order_line_uom  # UoM restriction for sale orders
 from . import sale_order_sap  # SAP integration for sale orders
 from . import sale_order_line_procurement  # Compatibility shim for procurement group
 from . import res_partner_sap  # SAP integration for partners/customers
+from . import ir_asset  # Patch for ir.asset to handle None manifest
 
 
