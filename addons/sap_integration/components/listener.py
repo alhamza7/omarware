@@ -21,24 +21,48 @@ class SapBindingListener(Component):
     _inherit = 'base.event.listener'
     _collection = 'sap.backend'
     
-    @skip_if(lambda self, record, **kwargs: self.no_connector_export(record))
+    # Models to skip (system models that cause concurrent update issues)
+    SKIP_MODELS = {
+        'mail.presence',
+        'bus.bus',
+        'ir.websocket',
+        'res.users.log',
+    }
+    
+    @skip_if(lambda self, record, **kwargs: self.should_skip(record))
     def on_record_create(self, record, fields=None):
         """Export record when created"""
-        # TODO: Uncomment when queue_job is installed
-        # record.with_delay().export_record()
-        # For now, export directly
-        _logger.info(f"New binding created: {record._name} [{record.id}]")
+        try:
+            # TODO: Uncomment when queue_job is installed
+            # record.with_delay().export_record()
+            # For now, export directly
+            _logger.info(f"New binding created: {record._name} [{record.id}]")
+        except Exception as e:
+            _logger.warning(f"Error in binding create listener for {record._name}[{record.id}]: {e}")
     
-    @skip_if(lambda self, record, **kwargs: self.no_connector_export(record))
+    @skip_if(lambda self, record, **kwargs: self.should_skip(record))
     def on_record_write(self, record, fields=None):
         """Export record when updated"""
-        # TODO: Uncomment when queue_job is installed
-        # record.with_delay().export_record(fields=fields)
-        _logger.info(f"Binding updated: {record._name} [{record.id}]")
+        try:
+            # TODO: Uncomment when queue_job is installed
+            # record.with_delay().export_record(fields=fields)
+            _logger.info(f"Binding updated: {record._name} [{record.id}]")
+        except Exception as e:
+            _logger.warning(f"Error in binding write listener for {record._name}[{record.id}]: {e}")
+    
+    def should_skip(self, record):
+        """Check if listener should be skipped"""
+        # Skip system models that cause concurrent update issues
+        if record._name in self.SKIP_MODELS:
+            return True
+        # Skip if connector_no_export context flag is set
+        if record.env.context.get('connector_no_export', False):
+            return True
+        return False
     
     def no_connector_export(self, record):
-        """Check if export should be skipped"""
-        return record.env.context.get('connector_no_export', False)
+        """Check if export should be skipped (deprecated, use should_skip instead)"""
+        return self.should_skip(record)
 
 
 class SapPartnerListener(Component):
@@ -95,6 +119,8 @@ class ResPartnerListener(Component):
     
     def on_record_create(self, record, fields=None):
         """Create SAP binding when partner is created"""
+        try:
+        """Create SAP binding when partner is created"""
         # Check if auto-export is enabled in any active backend
         backends = self.env['sap.backend'].search([
             ('active', '=', True),
@@ -120,23 +146,28 @@ class ResPartnerListener(Component):
                     binding.export_record()
             except Exception as e:
                 _logger.error(f"Error auto-creating partner binding: {str(e)}")
+        except Exception as e:
+            _logger.warning(f"Error in partner create listener: {e}")
     
     def on_record_write(self, record, fields=None):
         """Update SAP when partner is updated"""
-        # Find existing bindings with auto-export enabled
-        bindings = self.env['sap.res.partner'].search([
-            ('odoo_id', '=', record.id),
-            ('backend_id.active', '=', True),
-            ('backend_id.auto_export_partners', '=', True)
-        ])
-        
-        for binding in bindings:
-            try:
-                if binding.external_id:  # Only update if already exported
-                    _logger.info(f"Auto-updating partner {record.name} to SAP backend {binding.backend_id.name}")
-                    binding.export_record()
-            except Exception as e:
-                _logger.error(f"Error auto-updating partner binding: {str(e)}")
+        try:
+            # Find existing bindings with auto-export enabled
+            bindings = self.env['sap.res.partner'].search([
+                ('odoo_id', '=', record.id),
+                ('backend_id.active', '=', True),
+                ('backend_id.auto_export_partners', '=', True)
+            ])
+            
+            for binding in bindings:
+                try:
+                    if binding.external_id:  # Only update if already exported
+                        _logger.info(f"Auto-updating partner {record.name} to SAP backend {binding.backend_id.name}")
+                        binding.export_record()
+                except Exception as e:
+                    _logger.error(f"Error auto-updating partner binding: {str(e)}")
+        except Exception as e:
+            _logger.warning(f"Error in partner write listener: {e}")
 
 
 class ProductProductListener(Component):
@@ -147,9 +178,10 @@ class ProductProductListener(Component):
     
     def on_record_create(self, record, fields=None):
         """Create SAP binding when product is created"""
-        # Check if SAP product model is available (avoid errors during module installation)
-        if 'sap.product.product' not in self.env:
-            return
+        try:
+            # Check if SAP product model is available (avoid errors during module installation)
+            if 'sap.product.product' not in self.env:
+                return
             
         # Check if auto-export is enabled in any active backend
         try:
@@ -178,16 +210,16 @@ class ProductProductListener(Component):
                 except Exception as e:
                     _logger.error(f"Error auto-creating product binding: {str(e)}")
         except Exception as e:
-            _logger.warning(f"Could not access sap.product.product model during create: {str(e)}")
+            _logger.warning(f"Error in product create listener: {e}")
     
     def on_record_write(self, record, fields=None):
         """Update SAP when product is updated"""
-        # Check if SAP product model is available (avoid errors during module installation)
-        if 'sap.product.product' not in self.env:
-            return
-            
-        # Find existing bindings with auto-export enabled
         try:
+            # Check if SAP product model is available (avoid errors during module installation)
+            if 'sap.product.product' not in self.env:
+                return
+            
+            # Find existing bindings with auto-export enabled
             bindings = self.env['sap.product.product'].search([
                 ('odoo_id', '=', record.id),
                 ('backend_id.active', '=', True),
@@ -213,8 +245,9 @@ class SaleOrderListener(Component):
     
     def on_record_write(self, record, fields=None):
         """Create SAP binding when order is confirmed"""
-        # Auto-create binding when order is confirmed and auto-export is enabled
-        if record.state in ['sale', 'done']:
+        try:
+            # Auto-create binding when order is confirmed and auto-export is enabled
+            if record.state in ['sale', 'done']:
             backends = self.env['sap.backend'].search([
                 ('active', '=', True),
                 ('auto_export_orders', '=', True)
@@ -243,4 +276,6 @@ class SaleOrderListener(Component):
                         existing.export_record()
                 except Exception as e:
                     _logger.error(f"Error auto-exporting sale order: {str(e)}")
+        except Exception as e:
+            _logger.warning(f"Error in sale order write listener: {e}")
 
