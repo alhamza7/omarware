@@ -182,8 +182,7 @@ class ProductProductListener(Component):
             if 'sap.product.product' not in self.env:
                 return
             
-        # Check if auto-export is enabled in any active backend
-        try:
+            # Check if auto-export is enabled in any active backend
             backends = self.env['sap.backend'].search([
                 ('active', '=', True),
                 ('auto_export_products', '=', True)
@@ -247,34 +246,34 @@ class SaleOrderListener(Component):
         try:
             # Auto-create binding when order is confirmed and auto-export is enabled
             if record.state in ['sale', 'done']:
-            backends = self.env['sap.backend'].search([
-                ('active', '=', True),
-                ('auto_export_orders', '=', True)
-            ])
-            
-            for backend in backends:
-                try:
-                    # Check if binding already exists
-                    existing = self.env['sap.sale.order'].search([
-                        ('odoo_id', '=', record.id),
-                        ('backend_id', '=', backend.id),
-                    ])
-                    
-                    if not existing:
-                        binding = self.env['sap.sale.order'].create({
-                            'odoo_id': record.id,
-                            'backend_id': backend.id,
-                        })
-                        _logger.info(f"Auto-created SAP binding for sale order: {record.name} on backend {backend.name}")
+                backends = self.env['sap.backend'].search([
+                    ('active', '=', True),
+                    ('auto_export_orders', '=', True)
+                ])
+                
+                for backend in backends:
+                    try:
+                        # Check if binding already exists
+                        existing = self.env['sap.sale.order'].search([
+                            ('odoo_id', '=', record.id),
+                            ('backend_id', '=', backend.id),
+                        ])
                         
-                        # Export immediately if not using queue_job
-                        binding.export_record()
-                    elif existing.external_id:
-                        # Update existing export
-                        _logger.info(f"Auto-updating sale order {record.name} to SAP backend {backend.name}")
-                        existing.export_record()
-                except Exception as e:
-                    _logger.error(f"Error auto-exporting sale order: {str(e)}")
+                        if not existing:
+                            binding = self.env['sap.sale.order'].create({
+                                'odoo_id': record.id,
+                                'backend_id': backend.id,
+                            })
+                            _logger.info(f"Auto-created SAP binding for sale order: {record.name} on backend {backend.name}")
+                            
+                            # Export immediately if not using queue_job
+                            binding.export_record()
+                        elif existing.external_id:
+                            # Update existing export
+                            _logger.info(f"Auto-updating sale order {record.name} to SAP backend {backend.name}")
+                            existing.export_record()
+                    except Exception as e:
+                        _logger.error(f"Error auto-exporting sale order: {str(e)}")
         except Exception as e:
             _logger.warning(f"Error in sale order write listener: {e}")
 
