@@ -39,6 +39,8 @@
                             <field name="active"/>
                             <field name="auto_sync"/>
                             <field name="sync_frequency" invisible="not auto_sync"/>
+                            <field name="update_only" invisible="not auto_sync"
+                                   help="Only update existing records, don't create new ones (recommended for auto sync)"/>
                             <field name="last_sync" readonly="1"/>
                         </group>
                         <group string="Sync Options">

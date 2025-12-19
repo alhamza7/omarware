@@ -247,8 +247,17 @@ class SapProductSync(models.Model):
             self.sync_to_sap()
     
     @api.model
-    def import_record(self, backend, external_id):
-        """Import a single product record from SAP - DIRECT METHOD"""
+    def import_record(self, backend, external_id, update_only=False):
+        """Import a single product record from SAP - DIRECT METHOD
+        
+        Args:
+            backend: SAP backend record
+            external_id: SAP item code
+            update_only: If True, only update existing products, don't create new ones
+        
+        Returns:
+            product.product record or None
+        """
         try:
             _logger.info(f"Importing product {external_id} from SAP backend {backend.name}")
             
@@ -266,9 +275,10 @@ class SapProductSync(models.Model):
             
             # Use direct import helper
             direct_importer = self.env['sap.product.direct.import']
-            product = direct_importer.import_product_direct(backend, external_id, product_data)
+            product = direct_importer.import_product_direct(backend, external_id, product_data, update_only=update_only)
             
-            _logger.info(f"Successfully imported product {external_id}: {product.name}")
+            if product:
+                _logger.info(f"Successfully imported product {external_id}: {product.name}")
             return product
             
         except Exception as e:

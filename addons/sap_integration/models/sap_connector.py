@@ -35,6 +35,8 @@ class SapConnector(models.Model):
         ('daily', 'Daily'),
         ('weekly', 'Weekly'),
     ], 'Sync Frequency', default='daily')
+    update_only = fields.Boolean('Update Only', default=False,
+                                help="Only update existing records, don't create new ones (for auto sync)")
     
     # Statistics
     last_sync = fields.Datetime('Last Sync', readonly=True)
@@ -348,7 +350,8 @@ class SapConnector(models.Model):
                         _logger.info(f"Processing product: {item_code} - {item_name}")
                         
                         # Use product model import method
-                        result = product_model.import_record(self.backend_id, item_code)
+                        # Pass update_only flag if set (for auto sync)
+                        result = product_model.import_record(self.backend_id, item_code, update_only=self.update_only)
                         if result:
                             product_count += 1
                         

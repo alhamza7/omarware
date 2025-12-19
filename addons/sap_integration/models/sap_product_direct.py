@@ -17,7 +17,7 @@ class SapProductDirectImport(models.TransientModel):
     _description = 'SAP Product Direct Import'
     
     @api.model
-    def import_product_direct(self, backend, item_code, product_data):
+    def import_product_direct(self, backend, item_code, product_data, update_only=False):
         """
         Import a single product directly without service layer complexity
         
@@ -25,9 +25,10 @@ class SapProductDirectImport(models.TransientModel):
             backend: SAP backend record
             item_code: SAP item code
             product_data: Dictionary with product data from SAP
+            update_only: If True, only update existing products, don't create new ones
         
         Returns:
-            product.product record
+            product.product record or None if update_only=True and product doesn't exist
         """
         try:
             # Validate input
@@ -114,9 +115,12 @@ class SapProductDirectImport(models.TransientModel):
             if product:
                 product.write(product_vals)
                 _logger.info(f"Updated existing product: {product.name} ({item_code})")
-            else:
+            elif not update_only:
                 product = self.env['product.product'].create(product_vals)
                 _logger.info(f"Created new product: {product.name} ({item_code})")
+            else:
+                _logger.info(f"Skipping product {item_code} - update_only=True and product doesn't exist")
+                return None
             
             # Create or update sync record
             sync_record = self.env['sap.product.sync'].search([
