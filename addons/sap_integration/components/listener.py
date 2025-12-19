@@ -120,32 +120,31 @@ class ResPartnerListener(Component):
     def on_record_create(self, record, fields=None):
         """Create SAP binding when partner is created"""
         try:
-        """Create SAP binding when partner is created"""
-        # Check if auto-export is enabled in any active backend
-        backends = self.env['sap.backend'].search([
-            ('active', '=', True),
-            ('auto_export_partners', '=', True)
-        ])
-        
-        for backend in backends:
-            try:
-                # Check if binding already exists
-                existing = self.env['sap.res.partner'].search([
-                    ('odoo_id', '=', record.id),
-                    ('backend_id', '=', backend.id),
-                ])
-                
-                if not existing:
-                    binding = self.env['sap.res.partner'].create({
-                        'odoo_id': record.id,
-                        'backend_id': backend.id,
-                    })
-                    _logger.info(f"Auto-created SAP binding for partner: {record.name} on backend {backend.name}")
+            # Check if auto-export is enabled in any active backend
+            backends = self.env['sap.backend'].search([
+                ('active', '=', True),
+                ('auto_export_partners', '=', True)
+            ])
+            
+            for backend in backends:
+                try:
+                    # Check if binding already exists
+                    existing = self.env['sap.res.partner'].search([
+                        ('odoo_id', '=', record.id),
+                        ('backend_id', '=', backend.id),
+                    ])
                     
-                    # Export immediately if not using queue_job
-                    binding.export_record()
-            except Exception as e:
-                _logger.error(f"Error auto-creating partner binding: {str(e)}")
+                    if not existing:
+                        binding = self.env['sap.res.partner'].create({
+                            'odoo_id': record.id,
+                            'backend_id': backend.id,
+                        })
+                        _logger.info(f"Auto-created SAP binding for partner: {record.name} on backend {backend.name}")
+                        
+                        # Export immediately if not using queue_job
+                        binding.export_record()
+                except Exception as e:
+                    _logger.error(f"Error auto-creating partner binding: {str(e)}")
         except Exception as e:
             _logger.warning(f"Error in partner create listener: {e}")
     
