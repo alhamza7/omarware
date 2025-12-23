@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-    <!-- Simple Tree View -->
+    <!-- Simple List View (was tree in older Odoo) -->
     <record id="view_custom_report_template_tree_simple" model="ir.ui.view">
         <field name="name">custom.report.template.tree.simple</field>
         <field name="model">custom.report.template</field>
         <field name="arch" type="xml">
-            <tree string="Custom Report Templates">
+            <list string="Custom Report Templates">
                 <field name="sequence" widget="handle"/>
                 <field name="name"/>
                 <field name="code"/>
@@ -13,7 +13,7 @@
                 <field name="language"/>
                 <field name="currency_id"/>
                 <field name="active" widget="boolean_toggle"/>
-            </tree>
+            </list>
         </field>
     </record>
 
@@ -80,7 +80,7 @@
     <record id="action_custom_report_template_simple" model="ir.actions.act_window">
         <field name="name">قوالب التقارير المخصصة</field>
         <field name="res_model">custom.report.template</field>
-        <field name="view_mode">tree,form</field>
+        <field name="view_mode">list,form</field>
         <field name="view_id" ref="view_custom_report_template_tree_simple"/>
     </record>
 
