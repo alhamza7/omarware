@@ -183,14 +183,15 @@ class CustomReportTemplate(models.Model):
     usage_count = fields.Integer('عدد مرات الاستخدام', readonly=True, default=0)
     last_used = fields.Datetime('آخر استخدام', readonly=True)
     
-    @api.model
-    def create(self, vals):
+    @api.model_create_multi
+    def create(self, vals_list):
         """Override create to ensure code is unique"""
-        if vals.get('code'):
-            existing = self.search([('code', '=', vals['code'])])
-            if existing:
-                raise UserError(_(f"القالب برمز '{vals['code']}' موجود مسبقاً!"))
-        return super(CustomReportTemplate, self).create(vals)
+        for vals in vals_list:
+            if vals.get('code'):
+                existing = self.search([('code', '=', vals['code'])])
+                if existing:
+                    raise UserError(_(f"القالب برمز '{vals['code']}' موجود مسبقاً!"))
+        return super(CustomReportTemplate, self).create(vals_list)
     
     def generate_report(self, record_id, model_name):
         """توليد التقرير لسجل معين"""
