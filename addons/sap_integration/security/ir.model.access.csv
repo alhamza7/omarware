@@ -100,3 +100,7 @@ access_custom_report_total_manager,custom.report.total manager,model_custom_repo
 access_custom_report_total_user,custom.report.total user,model_custom_report_total,sap_integration.group_sap_user,1,0,0,0
 access_custom_report_section_manager,custom.report.section manager,model_custom_report_section,sap_integration.group_sap_manager,1,1,1,1
 access_custom_report_section_user,custom.report.section user,model_custom_report_section,sap_integration.group_sap_user,1,0,0,0
+access_invoice_template_designer_manager,invoice.template.designer manager,model_invoice_template_designer,sap_integration.group_sap_manager,1,1,1,1
+access_invoice_template_designer_user,invoice.template.designer user,model_invoice_template_designer,sap_integration.group_sap_user,1,1,1,0
+access_invoice_template_element_manager,invoice.template.element manager,model_invoice_template_element,sap_integration.group_sap_manager,1,1,1,1
+access_invoice_template_element_user,invoice.template.element user,model_invoice_template_element,sap_integration.group_sap_user,1,0,0,0

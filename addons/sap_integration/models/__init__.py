@@ -44,4 +44,8 @@ from . import custom_report_template
 from . import custom_report_qweb_generator
 from . import custom_report_pos_integration
 
+# Invoice Visual Designer (NEW!)
+from . import invoice_template_designer
+from . import invoice_designer_pos_integration
+
 

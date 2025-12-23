@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+
+    <t t-name="sap_integration.InvoiceDesigner">
+        <div class="o_invoice_designer">
+            <!-- Toolbar -->
+            <div class="o_designer_toolbar">
+                <div class="o_toolbar_left">
+                    <button class="btn btn-primary" t-on-click="saveTemplate">
+                        <i class="fa fa-save"/> Save
+                    </button>
+                    <button class="btn btn-secondary" t-on-click="preview">
+                        <i class="fa fa-eye"/> Preview
+                    </button>
+                    <button class="btn btn-secondary" t-on-click="closeDesigner">
+                        <i class="fa fa-times"/> Close
+                    </button>
+                </div>
+                
+                <div class="o_toolbar_center">
+                    <span class="o_template_name">
+                        <t t-esc="state.template?.name"/>
+                    </span>
+                </div>
+                
+                <div class="o_toolbar_right">
+                    <button class="btn btn-sm" t-on-click="zoomOut">
+                        <i class="fa fa-search-minus"/>
+                    </button>
+                    <span class="o_zoom_level">
+                        <t t-esc="Math.round(state.scale * 100)"/>%
+                    </span>
+                    <button class="btn btn-sm" t-on-click="zoomIn">
+                        <i class="fa fa-search-plus"/>
+                    </button>
+                    <button class="btn btn-sm" t-on-click="toggleGrid" 
+                            t-att-class="state.showGrid ? 'active' : ''">
+                        <i class="fa fa-th"/> Grid
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Main Content -->
+            <div class="o_designer_content">
+                <!-- Left Panel - Tools -->
+                <div class="o_designer_sidebar o_sidebar_left">
+                    <div class="o_sidebar_header">
+                        <h5>Elements</h5>
+                    </div>
+                    <div class="o_sidebar_body">
+                        <div class="o_tools_panel">
+                            <button class="o_tool_btn" t-on-click="() => this.addElement('text')">
+                                <i class="fa fa-font fa-2x"/>
+                                <span>Text</span>
+                            </button>
+                            <button class="o_tool_btn" t-on-click="() => this.addElement('field')">
+                                <i class="fa fa-database fa-2x"/>
+                                <span>Field</span>
+                            </button>
+                            <button class="o_tool_btn" t-on-click="() => this.addElement('image')">
+                                <i class="fa fa-image fa-2x"/>
+                                <span>Image</span>
+                            </button>
+                            <button class="o_tool_btn" t-on-click="() => this.addElement('table')">
+                                <i class="fa fa-table fa-2x"/>
+                                <span>Table</span>
+                            </button>
+                            <button class="o_tool_btn" t-on-click="() => this.addElement('shape')">
+                                <i class="fa fa-square fa-2x"/>
+                                <span>Shape</span>
+                            </button>
+                            <button class="o_tool_btn" t-on-click="() => this.addElement('line')">
+                                <i class="fa fa-minus fa-2x"/>
+                                <span>Line</span>
+                            </button>
+                            <button class="o_tool_btn" t-on-click="() => this.addElement('barcode')">
+                                <i class="fa fa-barcode fa-2x"/>
+                                <span>Barcode</span>
+                            </button>
+                            <button class="o_tool_btn" t-on-click="() => this.addElement('qrcode')">
+                                <i class="fa fa-qrcode fa-2x"/>
+                                <span>QR Code</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Center - Canvas -->
+                <div class="o_designer_canvas_container">
+                    <div class="o_canvas_wrapper" t-att-style="'transform: scale(' + state.scale + ')'">
+                        <canvas t-ref="canvas" class="o_invoice_canvas"></canvas>
+                    </div>
+                </div>
+                
+                <!-- Right Panel - Properties -->
+                <div class="o_designer_sidebar o_sidebar_right">
+                    <div class="o_sidebar_header">
+                        <h5>Properties</h5>
+                    </div>
+                    <div class="o_sidebar_body">
+                        <t t-if="state.selectedElement">
+                            <div class="o_properties_panel">
+                                <div class="o_property_group">
+                                    <h6>Element</h6>
+                                    <div class="form-group">
+                                        <label>Type</label>
+                                        <input type="text" class="form-control" 
+                                               t-att-value="state.selectedElement.element_type" 
+                                               readonly="readonly"/>
+                                    </div>
+                                </div>
+                                
+                                <div class="o_property_group">
+                                    <h6>Position &amp; Size</h6>
+                                    <div class="row">
+                                        <div class="col-6">
+                                            <label>X (mm)</label>
+                                            <input type="number" class="form-control form-control-sm" 
+                                                   t-att-value="state.selectedElement.x"/>
+                                        </div>
+                                        <div class="col-6">
+                                            <label>Y (mm)</label>
+                                            <input type="number" class="form-control form-control-sm" 
+                                                   t-att-value="state.selectedElement.y"/>
+                                        </div>
+                                    </div>
+                                    <div class="row mt-2">
+                                        <div class="col-6">
+                                            <label>Width (mm)</label>
+                                            <input type="number" class="form-control form-control-sm" 
+                                                   t-att-value="state.selectedElement.width"/>
+                                        </div>
+                                        <div class="col-6">
+                                            <label>Height (mm)</label>
+                                            <input type="number" class="form-control form-control-sm" 
+                                                   t-att-value="state.selectedElement.height"/>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <t t-if="state.selectedElement.element_type === 'text'">
+                                    <div class="o_property_group">
+                                        <h6>Text</h6>
+                                        <div class="form-group">
+                                            <label>Content</label>
+                                            <textarea class="form-control" rows="3" 
+                                                      t-att-value="state.selectedElement.static_text"/>
+                                        </div>
+                                    </div>
+                                </t>
+                                
+                                <t t-if="state.selectedElement.element_type === 'field'">
+                                    <div class="o_property_group">
+                                        <h6>Data Field</h6>
+                                        <div class="form-group">
+                                            <label>Field Name</label>
+                                            <input type="text" class="form-control" 
+                                                   t-att-value="state.selectedElement.field_name"/>
+                                        </div>
+                                    </div>
+                                </t>
+                                
+                                <div class="o_property_group">
+                                    <h6>Style</h6>
+                                    <div class="form-group">
+                                        <label>Font Size</label>
+                                        <input type="number" class="form-control form-control-sm" 
+                                               t-att-value="state.selectedElement.font_size"/>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Color</label>
+                                        <input type="color" class="form-control" 
+                                               t-att-value="state.selectedElement.color"/>
+                                    </div>
+                                </div>
+                                
+                                <div class="o_property_actions">
+                                    <button class="btn btn-danger btn-sm btn-block" t-on-click="deleteElement">
+                                        <i class="fa fa-trash"/> Delete Element
+                                    </button>
+                                </div>
+                            </div>
+                        </t>
+                        <t t-else="">
+                            <div class="o_no_selection">
+                                <p class="text-muted">Select an element to edit its properties</p>
+                            </div>
+                        </t>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </t>
+
+</templates>
+
