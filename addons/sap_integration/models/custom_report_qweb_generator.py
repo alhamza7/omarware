@@ -283,9 +283,10 @@ class CustomReportQWebGenerator(models.AbstractModel):
             alignment_class = f'text-{col.alignment}'
             
             if col.is_monetary:
+                decimal_format = '{:.' + str(col.decimal_places) + 'f}'
                 html.append(f'''
                 <td class="{alignment_class}">
-                    <span t-esc="'{:.{col.decimal_places}f}'.format(line.{col.technical_name})"/>
+                    <span t-esc="'{decimal_format}'.format(line.{col.technical_name})"/>
                     <span t-if="template.show_currency_name" t-field="doc.currency_id.name"/>
                 </td>
                 ''')
