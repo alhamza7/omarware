@@ -1,31 +1,43 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-Shared API authentication helpers.
+import logging
 
-The frontend uses Bearer JWT tokens (see `nbs.jwt.service`).
-Most API routes therefore run with `auth='none'` and validate tokens manually,
-then switch the request environment to the authenticated user.
-"""
+_logger = logging.getLogger(__name__)
 
-from odoo.http import request
 
-from .main import NBSMainController
+def _verify_jwt_token():
+    """Verify JWT token from Authorization header"""
+    from odoo.http import request
+    try:
+        auth_header = request.httprequest.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return None
+        token = auth_header.split(' ')[1]
+        if not hasattr(request, 'env') or not request.env:
+            _logger.warning('Request environment not initialized')
+            return None
+        jwt_service = request.env['nbs.jwt.service'].sudo()
+        payload = jwt_service.verify_access_token(token)
+        if payload:
+            return payload['user_id']
+        return None
+    except Exception as e:
+        _logger.error(f'JWT verification error: {str(e)}', exc_info=True)
+        return None
 
 
 def ensure_jwt_user_id():
-    """
-    Validate Authorization: Bearer <jwt> and update request env.
-
-    Returns:
-        int|None: authenticated user id or None if missing/invalid token
-    """
-    uid = NBSMainController()._verify_jwt_token()
-    if not uid:
+    """Validate Authorization: Bearer <jwt> and update request env."""
+    from odoo.http import request
+    try:
+        uid = _verify_jwt_token()
+        if not uid:
+            return None
+        if not hasattr(request, 'env') or not request.env:
+            _logger.error('Request environment not initialized, cannot update user')
+            return None
+        request.update_env(user=uid)
+        return uid
+    except Exception as e:
+        _logger.error(f'ensure_jwt_user_id error: {str(e)}', exc_info=True)
         return None
-    request.update_env(user=uid)
-    return uid
-
-
-

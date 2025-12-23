@@ -88,3 +88,5 @@ access_sap_product_warehouse_info_manager,sap.product.warehouse.info manager,mod
 access_sap_product_warehouse_info_user,sap.product.warehouse.info user,model_sap_product_warehouse_info,sap_integration.group_sap_user,1,0,0,0
 access_sap_product_complete_migration_manager,sap.product.complete.migration manager,model_sap_product_complete_migration,sap_integration.group_sap_manager,1,1,1,1
 access_sap_product_complete_migration_user,sap.product.complete.migration user,model_sap_product_complete_migration,sap_integration.group_sap_user,1,1,1,1
+access_sap_duplicate_cleaner_manager,sap.duplicate.cleaner manager,model_sap_duplicate_cleaner,sap_integration.group_sap_manager,1,1,1,1
+access_sap_duplicate_cleaner_user,sap.duplicate.cleaner user,model_sap_duplicate_cleaner,sap_integration.group_sap_user,1,1,1,1

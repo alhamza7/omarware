@@ -78,20 +78,8 @@ class NBSMainController(http.Controller):
         Returns:
             User ID if valid, None if invalid
         """
-        auth_header = request.httprequest.headers.get('Authorization')
-        
-        if not auth_header or not auth_header.startswith('Bearer '):
-            return None
-        
-        token = auth_header.split(' ')[1]
-        
-        jwt_service = request.env['nbs.jwt.service'].sudo()
-        payload = jwt_service.verify_access_token(token)
-        
-        if payload:
-            return payload['user_id']
-        
-        return None
+        from ._auth import _verify_jwt_token
+        return _verify_jwt_token()
     
     @http.route('/api/<path:path>', type='http', auth='none', methods=['OPTIONS'], csrf=False)
     def handle_preflight(self, **kwargs):
