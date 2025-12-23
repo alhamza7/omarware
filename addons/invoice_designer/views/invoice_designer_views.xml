@@ -80,8 +80,11 @@
                 <field name="name"/>
                 <field name="code"/>
                 <field name="template_type"/>
+                <field name="currency_id" optional="hide"/>
                 <field name="is_default"/>
                 <field name="usage_count"/>
+                <field name="last_used_date" optional="hide"/>
+                <field name="company_id" optional="hide" groups="base.group_multi_company"/>
                 <field name="active"/>
             </list>
         </field>
