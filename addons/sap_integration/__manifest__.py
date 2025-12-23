@@ -46,9 +46,7 @@
     },
     'assets': {
         'web.assets_backend': [
-            'sap_integration/static/src/js/invoice_designer.js',
-            'sap_integration/static/src/xml/invoice_designer.xml',
-            'sap_integration/static/src/css/invoice_designer.css',
+            # Invoice Designer moved to separate module 'invoice_designer'
         ],
     },
     'data': [
@@ -78,8 +76,7 @@
         'views/custom_report_template_views_simple.xml',  # Custom Report Designer (SIMPLE)
         'data/custom_report_templates_data.xml',  # Default Report Templates
         
-        # Invoice Visual Designer (NEW!)
-        'views/invoice_template_designer_views.xml',  # Visual Invoice Designer
+        # Invoice Visual Designer moved to separate module 'invoice_designer'
         
         # Views (Actions & Forms)
         'views/sap_backend_views.xml',

@@ -1,5 +1,0 @@
-access_invoice_template_designer_manager,invoice.template.designer manager,model_invoice_template_designer,sap_integration.group_sap_manager,1,1,1,1
-access_invoice_template_designer_user,invoice.template.designer user,model_invoice_template_designer,sap_integration.group_sap_user,1,1,1,0
-access_invoice_template_element_manager,invoice.template.element manager,model_invoice_template_element,sap_integration.group_sap_manager,1,1,1,1
-access_invoice_template_element_user,invoice.template.element user,model_invoice_template_element,sap_integration.group_sap_user,1,0,0,0
-
