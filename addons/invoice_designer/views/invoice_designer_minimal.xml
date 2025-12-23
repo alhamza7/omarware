@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        
+        <!-- ==================== MENU ==================== -->
+        
+        <menuitem id="menu_invoice_designer_root"
+                  name="Invoice Designer"
+                  sequence="50"/>
+        
+        <menuitem id="menu_invoice_designer_templates"
+                  name="Templates"
+                  parent="menu_invoice_designer_root"
+                  sequence="10"/>
+        
+        
+        <!-- ==================== ACTION ==================== -->
+        
+        <record id="action_invoice_template_designer" model="ir.actions.act_window">
+            <field name="name">Invoice Templates</field>
+            <field name="res_model">invoice.template.designer</field>
+            <field name="view_mode">tree,form</field>
+            <field name="help" type="html">
+                <p class="o_view_nocontent_smiling_face">
+                    Create your first invoice template!
+                </p>
+            </field>
+        </record>
+        
+        <menuitem id="menu_invoice_template_designer"
+                  name="Invoice Templates"
+                  parent="menu_invoice_designer_templates"
+                  action="action_invoice_template_designer"
+                  sequence="10"/>
+        
+        
+        <!-- ==================== TREE VIEW ==================== -->
+        
+        <record id="view_invoice_template_designer_tree_minimal" model="ir.ui.view">
+            <field name="name">invoice.template.designer.tree.minimal</field>
+            <field name="model">invoice.template.designer</field>
+            <field name="priority">1</field>
+            <field name="arch" type="xml">
+                <tree string="Templates">
+                    <field name="name"/>
+                    <field name="code"/>
+                    <field name="template_type"/>
+                    <field name="active"/>
+                </tree>
+            </field>
+        </record>
+        
+        
+        <!-- ==================== FORM VIEW ==================== -->
+        
+        <record id="view_invoice_template_designer_form_minimal" model="ir.ui.view">
+            <field name="name">invoice.template.designer.form.minimal</field>
+            <field name="model">invoice.template.designer</field>
+            <field name="priority">1</field>
+            <field name="arch" type="xml">
+                <form string="Invoice Template">
+                    <sheet>
+                        <group>
+                            <field name="name"/>
+                            <field name="code"/>
+                            <field name="template_type"/>
+                            <field name="sequence"/>
+                            <field name="active"/>
+                        </group>
+                        
+                        <notebook>
+                            <page string="Page Settings">
+                                <group>
+                                    <field name="page_format"/>
+                                    <field name="page_width"/>
+                                    <field name="page_height"/>
+                                    <field name="page_orientation"/>
+                                </group>
+                            </page>
+                            
+                            <page string="Margins">
+                                <group>
+                                    <field name="margin_top"/>
+                                    <field name="margin_right"/>
+                                    <field name="margin_bottom"/>
+                                    <field name="margin_left"/>
+                                </group>
+                            </page>
+                            
+                            <page string="Description">
+                                <field name="description"/>
+                            </page>
+                        </notebook>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+        
+    </data>
+</odoo>
+

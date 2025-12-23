@@ -131,13 +131,23 @@ class InvoiceTemplateDesigner(models.Model):
     # ==================== Statistics ====================
     usage_count = fields.Integer('Usage Count', default=0, readonly=True)
     last_used_date = fields.Datetime('Last Used Date', readonly=True)
-    last_used = fields.Datetime('Last Used', readonly=True, store=False, compute='_compute_last_used')
     
-    @api.depends('last_used_date')
-    def _compute_last_used(self):
-        """Alias for last_used_date for backwards compatibility"""
+    # Backwards compatibility computed fields (for old views in DB)
+    last_used = fields.Datetime('Last Used', compute='_compute_backwards_compat', store=False)
+    canvas_width = fields.Float('Canvas Width', compute='_compute_backwards_compat', store=False)
+    canvas_height = fields.Float('Canvas Height', compute='_compute_backwards_compat', store=False)
+    paper_format = fields.Char('Paper Format', compute='_compute_backwards_compat', store=False)
+    orientation = fields.Char('Orientation', compute='_compute_backwards_compat', store=False)
+    
+    @api.depends('last_used_date', 'page_width', 'page_height', 'page_format', 'page_orientation')
+    def _compute_backwards_compat(self):
+        """Computed fields for backwards compatibility with old views"""
         for record in self:
             record.last_used = record.last_used_date
+            record.canvas_width = record.page_width
+            record.canvas_height = record.page_height
+            record.paper_format = record.page_format
+            record.orientation = record.page_orientation
     
     # ==================== Company ====================
     company_id = fields.Many2one('res.company', 'Company', 

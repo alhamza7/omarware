@@ -44,7 +44,7 @@ Supported Document Types:
     'data': [
         'security/invoice_designer_security.xml',
         'security/ir.model.access.csv',
-        'views/invoice_template_views_simple.xml',
+        'views/invoice_designer_minimal.xml',
     ],
     # Assets will be added later when JS/CSS files are created
     # 'assets': {
