@@ -15,29 +15,25 @@ export class InvoiceDesignerCanvas extends Component {
     setup() {
         this.orm = useService("orm");
         this.notification = useService("notification");
-        this.router = useService("router");
         
-        // Get templateId from multiple sources
+        // Get templateId from URL hash (most reliable in Odoo 19)
         let templateId = null;
         
-        // 1. Try from URL hash parameters (most reliable)
+        // Parse URL hash: #action=invoice_designer_canvas&template_id=5
         const hash = window.location.hash;
+        console.log("Current URL hash:", hash);
+        
         if (hash) {
             const match = hash.match(/template_id=(\d+)/);
             if (match) {
                 templateId = parseInt(match[1]);
-                console.log("Template ID from URL:", templateId);
+                console.log("✅ Template ID found in URL:", templateId);
+            } else {
+                console.log("❌ No template_id in URL hash");
             }
         }
         
-        // 2. Try from router current hash
-        if (!templateId && this.router && this.router.current && this.router.current.hash) {
-            const hashObj = this.router.current.hash;
-            templateId = hashObj.template_id || hashObj.templateId;
-            console.log("Template ID from router:", templateId);
-        }
-        
-        // 3. Try from props (fallback)
+        // Fallback: try from props (unlikely to work but worth trying)
         if (!templateId) {
             if (this.props.action && this.props.action.params) {
                 templateId = this.props.action.params.templateId || this.props.action.params.template_id;
@@ -48,11 +44,12 @@ export class InvoiceDesignerCanvas extends Component {
             if (!templateId) {
                 templateId = this.props.templateId || this.props.template_id;
             }
-            console.log("Template ID from props:", templateId);
+            if (templateId) {
+                console.log("✅ Template ID found in props:", templateId);
+            }
         }
         
         console.log("Final Template ID:", templateId);
-        console.log("Props received:", this.props);
         
         if (!templateId) {
             this.notification.add(
