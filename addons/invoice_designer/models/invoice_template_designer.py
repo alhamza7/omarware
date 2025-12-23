@@ -229,10 +229,12 @@ class InvoiceTemplateDesigner(models.Model):
             'type': 'ir.actions.client',
             'tag': 'invoice_designer_canvas',
             'name': 'Visual Designer',
+            'context': {
+                'default_template_id': self.id,
+            },
             'params': {
                 'templateId': self.id,
             },
-            'target': 'fullscreen',
         }
 
     def action_preview_pdf(self):

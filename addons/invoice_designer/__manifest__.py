@@ -45,6 +45,7 @@ Supported Document Types:
         'security/invoice_designer_security.xml',
         'security/ir.model.access.csv',
         'views/invoice_designer_minimal.xml',
+        'views/sale_order_views.xml',
     ],
     'assets': {
         'web.assets_backend': [
