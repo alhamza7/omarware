@@ -67,7 +67,8 @@
         'wizard/sap_duplicate_cleaner_views.xml',  # SAP Duplicate Cleaner Wizard
         
         # Custom Report Designer
-        'views/custom_report_template_views.xml',  # Custom Report Designer
+        # 'views/custom_report_template_views.xml',  # Custom Report Designer (DISABLED - DEBUGGING)
+        'views/custom_report_template_views_simple.xml',  # Custom Report Designer (SIMPLE)
         'data/custom_report_templates_data.xml',  # Default Report Templates
         
         # Views (Actions & Forms)

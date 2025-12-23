@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Simple Action and Menu without complex form -->
+    <record id="action_custom_report_template_simple" model="ir.actions.act_window">
+        <field name="name">قوالب التقارير المخصصة</field>
+        <field name="res_model">custom.report.template</field>
+        <field name="view_mode">tree,form</field>
+    </record>
+
+    <menuitem id="menu_custom_report_designer"
+              name="مصمم التقارير"
+              parent="menu_sap_tools"
+              action="action_custom_report_template_simple"
+              sequence="200"/>
+</odoo>
+
