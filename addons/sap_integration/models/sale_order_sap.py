@@ -354,7 +354,14 @@ class SaleOrder(models.Model):
         # إعداد سطور الوثيقة
         document_lines = []
         for line in quotation.order_line:
+            # تخطي السطور بدون منتج
             if not line.product_id:
+                _logger.warning(f"Skipping order line {line.id} - no product_id")
+                continue
+            
+            # تخطي السطور بدون كمية أو بكمية صفر أو سالبة
+            if not line.product_uom_qty or line.product_uom_qty <= 0:
+                _logger.warning(f"Skipping order line {line.id} for product {line.product_id.name} - quantity is {line.product_uom_qty} (must be > 0)")
                 continue
             
             # الحصول على ItemCode (كود المنتج) - أولوية: default_code ثم barcode
