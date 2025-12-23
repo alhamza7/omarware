@@ -59,6 +59,13 @@
             <field name="priority">1</field>
             <field name="arch" type="xml">
                 <form string="Invoice Template">
+                    <header>
+                        <button name="action_open_visual_designer" 
+                                string="Open Visual Designer" 
+                                type="object" 
+                                class="oe_highlight"
+                                icon="fa-paint-brush"/>
+                    </header>
                     <sheet>
                         <group>
                             <field name="name"/>

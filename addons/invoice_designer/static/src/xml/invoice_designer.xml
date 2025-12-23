@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    
+    <!-- Main Canvas Template -->
+    <t t-name="invoice_designer.Canvas">
+        <div class="invoice_designer_container">
+            
+            <!-- Top Toolbar -->
+            <div class="invoice_designer_toolbar">
+                <div class="toolbar_left">
+                    <button class="btn btn-primary" t-on-click="addTextElement">
+                        <i class="fa fa-font"/> Add Text
+                    </button>
+                    <button class="btn btn-secondary" t-on-click="toggleGrid">
+                        <i class="fa fa-th"/> Grid
+                    </button>
+                </div>
+                
+                <div class="toolbar_center">
+                    <h4 class="mb-0">
+                        <t t-if="state.template" t-esc="state.template.name"/>
+                    </h4>
+                </div>
+                
+                <div class="toolbar_right">
+                    <button class="btn btn-sm btn-secondary" t-on-click="zoomOut">
+                        <i class="fa fa-search-minus"/>
+                    </button>
+                    <span class="zoom_level mx-2">
+                        <t t-esc="Math.round(state.zoom * 100)"/>%
+                    </span>
+                    <button class="btn btn-sm btn-secondary" t-on-click="zoomIn">
+                        <i class="fa fa-search-plus"/>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Main Content Area -->
+            <div class="invoice_designer_content">
+                
+                <!-- Canvas Area -->
+                <div class="invoice_designer_canvas_wrapper">
+                    <canvas 
+                        t-ref="canvas"
+                        class="invoice_designer_canvas"
+                        t-att-width="state.template ? state.template.page_width * 3.78 : 794"
+                        t-att-height="state.template ? state.template.page_height * 3.78 : 1123"
+                        t-att-style="'transform: scale(' + state.zoom + ');'">
+                    </canvas>
+                </div>
+                
+                <!-- Properties Panel -->
+                <div class="invoice_designer_properties" t-if="state.selectedElement">
+                    <div class="properties_header">
+                        <h5>Properties</h5>
+                    </div>
+                    
+                    <div class="properties_content">
+                        <div class="form-group">
+                            <label>Name</label>
+                            <input type="text" class="form-control" 
+                                   t-att-value="state.selectedElement.name"/>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Type</label>
+                            <input type="text" class="form-control" 
+                                   t-att-value="state.selectedElement.element_type" readonly="1"/>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-6">
+                                <div class="form-group">
+                                    <label>X (mm)</label>
+                                    <input type="number" class="form-control" 
+                                           t-att-value="Math.round(state.selectedElement.x)"/>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="form-group">
+                                    <label>Y (mm)</label>
+                                    <input type="number" class="form-control" 
+                                           t-att-value="Math.round(state.selectedElement.y)"/>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-6">
+                                <div class="form-group">
+                                    <label>Width (mm)</label>
+                                    <input type="number" class="form-control" 
+                                           t-att-value="Math.round(state.selectedElement.width)"/>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="form-group">
+                                    <label>Height (mm)</label>
+                                    <input type="number" class="form-control" 
+                                           t-att-value="Math.round(state.selectedElement.height)"/>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group" t-if="state.selectedElement.element_type === 'text'">
+                            <label>Content</label>
+                            <textarea class="form-control" rows="3"
+                                      t-att-value="state.selectedElement.content"/>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Font Size</label>
+                            <input type="number" class="form-control" 
+                                   t-att-value="state.selectedElement.font_size || 12"/>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Color</label>
+                            <input type="color" class="form-control" 
+                                   t-att-value="state.selectedElement.color || '#000000'"/>
+                        </div>
+                    </div>
+                </div>
+                
+            </div>
+            
+        </div>
+    </t>
+    
+</templates>
+

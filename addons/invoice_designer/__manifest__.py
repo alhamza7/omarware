@@ -46,12 +46,13 @@ Supported Document Types:
         'security/ir.model.access.csv',
         'views/invoice_designer_minimal.xml',
     ],
-    # Assets will be added later when JS/CSS files are created
-    # 'assets': {
-    #     'web.assets_backend': [
-    #         'invoice_designer/static/src/js/invoice_designer.js',
-    #     ],
-    # },
+    'assets': {
+        'web.assets_backend': [
+            'invoice_designer/static/src/js/invoice_designer.js',
+            'invoice_designer/static/src/xml/invoice_designer.xml',
+            'invoice_designer/static/src/css/invoice_designer.css',
+        ],
+    },
     'images': ['static/description/banner.png'],
     'installable': True,
     'application': True,
