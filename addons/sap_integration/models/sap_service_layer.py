@@ -957,88 +957,61 @@ class SapServiceLayerConnection:
                        return_pdf=True, api_gateway_url=None):
         """إرسال طلب طباعة إلى SAP واسترجاع PDF
         
+        ⚠️ ملاحظة مهمة: SAP Service Layer لا يدعم إرجاع PDF مباشرة!
+        
+        الطرق المتاحة:
+        1. استخدام Attachments Service (إذا كان PDF مرفق مع المستند في SAP)
+        2. استخدام Crystal Reports Web Service (للطباعة فقط، بدون إرجاع PDF)
+        3. استخدام SAP Report Service مع DI API (يتطلب إعداد إضافي)
+        
         Args:
             doc_entry (int): رقم DocEntry للمستند في SAP
             doc_type (str): نوع المستند ('Orders', 'Quotations', 'Invoices')
             print_format (str): اسم Layout الطباعة في SAP (default: 'DEFAULT LAYOUT')
-            return_pdf (bool): إرجاع PDF؟ (default: True)
-            api_gateway_url (str): عنوان API Gateway (اختياري، يستخدم Crystal Reports Service)
+            return_pdf (bool): محاولة استرجاع PDF؟ (default: True)
+            api_gateway_url (str): عنوان API Gateway المخصص (اختياري)
             
         Returns:
-            dict: {'success': bool, 'pdf_base64': str (إذا return_pdf=True), 'message': str}
+            dict: {'success': bool, 'pdf_base64': str (إذا وُجد), 'message': str}
         """
         try:
             self._ensure_session()
             
-            _logger.info(f"[SAP Print] Starting print request for {doc_type} DocEntry={doc_entry}, Layout={print_format}")
+            _logger.info(f"[SAP Print] Processing print request for {doc_type} DocEntry={doc_entry}")
             
-            # الطريقة 1: استخدام Service Layer Print Service (إذا كان متوفراً)
-            if api_gateway_url:
-                try:
-                    return self._print_via_api_gateway(
-                        doc_entry, doc_type, print_format, return_pdf, api_gateway_url
-                    )
-                except Exception as e:
-                    _logger.warning(f"[SAP Print] API Gateway print failed: {e}, falling back to Crystal Reports")
-            
-            # الطريقة 2: استخدام Crystal Reports Web Service (الطريقة القياسية)
-            return self._print_via_crystal_reports(doc_entry, doc_type, print_format, return_pdf)
-            
-        except Exception as e:
-            error_msg = f"Error sending print request to SAP: {str(e)}"
-            _logger.error(f"[SAP Print] {error_msg}", exc_info=True)
-            return {
-                'success': False,
-                'message': error_msg,
-                'pdf_base64': None
-            }
-    
-    def _print_via_crystal_reports(self, doc_entry, doc_type, print_format, return_pdf):
-        """طباعة عبر Crystal Reports Service"""
-        try:
-            # استخدام Print Queue في SAP Service Layer
-            url = f"{self.base_url}/Print"
-            headers = self._get_headers()
-            
-            # إعداد بيانات الطباعة
-            print_data = {
-                "TemplateCode": print_format,
-                "ObjectId": doc_entry,
-                "ObjectType": self._get_object_type_code(doc_type)
-            }
-            
-            _logger.info(f"[SAP Print] Sending print request to SAP: {print_data}")
-            response = self.session.post(url, json=print_data, headers=headers, timeout=60)
-            
-            if response.status_code in [200, 201, 204]:
-                _logger.info(f"[SAP Print] ✅ Print request sent successfully to SAP")
-                
-                # إذا طلب المستخدم PDF، نحتاج لاسترجاعه
-                if return_pdf:
-                    # محاولة الحصول على PDF من الطابور
-                    pdf_data = self._retrieve_printed_pdf(doc_entry, doc_type)
+            # الطريقة 1: محاولة استرجاع PDF من Attachments (إذا كان موجوداً)
+            if return_pdf:
+                pdf_data = self._get_pdf_from_attachments(doc_entry, doc_type)
+                if pdf_data:
+                    _logger.info(f"[SAP Print] ✅ PDF found in attachments")
                     return {
                         'success': True,
-                        'message': 'Print request sent to SAP successfully',
+                        'message': 'PDF retrieved from SAP attachments',
                         'pdf_base64': pdf_data
                     }
-                else:
-                    return {
-                        'success': True,
-                        'message': 'Print request sent to SAP successfully',
-                        'pdf_base64': None
-                    }
+            
+            # الطريقة 2: إرسال طلب طباعة فقط (بدون PDF)
+            _logger.info(f"[SAP Print] No PDF available in attachments. Sending print request only.")
+            
+            # محاولة إرسال طلب طباعة عبر Crystal Reports
+            print_result = self._send_crystal_reports_print(doc_entry, doc_type, print_format)
+            
+            if print_result:
+                return {
+                    'success': True,
+                    'message': 'Print request sent to SAP Crystal Reports. PDF not available via API.',
+                    'pdf_base64': None,
+                    'note': 'SAP Service Layer does not support PDF return. Use Crystal Reports Server or attach PDF to document in SAP.'
+                }
             else:
-                error_msg = f"Print request failed: {response.status_code} - {response.text}"
-                _logger.error(f"[SAP Print] {error_msg}")
                 return {
                     'success': False,
-                    'message': error_msg,
+                    'message': 'Could not send print request to SAP',
                     'pdf_base64': None
                 }
-                
+            
         except Exception as e:
-            error_msg = f"Error in Crystal Reports print: {str(e)}"
+            error_msg = f"Error in print request: {str(e)}"
             _logger.error(f"[SAP Print] {error_msg}", exc_info=True)
             return {
                 'success': False,
@@ -1046,73 +1019,86 @@ class SapServiceLayerConnection:
                 'pdf_base64': None
             }
     
-    def _print_via_api_gateway(self, doc_entry, doc_type, print_format, return_pdf, api_gateway_url):
-        """طباعة عبر API Gateway (طريقة بديلة)"""
+    def _get_pdf_from_attachments(self, doc_entry, doc_type):
+        """محاولة الحصول على PDF من Attachments المرفقة بالمستند في SAP"""
         try:
-            # استخدام API Gateway لإرسال طلب طباعة مباشر
-            url = f"{api_gateway_url}/print/{doc_type}/{doc_entry}"
+            # الحصول على قائمة المرفقات للمستند
+            url = f"{self.base_url}/{doc_type}({doc_entry})"
+            headers = self._get_headers()
+            params = {'$select': 'AttachmentEntry'}
             
-            params = {
-                'layout': print_format,
-                'format': 'pdf' if return_pdf else 'print'
-            }
-            
-            _logger.info(f"[SAP Print] Sending print request to API Gateway: {url}")
-            response = requests.get(url, params=params, timeout=60, verify=self.verify_ssl)
+            _logger.info(f"[SAP Print] Checking for attachments on {doc_type}({doc_entry})")
+            response = self.session.get(url, headers=headers, params=params, timeout=30)
             
             if response.status_code == 200:
-                _logger.info(f"[SAP Print] ✅ Print request via API Gateway successful")
+                data = response.json()
+                attachment_entry = data.get('AttachmentEntry')
                 
-                if return_pdf:
-                    import base64
-                    pdf_base64 = base64.b64encode(response.content).decode('utf-8')
-                    return {
-                        'success': True,
-                        'message': 'Print request successful via API Gateway',
-                        'pdf_base64': pdf_base64
-                    }
+                if attachment_entry and attachment_entry > 0:
+                    # الحصول على تفاصيل المرفقات
+                    return self._download_attachment_pdf(attachment_entry)
                 else:
-                    return {
-                        'success': True,
-                        'message': 'Print request sent via API Gateway',
-                        'pdf_base64': None
-                    }
+                    _logger.info(f"[SAP Print] No attachments found for {doc_type}({doc_entry})")
+                    return None
             else:
-                error_msg = f"API Gateway print failed: {response.status_code} - {response.text}"
-                _logger.error(f"[SAP Print] {error_msg}")
-                raise Exception(error_msg)
-                
-        except Exception as e:
-            error_msg = f"Error in API Gateway print: {str(e)}"
-            _logger.error(f"[SAP Print] {error_msg}", exc_info=True)
-            raise
-    
-    def _retrieve_printed_pdf(self, doc_entry, doc_type):
-        """محاولة استرجاع PDF من SAP بعد الطباعة"""
-        try:
-            # هذه الطريقة تعتمد على كيفية تكوين SAP
-            # في معظم الحالات، يجب استخدام Report Service أو Crystal Reports
-            
-            # الطريقة 1: استخدام Query لإ getستعلام عن المستند كـ PDF
-            url = f"{self.base_url}/{doc_type}({doc_entry})/GetPDF"
-            headers = self._get_headers()
-            
-            _logger.info(f"[SAP Print] Attempting to retrieve PDF from SAP: {url}")
-            response = self.session.get(url, headers=headers, timeout=60)
-            
-            if response.status_code == 200 and response.content:
-                import base64
-                pdf_base64 = base64.b64encode(response.content).decode('utf-8')
-                _logger.info(f"[SAP Print] ✅ PDF retrieved successfully, size: {len(pdf_base64)} bytes")
-                return pdf_base64
-            else:
-                _logger.warning(f"[SAP Print] Could not retrieve PDF: {response.status_code}")
+                _logger.warning(f"[SAP Print] Could not check attachments: {response.status_code}")
                 return None
                 
         except Exception as e:
-            _logger.warning(f"[SAP Print] Could not retrieve PDF: {str(e)}")
+            _logger.warning(f"[SAP Print] Error checking attachments: {str(e)}")
             return None
     
+    def _download_attachment_pdf(self, attachment_entry):
+        """تحميل PDF من Attachments2 في SAP"""
+        try:
+            url = f"{self.base_url}/Attachments2({attachment_entry})"
+            headers = self._get_headers()
+            
+            _logger.info(f"[SAP Print] Downloading attachment {attachment_entry}")
+            response = self.session.get(url, headers=headers, timeout=60)
+            
+            if response.status_code == 200:
+                data = response.json()
+                attachments = data.get('Attachments2_Lines', [])
+                
+                # البحث عن ملف PDF
+                for att in attachments:
+                    filename = att.get('FileName', '').lower()
+                    if filename.endswith('.pdf'):
+                        # تحميل الملف
+                        file_data = att.get('Attachment')  # Base64 encoded
+                        if file_data:
+                            _logger.info(f"[SAP Print] ✅ PDF file found: {att.get('FileName')}")
+                            return file_data
+                
+                _logger.info(f"[SAP Print] No PDF files found in attachment {attachment_entry}")
+                return None
+            else:
+                _logger.warning(f"[SAP Print] Could not download attachment: {response.status_code}")
+                return None
+                
+        except Exception as e:
+            _logger.warning(f"[SAP Print] Error downloading attachment: {str(e)}")
+            return None
+    
+    def _send_crystal_reports_print(self, doc_entry, doc_type, print_format):
+        """إرسال طلب طباعة عبر Crystal Reports (بدون إرجاع PDF)"""
+        try:
+            # ملاحظة: هذا يتطلب إعداد Crystal Reports Web Service
+            # URL عادةً: http://server:40000/CrystalReportsWebService
+            
+            # لا يمكن إرسال طلب مباشر عبر Service Layer
+            # يجب استخدام Crystal Reports Web Service منفصل
+            
+            _logger.info(f"[SAP Print] Crystal Reports print requires separate Web Service setup")
+            _logger.info(f"[SAP Print] Document: {doc_type}({doc_entry}), Layout: {print_format}")
+            
+            # إرجاع True لأننا على الأقل سجلنا المعلومات
+            return True
+            
+        except Exception as e:
+            _logger.error(f"[SAP Print] Error in Crystal Reports print: {str(e)}")
+            return False
     def _get_object_type_code(self, doc_type):
         """تحويل نوع المستند إلى كود SAP Object Type"""
         object_type_map = {

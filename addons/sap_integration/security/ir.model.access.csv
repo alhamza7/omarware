@@ -90,3 +90,13 @@ access_sap_product_complete_migration_manager,sap.product.complete.migration man
 access_sap_product_complete_migration_user,sap.product.complete.migration user,model_sap_product_complete_migration,sap_integration.group_sap_user,1,1,1,1
 access_sap_duplicate_cleaner_manager,sap.duplicate.cleaner manager,model_sap_duplicate_cleaner,sap_integration.group_sap_manager,1,1,1,1
 access_sap_duplicate_cleaner_user,sap.duplicate.cleaner user,model_sap_duplicate_cleaner,sap_integration.group_sap_user,1,1,1,1
+access_custom_report_template_manager,custom.report.template manager,model_custom_report_template,sap_integration.group_sap_manager,1,1,1,1
+access_custom_report_template_user,custom.report.template user,model_custom_report_template,sap_integration.group_sap_user,1,1,1,0
+access_custom_report_field_manager,custom.report.field manager,model_custom_report_field,sap_integration.group_sap_manager,1,1,1,1
+access_custom_report_field_user,custom.report.field user,model_custom_report_field,sap_integration.group_sap_user,1,0,0,0
+access_custom_report_column_manager,custom.report.column manager,model_custom_report_column,sap_integration.group_sap_manager,1,1,1,1
+access_custom_report_column_user,custom.report.column user,model_custom_report_column,sap_integration.group_sap_user,1,0,0,0
+access_custom_report_total_manager,custom.report.total manager,model_custom_report_total,sap_integration.group_sap_manager,1,1,1,1
+access_custom_report_total_user,custom.report.total user,model_custom_report_total,sap_integration.group_sap_user,1,0,0,0
+access_custom_report_section_manager,custom.report.section manager,model_custom_report_section,sap_integration.group_sap_manager,1,1,1,1
+access_custom_report_section_user,custom.report.section user,model_custom_report_section,sap_integration.group_sap_user,1,0,0,0

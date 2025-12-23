@@ -66,6 +66,10 @@
         'wizard/stock_duplicate_cleaner_views.xml',  # Stock Duplicate Cleaner Wizard
         'wizard/sap_duplicate_cleaner_views.xml',  # SAP Duplicate Cleaner Wizard
         
+        # Custom Report Designer
+        'views/custom_report_template_views.xml',  # Custom Report Designer
+        'data/custom_report_templates_data.xml',  # Default Report Templates
+        
         # Views (Actions & Forms)
         'views/sap_backend_views.xml',
         'views/sap_connector_views.xml',
