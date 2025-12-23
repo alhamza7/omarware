@@ -127,6 +127,7 @@
                             <separator string="أعمدة الجدول"/>
                             <field name="table_columns">
                                 <tree editable="bottom">
+                                    <field name="template_id" invisible="1"/>
                                     <field name="sequence" widget="handle"/>
                                     <field name="name"/>
                                     <field name="technical_name"/>
@@ -150,6 +151,7 @@
                             <separator string="حقول المجاميع"/>
                             <field name="totals_fields">
                                 <tree editable="bottom">
+                                    <field name="template_id" invisible="1"/>
                                     <field name="sequence" widget="handle"/>
                                     <field name="name"/>
                                     <field name="technical_name"/>
@@ -165,6 +167,7 @@
                         <page string="أقسام إضافية" name="sections">
                             <field name="sections">
                                 <tree>
+                                    <field name="template_id" invisible="1"/>
                                     <field name="sequence" widget="handle"/>
                                     <field name="name"/>
                                     <field name="position"/>
@@ -174,6 +177,7 @@
                                 <form>
                                     <group>
                                         <group>
+                                            <field name="template_id" invisible="1"/>
                                             <field name="name"/>
                                             <field name="sequence"/>
                                             <field name="position"/>
