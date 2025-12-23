@@ -225,16 +225,11 @@ class InvoiceTemplateDesigner(models.Model):
     def action_open_visual_designer(self):
         """فتح المصمم المرئي"""
         self.ensure_one()
+        # Use URL with hash to pass template_id
         return {
-            'type': 'ir.actions.client',
-            'tag': 'invoice_designer_canvas',
-            'name': 'Visual Designer',
-            'context': {
-                'default_template_id': self.id,
-            },
-            'params': {
-                'templateId': self.id,
-            },
+            'type': 'ir.actions.act_url',
+            'url': f'/web#action=invoice_designer_canvas&template_id={self.id}',
+            'target': 'self',
         }
 
     def action_preview_pdf(self):

@@ -5,6 +5,21 @@
     <t t-name="invoice_designer.Canvas">
         <div class="invoice_designer_container">
             
+            <!-- Error Message if no template -->
+            <div t-if="!templateId" class="alert alert-danger m-3" role="alert">
+                <h4 class="alert-heading">Template ID is Missing!</h4>
+                <p>Cannot load the visual designer without a template ID.</p>
+                <hr/>
+                <p class="mb-0">
+                    <strong>Debug Info:</strong><br/>
+                    Props keys: <t t-esc="Object.keys(props).join(', ')"/><br/>
+                    Action: <t t-esc="props.action ? 'exists' : 'missing'"/>
+                </p>
+            </div>
+            
+            <!-- Designer Interface (only if template exists) -->
+            <t t-if="templateId">
+            
             <!-- Top Toolbar -->
             <div class="invoice_designer_toolbar">
                 <div class="toolbar_left">
@@ -123,6 +138,9 @@
                 </div>
                 
             </div>
+            
+            </t>
+            <!-- End of Designer Interface -->
             
         </div>
     </t>
