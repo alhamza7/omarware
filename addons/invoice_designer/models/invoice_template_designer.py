@@ -228,9 +228,9 @@ class InvoiceTemplateDesigner(models.Model):
         return {
             'type': 'ir.actions.client',
             'tag': 'invoice_designer_canvas',
-            'name': _('Visual Designer'),
+            'name': 'Visual Designer',
             'params': {
-                'template_id': self.id,
+                'templateId': self.id,
             },
             'target': 'fullscreen',
         }

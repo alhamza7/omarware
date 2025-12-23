@@ -11,12 +11,22 @@ import { useService } from "@web/core/utils/hooks";
 export class InvoiceDesignerCanvas extends Component {
     static template = "invoice_designer.Canvas";
     static props = {
-        templateId: { type: Number },
+        templateId: { type: Number, optional: true },
     };
 
     setup() {
         this.orm = useService("orm");
         this.notification = useService("notification");
+        
+        // Get templateId from props
+        const templateId = this.props.templateId || this.props.template_id;
+        
+        if (!templateId) {
+            this.notification.add("Template ID is missing", { type: "danger" });
+            console.error("Template ID not provided in props:", this.props);
+        }
+        
+        this.templateId = templateId;
         
         this.state = useState({
             template: null,
@@ -41,20 +51,34 @@ export class InvoiceDesignerCanvas extends Component {
     }
     
     async loadTemplate() {
+        if (!this.templateId) {
+            console.error("Cannot load template: templateId is missing");
+            this.notification.add("Error: Template ID is missing", { type: "danger" });
+            return;
+        }
+        
         try {
+            console.log("Loading template ID:", this.templateId);
+            
             const template = await this.orm.read(
                 "invoice.template.designer",
-                [this.props.templateId],
+                [this.templateId],
                 ["name", "page_width", "page_height", "background_color", "show_grid", "element_ids"]
             );
+            
+            console.log("Template loaded:", template);
             
             if (template.length > 0) {
                 this.state.template = template[0];
                 this.state.showGrid = template[0].show_grid;
                 await this.loadElements();
+                this.renderCanvas();
+            } else {
+                this.notification.add("Template not found", { type: "danger" });
             }
         } catch (error) {
-            this.notification.add("Error loading template", { type: "danger" });
+            console.error("Error loading template:", error);
+            this.notification.add(`Error loading template: ${error.message}`, { type: "danger" });
         }
     }
     
@@ -258,11 +282,16 @@ export class InvoiceDesignerCanvas extends Component {
     }
     
     async addTextElement() {
+        if (!this.templateId) {
+            this.notification.add("Cannot add element: Template ID is missing", { type: "danger" });
+            return;
+        }
+        
         try {
             const newElement = await this.orm.create(
                 "invoice.template.element",
                 [{
-                    template_id: this.props.templateId,
+                    template_id: this.templateId,
                     name: "New Text",
                     element_type: "text",
                     content: "Sample Text",
@@ -275,10 +304,12 @@ export class InvoiceDesignerCanvas extends Component {
                 }]
             );
             
+            console.log("Element created:", newElement);
             await this.loadElements();
             this.notification.add("Text element added", { type: "success" });
         } catch (error) {
-            this.notification.add("Error adding element", { type: "danger" });
+            console.error("Error adding element:", error);
+            this.notification.add(`Error adding element: ${error.message}`, { type: "danger" });
         }
     }
     
