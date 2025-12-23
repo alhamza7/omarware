@@ -130,7 +130,14 @@ class InvoiceTemplateDesigner(models.Model):
     
     # ==================== Statistics ====================
     usage_count = fields.Integer('Usage Count', default=0, readonly=True)
-    last_used_date = fields.Datetime('Last Used', readonly=True)
+    last_used_date = fields.Datetime('Last Used Date', readonly=True)
+    last_used = fields.Datetime('Last Used', readonly=True, store=False, compute='_compute_last_used')
+    
+    @api.depends('last_used_date')
+    def _compute_last_used(self):
+        """Alias for last_used_date for backwards compatibility"""
+        for record in self:
+            record.last_used = record.last_used_date
     
     # ==================== Company ====================
     company_id = fields.Many2one('res.company', 'Company', 
