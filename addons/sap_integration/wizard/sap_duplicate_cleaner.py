@@ -230,13 +230,25 @@ class SapDuplicateCleaner(models.TransientModel):
         """فحص تكرار قوائم الأسعار"""
         query = """
             SELECT 
-                name,
+                CASE 
+                    WHEN jsonb_typeof(name) = 'string' THEN name::text
+                    WHEN jsonb_typeof(name) = 'object' THEN name->>'en_US'
+                    ELSE name::text
+                END as name,
                 currency_id,
                 COUNT(*) as count,
                 ARRAY_AGG(id ORDER BY id) as pricelist_ids
             FROM product_pricelist
-            WHERE name LIKE 'SAP Price List%'
-            GROUP BY name, currency_id
+            WHERE CASE 
+                    WHEN jsonb_typeof(name) = 'string' THEN name::text LIKE 'SAP Price List%'
+                    WHEN jsonb_typeof(name) = 'object' THEN name->>'en_US' LIKE 'SAP Price List%'
+                    ELSE name::text LIKE 'SAP Price List%'
+                END
+            GROUP BY CASE 
+                    WHEN jsonb_typeof(name) = 'string' THEN name::text
+                    WHEN jsonb_typeof(name) = 'object' THEN name->>'en_US'
+                    ELSE name::text
+                END, currency_id
             HAVING COUNT(*) > 1
             ORDER BY count DESC
         """
@@ -265,11 +277,19 @@ class SapDuplicateCleaner(models.TransientModel):
         """فحص تكرار وحدات القياس"""
         query = """
             SELECT 
-                name,
+                CASE 
+                    WHEN jsonb_typeof(name) = 'string' THEN name::text
+                    WHEN jsonb_typeof(name) = 'object' THEN name->>'en_US'
+                    ELSE name::text
+                END as name,
                 COUNT(*) as count,
                 ARRAY_AGG(id ORDER BY id) as uom_ids
             FROM uom_uom
-            GROUP BY name
+            GROUP BY CASE 
+                    WHEN jsonb_typeof(name) = 'string' THEN name::text
+                    WHEN jsonb_typeof(name) = 'object' THEN name->>'en_US'
+                    ELSE name::text
+                END
             HAVING COUNT(*) > 1
             ORDER BY count DESC
         """
