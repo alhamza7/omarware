@@ -23,6 +23,10 @@ class SapBackend(models.Model):
     name = fields.Char('Name', required=True, help="Name of the SAP backend configuration")
     base_url = fields.Char('Service Layer URL', required=True, 
                           help="SAP Service Layer URL (e.g., https://sap-server.com:50000/b1s/v1)")
+    api_gateway_url = fields.Char(
+        'API Gateway URL',
+        help="SAP API Gateway URL for printing and other services (e.g., https://sap-server.com:50001)"
+    )
     username = fields.Char('Username', required=True, help="SAP username")
     password = fields.Char('Password', required=True, help="SAP password")
     company_db = fields.Char('Company Database', required=True, 
