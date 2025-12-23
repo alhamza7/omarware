@@ -44,24 +44,14 @@ Supported Document Types:
     'data': [
         'security/invoice_designer_security.xml',
         'security/ir.model.access.csv',
-        'views/invoice_template_designer_views.xml',
-        'views/invoice_template_element_views.xml',
-        'data/default_templates.xml',
-        'data/available_fields.xml',
+        'views/invoice_designer_views.xml',
     ],
-    'assets': {
-        'web.assets_backend': [
-            'invoice_designer/static/src/js/invoice_designer.js',
-            'invoice_designer/static/src/js/canvas_engine.js',
-            'invoice_designer/static/src/js/element_handlers.js',
-            'invoice_designer/static/src/xml/invoice_designer.xml',
-            'invoice_designer/static/src/xml/toolbars.xml',
-            'invoice_designer/static/src/xml/properties_panel.xml',
-            'invoice_designer/static/src/css/invoice_designer.css',
-            'invoice_designer/static/src/css/canvas.css',
-            'invoice_designer/static/src/css/panels.css',
-        ],
-    },
+    # Assets will be added later when JS/CSS files are created
+    # 'assets': {
+    #     'web.assets_backend': [
+    #         'invoice_designer/static/src/js/invoice_designer.js',
+    #     ],
+    # },
     'images': ['static/description/banner.png'],
     'installable': True,
     'application': True,

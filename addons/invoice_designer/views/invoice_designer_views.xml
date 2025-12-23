@@ -1,0 +1,301 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- ==================== MENU ==================== -->
+    
+    <!-- Root Menu -->
+    <menuitem id="menu_invoice_designer_root"
+              name="Invoice Designer"
+              sequence="50"
+              web_icon="invoice_designer,static/description/icon.png"/>
+    
+    <!-- Sub Menus -->
+    <menuitem id="menu_invoice_designer_templates"
+              name="Templates"
+              parent="menu_invoice_designer_root"
+              sequence="10"/>
+    
+    <menuitem id="menu_invoice_designer_fonts"
+              name="Fonts Library"
+              parent="menu_invoice_designer_root"
+              sequence="20"/>
+    
+    <menuitem id="menu_invoice_designer_config"
+              name="Configuration"
+              parent="menu_invoice_designer_root"
+              sequence="100"/>
+    
+    
+    <!-- ==================== ACTIONS ==================== -->
+    
+    <!-- Templates Action -->
+    <record id="action_invoice_template_designer" model="ir.actions.act_window">
+        <field name="name">Invoice Templates</field>
+        <field name="res_model">invoice.template.designer</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Create your first invoice template!
+            </p>
+            <p>
+                Design professional invoices with full control over layout, fonts, colors, and more.
+            </p>
+        </field>
+    </record>
+    
+    <menuitem id="menu_invoice_template_designer"
+              name="Invoice Templates"
+              parent="menu_invoice_designer_templates"
+              action="action_invoice_template_designer"
+              sequence="10"/>
+    
+    
+    <!-- Fonts Action -->
+    <record id="action_invoice_template_font" model="ir.actions.act_window">
+        <field name="name">Available Fonts</field>
+        <field name="res_model">invoice.template.font</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Add fonts to your library!
+            </p>
+        </field>
+    </record>
+    
+    <menuitem id="menu_invoice_template_font"
+              name="Available Fonts"
+              parent="menu_invoice_designer_fonts"
+              action="action_invoice_template_font"
+              sequence="10"/>
+    
+    
+    <!-- ==================== LIST VIEWS ==================== -->
+    
+    <!-- Template List View -->
+    <record id="view_invoice_template_designer_list" model="ir.ui.view">
+        <field name="name">invoice.template.designer.list</field>
+        <field name="model">invoice.template.designer</field>
+        <field name="arch" type="xml">
+            <list string="Invoice Templates">
+                <field name="sequence" widget="handle"/>
+                <field name="name"/>
+                <field name="code"/>
+                <field name="template_type"/>
+                <field name="is_default"/>
+                <field name="usage_count"/>
+                <field name="active"/>
+            </list>
+        </field>
+    </record>
+    
+    
+    <!-- Template Form View -->
+    <record id="view_invoice_template_designer_form" model="ir.ui.view">
+        <field name="name">invoice.template.designer.form</field>
+        <field name="model">invoice.template.designer</field>
+        <field name="arch" type="xml">
+            <form string="Invoice Template">
+                <header>
+                    <button name="action_open_visual_designer" 
+                            string="Open Visual Designer" 
+                            type="object" 
+                            class="oe_highlight"
+                            icon="fa-paint-brush"/>
+                    <button name="action_preview_pdf" 
+                            string="Preview PDF" 
+                            type="object"
+                            icon="fa-file-pdf-o"/>
+                    <button name="action_duplicate" 
+                            string="Duplicate" 
+                            type="object"
+                            icon="fa-copy"/>
+                </header>
+                <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button class="oe_stat_button" type="object" name="action_preview_pdf" icon="fa-file-pdf-o">
+                            <field string="Used" name="usage_count" widget="statinfo"/>
+                        </button>
+                    </div>
+                    
+                    <widget name="web_ribbon" title="Default" bg_color="text-bg-success" invisible="not is_default"/>
+                    <widget name="web_ribbon" title="Archived" bg_color="text-bg-danger" invisible="active"/>
+                    
+                    <group>
+                        <group>
+                            <field name="name"/>
+                            <field name="code"/>
+                            <field name="template_type"/>
+                            <field name="is_default"/>
+                        </group>
+                        <group>
+                            <field name="sequence"/>
+                            <field name="currency_id"/>
+                            <field name="language_id"/>
+                            <field name="active"/>
+                        </group>
+                    </group>
+                    
+                    <notebook>
+                        <page string="Canvas Settings" name="canvas">
+                            <group>
+                                <group string="Page Format">
+                                    <field name="page_format"/>
+                                    <field name="page_orientation"/>
+                                    <field name="page_width"/>
+                                    <field name="page_height"/>
+                                </group>
+                                <group string="Margins (mm)">
+                                    <field name="margin_top"/>
+                                    <field name="margin_right"/>
+                                    <field name="margin_bottom"/>
+                                    <field name="margin_left"/>
+                                </group>
+                            </group>
+                            
+                            <group>
+                                <group string="Background">
+                                    <field name="background_color" widget="color"/>
+                                    <field name="background_image" filename="background_image_filename"/>
+                                    <field name="background_image_filename" invisible="1"/>
+                                    <field name="background_image_position" invisible="not background_image"/>
+                                    <field name="background_image_opacity" invisible="not background_image"/>
+                                </group>
+                                <group string="Grid">
+                                    <field name="show_grid"/>
+                                    <field name="grid_size" invisible="not show_grid"/>
+                                    <field name="snap_to_grid"/>
+                                    <field name="show_rulers"/>
+                                    <field name="show_guides"/>
+                                </group>
+                            </group>
+                        </page>
+                        
+                        <page string="Multi-Page" name="multipage">
+                            <group>
+                                <field name="enable_multi_page"/>
+                                <field name="header_height" invisible="not enable_multi_page"/>
+                                <field name="footer_height" invisible="not enable_multi_page"/>
+                                <field name="repeat_header" invisible="not enable_multi_page"/>
+                                <field name="repeat_footer" invisible="not enable_multi_page"/>
+                            </group>
+                        </page>
+                        
+                        <page string="Elements" name="elements">
+                            <field name="element_ids">
+                                <list string="Elements">
+                                    <field name="sequence" widget="handle"/>
+                                    <field name="name"/>
+                                    <field name="element_type"/>
+                                    <field name="x"/>
+                                    <field name="y"/>
+                                    <field name="width"/>
+                                    <field name="height"/>
+                                    <field name="z_index"/>
+                                    <field name="active"/>
+                                </list>
+                            </field>
+                        </page>
+                        
+                        <page string="PDF Settings" name="pdf">
+                            <group>
+                                <group string="Quality">
+                                    <field name="pdf_quality"/>
+                                    <field name="pdf_compression"/>
+                                </group>
+                                <group string="Security">
+                                    <field name="pdf_encryption"/>
+                                    <field name="pdf_password" password="True" invisible="not pdf_encryption"/>
+                                </group>
+                            </group>
+                        </page>
+                        
+                        <page string="SAP Integration" name="sap">
+                            <group>
+                                <field name="show_sap_doc_number"/>
+                                <field name="sap_doc_number_label" invisible="not show_sap_doc_number"/>
+                            </group>
+                        </page>
+                        
+                        <page string="Description" name="description">
+                            <field name="description" placeholder="Template description..."/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    
+    
+    <!-- Font List View -->
+    <record id="view_invoice_template_font_list" model="ir.ui.view">
+        <field name="name">invoice.template.font.list</field>
+        <field name="model">invoice.template.font</field>
+        <field name="arch" type="xml">
+            <list string="Fonts">
+                <field name="name"/>
+                <field name="font_family"/>
+                <field name="category"/>
+                <field name="is_system_font"/>
+                <field name="is_web_font"/>
+                <field name="active"/>
+            </list>
+        </field>
+    </record>
+    
+    
+    <!-- Font Form View -->
+    <record id="view_invoice_template_font_form" model="ir.ui.view">
+        <field name="name">invoice.template.font.form</field>
+        <field name="model">invoice.template.font</field>
+        <field name="arch" type="xml">
+            <form string="Font">
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="name"/>
+                            <field name="font_family"/>
+                            <field name="category"/>
+                        </group>
+                        <group>
+                            <field name="is_system_font"/>
+                            <field name="is_web_font"/>
+                            <field name="web_font_url" invisible="not is_web_font"/>
+                            <field name="active"/>
+                        </group>
+                    </group>
+                    
+                    <group string="Font File" invisible="is_system_font or is_web_font">
+                        <field name="font_file" filename="font_filename"/>
+                        <field name="font_filename" invisible="1"/>
+                    </group>
+                    
+                    <group string="Supported Weights">
+                        <group>
+                            <field name="supports_thin"/>
+                            <field name="supports_extra_light"/>
+                            <field name="supports_light"/>
+                            <field name="supports_normal"/>
+                            <field name="supports_medium"/>
+                        </group>
+                        <group>
+                            <field name="supports_semi_bold"/>
+                            <field name="supports_bold"/>
+                            <field name="supports_extra_bold"/>
+                            <field name="supports_black"/>
+                        </group>
+                    </group>
+                    
+                    <group string="Supported Styles">
+                        <field name="supports_italic"/>
+                        <field name="supports_oblique"/>
+                    </group>
+                    
+                    <group string="Preview">
+                        <field name="preview_text"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    
+</odoo>
+
