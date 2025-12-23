@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- ==================== MENU ==================== -->
+    
+    <!-- Root Menu -->
+    <menuitem id="menu_invoice_designer_root"
+              name="Invoice Designer"
+              sequence="50"/>
+    
+    <!-- Sub Menus -->
+    <menuitem id="menu_invoice_designer_templates"
+              name="Templates"
+              parent="menu_invoice_designer_root"
+              sequence="10"/>
+    
+    
+    <!-- ==================== ACTIONS ==================== -->
+    
+    <!-- Templates Action -->
+    <record id="action_invoice_template_designer" model="ir.actions.act_window">
+        <field name="name">Invoice Templates</field>
+        <field name="res_model">invoice.template.designer</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Create your first invoice template!
+            </p>
+            <p>
+                Design professional invoices with full control over layout, fonts, colors, and more.
+            </p>
+        </field>
+    </record>
+    
+    <menuitem id="menu_invoice_template_designer"
+              name="Invoice Templates"
+              parent="menu_invoice_designer_templates"
+              action="action_invoice_template_designer"
+              sequence="10"/>
+    
+    
+    <!-- ==================== LIST VIEW ==================== -->
+    
+    <record id="view_invoice_template_designer_tree" model="ir.ui.view">
+        <field name="name">invoice.template.designer.tree</field>
+        <field name="model">invoice.template.designer</field>
+        <field name="arch" type="xml">
+            <list string="Invoice Templates">
+                <field name="sequence" widget="handle"/>
+                <field name="name"/>
+                <field name="code"/>
+                <field name="template_type"/>
+                <field name="is_default"/>
+                <field name="active"/>
+            </list>
+        </field>
+    </record>
+    
+    
+    <!-- ==================== FORM VIEW ==================== -->
+    
+    <record id="view_invoice_template_designer_form_v2" model="ir.ui.view">
+        <field name="name">invoice.template.designer.form.v2</field>
+        <field name="model">invoice.template.designer</field>
+        <field name="arch" type="xml">
+            <form string="Invoice Template">
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name" placeholder="Template Name..."/>
+                        </h1>
+                    </div>
+                    
+                    <group>
+                        <group>
+                            <field name="code"/>
+                            <field name="template_type"/>
+                            <field name="is_default"/>
+                        </group>
+                        <group>
+                            <field name="sequence"/>
+                            <field name="active"/>
+                            <field name="company_id" groups="base.group_multi_company"/>
+                        </group>
+                    </group>
+                    
+                    <notebook>
+                        <page string="Canvas Settings" name="canvas">
+                            <group>
+                                <group string="Page Format">
+                                    <field name="page_format"/>
+                                    <field name="page_orientation"/>
+                                    <field name="page_width"/>
+                                    <field name="page_height"/>
+                                </group>
+                                <group string="Margins (mm)">
+                                    <field name="margin_top"/>
+                                    <field name="margin_right"/>
+                                    <field name="margin_bottom"/>
+                                    <field name="margin_left"/>
+                                </group>
+                            </group>
+                            
+                            <group>
+                                <group string="Background">
+                                    <field name="background_color" widget="color"/>
+                                </group>
+                                <group string="Grid">
+                                    <field name="show_grid"/>
+                                    <field name="grid_size" invisible="not show_grid"/>
+                                    <field name="snap_to_grid"/>
+                                </group>
+                            </group>
+                        </page>
+                        
+                        <page string="Elements" name="elements">
+                            <field name="element_ids">
+                                <list string="Elements">
+                                    <field name="sequence" widget="handle"/>
+                                    <field name="name"/>
+                                    <field name="element_type"/>
+                                    <field name="x"/>
+                                    <field name="y"/>
+                                    <field name="width"/>
+                                    <field name="height"/>
+                                    <field name="active"/>
+                                </list>
+                            </field>
+                        </page>
+                        
+                        <page string="Description" name="description">
+                            <field name="description" placeholder="Template description..."/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    
+</odoo>
+
