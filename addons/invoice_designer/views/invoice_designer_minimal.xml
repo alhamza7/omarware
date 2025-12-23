@@ -19,7 +19,7 @@
         <record id="action_invoice_template_designer" model="ir.actions.act_window">
             <field name="name">Invoice Templates</field>
             <field name="res_model">invoice.template.designer</field>
-            <field name="view_mode">tree,form</field>
+            <field name="view_mode">list,form</field>
             <field name="help" type="html">
                 <p class="o_view_nocontent_smiling_face">
                     Create your first invoice template!
@@ -41,12 +41,12 @@
             <field name="model">invoice.template.designer</field>
             <field name="priority">1</field>
             <field name="arch" type="xml">
-                <tree string="Templates">
+                <list string="Templates">
                     <field name="name"/>
                     <field name="code"/>
                     <field name="template_type"/>
                     <field name="active"/>
-                </tree>
+                </list>
             </field>
         </record>
         
