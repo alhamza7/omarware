@@ -66,8 +66,14 @@ export class InvoiceDesignerCanvas extends Component {
             selectedElement: null,
             zoom: 1.0,
             showGrid: true,
+            snapToGrid: false,
             isDragging: false,
             dragOffset: { x: 0, y: 0 },
+            unsavedChanges: false,
+            canUndo: false,
+            canRedo: false,
+            history: [],
+            historyIndex: -1,
         });
         
         this.canvasRef = useRef("canvas");
@@ -358,6 +364,370 @@ export class InvoiceDesignerCanvas extends Component {
     toggleGrid() {
         this.state.showGrid = !this.state.showGrid;
         this.renderCanvas();
+    }
+    
+    toggleSnap() {
+        this.state.snapToGrid = !this.state.snapToGrid;
+        this.notification.add(
+            this.state.snapToGrid ? "Snap to grid enabled" : "Snap to grid disabled",
+            { type: "info" }
+        );
+    }
+    
+    zoomReset() {
+        this.state.zoom = 1.0;
+        this.renderCanvas();
+    }
+    
+    // ================ ADD ELEMENTS ================
+    
+    async addFieldElement() {
+        await this.createElement({
+            name: "حقل ديناميكي",
+            element_type: "field",
+            field_name: "partner_id.name",
+            content: "[اسم العميل]",
+            x: 20,
+            y: 50,
+            width: 100,
+            height: 20,
+            font_size: 12,
+            color: "#000000",
+        });
+    }
+    
+    async addImageElement() {
+        await this.createElement({
+            name: "صورة",
+            element_type: "image",
+            x: 150,
+            y: 20,
+            width: 50,
+            height: 50,
+            object_fit: "contain",
+        });
+    }
+    
+    async addTableElement() {
+        await this.createElement({
+            name: "جدول المنتجات",
+            element_type: "table",
+            x: 20,
+            y: 100,
+            width: 170,
+            height: 100,
+            border_width: 1,
+            border_style: "solid",
+            color: "#000000",
+        });
+    }
+    
+    async addShapeElement() {
+        await this.createElement({
+            name: "شكل",
+            element_type: "shape",
+            shape_type: "rectangle",
+            x: 20,
+            y: 80,
+            width: 50,
+            height: 30,
+            background_color: "#e0e0e0",
+            border_width: 1,
+            border_style: "solid",
+            color: "#000000",
+        });
+    }
+    
+    async addLineElement() {
+        await this.createElement({
+            name: "خط",
+            element_type: "line",
+            x: 20,
+            y: 70,
+            width: 170,
+            height: 2,
+            color: "#000000",
+            border_width: 1,
+        });
+    }
+    
+    async addBarcodeElement() {
+        await this.createElement({
+            name: "باركود",
+            element_type: "barcode",
+            field_name: "name",
+            x: 20,
+            y: 220,
+            width: 60,
+            height: 20,
+        });
+    }
+    
+    async addQRElement() {
+        await this.createElement({
+            name: "QR Code",
+            element_type: "qr",
+            field_name: "name",
+            x: 100,
+            y: 220,
+            width: 30,
+            height: 30,
+        });
+    }
+    
+    async addIconElement() {
+        await this.createElement({
+            name: "أيقونة",
+            element_type: "icon",
+            content: "fa-star",
+            x: 150,
+            y: 80,
+            width: 20,
+            height: 20,
+            color: "#FFD700",
+            font_size: 20,
+        });
+    }
+    
+    async addGradientElement() {
+        await this.createElement({
+            name: "تدرج لوني",
+            element_type: "gradient_box",
+            x: 20,
+            y: 260,
+            width: 170,
+            height: 20,
+            background_color: "linear-gradient(90deg, #667eea 0%, #764ba2 100%)",
+        });
+    }
+    
+    async createElement(elementData) {
+        if (!this.templateId) {
+            this.notification.add("Cannot add element: Template ID is missing", { type: "danger" });
+            return;
+        }
+        
+        try {
+            const newElement = await this.orm.create(
+                "invoice.template.element",
+                [{
+                    template_id: this.templateId,
+                    ...elementData
+                }]
+            );
+            
+            console.log("Element created:", newElement);
+            await this.loadElements();
+            this.state.unsavedChanges = true;
+            this.notification.add(`تم إضافة ${elementData.name}`, { type: "success" });
+        } catch (error) {
+            console.error("Error adding element:", error);
+            this.notification.add(`خطأ في إضافة العنصر: ${error.message}`, { type: "danger" });
+        }
+    }
+    
+    // ================ ELEMENT OPERATIONS ================
+    
+    selectElement(element) {
+        this.state.selectedElement = element;
+        this.renderCanvas();
+    }
+    
+    toggleElementVisibility(element) {
+        element.visible = element.visible !== false ? false : true;
+        this.saveElement(element);
+        this.renderCanvas();
+    }
+    
+    async deleteElement() {
+        if (!this.state.selectedElement) return;
+        
+        if (confirm(`هل تريد حذف ${this.state.selectedElement.name}؟`)) {
+            try {
+                await this.orm.unlink("invoice.template.element", [this.state.selectedElement.id]);
+                this.state.selectedElement = null;
+                await this.loadElements();
+                this.notification.add("تم حذف العنصر", { type: "success" });
+            } catch (error) {
+                this.notification.add("خطأ في حذف العنصر", { type: "danger" });
+            }
+        }
+    }
+    
+    // ================ ALIGNMENT ================
+    
+    alignLeft() {
+        if (!this.state.selectedElement) return;
+        this.state.selectedElement.x = 10;
+        this.saveElement(this.state.selectedElement);
+        this.renderCanvas();
+    }
+    
+    alignCenter() {
+        if (!this.state.selectedElement || !this.state.template) return;
+        const centerX = (this.state.template.page_width - this.state.selectedElement.width) / 2;
+        this.state.selectedElement.x = centerX;
+        this.saveElement(this.state.selectedElement);
+        this.renderCanvas();
+    }
+    
+    alignRight() {
+        if (!this.state.selectedElement || !this.state.template) return;
+        this.state.selectedElement.x = this.state.template.page_width - this.state.selectedElement.width - 10;
+        this.saveElement(this.state.selectedElement);
+        this.renderCanvas();
+    }
+    
+    // ================ LAYER OPERATIONS ================
+    
+    async bringToFront() {
+        if (!this.state.selectedElement) return;
+        const maxZ = Math.max(...this.state.elements.map(e => e.z_index || 1));
+        this.state.selectedElement.z_index = maxZ + 1;
+        await this.saveElement(this.state.selectedElement);
+        await this.loadElements();
+        this.renderCanvas();
+    }
+    
+    async sendToBack() {
+        if (!this.state.selectedElement) return;
+        const minZ = Math.min(...this.state.elements.map(e => e.z_index || 1));
+        this.state.selectedElement.z_index = minZ - 1;
+        await this.saveElement(this.state.selectedElement);
+        await this.loadElements();
+        this.renderCanvas();
+    }
+    
+    // ================ PROPERTY CHANGES ================
+    
+    onPropertyChange() {
+        this.state.unsavedChanges = true;
+        this.renderCanvas();
+    }
+    
+    onElementTypeChange() {
+        this.onPropertyChange();
+    }
+    
+    setTextAlign(align) {
+        if (!this.state.selectedElement) return;
+        this.state.selectedElement.text_align = align;
+        this.onPropertyChange();
+    }
+    
+    async onImageUpload(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            if (this.state.selectedElement) {
+                this.state.selectedElement.image_data = e.target.result.split(',')[1];
+                this.state.selectedElement.image_filename = file.name;
+                await this.saveElement(this.state.selectedElement);
+                this.renderCanvas();
+                this.notification.add("تم رفع الصورة", { type: "success" });
+            }
+        };
+        reader.readAsDataURL(file);
+    }
+    
+    // ================ CANVAS EVENTS ================
+    
+    onCanvasMouseDown(event) {
+        this.onMouseDown(event);
+    }
+    
+    onCanvasMouseMove(event) {
+        this.onMouseMove(event);
+    }
+    
+    onCanvasMouseUp(event) {
+        this.onMouseUp(event);
+    }
+    
+    // ================ SAVE & PREVIEW ================
+    
+    async saveTemplate() {
+        try {
+            // Save all modified elements
+            for (const element of this.state.elements) {
+                if (element.modified) {
+                    await this.orm.write(
+                        "invoice.template.element",
+                        [element.id],
+                        element
+                    );
+                }
+            }
+            
+            this.state.unsavedChanges = false;
+            this.notification.add("تم حفظ القالب بنجاح", { type: "success" });
+        } catch (error) {
+            this.notification.add("خطأ في حفظ القالب", { type: "danger" });
+        }
+    }
+    
+    async previewTemplate() {
+        if (!this.templateId) return;
+        
+        try {
+            const action = await this.orm.call(
+                "invoice.template.designer",
+                "action_preview_pdf",
+                [[this.templateId]]
+            );
+            
+            // Open preview in new window
+            window.open(action.url, '_blank');
+        } catch (error) {
+            this.notification.add("خطأ في المعاينة", { type: "danger" });
+        }
+    }
+    
+    async exportPDF() {
+        this.notification.add("جاري تصدير PDF...", { type: "info" });
+        await this.previewTemplate();
+    }
+    
+    // ================ UNDO/REDO ================
+    
+    undo() {
+        if (this.state.historyIndex > 0) {
+            this.state.historyIndex--;
+            this.state.elements = JSON.parse(JSON.stringify(this.state.history[this.state.historyIndex]));
+            this.state.canUndo = this.state.historyIndex > 0;
+            this.state.canRedo = this.state.historyIndex < this.state.history.length - 1;
+            this.renderCanvas();
+        }
+    }
+    
+    redo() {
+        if (this.state.historyIndex < this.state.history.length - 1) {
+            this.state.historyIndex++;
+            this.state.elements = JSON.parse(JSON.stringify(this.state.history[this.state.historyIndex]));
+            this.state.canUndo = this.state.historyIndex > 0;
+            this.state.canRedo = this.state.historyIndex < this.state.history.length - 1;
+            this.renderCanvas();
+        }
+    }
+    
+    addToHistory() {
+        // Remove any forward history
+        this.state.history = this.state.history.slice(0, this.state.historyIndex + 1);
+        
+        // Add current state
+        this.state.history.push(JSON.parse(JSON.stringify(this.state.elements)));
+        this.state.historyIndex = this.state.history.length - 1;
+        
+        // Limit history to 50 states
+        if (this.state.history.length > 50) {
+            this.state.history.shift();
+            this.state.historyIndex--;
+        }
+        
+        this.state.canUndo = this.state.historyIndex > 0;
+        this.state.canRedo = false;
     }
 }
 

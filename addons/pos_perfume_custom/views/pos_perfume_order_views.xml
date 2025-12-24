@@ -44,6 +44,14 @@
                             type="object" 
                             invisible="state not in ('draft', 'quotation')" 
                             class="btn-primary"/>
+                    <button name="action_print_with_designer" string="طباعة مع المصمم" 
+                            type="object" 
+                            icon="fa-print"
+                            class="btn-info"/>
+                    <button name="action_open_designer" string="فتح المصمم" 
+                            type="object" 
+                            icon="fa-paint-brush"
+                            class="btn-secondary"/>
                     <button name="action_send_whatsapp" string="Send WhatsApp" 
                             type="object" 
                             icon="fa-whatsapp"
@@ -68,6 +76,7 @@
                             <field name="partner_id" required="1"/>
                             <field name="date"/>
                             <field name="invoice_type" widget="radio" options="{'horizontal': true}"/>
+                            <field name="invoice_template_id" placeholder="اختر قالب الفاتورة (اختياري)"/>
                         </group>
                         <group>
                             <field name="user_id"/>

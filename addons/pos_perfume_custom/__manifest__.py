@@ -26,10 +26,12 @@
         'uom_in_pricelist',          # ⭐ أسعار حسب UoM
         'sap_integration',           # ⭐ معلومات SAP
         'ultramsg_integration',      # ⭐ WhatsApp Integration
+        'invoice_designer',          # ⭐ مصمم الفواتير
     ],
     'data': [
         'security/ir.model.access.csv',
         'data/pos_perfume_sequence.xml',
+        'data/invoice_templates.xml',
         'views/pos_perfume_views.xml',
         'views/pos_perfume_order_views.xml',
         'views/pos_perfume_session_views.xml',
