@@ -114,6 +114,16 @@ class InvoiceTemplateDesigner(models.Model):
     sap_doc_number_label = fields.Char('SAP Doc Label', default='SAP Doc #:', translate=True)
     
     # ==================== PDF Settings ====================
+    # PDF Rendering Engine
+    render_engine = fields.Selection([
+        ('playwright', 'Playwright (Chromium) - Best Quality'),
+        ('weasyprint', 'WeasyPrint - Fast & Good'),
+        ('wkhtmltopdf', 'wkhtmltopdf - Fast but Basic'),
+    ], string='PDF Engine', default='playwright', required=True,
+       help="Playwright: 100% accurate but slower (2-3s)\n"
+            "WeasyPrint: Fast and accurate for most cases (1s)\n"
+            "wkhtmltopdf: Fastest but limited CSS support (<1s)")
+    
     pdf_quality = fields.Selection([
         ('draft', 'Draft (Fast)'),
         ('normal', 'Normal'),
@@ -445,7 +455,13 @@ class InvoiceTemplateDesigner(models.Model):
 
     # ==================== Public Methods ====================
     def generate_invoice_pdf(self, order_id, model_name='sale.order'):
-        """Generate PDF for a specific order"""
+        """Generate PDF for a specific order using configured render engine
+        
+        Supports multiple rendering engines:
+        - Playwright: Best quality, 100% accurate, slower (2-3s)
+        - WeasyPrint: Good quality, fast (1s)  
+        - wkhtmltopdf: Basic quality, fastest (<1s)
+        """
         self.ensure_one()
         
         # Get order data based on model
@@ -455,24 +471,123 @@ class InvoiceTemplateDesigner(models.Model):
         # Generate HTML
         html = self._generate_full_html_for_pdf(data_dict)
         
-        # Ensure html is string (not bytes) - _run_wkhtmltopdf expects Iterable[str]
+        # Ensure html is string
         if isinstance(html, bytes):
             html = html.decode('utf-8')
         
-        # Generate PDF using wkhtmltopdf
-        try:
-            pdf = self.env['ir.actions.report']._run_wkhtmltopdf(
-                [html],  # Pass as list of strings
-                landscape=(self.page_orientation == 'landscape'),
-            )
-        except Exception as e:
-            raise UserError(_('PDF generation failed: %s') % str(e))
+        # Choose rendering engine
+        pdf_bytes = None
+        
+        if self.render_engine == 'playwright':
+            try:
+                pdf_bytes = self._generate_pdf_with_playwright(html)
+            except ImportError:
+                _logger.warning('Playwright not available, falling back to WeasyPrint')
+                self.render_engine = 'weasyprint'
+            except Exception as e:
+                _logger.error(f'Playwright PDF generation failed: {e}, falling back to WeasyPrint')
+                self.render_engine = 'weasyprint'
+        
+        if self.render_engine == 'weasyprint' and not pdf_bytes:
+            try:
+                pdf_bytes = self._generate_pdf_with_weasyprint(html)
+            except ImportError:
+                _logger.warning('WeasyPrint not available, falling back to wkhtmltopdf')
+                self.render_engine = 'wkhtmltopdf'
+            except Exception as e:
+                _logger.error(f'WeasyPrint PDF generation failed: {e}, falling back to wkhtmltopdf')
+                self.render_engine = 'wkhtmltopdf'
+        
+        if self.render_engine == 'wkhtmltopdf' and not pdf_bytes:
+            try:
+                pdf_bytes = self.env['ir.actions.report']._run_wkhtmltopdf(
+                    [html],
+                    landscape=(self.page_orientation == 'landscape'),
+                )
+            except Exception as e:
+                raise UserError(_('PDF generation failed with all engines: %s') % str(e))
         
         # Update statistics
         self.usage_count += 1
         self.last_used_date = fields.Datetime.now()
         
-        return pdf
+        return pdf_bytes
+    
+    def _generate_pdf_with_playwright(self, html):
+        """Generate PDF using Playwright (Headless Chrome)"""
+        from playwright.sync_api import sync_playwright
+        import tempfile
+        import os
+        
+        # Create temporary HTML file
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.html', delete=False) as f:
+            f.write(html)
+            temp_html_path = f.name
+        
+        try:
+            # Generate PDF using Playwright
+            with sync_playwright() as p:
+                # Launch browser with optimized settings
+                browser = p.chromium.launch(
+                    headless=True,
+                    args=[
+                        '--disable-gpu',
+                        '--disable-dev-shm-usage',
+                        '--disable-setuid-sandbox',
+                        '--no-sandbox',
+                    ]
+                )
+                
+                page = browser.new_page()
+                
+                # Set viewport to match page size (mm to px at 96 DPI)
+                page.set_viewport_size({
+                    'width': int(self.page_width * 3.7795275591),
+                    'height': int(self.page_height * 3.7795275591)
+                })
+                
+                # Load HTML file
+                page.goto(f'file:///{temp_html_path.replace(chr(92), "/")}')
+                
+                # Wait for page to load completely
+                page.wait_for_load_state('networkidle', timeout=10000)
+                
+                # Generate PDF with exact dimensions
+                pdf_bytes = page.pdf(
+                    format=None,  # Use custom size
+                    width=f'{self.page_width}mm',
+                    height=f'{self.page_height}mm',
+                    margin={
+                        'top': f'{self.margin_top}mm',
+                        'right': f'{self.margin_right}mm',
+                        'bottom': f'{self.margin_bottom}mm',
+                        'left': f'{self.margin_left}mm'
+                    },
+                    print_background=True,
+                    prefer_css_page_size=False,
+                    display_header_footer=False,
+                )
+                
+                browser.close()
+                
+                return pdf_bytes
+                
+        finally:
+            # Clean up temp file
+            try:
+                os.unlink(temp_html_path)
+            except:
+                pass
+    
+    def _generate_pdf_with_weasyprint(self, html):
+        """Generate PDF using WeasyPrint (Fast and lightweight)"""
+        from weasyprint import HTML, CSS
+        from io import BytesIO
+        
+        # Convert HTML string to PDF using WeasyPrint
+        pdf_bytes = HTML(string=html, encoding='utf-8').write_pdf()
+        
+        return pdf_bytes
 
     def _prepare_order_data(self, order):
         """Prepare order data for rendering - supports multiple models"""
