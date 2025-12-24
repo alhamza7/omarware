@@ -17,7 +17,6 @@
                             </group>
                             <group>
                                 <field name="z_index"/>
-                                <field name="visible"/>
                             </group>
                         </group>
                         
@@ -291,7 +290,6 @@
                     <field name="width"/>
                     <field name="height"/>
                     <field name="z_index"/>
-                    <field name="visible"/>
                 </list>
             </field>
         </record>
