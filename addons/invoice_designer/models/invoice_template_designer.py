@@ -411,16 +411,14 @@ class InvoiceTemplateDesigner(models.Model):
         # Generate HTML
         html = self._generate_full_html_for_pdf(data_dict)
         
-        # Convert html to bytes if it's a string
-        if isinstance(html, str):
-            html_bytes = html.encode('utf-8')
-        else:
-            html_bytes = html
+        # Ensure html is string (not bytes) - _run_wkhtmltopdf expects Iterable[str]
+        if isinstance(html, bytes):
+            html = html.decode('utf-8')
         
         # Generate PDF using wkhtmltopdf
         try:
             pdf = self.env['ir.actions.report']._run_wkhtmltopdf(
-                [html_bytes],
+                [html],  # Pass as list of strings
                 landscape=(self.page_orientation == 'landscape'),
             )
         except Exception as e:
