@@ -132,7 +132,7 @@
                             </page>
                             
                             <page string="Elements">
-                                <field name="element_ids" context="{'default_template_id': active_id}"/>
+                                <field name="element_ids" context="{'default_template_id': id}"/>
                             </page>
                         </notebook>
                     </sheet>
