@@ -356,36 +356,80 @@ class InvoiceTemplateDesigner(models.Model):
         """Generate complete HTML for PDF generation"""
         self.ensure_one()
         
-        html = f'''
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8"/>
-            <style>
-                @page {{
-                    size: {self.page_width}mm {self.page_height}mm;
-                    margin: {self.margin_top}mm {self.margin_right}mm {self.margin_bottom}mm {self.margin_left}mm;
-                }}
-                body {{
-                    font-family: 'Arial', sans-serif;
-                    margin: 0;
-                    padding: 0;
-                }}
-                .page {{
-                    width: {self.page_width - self.margin_left - self.margin_right}mm;
-                    height: {self.page_height - self.margin_top - self.margin_bottom}mm;
-                    background-color: {self.background_color};
-                    position: relative;
-                }}
-            </style>
-        </head>
-        <body>
-            <div class="page">
-                {self._render_elements_for_pdf(data_dict)}
-            </div>
-        </body>
-        </html>
-        '''
+        html = f'''<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8"/>
+    <style>
+        * {{
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }}
+        
+        @page {{
+            size: {self.page_width}mm {self.page_height}mm;
+            margin: {self.margin_top}mm {self.margin_right}mm {self.margin_bottom}mm {self.margin_left}mm;
+        }}
+        
+        body {{
+            font-family: 'Arial', 'Helvetica', sans-serif;
+            margin: 0;
+            padding: 0;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }}
+        
+        .page {{
+            width: {self.page_width - self.margin_left - self.margin_right}mm;
+            height: {self.page_height - self.margin_top - self.margin_bottom}mm;
+            background-color: {self.background_color};
+            position: relative;
+            overflow: visible;
+        }}
+        
+        .element {{
+            box-sizing: border-box;
+            overflow: visible;
+        }}
+        
+        .element-field, .element-text {{
+            white-space: normal;
+            word-wrap: break-word;
+            overflow: visible;
+        }}
+        
+        .element-table {{
+            border-collapse: collapse;
+            width: 100%;
+        }}
+        
+        .element-table th, .element-table td {{
+            padding: 8px;
+            text-align: right;
+            border: 1px solid #ddd;
+            vertical-align: middle;
+        }}
+        
+        .element-table thead {{
+            background-color: #4a5568;
+            color: white;
+        }}
+        
+        .element-image {{
+            display: block;
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }}
+    </style>
+</head>
+<body>
+    <div class="page">
+        {self._render_elements_for_pdf(data_dict)}
+    </div>
+</body>
+</html>'''
         
         return html
 

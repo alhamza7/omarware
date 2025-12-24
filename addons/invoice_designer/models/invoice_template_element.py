@@ -429,6 +429,9 @@ class InvoiceTemplateElement(models.Model):
         
         styles = []
         
+        # Box Model
+        styles.append("box-sizing: border-box;")
+        
         # Position & Size
         styles.append(f"position: {self.position};")
         styles.append(f"left: {self.x}mm;")
@@ -441,9 +444,12 @@ class InvoiceTemplateElement(models.Model):
         
         styles.append(f"z-index: {self.z_index};")
         
+        # Overflow
+        styles.append("overflow: visible;")
+        
         # Font
         if self.font_family_name:
-            styles.append(f"font-family: '{self.font_family_name}';")
+            styles.append(f"font-family: '{self.font_family_name}', 'Arial', sans-serif;")
         if self.font_size:
             styles.append(f"font-size: {self.font_size}pt;")
         if self.font_weight:
