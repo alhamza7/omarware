@@ -187,6 +187,15 @@ class PosPerfumeOrder(models.Model):
     # Notes
     note = fields.Text(string='Notes')
     
+    # SAP Document Number
+    sap_doc_number = fields.Char(
+        string='SAP Document Number',
+        readonly=True,
+        copy=False,
+        help='Document number returned from SAP after successful posting',
+        tracking=True
+    )
+    
     # Invoice Type (for SAP) - قيم ثابتة
     invoice_type = fields.Selection(
         string='نوع الفاتورة / Invoice Type',

@@ -363,14 +363,49 @@ class InvoiceTemplateDesigner(models.Model):
         return pdf
 
     def _generate_full_html_for_pdf(self, data_dict):
-        """Generate complete HTML for PDF generation"""
+        """Generate complete HTML for PDF generation with Google Fonts support"""
         self.ensure_one()
         
+        # Get used fonts from elements
+        used_fonts = set()
+        for element in self.element_ids:
+            if element.font_family_name and element.font_family_name != 'custom':
+                used_fonts.add(element.font_family_name)
+            elif element.font_family_name == 'custom' and element.custom_font_name:
+                used_fonts.add(element.custom_font_name)
+        
+        # Google Fonts imports for Arabic and other fonts
+        google_fonts_import = ""
+        if used_fonts:
+            # Arabic + English fonts from Google Fonts
+            arabic_fonts = {
+                'Almarai': 'Almarai:300,400,700,800',
+                'Cairo': 'Cairo:200,300,400,600,700,900',
+                'Tajawal': 'Tajawal:200,300,400,500,700,800,900',
+                'Amiri': 'Amiri:400,700',
+                'Scheherazade New': 'Scheherazade+New:400,700',
+                'Noto Sans Arabic': 'Noto+Sans+Arabic:100,200,300,400,500,600,700,800,900',
+                'IBM Plex Sans Arabic': 'IBM+Plex+Sans+Arabic:100,200,300,400,500,600,700',
+                'Markazi Text': 'Markazi+Text:400,500,600,700',
+                'El Messiri': 'El+Messiri:400,500,600,700',
+                'Lateef': 'Lateef:200,300,400,500,600,700,800',
+            }
+            
+            fonts_to_import = []
+            for font in used_fonts:
+                if font in arabic_fonts:
+                    fonts_to_import.append(arabic_fonts[font])
+            
+            if fonts_to_import:
+                google_fonts_import = f"@import url('https://fonts.googleapis.com/css2?{('&').join([f'family={f}' for f in fonts_to_import])}&display=swap');"
+        
         html = f'''<!DOCTYPE html>
-<html>
+<html dir="rtl" lang="ar">
 <head>
     <meta charset="utf-8"/>
     <style>
+        {google_fonts_import}
+        
         * {{
             box-sizing: border-box;
             margin: 0;
@@ -383,11 +418,12 @@ class InvoiceTemplateDesigner(models.Model):
         }}
         
         body {{
-            font-family: 'Arial', 'Helvetica', sans-serif;
+            font-family: 'Almarai', 'Arial', 'Helvetica', sans-serif;
             margin: 0;
             padding: 0;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
+            direction: rtl;
         }}
         
         .page {{
@@ -412,6 +448,8 @@ class InvoiceTemplateDesigner(models.Model):
         .element-table {{
             border-collapse: collapse;
             width: 100%;
+            direction: rtl;
+            text-align: right;
         }}
         
         .element-table th, .element-table td {{
@@ -593,22 +631,42 @@ class InvoiceTemplateDesigner(models.Model):
         """Prepare order data for rendering - supports multiple models"""
         # Basic customer info
         data = {
+            # Customer/Partner Fields
             'partner_id.name': order.partner_id.name if hasattr(order, 'partner_id') and order.partner_id else '',
             'partner_id.street': order.partner_id.street if hasattr(order, 'partner_id') and order.partner_id and order.partner_id.street else '',
+            'partner_id.street2': order.partner_id.street2 if hasattr(order, 'partner_id') and order.partner_id and order.partner_id.street2 else '',
             'partner_id.city': order.partner_id.city if hasattr(order, 'partner_id') and order.partner_id and order.partner_id.city else '',
+            'partner_id.state_id.name': order.partner_id.state_id.name if hasattr(order, 'partner_id') and order.partner_id and order.partner_id.state_id else '',
+            'partner_id.zip': order.partner_id.zip if hasattr(order, 'partner_id') and order.partner_id and order.partner_id.zip else '',
+            'partner_id.country_id.name': order.partner_id.country_id.name if hasattr(order, 'partner_id') and order.partner_id and order.partner_id.country_id else '',
             'partner_id.phone': order.partner_id.phone if hasattr(order, 'partner_id') and order.partner_id and order.partner_id.phone else '',
+            'partner_id.mobile': order.partner_id.mobile if hasattr(order, 'partner_id') and order.partner_id and order.partner_id.mobile else '',
             'partner_id.email': order.partner_id.email if hasattr(order, 'partner_id') and order.partner_id and order.partner_id.email else '',
+            'partner_id.vat': order.partner_id.vat if hasattr(order, 'partner_id') and order.partner_id and order.partner_id.vat else '',
+            'partner_id.ref': order.partner_id.ref if hasattr(order, 'partner_id') and order.partner_id and order.partner_id.ref else '',
             
             # Order info
             'name': order.name if hasattr(order, 'name') else '',
+            'state': dict(order._fields['state'].selection).get(order.state) if hasattr(order, 'state') else '',
+            
+            # Invoice Type
+            'invoice_type': 'فاتورة مبيعات' if hasattr(order, 'order_line') else 'فاتورة POS',
+            'invoice_type_code': 'SALES' if hasattr(order, 'order_line') else 'POS',
             
             # Company info
             'company_id.name': order.company_id.name if hasattr(order, 'company_id') and order.company_id else self.env.company.name,
             'company_id.street': order.company_id.street if hasattr(order, 'company_id') and order.company_id else self.env.company.street,
+            'company_id.street2': order.company_id.street2 if hasattr(order, 'company_id') and order.company_id else self.env.company.street2,
+            'company_id.city': order.company_id.city if hasattr(order, 'company_id') and order.company_id else self.env.company.city,
+            'company_id.zip': order.company_id.zip if hasattr(order, 'company_id') and order.company_id else self.env.company.zip,
+            'company_id.country_id.name': order.company_id.country_id.name if hasattr(order, 'company_id') and order.company_id and order.company_id.country_id else self.env.company.country_id.name,
             'company_id.phone': order.company_id.phone if hasattr(order, 'company_id') and order.company_id else self.env.company.phone,
+            'company_id.email': order.company_id.email if hasattr(order, 'company_id') and order.company_id else self.env.company.email,
+            'company_id.vat': order.company_id.vat if hasattr(order, 'company_id') and order.company_id else self.env.company.vat,
             
             # Currency
             'currency_id': order.currency_id if hasattr(order, 'currency_id') else self.env.company.currency_id,
+            'currency_id.symbol': order.currency_id.symbol if hasattr(order, 'currency_id') and order.currency_id else self.env.company.currency_id.symbol,
         }
         
         # Date field (different names in different models)
@@ -649,6 +707,10 @@ class InvoiceTemplateDesigner(models.Model):
         
         if hasattr(order, 'user_id'):
             data['user_name'] = order.user_id.name if order.user_id else ''
+        
+        # Payment info
+        if hasattr(order, 'payment_term_id'):
+            data['payment_term'] = order.payment_term_id.name if order.payment_term_id else ''
         
         return data
 

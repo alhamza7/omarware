@@ -71,7 +71,32 @@ class InvoiceTemplateElement(models.Model):
 
     # ==================== FONT CONTROL (9 Weights) ====================
     font_family_id = fields.Many2one('invoice.template.font', 'Font Family')
-    font_family_name = fields.Char('Font Family Name', default='Arial')
+    font_family_name = fields.Selection([
+        # Arabic Google Fonts
+        ('Almarai', 'Almarai (عربي - حديث)'),
+        ('Cairo', 'Cairo (عربي - كايرو)'),
+        ('Tajawal', 'Tajawal (عربي - تجوال)'),
+        ('Amiri', 'Amiri (عربي - كلاسيكي)'),
+        ('Scheherazade New', 'Scheherazade (عربي - شهرزاد)'),
+        ('Noto Sans Arabic', 'Noto Sans Arabic (عربي)'),
+        ('IBM Plex Sans Arabic', 'IBM Plex Sans Arabic'),
+        ('Markazi Text', 'Markazi Text (عربي)'),
+        ('El Messiri', 'El Messiri (عربي)'),
+        ('Lateef', 'Lateef (عربي)'),
+        # Standard Fonts
+        ('Arial', 'Arial'),
+        ('Helvetica', 'Helvetica'),
+        ('Times New Roman', 'Times New Roman'),
+        ('Courier New', 'Courier New'),
+        ('Georgia', 'Georgia'),
+        ('Verdana', 'Verdana'),
+        ('Tahoma', 'Tahoma'),
+        ('Trebuchet MS', 'Trebuchet MS'),
+        ('custom', 'Custom Font'),
+    ], string='Font Family', default='Almarai')
+    
+    custom_font_name = fields.Char('Custom Font Name', help='Enter custom font name if selected "Custom Font"')
+    
     font_size = fields.Integer('Font Size (pt)', default=12)
     font_weight = fields.Selection([
         ('100', '100 - Thin'),
@@ -386,6 +411,67 @@ class InvoiceTemplateElement(models.Model):
         ('H', 'High (30%)'),
     ], string='QR Error Correction', default='M')
 
+    # ==================== TABLE SETTINGS ====================
+    # Table Structure
+    table_columns = fields.Selection([
+        ('product_qty_price_total', 'Product + Qty + Price + Total'),
+        ('product_qty_price', 'Product + Qty + Price'),
+        ('product_total', 'Product + Total'),
+        ('custom', 'Custom Columns'),
+    ], string='Table Columns', default='product_qty_price_total')
+    
+    # Column Visibility
+    show_column_product = fields.Boolean('Show Product Column', default=True)
+    show_column_description = fields.Boolean('Show Description', default=False)
+    show_column_qty = fields.Boolean('Show Quantity', default=True)
+    show_column_uom = fields.Boolean('Show Unit of Measure', default=True)
+    show_column_price = fields.Boolean('Show Unit Price', default=True)
+    show_column_discount = fields.Boolean('Show Discount', default=False)
+    show_column_tax = fields.Boolean('Show Tax', default=False)
+    show_column_subtotal = fields.Boolean('Show Subtotal', default=True)
+    
+    # Column Widths (percentage)
+    column_width_product = fields.Integer('Product Width %', default=40)
+    column_width_description = fields.Integer('Description Width %', default=20)
+    column_width_qty = fields.Integer('Qty Width %', default=10)
+    column_width_uom = fields.Integer('UOM Width %', default=10)
+    column_width_price = fields.Integer('Price Width %', default=15)
+    column_width_discount = fields.Integer('Discount Width %', default=10)
+    column_width_tax = fields.Integer('Tax Width %', default=10)
+    column_width_subtotal = fields.Integer('Subtotal Width %', default=15)
+    
+    # Column Headers (Arabic)
+    header_product = fields.Char('Product Header', default='المنتج')
+    header_description = fields.Char('Description Header', default='الوصف')
+    header_qty = fields.Char('Qty Header', default='الكمية')
+    header_uom = fields.Char('UOM Header', default='الوحدة')
+    header_price = fields.Char('Price Header', default='السعر')
+    header_discount = fields.Char('Discount Header', default='الخصم')
+    header_tax = fields.Char('Tax Header', default='الضريبة')
+    header_subtotal = fields.Char('Subtotal Header', default='المجموع')
+    
+    # Table Styling
+    table_header_bg = fields.Char('Table Header Background', default='#4a5568')
+    table_header_color = fields.Char('Table Header Color', default='#ffffff')
+    table_header_font_size = fields.Integer('Header Font Size', default=12)
+    table_header_font_weight = fields.Selection([
+        ('400', 'Normal'),
+        ('600', 'Semi Bold'),
+        ('700', 'Bold'),
+    ], string='Header Font Weight', default='700')
+    
+    table_row_bg = fields.Char('Table Row Background', default='#ffffff')
+    table_row_alternate_bg = fields.Char('Alternate Row Background', default='#f8f9fa')
+    table_row_color = fields.Char('Table Row Color', default='#333333')
+    table_row_font_size = fields.Integer('Row Font Size', default=11)
+    table_border_color = fields.Char('Table Border Color', default='#dee2e6')
+    table_border_width = fields.Integer('Table Border Width', default=1)
+    table_cell_padding = fields.Integer('Cell Padding (px)', default=8)
+    
+    # Table Footer
+    show_table_footer = fields.Boolean('Show Table Footer', default=False)
+    table_footer_text = fields.Char('Footer Text', default='')
+
     # ==================== CONDITIONAL VISIBILITY ====================
     visible_condition = fields.Char('Visible If (Python Expression)')  # e.g., "amount_total > 1000"
     
@@ -448,8 +534,9 @@ class InvoiceTemplateElement(models.Model):
         styles.append("overflow: visible;")
         
         # Font
-        if self.font_family_name:
-            styles.append(f"font-family: '{self.font_family_name}', 'Arial', sans-serif;")
+        font_name = self.custom_font_name if self.font_family_name == 'custom' and self.custom_font_name else self.font_family_name
+        if font_name:
+            styles.append(f"font-family: '{font_name}', 'Almarai', 'Arial', sans-serif;")
         if self.font_size:
             styles.append(f"font-size: {self.font_size}pt;")
         if self.font_weight:
@@ -639,42 +726,107 @@ class InvoiceTemplateElement(models.Model):
             return str(value)
     
     def _render_table_for_pdf(self, data_dict):
-        """Render order lines table with actual data"""
+        """Render order lines table with actual data and full customization"""
         order_lines = data_dict.get('order_line', [])
         
         if not order_lines:
-            return f'<div class="element element-table" style="{self._generate_css_style()}">No items</div>'
+            return f'<div class="element element-table" style="{self._generate_css_style()}">لا توجد منتجات</div>'
         
+        # Build column list based on visibility settings
+        columns = []
+        if self.show_column_product:
+            columns.append(('product', self.header_product, self.column_width_product))
+        if self.show_column_description:
+            columns.append(('description', self.header_description, self.column_width_description))
+        if self.show_column_qty:
+            columns.append(('qty', self.header_qty, self.column_width_qty))
+        if self.show_column_uom:
+            columns.append(('uom', self.header_uom, self.column_width_uom))
+        if self.show_column_price:
+            columns.append(('price', self.header_price, self.column_width_price))
+        if self.show_column_discount:
+            columns.append(('discount', self.header_discount, self.column_width_discount))
+        if self.show_column_tax:
+            columns.append(('tax', self.header_tax, self.column_width_tax))
+        if self.show_column_subtotal:
+            columns.append(('subtotal', self.header_subtotal, self.column_width_subtotal))
+        
+        # Table header style
+        header_style = f"background-color: {self.table_header_bg}; color: {self.table_header_color}; font-size: {self.table_header_font_size}pt; font-weight: {self.table_header_font_weight}; padding: {self.table_cell_padding}px;"
+        
+        # Build table HTML
         table_html = f'''
-        <table class="element element-table" style="{self._generate_css_style()}; width: 100%; border-collapse: collapse;">
+        <table class="element element-table" style="{self._generate_css_style()}; width: 100%; border-collapse: collapse; direction: rtl; text-align: right; border: {self.table_border_width}px solid {self.table_border_color};">
             <thead>
-                <tr style="background-color: #4a5568; color: white;">
-                    <th style="padding: 8px; text-align: right; border: 1px solid #ddd;">المنتج</th>
-                    <th style="padding: 8px; text-align: center; border: 1px solid #ddd;">الكمية</th>
-                    <th style="padding: 8px; text-align: right; border: 1px solid #ddd;">السعر</th>
-                    <th style="padding: 8px; text-align: right; border: 1px solid #ddd;">المجموع</th>
+                <tr style="{header_style}">
+        '''
+        
+        # Add headers
+        for col_key, col_header, col_width in columns:
+            table_html += f'<th style="width: {col_width}%; padding: {self.table_cell_padding}px; text-align: right; border: {self.table_border_width}px solid {self.table_border_color};">{col_header}</th>'
+        
+        table_html += '''
                 </tr>
             </thead>
             <tbody>
         '''
         
-        for line in order_lines:
-            product_name = line.product_id.name if hasattr(line, 'product_id') else ''
+        # Add rows
+        for idx, line in enumerate(order_lines):
+            # Alternate row colors
+            row_bg = self.table_row_alternate_bg if idx % 2 == 1 else self.table_row_bg
+            row_style = f"background-color: {row_bg}; color: {self.table_row_color}; font-size: {self.table_row_font_size}pt;"
+            
+            table_html += f'<tr style="{row_style}">'
+            
+            # Get line data
+            product_name = line.product_id.name if hasattr(line, 'product_id') and line.product_id else ''
+            description = line.name if hasattr(line, 'name') else ''
             quantity = line.quantity if hasattr(line, 'quantity') else (line.product_uom_qty if hasattr(line, 'product_uom_qty') else 0)
+            uom = line.product_uom.name if hasattr(line, 'product_uom') and line.product_uom else (line.product_id.uom_id.name if hasattr(line, 'product_id') and line.product_id and line.product_id.uom_id else 'قطعة')
             price = line.price_unit if hasattr(line, 'price_unit') else 0
+            discount = line.discount if hasattr(line, 'discount') else 0
+            tax = line.price_tax if hasattr(line, 'price_tax') else 0
             subtotal = line.price_subtotal if hasattr(line, 'price_subtotal') else (quantity * price)
             
-            table_html += f'''
-                <tr>
-                    <td style="padding: 8px; text-align: right; border: 1px solid #ddd;">{product_name}</td>
-                    <td style="padding: 8px; text-align: center; border: 1px solid #ddd;">{quantity}</td>
-                    <td style="padding: 8px; text-align: right; border: 1px solid #ddd;">{price:,.2f}</td>
-                    <td style="padding: 8px; text-align: right; border: 1px solid #ddd;">{subtotal:,.2f}</td>
-                </tr>
-            '''
+            # Add cells based on visible columns
+            for col_key, col_header, col_width in columns:
+                cell_style = f"padding: {self.table_cell_padding}px; text-align: right; border: {self.table_border_width}px solid {self.table_border_color};"
+                
+                if col_key == 'product':
+                    table_html += f'<td style="{cell_style}">{product_name}</td>'
+                elif col_key == 'description':
+                    table_html += f'<td style="{cell_style}">{description}</td>'
+                elif col_key == 'qty':
+                    table_html += f'<td style="{cell_style} text-align: center;">{quantity}</td>'
+                elif col_key == 'uom':
+                    table_html += f'<td style="{cell_style} text-align: center;">{uom}</td>'
+                elif col_key == 'price':
+                    table_html += f'<td style="{cell_style} text-align: right;">{price:,.2f}</td>'
+                elif col_key == 'discount':
+                    table_html += f'<td style="{cell_style} text-align: center;">{discount}%</td>'
+                elif col_key == 'tax':
+                    table_html += f'<td style="{cell_style} text-align: right;">{tax:,.2f}</td>'
+                elif col_key == 'subtotal':
+                    table_html += f'<td style="{cell_style} text-align: right;">{subtotal:,.2f}</td>'
+            
+            table_html += '</tr>'
         
         table_html += '''
             </tbody>
+        '''
+        
+        # Add footer if enabled
+        if self.show_table_footer and self.table_footer_text:
+            table_html += f'''
+            <tfoot>
+                <tr style="{header_style}">
+                    <td colspan="{len(columns)}" style="padding: {self.table_cell_padding}px; text-align: center;">{self.table_footer_text}</td>
+                </tr>
+            </tfoot>
+            '''
+        
+        table_html += '''
         </table>
         '''
         

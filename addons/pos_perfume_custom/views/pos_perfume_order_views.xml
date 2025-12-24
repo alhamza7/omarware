@@ -81,6 +81,7 @@
                         <group>
                             <field name="user_id"/>
                             <field name="sale_order_id" readonly="1"/>
+                            <field name="sap_doc_number" readonly="1" invisible="not sap_doc_number"/>
                             <field name="exchange_rate"/>
                         </group>
                     </group>
