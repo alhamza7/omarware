@@ -2160,7 +2160,7 @@ export class PosPerfumeScreen extends Component {
     }
     
     /**
-     * Print order - إرسال طلب طباعة إلى SAP على DEFAULT LAYOUT
+     * Print order - طباعة باستخدام Invoice Designer
      */
     async printOrder() {
         if (!this.state.currentOrder.order_id) {
@@ -2171,34 +2171,40 @@ export class PosPerfumeScreen extends Component {
         try {
             const orderId = this.state.currentOrder.order_id;
             
-            console.log('=== Print Order to SAP ===');
+            console.log('=== Print Order with Invoice Designer ===');
             console.log('Order ID:', orderId);
             
-            // إرسال طلب الطباعة إلى SAP
+            // طباعة باستخدام Invoice Designer
             const result = await this.orm.call(
                 'pos.perfume.order',
-                'action_print_to_sap',
+                'action_print_with_designer',
                 [[orderId]]
             );
             
-            console.log('SAP Print result:', result);
+            console.log('Print result:', result);
             
-            // عرض إشعار النجاح
-            this.notification.add(_t("Print request sent to SAP successfully"), { type: "success" });
-            
-            // إذا كان هناك إجراء إضافي من السيرفر، قم بتنفيذه
+            // إذا كان هناك إجراء (مثل فتح PDF)، قم بتنفيذه
             if (result && result.type) {
-                await this.action.doAction(result);
+                if (result.type === 'ir.actions.act_url') {
+                    // فتح PDF في نافذة جديدة
+                    window.open(result.url, '_blank');
+                    this.notification.add(_t("Invoice generated successfully!"), { type: "success" });
+                } else {
+                    // تنفيذ الإجراء العادي
+                    await this.action.doAction(result);
+                }
+            } else {
+                this.notification.add(_t("Invoice printed successfully!"), { type: "success" });
             }
             
         } catch (error) {
-            console.error('=== Print Order to SAP Error ===');
+            console.error('=== Print Order Error ===');
             console.error('Error object:', error);
             console.error('Error message:', error.message);
             console.error('Error data:', error.data);
             console.error('Error stack:', error.stack);
             
-            let errorMessage = _t("Error sending print request to SAP: ");
+            let errorMessage = _t("Error printing invoice: ");
             
             if (error.data && error.data.message) {
                 errorMessage += error.data.message;
@@ -2216,7 +2222,7 @@ export class PosPerfumeScreen extends Component {
             this.notification.add(errorMessage, { 
                 type: "danger",
                 sticky: true,
-                title: _t("SAP Print Error")
+                title: _t("Print Error")
             });
         }
     }
