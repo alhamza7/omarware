@@ -33,11 +33,17 @@
                   action="action_invoice_template_designer"
                   sequence="10"/>
         
-        <!-- Template Elements Menu (for direct access) -->
+        <!-- Template Elements Action & Menu -->
+        <record id="action_invoice_template_element" model="ir.actions.act_window">
+            <field name="name">Template Elements</field>
+            <field name="res_model">invoice.template.element</field>
+            <field name="view_mode">list,form</field>
+        </record>
+        
         <menuitem id="menu_invoice_template_elements"
                   name="Template Elements"
                   parent="menu_invoice_designer_templates"
-                  action="invoice_template_element_views.action_invoice_template_element"
+                  action="action_invoice_template_element"
                   sequence="20"/>
         
         
