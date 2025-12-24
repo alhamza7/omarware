@@ -36,7 +36,6 @@
             <field name="z_index">10</field>
             <field name="sequence">10</field>
             <field name="field_name">company_id.logo</field>
-            <field name="object_fit">contain</field>
         </record>
         
         <!-- اسم الشركة -->
@@ -424,7 +423,6 @@
             <field name="height">40</field>
             <field name="z_index">10</field>
             <field name="field_name">company_id.logo</field>
-            <field name="object_fit">contain</field>
         </record>
         
         <!-- اسم الشركة - عصري -->

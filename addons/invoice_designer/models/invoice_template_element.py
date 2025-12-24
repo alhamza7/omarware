@@ -196,6 +196,9 @@ class InvoiceTemplateElement(models.Model):
     ], string='Left Border Style', default='solid')
     border_left_color = fields.Char('Left Border Color', default='#000000')
 
+    # ==================== BORDER RADIUS ====================
+    border_radius = fields.Integer('Border Radius (px)', default=0, help='General border radius for all corners')
+    
     # ==================== BORDER RADIUS (4 Corners) ====================
     border_top_left_radius = fields.Integer('Top-Left Radius (px)', default=0)
     border_top_right_radius = fields.Integer('Top-Right Radius (px)', default=0)
@@ -203,6 +206,7 @@ class InvoiceTemplateElement(models.Model):
     border_bottom_left_radius = fields.Integer('Bottom-Left Radius (px)', default=0)
 
     # ==================== BOX SHADOW ====================
+    box_shadow = fields.Char('Box Shadow CSS', help='CSS box-shadow property (e.g., 2px 2px 5px rgba(0,0,0,0.3))')
     box_shadow_enabled = fields.Boolean('Enable Box Shadow')
     box_shadow_x = fields.Integer('Shadow X Offset (px)', default=0)
     box_shadow_y = fields.Integer('Shadow Y Offset (px)', default=2)
