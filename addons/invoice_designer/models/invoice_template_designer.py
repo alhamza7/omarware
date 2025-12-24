@@ -411,6 +411,10 @@ class InvoiceTemplateDesigner(models.Model):
         # Generate HTML
         html = self._generate_full_html_for_pdf(data_dict)
         
+        # Ensure html is string, not bytes
+        if isinstance(html, bytes):
+            html = html.decode('utf-8')
+        
         # Generate PDF
         pdf = self.env['ir.actions.report']._run_wkhtmltopdf(
             [html.encode('utf-8')],
