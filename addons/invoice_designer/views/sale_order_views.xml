@@ -28,32 +28,11 @@
         </field>
     </record>
     
-    
-    <!-- POS Order Form: Add Invoice Template Field -->
-    <record id="view_pos_order_form_invoice_designer" model="ir.ui.view">
-        <field name="name">pos.order.form.invoice.designer</field>
-        <field name="model">pos.order</field>
-        <field name="inherit_id" ref="point_of_sale.view_pos_pos_form"/>
-        <field name="arch" type="xml">
-            
-            <!-- Add Print button -->
-            <xpath expr="//header" position="inside">
-                <button name="action_print_with_designer" 
-                        string="Print Receipt" 
-                        type="object"
-                        class="btn-secondary"
-                        icon="fa-print"/>
-            </xpath>
-            
-            <!-- Add template field -->
-            <xpath expr="//group[@name='info']" position="after">
-                <group string="Receipt Template">
-                    <field name="invoice_template_id"/>
-                </group>
-            </xpath>
-            
-        </field>
-    </record>
+    <!-- 
+        Note: POS Order integration is handled in pos_perfume_custom module
+        to avoid conflicts and ensure better compatibility.
+    -->
     
 </odoo>
+
 
