@@ -132,18 +132,7 @@
                             </page>
                             
                             <page string="Elements">
-                                <field name="element_ids" context="{'default_template_id': active_id}">
-                                    <tree editable="bottom">
-                                        <field name="sequence" widget="handle"/>
-                                        <field name="name"/>
-                                        <field name="element_type"/>
-                                        <field name="x"/>
-                                        <field name="y"/>
-                                        <field name="width"/>
-                                        <field name="height"/>
-                                        <field name="visible"/>
-                                    </tree>
-                                </field>
+                                <field name="element_ids" context="{'default_template_id': active_id}"/>
                             </page>
                         </notebook>
                     </sheet>
