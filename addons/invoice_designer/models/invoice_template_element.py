@@ -48,6 +48,13 @@ class InvoiceTemplateElement(models.Model):
     image_data = fields.Binary('Image Data')
     image_filename = fields.Char('Image Filename')
     image_url = fields.Char('Image URL')
+    object_fit = fields.Selection([
+        ('fill', 'Fill'),
+        ('contain', 'Contain'),
+        ('cover', 'Cover'),
+        ('none', 'None'),
+        ('scale-down', 'Scale Down'),
+    ], string='Object Fit', default='contain', help='How the image should fit within its box')
     
     # For shape
     shape_type = fields.Selection([
@@ -134,6 +141,18 @@ class InvoiceTemplateElement(models.Model):
     
     opacity = fields.Float('Opacity', default=1.0, help='0.0 = transparent, 1.0 = opaque')
 
+    # ==================== BORDERS ====================
+    # General border fields (for convenience/backward compatibility)
+    border_width = fields.Integer('Border Width (px)', default=0, help='General border width for all sides')
+    border_style = fields.Selection([
+        ('none', 'None'),
+        ('solid', 'Solid'),
+        ('dashed', 'Dashed'),
+        ('dotted', 'Dotted'),
+        ('double', 'Double'),
+    ], string='Border Style', default='solid', help='General border style')
+    border_color = fields.Char('Border Color', default='#000000', help='General border color')
+    
     # ==================== BORDERS (4 Sides Separate) ====================
     # Top Border
     border_top_width = fields.Integer('Top Border Width (px)', default=0)
