@@ -194,7 +194,9 @@ export class InvoiceDesignerCanvas extends Component {
         
         // Elements
         this.state.elements.forEach(element => {
-            this.drawElement(ctx, element);
+            if (element.visible !== false) {
+                this.drawElement(ctx, element);
+            }
         });
         
         // Selection
@@ -675,10 +677,16 @@ export class InvoiceDesignerCanvas extends Component {
             // Save all modified elements
             for (const element of this.state.elements) {
                 if (element.modified) {
+                    const payload = { ...element };
+                    delete payload.modified; // not a DB field
+                    // strip any computed-only keys
+                    delete payload.id;
+                    delete payload.__last_update;
+                    delete payload.display_name;
                     await this.orm.write(
                         "invoice.template.element",
                         [element.id],
-                        element
+                        payload
                     );
                 }
             }
