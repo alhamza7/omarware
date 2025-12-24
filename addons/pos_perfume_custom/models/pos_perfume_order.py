@@ -821,10 +821,21 @@ class PosPerfumeOrder(models.Model):
             if not pdf_data:
                 raise UserError(_('Failed to generate PDF from template.'))
             
+            # Save PDF as attachment
+            import base64
+            attachment = self.env['ir.attachment'].create({
+                'name': f'{self.name}.pdf',
+                'type': 'binary',
+                'datas': base64.b64encode(pdf_data),
+                'res_model': 'pos.perfume.order',
+                'res_id': self.id,
+                'mimetype': 'application/pdf',
+            })
+            
             # Return PDF as download
             return {
                 'type': 'ir.actions.act_url',
-                'url': f'/web/content/?model=invoice.template.designer&id={template.id}&field=pdf_preview&filename={self.name}.pdf&download=true',
+                'url': f'/web/content/{attachment.id}?download=true',
                 'target': 'new',
             }
         except Exception as e:
