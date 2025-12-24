@@ -127,8 +127,27 @@ export class InvoiceDesignerCanvas extends Component {
             const elements = await this.orm.read(
                 "invoice.template.element",
                 this.state.template.element_ids,
-                ["name", "element_type", "x", "y", "width", "height", "content", 
-                 "color", "background_color", "font_size", "z_index"]
+                [
+                    // basic
+                    "name", "element_type", "x", "y", "width", "height", "content",
+                    "color", "background_color", "font_size", "z_index", "visible",
+                    // table core
+                    "show_column_product", "show_column_description", "show_column_qty", "show_column_uom",
+                    "show_column_price", "show_column_discount", "show_column_tax", "show_column_subtotal",
+                    "column_width_product", "column_width_description", "column_width_qty", "column_width_uom",
+                    "column_width_price", "column_width_discount", "column_width_tax", "column_width_subtotal",
+                    "column_order_product", "column_order_description", "column_order_qty", "column_order_uom",
+                    "column_order_price", "column_order_discount", "column_order_tax", "column_order_subtotal",
+                    "column_align_product", "column_align_description", "column_align_qty", "column_align_uom",
+                    "column_align_price", "column_align_discount", "column_align_tax", "column_align_subtotal",
+                    "header_product", "header_description", "header_qty", "header_uom",
+                    "header_price", "header_discount", "header_tax", "header_subtotal",
+                    "table_direction", "table_font_family", "table_custom_font",
+                    "table_header_bg", "table_header_color", "table_header_font_size", "table_header_font_weight",
+                    "table_row_bg", "table_row_alternate_bg", "table_row_color", "table_row_font_size",
+                    "table_border_color", "table_border_width", "table_cell_padding",
+                    "show_table_footer", "table_footer_text",
+                ]
             );
             this.state.elements = elements.sort((a, b) => a.z_index - b.z_index);
             this.renderCanvas();
@@ -602,6 +621,9 @@ export class InvoiceDesignerCanvas extends Component {
     
     onPropertyChange() {
         this.state.unsavedChanges = true;
+        if (this.state.selectedElement) {
+            this.state.selectedElement.modified = true;
+        }
         this.renderCanvas();
     }
     

@@ -15,6 +15,8 @@ class InvoiceTemplateElement(models.Model):
     name = fields.Char('Element Name', required=True)
     sequence = fields.Integer('Sequence', default=10)
     active = fields.Boolean('Active', default=True)
+    # Visibility toggle for canvas/UI
+    visible = fields.Boolean('Visible', default=True, help='Show/Hide this element on the designer and print')
 
     # ==================== Element Type ====================
     element_type = fields.Selection([
