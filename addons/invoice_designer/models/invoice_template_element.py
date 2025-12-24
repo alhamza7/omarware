@@ -420,6 +420,16 @@ class InvoiceTemplateElement(models.Model):
         ('custom', 'Custom Columns'),
     ], string='Table Columns', default='product_qty_price_total')
     
+    # Column Order (sequence)
+    column_order_product = fields.Integer('Product Order', default=1)
+    column_order_description = fields.Integer('Description Order', default=2)
+    column_order_qty = fields.Integer('Qty Order', default=3)
+    column_order_uom = fields.Integer('UOM Order', default=4)
+    column_order_price = fields.Integer('Price Order', default=5)
+    column_order_discount = fields.Integer('Discount Order', default=6)
+    column_order_tax = fields.Integer('Tax Order', default=7)
+    column_order_subtotal = fields.Integer('Subtotal Order', default=8)
+    
     # Column Visibility
     show_column_product = fields.Boolean('Show Product Column', default=True)
     show_column_description = fields.Boolean('Show Description', default=False)
@@ -440,6 +450,32 @@ class InvoiceTemplateElement(models.Model):
     column_width_tax = fields.Integer('Tax Width %', default=10)
     column_width_subtotal = fields.Integer('Subtotal Width %', default=15)
     
+    # Column Alignment (text-align)
+    column_align_product = fields.Selection([
+        ('left', 'Left'), ('center', 'Center'), ('right', 'Right')
+    ], string='Product Align', default='right')
+    column_align_description = fields.Selection([
+        ('left', 'Left'), ('center', 'Center'), ('right', 'Right')
+    ], string='Description Align', default='right')
+    column_align_qty = fields.Selection([
+        ('left', 'Left'), ('center', 'Center'), ('right', 'Right')
+    ], string='Qty Align', default='center')
+    column_align_uom = fields.Selection([
+        ('left', 'Left'), ('center', 'Center'), ('right', 'Right')
+    ], string='UOM Align', default='center')
+    column_align_price = fields.Selection([
+        ('left', 'Left'), ('center', 'Center'), ('right', 'Right')
+    ], string='Price Align', default='right')
+    column_align_discount = fields.Selection([
+        ('left', 'Left'), ('center', 'Center'), ('right', 'Right')
+    ], string='Discount Align', default='center')
+    column_align_tax = fields.Selection([
+        ('left', 'Left'), ('center', 'Center'), ('right', 'Right')
+    ], string='Tax Align', default='right')
+    column_align_subtotal = fields.Selection([
+        ('left', 'Left'), ('center', 'Center'), ('right', 'Right')
+    ], string='Subtotal Align', default='right')
+    
     # Column Headers (Arabic)
     header_product = fields.Char('Product Header', default='المنتج')
     header_description = fields.Char('Description Header', default='الوصف')
@@ -449,6 +485,27 @@ class InvoiceTemplateElement(models.Model):
     header_discount = fields.Char('Discount Header', default='الخصم')
     header_tax = fields.Char('Tax Header', default='الضريبة')
     header_subtotal = fields.Char('Subtotal Header', default='المجموع')
+    
+    # Table Direction
+    table_direction = fields.Selection([
+        ('rtl', 'Right to Left (RTL) - Arabic'),
+        ('ltr', 'Left to Right (LTR) - English'),
+    ], string='Table Direction', default='rtl')
+    
+    # Table Font
+    table_font_family = fields.Selection([
+        ('inherit', 'Inherit from Element'),
+        ('Almarai', 'Almarai (عربي)'),
+        ('Cairo', 'Cairo (عربي)'),
+        ('Tajawal', 'Tajawal (عربي)'),
+        ('Amiri', 'Amiri (عربي)'),
+        ('Arial', 'Arial'),
+        ('Helvetica', 'Helvetica'),
+        ('Times New Roman', 'Times New Roman'),
+        ('custom', 'Custom'),
+    ], string='Table Font Family', default='inherit')
+    
+    table_custom_font = fields.Char('Custom Table Font')
     
     # Table Styling
     table_header_bg = fields.Char('Table Header Background', default='#4a5568')
@@ -732,38 +789,53 @@ class InvoiceTemplateElement(models.Model):
         if not order_lines:
             return f'<div class="element element-table" style="{self._generate_css_style()}">لا توجد منتجات</div>'
         
-        # Build column list based on visibility settings
-        columns = []
-        if self.show_column_product:
-            columns.append(('product', self.header_product, self.column_width_product))
-        if self.show_column_description:
-            columns.append(('description', self.header_description, self.column_width_description))
-        if self.show_column_qty:
-            columns.append(('qty', self.header_qty, self.column_width_qty))
-        if self.show_column_uom:
-            columns.append(('uom', self.header_uom, self.column_width_uom))
-        if self.show_column_price:
-            columns.append(('price', self.header_price, self.column_width_price))
-        if self.show_column_discount:
-            columns.append(('discount', self.header_discount, self.column_width_discount))
-        if self.show_column_tax:
-            columns.append(('tax', self.header_tax, self.column_width_tax))
-        if self.show_column_subtotal:
-            columns.append(('subtotal', self.header_subtotal, self.column_width_subtotal))
+        # Build column list based on visibility settings with custom order
+        all_columns = [
+            ('product', self.header_product, self.column_width_product, self.column_order_product, self.show_column_product, self.column_align_product),
+            ('description', self.header_description, self.column_width_description, self.column_order_description, self.show_column_description, self.column_align_description),
+            ('qty', self.header_qty, self.column_width_qty, self.column_order_qty, self.show_column_qty, self.column_align_qty),
+            ('uom', self.header_uom, self.column_width_uom, self.column_order_uom, self.show_column_uom, self.column_align_uom),
+            ('price', self.header_price, self.column_width_price, self.column_order_price, self.show_column_price, self.column_align_price),
+            ('discount', self.header_discount, self.column_width_discount, self.column_order_discount, self.show_column_discount, self.column_align_discount),
+            ('tax', self.header_tax, self.column_width_tax, self.column_order_tax, self.show_column_tax, self.column_align_tax),
+            ('subtotal', self.header_subtotal, self.column_width_subtotal, self.column_order_subtotal, self.show_column_subtotal, self.column_align_subtotal),
+        ]
+        
+        # Filter visible columns and sort by order
+        columns = [(col[0], col[1], col[2], col[5]) for col in all_columns if col[4]]  # col[4] is show_column
+        columns = sorted(columns, key=lambda x: all_columns[[c[0] for c in all_columns].index(x[0])][3])  # Sort by order field
+        
+        # Determine table font
+        table_font = ''
+        if self.table_font_family == 'inherit':
+            if self.font_family_name and self.font_family_name != 'custom':
+                table_font = self.font_family_name
+            elif self.font_family_name == 'custom' and self.custom_font_name:
+                table_font = self.custom_font_name
+        elif self.table_font_family == 'custom' and self.table_custom_font:
+            table_font = self.table_custom_font
+        elif self.table_font_family != 'inherit':
+            table_font = self.table_font_family
+        
+        font_style = f"font-family: '{table_font}', 'Almarai', 'Arial', sans-serif;" if table_font else ''
+        
+        # Table direction
+        direction = self.table_direction or 'rtl'
+        text_align_default = 'right' if direction == 'rtl' else 'left'
         
         # Table header style
-        header_style = f"background-color: {self.table_header_bg}; color: {self.table_header_color}; font-size: {self.table_header_font_size}pt; font-weight: {self.table_header_font_weight}; padding: {self.table_cell_padding}px;"
+        header_style = f"background-color: {self.table_header_bg}; color: {self.table_header_color}; font-size: {self.table_header_font_size}pt; font-weight: {self.table_header_font_weight}; padding: {self.table_cell_padding}px; {font_style}"
         
         # Build table HTML
         table_html = f'''
-        <table class="element element-table" style="{self._generate_css_style()}; width: 100%; border-collapse: collapse; direction: rtl; text-align: right; border: {self.table_border_width}px solid {self.table_border_color};">
+        <table class="element element-table" style="{self._generate_css_style()}; width: 100%; border-collapse: collapse; direction: {direction}; text-align: {text_align_default}; border: {self.table_border_width}px solid {self.table_border_color}; {font_style}">
             <thead>
                 <tr style="{header_style}">
         '''
         
         # Add headers
-        for col_key, col_header, col_width in columns:
-            table_html += f'<th style="width: {col_width}%; padding: {self.table_cell_padding}px; text-align: right; border: {self.table_border_width}px solid {self.table_border_color};">{col_header}</th>'
+        for col_key, col_header, col_width, col_align in columns:
+            table_html += f'<th style="width: {col_width}%; padding: {self.table_cell_padding}px; text-align: {col_align}; border: {self.table_border_width}px solid {self.table_border_color};">{col_header}</th>'
         
         table_html += '''
                 </tr>
@@ -775,7 +847,7 @@ class InvoiceTemplateElement(models.Model):
         for idx, line in enumerate(order_lines):
             # Alternate row colors
             row_bg = self.table_row_alternate_bg if idx % 2 == 1 else self.table_row_bg
-            row_style = f"background-color: {row_bg}; color: {self.table_row_color}; font-size: {self.table_row_font_size}pt;"
+            row_style = f"background-color: {row_bg}; color: {self.table_row_color}; font-size: {self.table_row_font_size}pt; {font_style}"
             
             table_html += f'<tr style="{row_style}">'
             
@@ -789,26 +861,26 @@ class InvoiceTemplateElement(models.Model):
             tax = line.price_tax if hasattr(line, 'price_tax') else 0
             subtotal = line.price_subtotal if hasattr(line, 'price_subtotal') else (quantity * price)
             
-            # Add cells based on visible columns
-            for col_key, col_header, col_width in columns:
-                cell_style = f"padding: {self.table_cell_padding}px; text-align: right; border: {self.table_border_width}px solid {self.table_border_color};"
+            # Add cells based on visible columns (in order)
+            for col_key, col_header, col_width, col_align in columns:
+                cell_style = f"padding: {self.table_cell_padding}px; text-align: {col_align}; border: {self.table_border_width}px solid {self.table_border_color};"
                 
                 if col_key == 'product':
                     table_html += f'<td style="{cell_style}">{product_name}</td>'
                 elif col_key == 'description':
                     table_html += f'<td style="{cell_style}">{description}</td>'
                 elif col_key == 'qty':
-                    table_html += f'<td style="{cell_style} text-align: center;">{quantity}</td>'
+                    table_html += f'<td style="{cell_style}">{quantity}</td>'
                 elif col_key == 'uom':
-                    table_html += f'<td style="{cell_style} text-align: center;">{uom}</td>'
+                    table_html += f'<td style="{cell_style}">{uom}</td>'
                 elif col_key == 'price':
-                    table_html += f'<td style="{cell_style} text-align: right;">{price:,.2f}</td>'
+                    table_html += f'<td style="{cell_style}">{price:,.2f}</td>'
                 elif col_key == 'discount':
-                    table_html += f'<td style="{cell_style} text-align: center;">{discount}%</td>'
+                    table_html += f'<td style="{cell_style}">{discount}%</td>'
                 elif col_key == 'tax':
-                    table_html += f'<td style="{cell_style} text-align: right;">{tax:,.2f}</td>'
+                    table_html += f'<td style="{cell_style}">{tax:,.2f}</td>'
                 elif col_key == 'subtotal':
-                    table_html += f'<td style="{cell_style} text-align: right;">{subtotal:,.2f}</td>'
+                    table_html += f'<td style="{cell_style}">{subtotal:,.2f}</td>'
             
             table_html += '</tr>'
         

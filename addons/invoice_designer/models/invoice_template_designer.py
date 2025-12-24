@@ -79,6 +79,29 @@ class InvoiceTemplateDesigner(models.Model):
     ], string='Background Position', default='center')
     background_image_opacity = fields.Float('Background Opacity', default=1.0)
     
+    # Default Font for Entire Invoice
+    default_font_family = fields.Selection([
+        ('Almarai', 'Almarai (عربي - افتراضي)'),
+        ('Cairo', 'Cairo (عربي)'),
+        ('Tajawal', 'Tajawal (عربي)'),
+        ('Amiri', 'Amiri (عربي)'),
+        ('Arial', 'Arial'),
+        ('Helvetica', 'Helvetica'),
+        ('Times New Roman', 'Times New Roman'),
+        ('custom', 'Custom'),
+    ], string='Default Font Family', default='Almarai',
+       help='Default font for the entire invoice. Elements can override this.')
+    
+    default_custom_font = fields.Char('Custom Default Font')
+    default_font_size = fields.Integer('Default Font Size (pt)', default=11)
+    
+    # Default Direction for Entire Invoice
+    default_direction = fields.Selection([
+        ('rtl', 'Right to Left (RTL) - Arabic'),
+        ('ltr', 'Left to Right (LTR) - English'),
+    ], string='Default Direction', default='rtl',
+       help='Default text direction for the entire invoice')
+    
     # Grid & Snap
     show_grid = fields.Boolean('Show Grid', default=True)
     grid_size = fields.Integer('Grid Size (mm)', default=5)
@@ -368,11 +391,24 @@ class InvoiceTemplateDesigner(models.Model):
         
         # Get used fonts from elements
         used_fonts = set()
+        
+        # Add default font
+        if self.default_font_family and self.default_font_family != 'custom':
+            used_fonts.add(self.default_font_family)
+        elif self.default_font_family == 'custom' and self.default_custom_font:
+            used_fonts.add(self.default_custom_font)
+        
+        # Add fonts from elements
         for element in self.element_ids:
             if element.font_family_name and element.font_family_name != 'custom':
                 used_fonts.add(element.font_family_name)
             elif element.font_family_name == 'custom' and element.custom_font_name:
                 used_fonts.add(element.custom_font_name)
+            # Add table font
+            if element.element_type == 'table' and element.table_font_family and element.table_font_family != 'custom' and element.table_font_family != 'inherit':
+                used_fonts.add(element.table_font_family)
+            elif element.element_type == 'table' and element.table_font_family == 'custom' and element.table_custom_font:
+                used_fonts.add(element.table_custom_font)
         
         # Google Fonts imports for Arabic and other fonts
         google_fonts_import = ""
@@ -399,8 +435,19 @@ class InvoiceTemplateDesigner(models.Model):
             if fonts_to_import:
                 google_fonts_import = f"@import url('https://fonts.googleapis.com/css2?{('&').join([f'family={f}' for f in fonts_to_import])}&display=swap');"
         
+        # Determine default direction
+        direction = self.default_direction or 'rtl'
+        lang = 'ar' if direction == 'rtl' else 'en'
+        
+        # Determine default font
+        default_font = 'Almarai'
+        if self.default_font_family and self.default_font_family != 'custom':
+            default_font = self.default_font_family
+        elif self.default_font_family == 'custom' and self.default_custom_font:
+            default_font = self.default_custom_font
+        
         html = f'''<!DOCTYPE html>
-<html dir="rtl" lang="ar">
+<html dir="{direction}" lang="{lang}">
 <head>
     <meta charset="utf-8"/>
     <style>
@@ -418,12 +465,13 @@ class InvoiceTemplateDesigner(models.Model):
         }}
         
         body {{
-            font-family: 'Almarai', 'Arial', 'Helvetica', sans-serif;
+            font-family: '{default_font}', 'Almarai', 'Arial', 'Helvetica', sans-serif;
+            font-size: {self.default_font_size or 11}pt;
             margin: 0;
             padding: 0;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
-            direction: rtl;
+            direction: {direction};
         }}
         
         .page {{
@@ -448,13 +496,10 @@ class InvoiceTemplateDesigner(models.Model):
         .element-table {{
             border-collapse: collapse;
             width: 100%;
-            direction: rtl;
-            text-align: right;
         }}
         
         .element-table th, .element-table td {{
             padding: 8px;
-            text-align: right;
             border: 1px solid #ddd;
             vertical-align: middle;
         }}

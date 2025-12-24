@@ -33,6 +33,13 @@
                   action="action_invoice_template_designer"
                   sequence="10"/>
         
+        <!-- Template Elements Menu (for direct access) -->
+        <menuitem id="menu_invoice_template_elements"
+                  name="Template Elements"
+                  parent="menu_invoice_designer_templates"
+                  action="invoice_template_element_views.action_invoice_template_element"
+                  sequence="20"/>
+        
         
         <!-- ==================== TREE VIEW ==================== -->
         
@@ -94,8 +101,43 @@
                                 </group>
                             </page>
                             
+                            <page string="Default Font &amp; Direction">
+                                <group string="Default Font for Entire Invoice">
+                                    <group>
+                                        <field name="default_font_family"/>
+                                        <field name="default_custom_font" invisible="default_font_family != 'custom'"/>
+                                        <field name="default_font_size"/>
+                                    </group>
+                                </group>
+                                <group string="Default Direction">
+                                    <field name="default_direction"/>
+                                </group>
+                                <separator string="ملاحظة"/>
+                                <div class="text-muted">
+                                    <p>• الخط والاتجاه الافتراضي يُطبق على الفاتورة بالكامل</p>
+                                    <p>• يمكن للعناصر الفردية تجاوز هذه الإعدادات</p>
+                                    <p>• RTL (من اليمين لليسار) للعربية</p>
+                                    <p>• LTR (من اليسار لليمين) للإنجليزية</p>
+                                </div>
+                            </page>
+                            
                             <page string="Description">
                                 <field name="description"/>
+                            </page>
+                            
+                            <page string="Elements">
+                                <field name="element_ids" context="{'default_template_id': active_id}">
+                                    <tree editable="bottom">
+                                        <field name="sequence" widget="handle"/>
+                                        <field name="name"/>
+                                        <field name="element_type"/>
+                                        <field name="x"/>
+                                        <field name="y"/>
+                                        <field name="width"/>
+                                        <field name="height"/>
+                                        <field name="visible"/>
+                                    </tree>
+                                </field>
                             </page>
                         </notebook>
                     </sheet>
