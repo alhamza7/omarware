@@ -411,15 +411,20 @@ class InvoiceTemplateDesigner(models.Model):
         # Generate HTML
         html = self._generate_full_html_for_pdf(data_dict)
         
-        # Ensure html is string, not bytes
-        if isinstance(html, bytes):
-            html = html.decode('utf-8')
+        # Convert html to bytes if it's a string
+        if isinstance(html, str):
+            html_bytes = html.encode('utf-8')
+        else:
+            html_bytes = html
         
-        # Generate PDF
-        pdf = self.env['ir.actions.report']._run_wkhtmltopdf(
-            [html.encode('utf-8')],
-            landscape=(self.page_orientation == 'landscape'),
-        )
+        # Generate PDF using wkhtmltopdf
+        try:
+            pdf = self.env['ir.actions.report']._run_wkhtmltopdf(
+                [html_bytes],
+                landscape=(self.page_orientation == 'landscape'),
+            )
+        except Exception as e:
+            raise UserError(_('PDF generation failed: %s') % str(e))
         
         # Update statistics
         self.usage_count += 1
