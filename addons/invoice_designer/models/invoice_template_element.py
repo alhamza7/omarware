@@ -575,8 +575,104 @@ class InvoiceTemplateElement(models.Model):
 
     def _render_for_pdf(self, data_dict):
         """Render element for PDF with actual data"""
-        # Similar to _render_html but with data substitution
-        return self._render_html()
+        self.ensure_one()
+        
+        style = self._generate_css_style()
+        
+        if self.element_type == 'text':
+            return f'<div class="element element-text" style="{style}">{self.content or ""}</div>'
+        
+        elif self.element_type == 'field':
+            # Replace field placeholder with actual data
+            field_value = self._get_field_value(self.field_name, data_dict)
+            return f'<div class="element element-field" style="{style}">{field_value}</div>'
+        
+        elif self.element_type == 'image':
+            img_src = f"data:image/png;base64,{self.image_data.decode('utf-8')}" if self.image_data else self.image_url
+            return f'<img class="element element-image" src="{img_src}" style="{style}"/>'
+        
+        elif self.element_type == 'table':
+            return self._render_table_for_pdf(data_dict)
+        
+        elif self.element_type == 'shape':
+            return self._render_shape_html(style)
+        
+        elif self.element_type == 'line':
+            return self._render_line_html()
+        
+        elif self.element_type in ('barcode', 'qr'):
+            return self._render_barcode_html(style)
+        
+        return ''
+    
+    def _get_field_value(self, field_name, data_dict):
+        """Get field value from data dictionary with formatting"""
+        if not field_name or not data_dict:
+            return ''
+        
+        value = data_dict.get(field_name, '')
+        
+        # Format based on field type
+        if not value:
+            return ''
+        
+        # Handle different data types
+        if hasattr(value, 'name'):  # Many2one field
+            return value.name or ''
+        elif isinstance(value, (int, float)):
+            if field_name in ['amount_untaxed', 'amount_tax', 'amount_total', 'amount_discount', 'amount_total_iqd']:
+                # Format currency
+                currency = data_dict.get('currency_id')
+                if currency:
+                    return f"{currency.symbol or ''} {value:,.2f}"
+                return f"{value:,.2f}"
+            return str(value)
+        elif hasattr(value, 'strftime'):  # Date/Datetime
+            return value.strftime('%Y-%m-%d')
+        else:
+            return str(value)
+    
+    def _render_table_for_pdf(self, data_dict):
+        """Render order lines table with actual data"""
+        order_lines = data_dict.get('order_line', [])
+        
+        if not order_lines:
+            return f'<div class="element element-table" style="{self._generate_css_style()}">No items</div>'
+        
+        table_html = f'''
+        <table class="element element-table" style="{self._generate_css_style()}; width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr style="background-color: #4a5568; color: white;">
+                    <th style="padding: 8px; text-align: right; border: 1px solid #ddd;">المنتج</th>
+                    <th style="padding: 8px; text-align: center; border: 1px solid #ddd;">الكمية</th>
+                    <th style="padding: 8px; text-align: right; border: 1px solid #ddd;">السعر</th>
+                    <th style="padding: 8px; text-align: right; border: 1px solid #ddd;">المجموع</th>
+                </tr>
+            </thead>
+            <tbody>
+        '''
+        
+        for line in order_lines:
+            product_name = line.product_id.name if hasattr(line, 'product_id') else ''
+            quantity = line.quantity if hasattr(line, 'quantity') else (line.product_uom_qty if hasattr(line, 'product_uom_qty') else 0)
+            price = line.price_unit if hasattr(line, 'price_unit') else 0
+            subtotal = line.price_subtotal if hasattr(line, 'price_subtotal') else (quantity * price)
+            
+            table_html += f'''
+                <tr>
+                    <td style="padding: 8px; text-align: right; border: 1px solid #ddd;">{product_name}</td>
+                    <td style="padding: 8px; text-align: center; border: 1px solid #ddd;">{quantity}</td>
+                    <td style="padding: 8px; text-align: right; border: 1px solid #ddd;">{price:,.2f}</td>
+                    <td style="padding: 8px; text-align: right; border: 1px solid #ddd;">{subtotal:,.2f}</td>
+                </tr>
+            '''
+        
+        table_html += '''
+            </tbody>
+        </table>
+        '''
+        
+        return table_html
 
     @api.constrains('x', 'y', 'width', 'height')
     def _check_dimensions(self):

@@ -432,23 +432,33 @@ class InvoiceTemplateDesigner(models.Model):
 
     def _prepare_order_data(self, order):
         """Prepare order data for rendering - supports multiple models"""
+        # Basic customer info
         data = {
-            'name': order.partner_id.name if hasattr(order, 'partner_id') else '',
-            'street': order.partner_id.street if hasattr(order, 'partner_id') and order.partner_id.street else '',
-            'city': order.partner_id.city if hasattr(order, 'partner_id') and order.partner_id.city else '',
-            'phone': order.partner_id.phone if hasattr(order, 'partner_id') and order.partner_id.phone else '',
-            'email': order.partner_id.email if hasattr(order, 'partner_id') and order.partner_id.email else '',
-            'order_number': order.name if hasattr(order, 'name') else '',
+            'partner_id.name': order.partner_id.name if hasattr(order, 'partner_id') and order.partner_id else '',
+            'partner_id.street': order.partner_id.street if hasattr(order, 'partner_id') and order.partner_id and order.partner_id.street else '',
+            'partner_id.city': order.partner_id.city if hasattr(order, 'partner_id') and order.partner_id and order.partner_id.city else '',
+            'partner_id.phone': order.partner_id.phone if hasattr(order, 'partner_id') and order.partner_id and order.partner_id.phone else '',
+            'partner_id.email': order.partner_id.email if hasattr(order, 'partner_id') and order.partner_id and order.partner_id.email else '',
+            
+            # Order info
+            'name': order.name if hasattr(order, 'name') else '',
+            
+            # Company info
+            'company_id.name': order.company_id.name if hasattr(order, 'company_id') and order.company_id else self.env.company.name,
+            'company_id.street': order.company_id.street if hasattr(order, 'company_id') and order.company_id else self.env.company.street,
+            'company_id.phone': order.company_id.phone if hasattr(order, 'company_id') and order.company_id else self.env.company.phone,
+            
+            # Currency
             'currency_id': order.currency_id if hasattr(order, 'currency_id') else self.env.company.currency_id,
         }
         
         # Date field (different names in different models)
         if hasattr(order, 'date_order'):
-            data['date_order'] = order.date_order
+            data['date'] = order.date_order
         elif hasattr(order, 'date'):
-            data['date_order'] = order.date
+            data['date'] = order.date
         else:
-            data['date_order'] = False
+            data['date'] = fields.Datetime.now()
         
         # SAP doc number (if available)
         data['sap_doc_number'] = order.sap_doc_number if hasattr(order, 'sap_doc_number') else ''
@@ -463,26 +473,24 @@ class InvoiceTemplateDesigner(models.Model):
         
         # Amounts
         if hasattr(order, 'amount_untaxed'):
-            data['amount_untaxed'] = order.amount_untaxed
+            data['amount_subtotal'] = order.amount_untaxed
         elif hasattr(order, 'amount_subtotal'):
-            data['amount_untaxed'] = order.amount_subtotal
+            data['amount_subtotal'] = order.amount_subtotal
         else:
-            data['amount_untaxed'] = 0.0
+            data['amount_subtotal'] = 0.0
         
         data['amount_tax'] = order.amount_tax if hasattr(order, 'amount_tax') else 0.0
         data['amount_total'] = order.amount_total if hasattr(order, 'amount_total') else 0.0
         
         # Additional fields for pos.perfume.order
-        if hasattr(order, 'amount_discount'):
-            data['amount_discount'] = order.amount_discount
-        if hasattr(order, 'amount_total_iqd'):
-            data['amount_total_iqd'] = order.amount_total_iqd
-        if hasattr(order, 'exchange_rate'):
-            data['exchange_rate'] = order.exchange_rate
-        if hasattr(order, 'note'):
-            data['note'] = order.note
+        data['amount_discount'] = order.amount_discount if hasattr(order, 'amount_discount') else 0.0
+        data['amount_total_iqd'] = order.amount_total_iqd if hasattr(order, 'amount_total_iqd') else 0.0
+        data['exchange_rate'] = order.exchange_rate if hasattr(order, 'exchange_rate') else 0.0
+        data['note'] = order.note if hasattr(order, 'note') else ''
+        
         if hasattr(order, 'user_id'):
             data['user_name'] = order.user_id.name if order.user_id else ''
         
         return data
+
 
