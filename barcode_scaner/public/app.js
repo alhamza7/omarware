@@ -338,23 +338,23 @@ async function openMultiUnitDialog(item, addMode, lastQty, sapQuantity, unitType
     let sapHtml = '';
     if (sapQuantity) {
       sapHtml = `
-        <div style="margin: 16px 0; padding: 16px; background: #E3F2FD; border: 2px solid #2196F3; border-radius: 12px;">
-          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px; border-bottom: 2px solid #2196F3; padding-bottom: 8px;">
-            <span style="font-size: 20px;">☁️</span>
-            <strong style="color: #1976D2; font-size: 16px;">كمية SAP الحالية:</strong>
+        <div style="margin: 20px 0; padding: 20px; background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); border: 3px solid #2196F3; border-radius: 12px; box-shadow: 0 4px 12px rgba(33, 150, 243, 0.2);">
+          <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 3px solid #2196F3;">
+            <span style="font-size: 28px;">☁️</span>
+            <strong style="color: #1976D2; font-size: 20px;">كمية SAP الحالية</strong>
           </div>
-          <div style="display: grid; gap: 8px;">
-            <div style="display: flex; justify-content: space-between; padding: 6px; background: rgba(255,255,255,0.5); border-radius: 6px;">
-              <span style="color: #1565C0; font-weight: 500;">الموجود:</span>
-              <strong style="font-size: 16px;">${escapeHtml(String(sapQuantity.quantity || 0))}</strong>
+          <div style="display: grid; gap: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: white; border-radius: 8px; border-right: 5px solid #1976D2;">
+              <span style="color: #1565C0; font-weight: 600; font-size: 16px;">📦 الموجود:</span>
+              <strong style="font-size: 22px; color: #1976D2;">${escapeHtml(String(sapQuantity.quantity || 0))}</strong>
             </div>
-            <div style="display: flex; justify-content: space-between; padding: 6px; background: rgba(255,255,255,0.5); border-radius: 6px;">
-              <span style="color: #E65100; font-weight: 500;">المحجوز:</span>
-              <strong style="font-size: 16px;">${escapeHtml(String(sapQuantity.committed || 0))}</strong>
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: white; border-radius: 8px; border-right: 5px solid #F57C00;">
+              <span style="color: #E65100; font-weight: 600; font-size: 16px;">🔒 المحجوز:</span>
+              <strong style="font-size: 22px; color: #F57C00;">${escapeHtml(String(sapQuantity.committed || 0))}</strong>
             </div>
-            <div style="display: flex; justify-content: space-between; padding: 8px; background: rgba(76, 175, 80, 0.15); border-radius: 6px; border: 2px solid #4CAF50;">
-              <span style="color: #2E7D32; font-weight: bold;">✅ المتاح:</span>
-              <strong style="color: #4CAF50; font-size: 18px; font-weight: bold;">${escapeHtml(String(sapQuantity.available || 0))}</strong>
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background: linear-gradient(135deg, #c8e6c9 0%, #a5d6a7 100%); border-radius: 10px; border: 3px solid #4CAF50; box-shadow: 0 2px 8px rgba(76, 175, 80, 0.3);">
+              <span style="color: #2E7D32; font-weight: bold; font-size: 18px;">✅ المتاح:</span>
+              <strong style="color: #2E7D32; font-size: 26px; font-weight: bold;">${escapeHtml(String(sapQuantity.available || 0))}</strong>
             </div>
           </div>
         </div>
@@ -363,53 +363,94 @@ async function openMultiUnitDialog(item, addMode, lastQty, sapQuantity, unitType
 
     let addModeHtml = '';
     if (addMode) {
-      addModeHtml = `<div style="color: #4CAF50; font-weight: bold; margin: 12px 0; padding: 10px; background: #E8F5E9; border-radius: 6px;">الكمية الحالية: ${lastQty}</div>`;
+      addModeHtml = `
+        <div style="margin: 16px 0; padding: 16px; background: linear-gradient(135deg, #c8e6c9 0%, #a5d6a7 100%); border: 3px solid #4CAF50; border-radius: 12px; box-shadow: 0 2px 8px rgba(76, 175, 80, 0.2);">
+          <div style="display: flex; align-items: center; justify-content: center; gap: 10px;">
+            <span style="font-size: 24px;">➕</span>
+            <div>
+              <div style="color: #2E7D32; font-weight: bold; font-size: 16px;">وضع الإضافة</div>
+              <div style="color: #1B5E20; font-size: 20px; font-weight: bold; margin-top: 4px;">
+                الكمية الحالية: ${lastQty}
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
     }
 
     dialogBox.innerHTML = `
-      <div style="margin-bottom: 16px;">
-        <strong style="font-size: 18px; color: #2196F3;">${addMode ? 'إضافة كمية إضافية' : 'إضافة كمية'}</strong>
+      <div style="margin-bottom: 20px; text-align: center; padding: 16px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; color: white;">
+        <div style="font-size: 24px; font-weight: bold; margin-bottom: 8px;">
+          📦 ${addMode ? 'إضافة كمية إضافية' : 'إضافة كمية'}
+        </div>
+        <div style="font-size: 14px; opacity: 0.9;">الوحدات المتعددة</div>
       </div>
-      <div style="margin-bottom: 12px;">
-        <strong style="font-size: 16px;">${escapeHtml(item.item_code)} — ${escapeHtml(item.item_name)}</strong>
+      
+      <div style="margin-bottom: 16px; padding: 16px; background: #f8f9fa; border-radius: 10px; border-right: 5px solid #667eea;">
+        <div style="font-size: 18px; font-weight: bold; color: #333; margin-bottom: 4px;">
+          ${escapeHtml(item.item_code)}
+        </div>
+        <div style="font-size: 16px; color: #666;">
+          ${escapeHtml(item.item_name)}
+        </div>
         ${barcodeText}
       </div>
+      
       ${addModeHtml}
       ${sapHtml}
       
-      <div style="margin: 20px 0;">
-        <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #333;">
-          ${unitLabel}
-        </label>
+      <div style="margin: 20px 0; padding: 16px; background: linear-gradient(to right, #e3f2fd, #f3e5f5); border-radius: 12px; border: 3px solid #2196F3;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+          <span style="font-size: 24px;">📦</span>
+          <label style="font-size: 18px; font-weight: bold; color: #1976D2;">
+            ${unitLabel}
+          </label>
+        </div>
         <input type="number" id="multiPieces" 
-          style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px; text-align: center;"
-          placeholder="0" step="any" min="0">
+          style="width: 100%; padding: 16px; border: 3px solid #2196F3; border-radius: 10px; font-size: 22px; text-align: center; font-weight: bold; background: white;"
+          placeholder="أدخل عدد ${unitLabel}" step="any" min="0">
       </div>
 
-      <div style="margin: 20px 0;">
-        <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #333;">
-          درزن
-        </label>
+      <div style="margin: 20px 0; padding: 16px; background: linear-gradient(to right, #fff3e0, #fce4ec); border-radius: 12px; border: 3px solid #FF9800;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+          <span style="font-size: 24px;">📊</span>
+          <label style="font-size: 18px; font-weight: bold; color: #F57C00;">
+            درزن (Dozen)
+          </label>
+        </div>
         <input type="number" id="multiDozen" 
-          style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px; text-align: center;"
-          placeholder="0" step="any" min="0">
+          style="width: 100%; padding: 16px; border: 3px solid #FF9800; border-radius: 10px; font-size: 22px; text-align: center; font-weight: bold; background: white;"
+          placeholder="أدخل عدد الدرزن" step="any" min="0">
       </div>
 
-      <div style="margin: 20px 0;">
-        <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #333;">
-          كارتون
-        </label>
+      <div style="margin: 20px 0; padding: 16px; background: linear-gradient(to right, #e8f5e9, #f1f8e9); border-radius: 12px; border: 3px solid #4CAF50;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+          <span style="font-size: 24px;">📦</span>
+          <label style="font-size: 18px; font-weight: bold; color: #388E3C;">
+            كارتون (Carton)
+          </label>
+        </div>
         <input type="number" id="multiCarton" 
-          style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px; text-align: center;"
-          placeholder="0" step="any" min="0">
+          style="width: 100%; padding: 16px; border: 3px solid #4CAF50; border-radius: 10px; font-size: 22px; text-align: center; font-weight: bold; background: white;"
+          placeholder="أدخل عدد الكراتين" step="any" min="0">
       </div>
 
-      <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 24px;">
-        <button id="btnMultiCancel" style="padding: 12px 24px; border: 1px solid #ddd; background: white; border-radius: 6px; cursor: pointer; font-size: 16px;">
-          إلغاء
+      <div style="margin-top: 24px; padding: 12px; background: #fff3cd; border: 2px solid #ffc107; border-radius: 8px; text-align: center; color: #856404;">
+        <strong>💡 ملاحظة:</strong> أدخل الكميات بشكل منفصل - لا يتم الجمع تلقائياً
+      </div>
+
+      <div style="display: flex; gap: 12px; justify-content: center; margin-top: 24px;">
+        <button id="btnMultiCancel" 
+          style="flex: 1; padding: 16px 24px; border: 2px solid #f44336; background: white; color: #f44336; border-radius: 10px; cursor: pointer; font-size: 18px; font-weight: bold; transition: all 0.3s;"
+          onmouseover="this.style.background='#f44336'; this.style.color='white';"
+          onmouseout="this.style.background='white'; this.style.color='#f44336';">
+          ❌ إلغاء
         </button>
-        <button id="btnMultiSave" style="padding: 12px 24px; border: none; background: #2196F3; color: white; border-radius: 6px; cursor: pointer; font-size: 16px; font-weight: bold;">
-          حفظ
+        <button id="btnMultiSave" 
+          style="flex: 2; padding: 16px 24px; border: none; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 10px; cursor: pointer; font-size: 18px; font-weight: bold; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4); transition: all 0.3s;"
+          onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 20px rgba(102, 126, 234, 0.6)';"
+          onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 15px rgba(102, 126, 234, 0.4)';">
+          ✅ حفظ الكميات
         </button>
       </div>
     `;
