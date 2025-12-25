@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>اختبار تفصيلي - كمية SAP</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 900px;
+            margin: 30px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            margin: 20px 0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #1976D2;
+            text-align: center;
+        }
+        button {
+            background: #2196F3;
+            color: white;
+            border: none;
+            padding: 14px 28px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            margin: 8px;
+            width: 100%;
+            max-width: 300px;
+        }
+        button:hover {
+            background: #1976D2;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 20px;
+            border-radius: 8px;
+            background: #f9f9f9;
+            border-left: 4px solid #2196F3;
+        }
+        .success { border-left-color: #4CAF50; background: #E8F5E9; }
+        .error { border-left-color: #F44336; background: #FFEBEE; }
+        .warning { border-left-color: #FF9800; background: #FFF3E0; }
+        pre {
+            background: #263238;
+            color: #aed581;
+            padding: 16px;
+            border-radius: 8px;
+            overflow-x: auto;
+            direction: ltr;
+            text-align: left;
+            font-size: 13px;
+        }
+        .step {
+            background: #E3F2FD;
+            padding: 12px;
+            margin: 12px 0;
+            border-radius: 6px;
+            border-left: 3px solid #2196F3;
+        }
+        .console-log {
+            background: #fff;
+            padding: 12px;
+            margin: 8px 0;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            font-family: monospace;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔬 اختبار تفصيلي - كمية SAP</h1>
+    
+    <div class="card">
+        <h2>📋 التعليمات</h2>
+        <p><strong>افتح Console في المتصفح:</strong></p>
+        <div class="step">
+            1. اضغط <code>F12</code> أو <code>Ctrl+Shift+I</code><br>
+            2. اذهب لتبويب <strong>Console</strong><br>
+            3. شغل الاختبارات أدناه وراقب الرسائل
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>✅ الخطوة 1: اختبار API</h2>
+        <p>تحقق من أن API يرجع <code>sapQuantity</code></p>
+        <button onclick="testAPI()">اختبر API</button>
+        <div id="apiResult"></div>
+    </div>
+
+    <div class="card">
+        <h2>🔍 الخطوة 2: محاكاة البحث</h2>
+        <p>محاكاة ما يحدث عند البحث عن الصنف</p>
+        <button onclick="simulateSearch()">محاكاة البحث عن G00262</button>
+        <div id="searchResult"></div>
+    </div>
+
+    <div class="card">
+        <h2>📊 Console Logs</h2>
+        <p>راقب هذه المنطقة - ستظهر الرسائل من console هنا:</p>
+        <div id="consoleLogs" style="max-height: 400px; overflow-y: auto;"></div>
+    </div>
+
+    <script>
+        // اعتراض console.log
+        const originalLog = console.log;
+        const consoleLogsDiv = document.getElementById('consoleLogs');
+        
+        console.log = function(...args) {
+            originalLog.apply(console, args);
+            const logDiv = document.createElement('div');
+            logDiv.className = 'console-log';
+            logDiv.textContent = args.map(a => 
+                typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)
+            ).join(' ');
+            consoleLogsDiv.appendChild(logDiv);
+            consoleLogsDiv.scrollTop = consoleLogsDiv.scrollHeight;
+        };
+
+        console.log('🚀 صفحة الاختبار جاهزة!');
+
+        async function testAPI() {
+            const resultDiv = document.getElementById('apiResult');
+            resultDiv.innerHTML = '<p>⏳ جاري الاختبار...</p>';
+            console.log('🧪 بدء اختبار API...');
+            
+            try {
+                const response = await fetch('/api/items/by-code/G00262');
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                console.log('📦 البيانات المستلمة:', data);
+                
+                let html = '<div class="result success"><h3>✅ API يعمل!</h3>';
+                
+                // معلومات الصنف
+                html += `<p><strong>الكود:</strong> ${data.item.item_code}</p>`;
+                html += `<p><strong>الاسم:</strong> ${data.item.item_name}</p>`;
+                
+                // التحقق من sapQuantity
+                if (data.sapQuantity) {
+                    console.log('✅ sapQuantity موجود في الاستجابة!');
+                    html += '<div style="background: #E8F5E9; padding: 15px; margin: 15px 0; border-radius: 6px; border: 2px solid #4CAF50;">';
+                    html += '<h4 style="color: #2E7D32;">✅ sapQuantity موجود!</h4>';
+                    html += `<p><strong>الكمية:</strong> ${data.sapQuantity.quantity}</p>`;
+                    html += `<p><strong>المحجوز:</strong> ${data.sapQuantity.committed}</p>`;
+                    html += `<p><strong>المتاح:</strong> ${data.sapQuantity.available}</p>`;
+                    html += '</div>';
+                } else {
+                    console.error('❌ sapQuantity غير موجود في الاستجابة!');
+                    html += '<div style="background: #FFEBEE; padding: 15px; margin: 15px 0; border-radius: 6px; border: 2px solid #F44336;">';
+                    html += '<h4 style="color: #C62828;">❌ sapQuantity غير موجود!</h4>';
+                    html += '<p>تحقق من إعدادات SAP في السيرفر</p>';
+                    html += '</div>';
+                }
+                
+                html += '<h4>📄 البيانات الكاملة:</h4>';
+                html += `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+                html += '</div>';
+                
+                resultDiv.innerHTML = html;
+                
+            } catch (error) {
+                console.error('❌ خطأ:', error);
+                resultDiv.innerHTML = `
+                    <div class="result error">
+                        <h3>❌ خطأ في API</h3>
+                        <p>${error.message}</p>
+                        <p><strong>تأكد من:</strong></p>
+                        <ul>
+                            <li>تسجيل الدخول أولاً في الصفحة الرئيسية</li>
+                            <li>السيرفر يعمل</li>
+                            <li>SAP مفعّل</li>
+                        </ul>
+                    </div>
+                `;
+            }
+        }
+
+        async function simulateSearch() {
+            const resultDiv = document.getElementById('searchResult');
+            resultDiv.innerHTML = '<p>⏳ جاري المحاكاة...</p>';
+            console.log('🔍 محاكاة البحث عن G00262...');
+            
+            try {
+                // الخطوة 1: جلب البيانات
+                console.log('📡 الخطوة 1: جلب البيانات من API...');
+                const response = await fetch('/api/items/by-code/G00262');
+                const data = await response.json();
+                console.log('📦 البيانات:', data);
+                
+                // الخطوة 2: استخراج المعلومات
+                const item = data.item;
+                const lastCount = data.lastCount || null;
+                const sapQuantity = data.sapQuantity || null;
+                
+                console.log('🔍 استخراج المعلومات:');
+                console.log('  - item:', item);
+                console.log('  - lastCount:', lastCount);
+                console.log('  - sapQuantity:', sapQuantity);
+                
+                // الخطوة 3: بناء HTML
+                console.log('🏗️ الخطوة 3: بناء HTML...');
+                
+                let html = '<div class="result success">';
+                html += '<h3>✅ محاكاة ناجحة</h3>';
+                html += '<h4>🎨 المحتوى الذي سيظهر في Dialog:</h4>';
+                html += '<div style="background: white; padding: 20px; border: 2px solid #2196F3; border-radius: 8px; margin: 15px 0;">';
+                
+                // معلومات الصنف
+                html += `<p style="font-size: 16px; margin-bottom: 12px;"><strong>${item.item_code}</strong> — ${item.item_name}</p>`;
+                
+                // صندوق SAP
+                if (sapQuantity) {
+                    console.log('✅ سيتم عرض صندوق SAP');
+                    html += '<div style="background: #E3F2FD; border: 1px solid #2196F3; border-radius: 8px; padding: 15px; margin: 12px 0;">';
+                    html += '<div style="margin-bottom: 8px;"><span>☁️</span> <strong style="color: #1976D2;">كمية SAP:</strong></div>';
+                    html += `<div style="display: flex; justify-content: space-between; padding: 8px 0;">`;
+                    html += `<span>✅ الكمية المتاحة:</span><strong style="color: #4CAF50; font-size: 20px; font-weight: bold;">${sapQuantity.available}</strong>`;
+                    html += `</div>`;
+                    html += '</div>';
+                } else {
+                    console.warn('⚠️ sapQuantity غير موجود - لن يظهر صندوق SAP');
+                    html += '<div style="background: #FFF3E0; padding: 12px; border-radius: 6px; margin: 12px 0;">';
+                    html += '<p style="color: #F57C00;">⚠️ كمية SAP غير متوفرة</p>';
+                    html += '</div>';
+                }
+                
+                html += '</div>';
+                html += '</div>';
+                
+                resultDiv.innerHTML = html;
+                
+            } catch (error) {
+                console.error('❌ خطأ في المحاكاة:', error);
+                resultDiv.innerHTML = `
+                    <div class="result error">
+                        <h3>❌ فشلت المحاكاة</h3>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>
+
+

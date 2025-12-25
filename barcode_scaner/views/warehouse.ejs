@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>اختيار المخزن</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body class="page">
+    <header class="topbar">
+      <div class="topbar__left">
+        <strong>اختيار مخزن الجرد</strong>
+        <span class="pill">مرة واحدة</span>
+      </div>
+      <div class="topbar__right">
+        <span class="muted">مرحباً، <%= username %></span>
+        <form method="post" action="/logout">
+          <button class="btn" type="submit">خروج</button>
+        </form>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="card">
+        <h1>اختر رقم المخزن</h1>
+        <p class="muted">سيتم حفظ الاختيار وسيُستخدم في كل عمليات الجرد والتقارير حتى تغييره.</p>
+
+        <div class="whGrid">
+          <% for (let i = 1; i <= 18; i++) { %>
+            <form method="post" action="/warehouse/select">
+              <input type="hidden" name="warehouse_id" value="<%= i %>" />
+              <button class="btn <%= (currentWarehouseId === i ? 'primary' : '') %> whBtn" type="submit">
+                مخزن <%= i %> <%= (currentWarehouseId === i ? '(الحالي)' : '') %>
+              </button>
+            </form>
+          <% } %>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
+
+

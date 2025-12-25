@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>تسجيل الدخول</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body class="page">
+    <main class="card">
+      <h1>تسجيل الدخول</h1>
+      <p class="muted">الدخول مخصص للمستخدمين المصرح لهم.</p>
+
+      <% if (error) { %>
+        <div class="alert"><%= error %></div>
+      <% } %>
+
+      <form method="post" action="/login" class="form">
+        <label class="field">
+          <span>اسم المستخدم</span>
+          <input name="username" autocomplete="username" required />
+        </label>
+
+        <label class="field">
+          <span>كلمة المرور</span>
+          <input name="password" type="password" autocomplete="current-password" required />
+        </label>
+
+        <button class="btn primary" type="submit">دخول</button>
+      </form>
+    </main>
+  </body>
+</html>
+
+
+
+
+
+
+
+

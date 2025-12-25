@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>الجرد</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body class="page">
+    <header class="topbar">
+      <div class="topbar__left">
+        <strong>نظام الجرد</strong>
+        <span class="pill">مبدئي</span>
+      </div>
+      <div class="topbar__right">
+        <% if (userRole === 'admin') { %>
+          <a class="btn" href="/admin" style="background: #000; color: white; font-weight: bold; border: 2px solid #000;">🎛️ لوحة التحكم</a>
+        <% } %>
+        <a class="btn" href="/reports">التقارير</a>
+        <a class="btn" href="/warehouse">مخزن: <%= warehouseId %></a>
+        <span class="muted">مرحباً، <%= username %></span>
+        <form method="post" action="/logout">
+          <button class="btn" type="submit">خروج</button>
+        </form>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="card">
+        <h1>بحث عن صنف</h1>
+        <p class="muted">ابحث بـ Itemcode / باركود أو اسم الصنف. عند اختيار الصنف ستظهر نافذة لإضافة كمية الجرد.</p>
+
+        <div class="searchWrap">
+          <div class="searchRow">
+            <input id="q" class="input" placeholder="بحث يدوي (عند عدم توفر باركود)..." />
+            <button id="btnSearch" class="btn primary" type="button">بحث</button>
+            <button id="btnScan" class="btn" type="button" title="تشغيل/إيقاف الكاميرا">الكاميرا</button>
+          </div>
+          <div id="dropdown" class="dropdown" style="display:none"></div>
+        </div>
+
+        <div id="results" class="results"></div>
+
+        <div id="scanInline" class="scanInline">
+          <div class="scanInline__top">
+            <strong>الماسح جاهز</strong>
+            <span class="muted" id="scanStatus">جاري التشغيل...</span>
+          </div>
+          <video id="scanVideo" class="video" playsinline></video>
+        </div>
+      </section>
+    </main>
+
+    <dialog id="countDlg" class="dialog">
+      <form method="dialog" class="dialog__inner" id="countForm">
+        <h2 id="dlgTitle">إضافة كمية</h2>
+        <div class="muted" id="dlgMeta"></div>
+
+        <label class="field">
+          <span>الكمية الموجودة</span>
+          <input id="qty" type="number" step="0.01" inputmode="decimal" required />
+        </label>
+
+        <label class="field">
+          <span>ملاحظة (اختياري)</span>
+          <input id="note" />
+        </label>
+
+        <div class="dialog__actions">
+          <button class="btn" value="cancel" type="button" id="btnCancel">إلغاء</button>
+          <button class="btn primary" value="ok" type="submit">حفظ</button>
+        </div>
+
+        <div class="divider"></div>
+        <h3>آخر عمليات إدخال الكمية</h3>
+        <div id="latestCounts" class="muted"></div>
+      </form>
+    </dialog>
+
+    <script src="/static/app.js"></script>
+    <script src="/static/scan.js"></script>
+  </body>
+</html>
+
+

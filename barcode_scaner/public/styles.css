@@ -1,0 +1,81 @@
+:root{
+  --bg:#0b1220;
+  --card:#111a2e;
+  --text:#e8eefc;
+  --muted:#a8b3d7;
+  --primary:#3b82f6;
+  --border:rgba(255,255,255,.12);
+  --danger:#ef4444;
+}
+*{box-sizing:border-box}
+html{
+  /* منع الزوم والتحريك في المتصفح */
+  touch-action: pan-x pan-y;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+body{
+  margin:0;
+  font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; 
+  background:radial-gradient(1200px 800px at 10% 10%, #182549, var(--bg)); 
+  color:var(--text);
+  /* منع الزوم بالقرص (pinch) */
+  touch-action: pan-x pan-y;
+  /* منع تحديد النص على الموبايل */
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  user-select: none;
+  /* منع السحب (drag) */
+  -webkit-user-drag: none;
+  overscroll-behavior: none;
+}
+/* السماح بتحديد النص في حقول الإدخال فقط */
+input, textarea {
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  user-select: text;
+}
+.page{min-height:100vh; display:flex; flex-direction:column}
+.container{max-width:980px; width:100%; margin:20px auto; padding:0 16px}
+.topbar{display:flex; justify-content:space-between; align-items:center; padding:14px 16px; border-bottom:1px solid var(--border); background:rgba(17,26,46,.65); backdrop-filter: blur(8px)}
+.topbar__right{display:flex; align-items:center; gap:12px}
+.card{max-width:520px; margin:80px auto 0; padding:22px; background:rgba(17,26,46,.85); border:1px solid var(--border); border-radius:14px; box-shadow:0 20px 60px rgba(0,0,0,.35)}
+.container .card{max-width:unset; margin:0}
+h1{margin:0 0 8px}
+.muted{color:var(--muted); font-size:14px}
+.pill{display:inline-block; font-size:12px; padding:2px 8px; border:1px solid var(--border); border-radius:999px; margin-inline-start:8px; color:var(--muted)}
+.form{margin-top:14px; display:grid; gap:12px}
+.field{display:grid; gap:6px}
+.field > span{font-size:13px; color:var(--muted)}
+input{width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:rgba(0,0,0,.18); color:var(--text); outline:none}
+input:focus{border-color:rgba(59,130,246,.6); box-shadow:0 0 0 3px rgba(59,130,246,.16)}
+.btn{padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:rgba(255,255,255,.06); color:var(--text); cursor:pointer}
+.btn.primary{background:linear-gradient(180deg, rgba(59,130,246,.95), rgba(59,130,246,.75)); border-color:rgba(59,130,246,.35)}
+.btn.danger{background:rgba(239,68,68,.15); border-color:rgba(239,68,68,.35); color:#ffd7d7}
+.btn.danger:hover{background:rgba(239,68,68,.25)}
+.btn:active{transform:translateY(1px)}
+.alert{padding:10px 12px; border:1px solid rgba(239,68,68,.35); background:rgba(239,68,68,.12); border-radius:10px; color:#ffd7d7}
+.searchRow{display:flex; gap:10px; margin-top:14px}
+.searchRow .input{flex:1}
+.results{margin-top:14px; display:grid; gap:10px}
+.result{display:flex; justify-content:space-between; align-items:center; padding:12px; border:1px solid var(--border); border-radius:12px; background:rgba(0,0,0,.12)}
+.result__meta{display:grid; gap:2px}
+.result__code{font-family:ui-monospace, SFMono-Regular, Menlo, monospace; color:#dbe7ff}
+.result__name{color:var(--muted); font-size:14px}
+.dialog{border:1px solid var(--border); border-radius:14px; padding:0; background:rgba(17,26,46,.98); color:var(--text); width:min(560px, 92vw)}
+.dialog::backdrop{background:rgba(0,0,0,.6)}
+.dialog__inner{padding:18px; display:grid; gap:12px}
+.dialog__actions{display:flex; justify-content:flex-start; gap:10px}
+.divider{height:1px; background:var(--border); margin:6px 0}
+.video{width:100%; border-radius:12px; border:1px solid var(--border); background:rgba(0,0,0,.25); min-height:240px}
+.scanInline{margin-top:14px; padding:12px; border:1px solid var(--border); border-radius:12px; background:rgba(0,0,0,.10)}
+.scanInline__top{display:flex; justify-content:space-between; align-items:center; margin-bottom:10px}
+.whGrid{display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:10px; margin-top:14px}
+.whBtn{width:100%}
+
+.searchWrap{position:relative}
+.dropdown{position:absolute; top:calc(100% + 8px); left:0; right:0; z-index:20; max-height:260px; overflow:auto; border:1px solid var(--border); border-radius:12px; background:rgba(10,16,32,.98); box-shadow:0 20px 60px rgba(0,0,0,.35)}
+.dropdown .result{margin:0; border-radius:0; border-left:none; border-right:none}
+.dropdown .result:first-child{border-top:none; border-top-left-radius:12px; border-top-right-radius:12px}
+.dropdown .result:last-child{border-bottom:none; border-bottom-left-radius:12px; border-bottom-right-radius:12px}
+

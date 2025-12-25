@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>اختبار كمية SAP</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            direction: rtl;
+        }
+        .test-box {
+            border: 2px solid #2196F3;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            background: #f5f5f5;
+        }
+        button {
+            background: #2196F3;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+        }
+        button:hover {
+            background: #1976D2;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 6px;
+            background: white;
+            border: 1px solid #ddd;
+        }
+        .success {
+            background: #E8F5E9;
+            border-color: #4CAF50;
+        }
+        .error {
+            background: #FFEBEE;
+            border-color: #F44336;
+        }
+        pre {
+            background: #263238;
+            color: #aed581;
+            padding: 15px;
+            border-radius: 6px;
+            overflow-x: auto;
+            direction: ltr;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 اختبار كمية SAP في واجهة الويب</h1>
+    
+    <div class="test-box">
+        <h2>1️⃣ اختبار حالة SAP</h2>
+        <button onclick="testSAPStatus()">اختبر الاتصال</button>
+        <div id="statusResult"></div>
+    </div>
+
+    <div class="test-box">
+        <h2>2️⃣ اختبار الصنف G00262</h2>
+        <p>الصنف: <strong>G00262 - المشاعر الملتهبة</strong></p>
+        <button onclick="testItem()">جلب الكمية من SAP</button>
+        <div id="itemResult"></div>
+    </div>
+
+    <div class="test-box">
+        <h2>3️⃣ محاكاة عملية الجرد</h2>
+        <p>سيفتح dialog كما يظهر في النظام الفعلي</p>
+        <button onclick="simulateInventory()">ابدأ الجرد</button>
+    </div>
+
+    <script>
+        async function testSAPStatus() {
+            const resultDiv = document.getElementById('statusResult');
+            resultDiv.innerHTML = '<p>⏳ جاري الاختبار...</p>';
+            
+            try {
+                const response = await fetch('/api/sap/status');
+                const data = await response.json();
+                
+                resultDiv.innerHTML = `
+                    <div class="result ${data.enabled ? 'success' : 'error'}">
+                        <h3>✅ النتيجة:</h3>
+                        <p><strong>SAP مفعل:</strong> ${data.enabled ? 'نعم ✅' : 'لا ❌'}</p>
+                        <p><strong>متصل:</strong> ${data.connected ? 'نعم ✅' : 'لا ❌'}</p>
+                        <p><strong>عنوان Service Layer:</strong> ${data.serviceLayerUrl || 'غير متوفر'}</p>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    </div>
+                `;
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <div class="result error">
+                        <h3>❌ خطأ:</h3>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        async function testItem() {
+            const resultDiv = document.getElementById('itemResult');
+            resultDiv.innerHTML = '<p>⏳ جاري جلب البيانات من SAP...</p>';
+            
+            try {
+                const response = await fetch('/api/items/by-code/G00262');
+                const data = await response.json();
+                
+                let html = '<div class="result success"><h3>✅ تم جلب البيانات:</h3>';
+                
+                // معلومات الصنف
+                html += `
+                    <h4>📦 معلومات الصنف:</h4>
+                    <p><strong>الكود:</strong> ${data.item.item_code}</p>
+                    <p><strong>الاسم:</strong> ${data.item.item_name}</p>
+                    <p><strong>UOM:</strong> ${data.item.uom || 'غير محدد'}</p>
+                `;
+                
+                // كمية SAP
+                if (data.sapQuantity) {
+                    html += `
+                        <h4 style="color: #2196F3;">☁️ كمية SAP:</h4>
+                        <div style="background: #E3F2FD; padding: 15px; border-radius: 6px; border: 1px solid #2196F3;">
+                            <p><strong>✅ الكمية المتاحة:</strong> <span style="color: #4CAF50; font-size: 24px; font-weight: bold;">${data.sapQuantity.available}</span></p>
+                            <p><strong>المخزن:</strong> ${data.sapQuantity.warehouseCode}</p>
+                        </div>
+                    `;
+                } else {
+                    html += '<p style="color: #FF9800;">⚠️ كمية SAP غير متوفرة</p>';
+                }
+                
+                // JSON الكامل
+                html += `<h4>📄 البيانات الكاملة:</h4><pre>${JSON.stringify(data, null, 2)}</pre>`;
+                html += '</div>';
+                
+                resultDiv.innerHTML = html;
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <div class="result error">
+                        <h3>❌ خطأ:</h3>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        async function simulateInventory() {
+            try {
+                const response = await fetch('/api/items/by-code/G00262');
+                const data = await response.json();
+                
+                // محاكاة فتح dialog
+                if (window.openCountDialog && typeof window.openCountDialog === 'function') {
+                    window.openCountDialog(data.item, data.lastCount, data.sapQuantity);
+                } else {
+                    alert('قم بفتح صفحة الجرد الرئيسية (http://localhost:3000) لرؤية Dialog الفعلي!');
+                }
+            } catch (error) {
+                alert('خطأ: ' + error.message);
+            }
+        }
+    </script>
+</body>
+</html>
+
+

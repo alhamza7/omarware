@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>تقارير الجرد</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body class="page">
+    <header class="topbar">
+      <div class="topbar__left">
+        <strong>تقارير الجرد</strong>
+        <span class="pill">مبدئي</span>
+      </div>
+      <div class="topbar__right">
+        <% if (userRole === 'admin') { %>
+          <a class="btn" href="/admin" style="background: #000; color: white; font-weight: bold; border: 2px solid #000;">🎛️ لوحة التحكم</a>
+        <% } %>
+        <a class="btn" href="/inventory">الجرد</a>
+        <a class="btn" href="/warehouse">مخزن: <%= warehouseId %></a>
+        <span class="muted">مرحباً، <%= username %></span>
+        <form method="post" action="/logout">
+          <button class="btn" type="submit">خروج</button>
+        </form>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="card">
+        <h1>ملخص</h1>
+        <div class="muted" id="stats">جاري التحميل...</div>
+
+        <div class="searchRow">
+          <input id="rq" class="input" placeholder="بحث (كود / باركود / اسم)..." />
+          <select id="filter" class="btn">
+            <option value="all">الكل</option>
+            <option value="counted">المجرودة</option>
+            <option value="remaining">المتبقية</option>
+          </select>
+          <button id="btnRSearch" class="btn primary" type="button">تحديث</button>
+          <% if (userRole === 'admin') { %>
+            <a id="btnExport" class="btn" href="/api/reports/export.xlsx" style="background: #000; color: white; font-weight: bold; border: 2px solid #000;">📥 تصدير Excel</a>
+          <% } else { %>
+            <button class="btn" disabled title="التصدير متاح للإدارة فقط" style="opacity: 0.5; cursor: not-allowed;">🔒 تصدير Excel</button>
+          <% } %>
+          <button id="btnResetWarehouse" class="btn danger" type="button">إعادة تعيين المخزن</button>
+          <% if (userRole === 'admin') { %>
+            <button id="btnResetAll" class="btn danger" type="button">حذف الكل</button>
+          <% } %>
+        </div>
+
+        <div id="rtable" class="results"></div>
+      </section>
+    </main>
+
+    <script src="/static/reports.js"></script>
+  </body>
+</html>
+
+

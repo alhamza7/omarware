@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>اختبار تثبيت الواجهة</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+            /* منع الزوم والتحريك */
+            touch-action: pan-x pan-y;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            user-select: none;
+            overscroll-behavior: none;
+        }
+        
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 28px;
+        }
+        
+        .test-box {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .test-box h2 {
+            font-size: 20px;
+            margin-top: 0;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .test-box p {
+            line-height: 1.6;
+            margin: 8px 0;
+        }
+        
+        .status {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        
+        .status.good {
+            background: #4ade80;
+            color: #065f46;
+        }
+        
+        .status.bad {
+            background: #f87171;
+            color: #7f1d1d;
+        }
+        
+        input {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            margin-top: 10px;
+            -webkit-user-select: text;
+            -moz-user-select: text;
+            user-select: text;
+        }
+        
+        .alert {
+            background: rgba(251, 191, 36, 0.2);
+            border: 2px solid #fbbf24;
+            border-radius: 12px;
+            padding: 15px;
+            margin-top: 20px;
+        }
+        
+        .alert strong {
+            display: block;
+            margin-bottom: 10px;
+            font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 اختبار تثبيت الواجهة</h1>
+        
+        <div class="test-box">
+            <h2>
+                <span>1️⃣</span>
+                <span>اختبار منع الزوم</span>
+            </h2>
+            <p><span class="status good">✓</span> حاول عمل زوم بالقرص (pinch zoom)</p>
+            <p><strong>النتيجة المتوقعة:</strong> لن يحدث زوم ✅</p>
+        </div>
+        
+        <div class="test-box">
+            <h2>
+                <span>2️⃣</span>
+                <span>اختبار النقر المزدوج</span>
+            </h2>
+            <p><span class="status good">✓</span> انقر نقرتين سريعتين على هذا النص</p>
+            <p><strong>النتيجة المتوقعة:</strong> لن يحدث زوم ✅</p>
+        </div>
+        
+        <div class="test-box">
+            <h2>
+                <span>3️⃣</span>
+                <span>اختبار تحديد النص</span>
+            </h2>
+            <p><span class="status good">✓</span> حاول تحديد هذا النص بالإصبع</p>
+            <p><strong>النتيجة المتوقعة:</strong> لن يُحدد النص ✅</p>
+        </div>
+        
+        <div class="test-box">
+            <h2>
+                <span>4️⃣</span>
+                <span>اختبار حقول الإدخال</span>
+            </h2>
+            <p><span class="status good">✓</span> اكتب في هذا الحقل وحاول تحديد النص</p>
+            <input type="text" placeholder="اكتب شيئاً هنا..." value="يمكنك تحديد هذا النص">
+            <p style="margin-top: 10px;"><strong>النتيجة المتوقعة:</strong> يمكنك تحديد النص في الحقل ✅</p>
+        </div>
+        
+        <div class="test-box">
+            <h2>
+                <span>5️⃣</span>
+                <span>اختبار التحريك الجانبي</span>
+            </h2>
+            <p><span class="status good">✓</span> حاول تحريك الصفحة يميناً أو يساراً</p>
+            <p><strong>النتيجة المتوقعة:</strong> لن تتحرك أفقياً ✅</p>
+        </div>
+        
+        <div class="alert">
+            <strong>⚠️ ملاحظة:</strong>
+            <p>التحريك العمودي (سكرول للأعلى/للأسفل) يعمل بشكل طبيعي ✓</p>
+            <p>فقط الزوم والتحريك الأفقي ممنوعان لتجنب الإرباك في العمل.</p>
+        </div>
+        
+        <div style="text-align: center; margin-top: 30px; opacity: 0.8;">
+            <p>جميع الاختبارات يجب أن تنجح ✅</p>
+            <p style="font-size: 14px;">إذا حدث زوم، تأكد من تحديث الصفحة (Ctrl+Shift+R)</p>
+        </div>
+    </div>
+    
+    <script>
+        // منع الزوم في المتصفح على الموبايل
+        document.addEventListener('gesturestart', function (e) {
+            e.preventDefault();
+        });
+
+        document.addEventListener('gesturechange', function (e) {
+            e.preventDefault();
+        });
+
+        document.addEventListener('gestureend', function (e) {
+            e.preventDefault();
+        });
+
+        // منع الزوم بالنقر المزدوج
+        let lastTouchEnd = 0;
+        document.addEventListener('touchend', function (e) {
+            const now = Date.now();
+            if (now - lastTouchEnd <= 300) {
+                e.preventDefault();
+            }
+            lastTouchEnd = now;
+        }, false);
+        
+        console.log('✅ صفحة الاختبار جاهزة - جرب الاختبارات المذكورة');
+    </script>
+</body>
+</html>
+
+
+
+
+
