@@ -1211,9 +1211,21 @@ export class InvoiceDesignerCanvas extends Component {
                 obj.selectable = true;  // Force selectable
                 obj.evented = true;     // Force evented
                 obj.hoverCursor = 'move';  // Show it's movable
+                
+                // Ensure object has visible properties
+                if (obj.type === 'textbox' || obj.type === 'i-text' || obj.type === 'text') {
+                    if (!obj.fill || obj.fill === 'transparent' || obj.fill === '') {
+                        obj.fill = '#000000';
+                        console.log(`  ⚠️ Fixed missing text color for element ${idx}`);
+                    }
+                }
+                
                 this.fabricCanvas.add(obj);
                 this.elementObjects.set(element.id, obj);
-                console.log(`  ✅ Added element ${idx}:`, element.element_type, element.name, 'selectable:', obj.selectable, 'evented:', obj.evented);
+                console.log(`  ✅ Added element ${idx}:`, element.element_type, element.name, 
+                    'selectable:', obj.selectable, 'evented:', obj.evented, 
+                    'visible:', obj.visible, 'opacity:', obj.opacity,
+                    'position:', obj.left, obj.top, 'size:', obj.width, obj.height);
             } else {
                 console.warn(`  ⚠️ Failed to create object for element ${idx}:`, element.element_type);
             }
@@ -1221,7 +1233,24 @@ export class InvoiceDesignerCanvas extends Component {
 
         this.fabricCanvas.requestRenderAll();
         this._updatingFabric = false;
+        
+        // Final verification
+        const allObjects = this.fabricCanvas.getObjects();
         console.log("✅ Fabric scene built and rendered");
+        console.log(`   Total objects on canvas: ${allObjects.length}`);
+        console.log(`   Canvas background: ${this.fabricCanvas.backgroundColor}`);
+        console.log(`   Canvas dimensions: ${this.fabricCanvas.width} x ${this.fabricCanvas.height}`);
+        if (allObjects.length > 0) {
+            console.log(`   First object sample:`, {
+                type: allObjects[0].type,
+                fill: allObjects[0].fill,
+                stroke: allObjects[0].stroke,
+                position: `${allObjects[0].left}, ${allObjects[0].top}`,
+                size: `${allObjects[0].width} x ${allObjects[0].height}`,
+                visible: allObjects[0].visible,
+                opacity: allObjects[0].opacity,
+            });
+        }
     }
 
     createFabricObject(element) {
@@ -1257,25 +1286,31 @@ export class InvoiceDesignerCanvas extends Component {
         };
 
         if (element.element_type === "text" || element.element_type === "field") {
+            const textColor = element.color || "#000000";
+            const textBg = element.background_color && element.background_color !== "transparent" && element.background_color !== "" ? element.background_color : "";
+            
+            console.log(`  Text/Field colors: fill=${textColor}, bg=${textBg}`);
+            
             const textObj = new window.fabric.Textbox(element.content || (element.element_type === "field" ? `[${element.field_name || "حقل"}]` : "نص"), {
                 ...common,
                 fontSize: element.font_size || 14,
                 fontFamily: element.font_family_name || "Almarai",
                 fontWeight: element.font_weight || "400",
                 textAlign: element.text_align || "left",
-                fill: element.color || "#000000",
-                stroke: "",
+                fill: textColor,
+                stroke: null,
                 strokeWidth: 0,
-                backgroundColor: element.background_color && element.background_color !== "transparent" ? element.background_color : "transparent",
-                editable: false,  // Prevent inline editing (confusing in designer)
-                lockUniScaling: false,  // Allow free scaling
+                backgroundColor: textBg,
+                editable: false,
+                lockUniScaling: false,
             });
-            // Add double-click to edit text
             textObj.on('mousedblclick', () => {
                 textObj.set({ editable: true });
                 textObj.enterEditing();
                 textObj.selectAll();
             });
+            
+            console.log(`  Created Textbox with fill: ${textObj.fill}`);
             return textObj;
         }
 
