@@ -308,8 +308,9 @@ export class InvoiceDesignerCanvas extends Component {
         ctx.save();
         ctx.fillStyle = element.color || '#000000';
         ctx.font = `${fontSize}px ${element.font_family_name || "Arial"}`;
-        ctx.textBaseline = 'top';
-        ctx.textAlign = element.text_align || 'left';
+        ctx.textBaseline = 'alphabetic'; // avoid invalid baseline values
+        const allowedAlign = ['left', 'right', 'center', 'start', 'end'];
+        ctx.textAlign = allowedAlign.includes(element.text_align) ? element.text_align : 'left';
         
         if (element.element_type === 'text') {
             ctx.fillText(element.content || 'نص', x + 6, y + 6, width - 12);
