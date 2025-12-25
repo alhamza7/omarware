@@ -45,6 +45,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
   bool _paused = false;
   String? _status;
   bool _torchEnabled = false;
+  String _username = ''; // اسم المستخدم
   
   // منع التكرار بنظام أذكى
   String? _lastScannedCode;
@@ -902,6 +903,20 @@ class _InventoryScreenState extends State<InventoryScreen> {
   void initState() {
     super.initState();
     _searchController.addListener(() => _onSearchChanged(_searchController.text));
+    _loadUsername();
+  }
+
+  Future<void> _loadUsername() async {
+    try {
+      final userInfo = await widget.api.getUserInfo();
+      if (mounted) {
+        setState(() {
+          _username = userInfo['username']?.toString() ?? '';
+        });
+      }
+    } catch (e) {
+      // تجاهل الخطأ
+    }
   }
 
   @override
@@ -916,7 +931,32 @@ class _InventoryScreenState extends State<InventoryScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('الجرد'),
+        title: Row(
+          children: [
+            const Text('الجرد'),
+            if (_username.isNotEmpty) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.person, size: 16),
+                    const SizedBox(width: 4),
+                    Text(
+                      _username,
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
         actions: [
           IconButton(
             onPressed: () => Navigator.of(context).pushReplacementNamed('/warehouse'),

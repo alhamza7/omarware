@@ -168,6 +168,59 @@ async function loadLatestCounts(itemId) {
   }
 }
 
+// تحديد نوع الوحدة من UOM
+function getUnitType(uom) {
+  if (!uom) return 'default';
+  
+  const normalized = uom.toLowerCase().trim();
+  
+  // قطعة
+  if (normalized === 'قطعة' || normalized === 'قطعه' || 
+      normalized === 'piece' || normalized === 'pcs') {
+    return 'piece';
+  }
+  
+  // باكيت
+  if (normalized === 'باكيت' || normalized === 'packet' || normalized === 'pack') {
+    return 'packet';
+  }
+  
+  // سيت
+  if (normalized === 'سيت' || normalized === 'set') {
+    return 'set';
+  }
+  
+  // درزن
+  if (normalized === 'درزن' || normalized === 'dozen') {
+    return 'dozen';
+  }
+  
+  // كارتون
+  if (normalized === 'كارتون' || normalized === 'carton') {
+    return 'carton';
+  }
+  
+  return 'default';
+}
+
+// الحصول على اسم الوحدة بالعربي
+function getUnitLabel(unitType) {
+  switch (unitType) {
+    case 'piece':
+      return 'قطعة';
+    case 'packet':
+      return 'باكيت';
+    case 'set':
+      return 'سيت';
+    case 'dozen':
+      return 'درزن';
+    case 'carton':
+      return 'كارتون';
+    default:
+      return 'الكمية';
+  }
+}
+
 async function openCountDialog(item, lastCount = null, sapQuantity = null) {
   console.log('🔍 openCountDialog called with:', { item, lastCount, sapQuantity });
   
@@ -187,10 +240,20 @@ async function openCountDialog(item, lastCount = null, sapQuantity = null) {
     }
   }
 
+  // تحديد نوع الوحدة
+  const unitType = getUnitType(item.uom);
+  
+  // إذا كان النوع متعدد الوحدات، استخدم dialog خاص
+  if (unitType !== 'default') {
+    await openMultiUnitDialog(item, addMode, lastQty, sapQuantity, unitType);
+    return;
+  }
+
+  // Dialog العادي (للوحدات الافتراضية)
   selectedItem = item;
   selectedItem._addMode = addMode;
   selectedItem._lastQty = lastQty;
-  selectedItem._sapQuantity = sapQuantity; // حفظ بيانات SAP
+  selectedItem._sapQuantity = sapQuantity;
   
   dlgTitle.textContent = addMode ? "إضافة كمية إضافية" : "إضافة كمية جرد";
   const barcodeText = item.barcode ? ` (باركود: ${item.barcode})` : "";
@@ -203,9 +266,7 @@ async function openCountDialog(item, lastCount = null, sapQuantity = null) {
   }
   
   // عرض كمية SAP إن وجدت
-  console.log('☁️ SAP Quantity:', sapQuantity);
   if (sapQuantity) {
-    console.log('✅ Showing SAP quantity box');
     metaHtml += `
       <div style="background: #E3F2FD; border: 2px solid #2196F3; border-radius: 12px; padding: 16px; margin: 16px 0; text-align: right;">
         <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px; border-bottom: 2px solid #2196F3; padding-bottom: 8px;">
@@ -228,8 +289,6 @@ async function openCountDialog(item, lastCount = null, sapQuantity = null) {
         </div>
       </div>
     `;
-  } else {
-    console.log('❌ No SAP quantity available');
   }
   
   dlgMeta.innerHTML = metaHtml;
@@ -239,6 +298,186 @@ async function openCountDialog(item, lastCount = null, sapQuantity = null) {
   await loadLatestCounts(item.id);
   dlg.showModal();
   qtyEl.focus();
+}
+
+// Dialog الوحدات المتعددة
+async function openMultiUnitDialog(item, addMode, lastQty, sapQuantity, unitType) {
+  return new Promise((resolve) => {
+    const dialogOverlay = document.createElement('div');
+    dialogOverlay.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10000;
+      padding: 20px;
+    `;
+
+    const dialogBox = document.createElement('div');
+    dialogBox.style.cssText = `
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      max-width: 500px;
+      width: 100%;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      max-height: 90vh;
+      overflow-y: auto;
+      text-align: right;
+    `;
+
+    const barcodeText = item.barcode ? `<br><small style="color: #666;">باركود: ${escapeHtml(item.barcode)}</small>` : "";
+    const unitLabel = getUnitLabel(unitType);
+
+    // بناء محتوى كمية SAP إن وجدت
+    let sapHtml = '';
+    if (sapQuantity) {
+      sapHtml = `
+        <div style="margin: 16px 0; padding: 16px; background: #E3F2FD; border: 2px solid #2196F3; border-radius: 12px;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px; border-bottom: 2px solid #2196F3; padding-bottom: 8px;">
+            <span style="font-size: 20px;">☁️</span>
+            <strong style="color: #1976D2; font-size: 16px;">كمية SAP الحالية:</strong>
+          </div>
+          <div style="display: grid; gap: 8px;">
+            <div style="display: flex; justify-content: space-between; padding: 6px; background: rgba(255,255,255,0.5); border-radius: 6px;">
+              <span style="color: #1565C0; font-weight: 500;">الموجود:</span>
+              <strong style="font-size: 16px;">${escapeHtml(String(sapQuantity.quantity || 0))}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 6px; background: rgba(255,255,255,0.5); border-radius: 6px;">
+              <span style="color: #E65100; font-weight: 500;">المحجوز:</span>
+              <strong style="font-size: 16px;">${escapeHtml(String(sapQuantity.committed || 0))}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 8px; background: rgba(76, 175, 80, 0.15); border-radius: 6px; border: 2px solid #4CAF50;">
+              <span style="color: #2E7D32; font-weight: bold;">✅ المتاح:</span>
+              <strong style="color: #4CAF50; font-size: 18px; font-weight: bold;">${escapeHtml(String(sapQuantity.available || 0))}</strong>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    let addModeHtml = '';
+    if (addMode) {
+      addModeHtml = `<div style="color: #4CAF50; font-weight: bold; margin: 12px 0; padding: 10px; background: #E8F5E9; border-radius: 6px;">الكمية الحالية: ${lastQty}</div>`;
+    }
+
+    dialogBox.innerHTML = `
+      <div style="margin-bottom: 16px;">
+        <strong style="font-size: 18px; color: #2196F3;">${addMode ? 'إضافة كمية إضافية' : 'إضافة كمية'}</strong>
+      </div>
+      <div style="margin-bottom: 12px;">
+        <strong style="font-size: 16px;">${escapeHtml(item.item_code)} — ${escapeHtml(item.item_name)}</strong>
+        ${barcodeText}
+      </div>
+      ${addModeHtml}
+      ${sapHtml}
+      
+      <div style="margin: 20px 0;">
+        <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #333;">
+          ${unitLabel}
+        </label>
+        <input type="number" id="multiPieces" 
+          style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px; text-align: center;"
+          placeholder="0" step="any" min="0">
+      </div>
+
+      <div style="margin: 20px 0;">
+        <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #333;">
+          درزن
+        </label>
+        <input type="number" id="multiDozen" 
+          style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px; text-align: center;"
+          placeholder="0" step="any" min="0">
+      </div>
+
+      <div style="margin: 20px 0;">
+        <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #333;">
+          كارتون
+        </label>
+        <input type="number" id="multiCarton" 
+          style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px; text-align: center;"
+          placeholder="0" step="any" min="0">
+      </div>
+
+      <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 24px;">
+        <button id="btnMultiCancel" style="padding: 12px 24px; border: 1px solid #ddd; background: white; border-radius: 6px; cursor: pointer; font-size: 16px;">
+          إلغاء
+        </button>
+        <button id="btnMultiSave" style="padding: 12px 24px; border: none; background: #2196F3; color: white; border-radius: 6px; cursor: pointer; font-size: 16px; font-weight: bold;">
+          حفظ
+        </button>
+      </div>
+    `;
+
+    dialogOverlay.appendChild(dialogBox);
+    document.body.appendChild(dialogOverlay);
+
+    const piecesInput = document.getElementById('multiPieces');
+    const dozenInput = document.getElementById('multiDozen');
+    const cartonInput = document.getElementById('multiCarton');
+
+    // Focus على الحقل الأول
+    setTimeout(() => piecesInput.focus(), 100);
+
+    const cleanup = () => {
+      document.body.removeChild(dialogOverlay);
+    };
+
+    document.getElementById('btnMultiCancel').onclick = () => {
+      cleanup();
+      window.resumeScanning?.();
+      resolve(null);
+    };
+
+    document.getElementById('btnMultiSave').onclick = async () => {
+      const pieces = parseFloat(piecesInput.value) || 0;
+      const dozen = parseFloat(dozenInput.value) || 0;
+      const carton = parseFloat(cartonInput.value) || 0;
+
+      if (pieces <= 0 && dozen <= 0 && carton <= 0) {
+        alert('يجب إدخال كمية واحدة على الأقل');
+        return;
+      }
+
+      let finalQty = pieces; // نحفظ القطع كإجمالي
+      if (addMode && lastQty) {
+        finalQty = finalQty + lastQty;
+      }
+
+      try {
+        const payload = {
+          item_id: item.id,
+          qty: finalQty,
+          qty_pieces: pieces,
+          qty_dozen: dozen,
+          qty_carton: carton,
+        };
+        
+        // إضافة بيانات SAP إن وجدت
+        if (sapQuantity) {
+          payload.sap_qty = sapQuantity.quantity || null;
+          payload.sap_committed = sapQuantity.committed || null;
+          payload.sap_available = sapQuantity.available || null;
+        }
+        
+        await api("/api/counts", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        
+        cleanup();
+        window.resumeScanning?.();
+        resolve({ success: true });
+      } catch (e) {
+        alert(`فشل الحفظ: ${String(e.message || e)}`);
+      }
+    };
+  });
 }
 
 async function showAlreadyCountedDialog(item, lastCount, sapQuantity = null) {

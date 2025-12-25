@@ -47,6 +47,25 @@ class ApiClient {
     return wh;
   }
 
+  Future<Map<String, dynamic>> getUserInfo() async {
+    final r = await _dio.get<Map<String, dynamic>>('/api/me');
+    final data = r.data ?? {};
+    final user = (data['user'] as Map?)?.cast<String, dynamic>() ?? {};
+    final username = user['username']?.toString() ?? '';
+    final warehouseId = (data['warehouse_id'] is num) ? (data['warehouse_id'] as num).toInt() : 1;
+    
+    // حفظ اسم المستخدم محلياً
+    if (username.isNotEmpty) {
+      await _storage.write(key: 'username', value: username);
+    }
+    
+    return {
+      'username': username,
+      'warehouse_id': warehouseId,
+      'full_name': user['full_name']?.toString() ?? username,
+    };
+  }
+
   Future<int> setWarehouse(int warehouseId) async {
     final r = await _dio.post<Map<String, dynamic>>(
       '/api/me/warehouse',
