@@ -397,6 +397,10 @@ class InvoiceTemplateDesigner(models.Model):
             used_fonts.add(self.default_font_family)
         elif self.default_font_family == 'custom' and self.default_custom_font:
             used_fonts.add(self.default_custom_font)
+        else:
+            used_fonts.add('Almarai')
+        # Always import Almarai as a safe Arabic fallback
+        used_fonts.add('Almarai')
         
         # Add fonts from elements
         for element in self.element_ids:
@@ -415,16 +419,16 @@ class InvoiceTemplateDesigner(models.Model):
         if used_fonts:
             # Arabic + English fonts from Google Fonts
             arabic_fonts = {
-                'Almarai': 'Almarai:300,400,700,800',
-                'Cairo': 'Cairo:200,300,400,600,700,900',
-                'Tajawal': 'Tajawal:200,300,400,500,700,800,900',
-                'Amiri': 'Amiri:400,700',
-                'Scheherazade New': 'Scheherazade+New:400,700',
-                'Noto Sans Arabic': 'Noto+Sans+Arabic:100,200,300,400,500,600,700,800,900',
-                'IBM Plex Sans Arabic': 'IBM+Plex+Sans+Arabic:100,200,300,400,500,600,700',
-                'Markazi Text': 'Markazi+Text:400,500,600,700',
-                'El Messiri': 'El+Messiri:400,500,600,700',
-                'Lateef': 'Lateef:200,300,400,500,600,700,800',
+                'Almarai': 'Almarai:wght@300;400;700;800',
+                'Cairo': 'Cairo:wght@200;300;400;600;700;900',
+                'Tajawal': 'Tajawal:wght@200;300;400;500;700;800;900',
+                'Amiri': 'Amiri:wght@400;700',
+                'Scheherazade New': 'Scheherazade+New:wght@400;700',
+                'Noto Sans Arabic': 'Noto+Sans+Arabic:wght@100;200;300;400;500;600;700;800;900',
+                'IBM Plex Sans Arabic': 'IBM+Plex+Sans+Arabic:wght@100;200;300;400;500;600;700',
+                'Markazi Text': 'Markazi+Text:wght@400;500;600;700',
+                'El Messiri': 'El+Messiri:wght@400;500;600;700',
+                'Lateef': 'Lateef:wght@200;300;400;500;600;700;800',
             }
             
             fonts_to_import = []
@@ -433,6 +437,7 @@ class InvoiceTemplateDesigner(models.Model):
                     fonts_to_import.append(arabic_fonts[font])
             
             if fonts_to_import:
+                fonts_to_import = sorted(list(set(fonts_to_import)))
                 google_fonts_import = f"@import url('https://fonts.googleapis.com/css2?{('&').join([f'family={f}' for f in fonts_to_import])}&display=swap');"
         
         # Determine default direction

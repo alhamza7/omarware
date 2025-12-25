@@ -4,6 +4,38 @@ import { Component, useState, onMounted, onWillUnmount, useRef } from "@odoo/owl
 import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
 
+const FABRIC_URL = "https://cdn.jsdelivr.net/npm/fabric@5.3.0/dist/fabric.min.js";
+const MM_TO_PX = 3.78;
+
+async function loadScriptOnce(src) {
+    if (document.querySelector(`script[data-src="${src}"]`)) {
+        return;
+    }
+    await new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = src;
+        script.async = true;
+        script.dataset.src = src;
+        script.onload = () => resolve();
+        script.onerror = reject;
+        document.head.appendChild(script);
+    });
+}
+
+function ensureGoogleFont(family, weights = "300;400;700;800") {
+    const id = `gf-${family.replace(/\s+/g, "-")}`;
+    if (!document.getElementById(id)) {
+        const link = document.createElement("link");
+        link.id = id;
+        link.rel = "stylesheet";
+        link.href = `https://fonts.googleapis.com/css2?family=${family.replace(/\s+/g, "+")}:wght@${weights}&display=swap`;
+        document.head.appendChild(link);
+    }
+    if (document.fonts) {
+        document.fonts.load(`16px "${family}"`);
+    }
+}
+
 /**
  * Invoice Designer Canvas - Visual Designer Component
  * Simple but functional drag & drop designer
@@ -12,9 +44,16 @@ export class InvoiceDesignerCanvas extends Component {
     static template = "invoice_designer.Canvas";
     static props = ["*"]; // Accept all props
 
+    GRID_MM = 5; // grid size in mm (approx 5mm ~= 20px)
+
     setup() {
         this.orm = useService("orm");
         this.notification = useService("notification");
+        this._boundMouseDown = this.onMouseDown.bind(this);
+        this._boundMouseMove = this.onMouseMove.bind(this);
+        this._boundMouseUp = this.onMouseUp.bind(this);
+        this.elementObjects = new Map(); // elementId -> fabric object
+        this.fabricReady = false;
         
         // Get templateId from URL hash (most reliable in Odoo 19)
         let templateId = null;
@@ -68,12 +107,16 @@ export class InvoiceDesignerCanvas extends Component {
             showGrid: true,
             snapToGrid: false,
             isDragging: false,
+            isResizing: false,
+            resizeHandle: null,
             dragOffset: { x: 0, y: 0 },
+            dragStart: { x: 0, y: 0 },
             unsavedChanges: false,
             canUndo: false,
             canRedo: false,
             history: [],
             historyIndex: -1,
+            initialElement: null,
         });
         
         this.canvasRef = useRef("canvas");
@@ -81,6 +124,7 @@ export class InvoiceDesignerCanvas extends Component {
         onMounted(() => {
             this.loadTemplate();
             this.setupEventListeners();
+            this.ensureFabric(); // begin loading Fabric.js early
         });
         
         onWillUnmount(() => {
@@ -110,7 +154,8 @@ export class InvoiceDesignerCanvas extends Component {
                 this.state.template = template[0];
                 this.state.showGrid = template[0].show_grid;
                 await this.loadElements();
-                this.renderCanvas();
+                await this.ensureFabric();
+                this.buildFabricScene();
             } else {
                 this.notification.add("Template not found", { type: "danger" });
             }
@@ -121,16 +166,16 @@ export class InvoiceDesignerCanvas extends Component {
     }
     
     async loadElements() {
-        if (!this.state.template.element_ids) return;
-        
         try {
-            const elements = await this.orm.read(
+            const elements = await this.orm.searchRead(
                 "invoice.template.element",
-                this.state.template.element_ids,
+                [["template_id", "=", this.templateId]],
                 [
                     // basic
                     "name", "element_type", "x", "y", "width", "height", "content",
                     "color", "background_color", "font_size", "z_index", "visible",
+                    "font_family_name", "font_weight", "text_align", "shape_type",
+                    "line_x2", "line_y2", "object_fit", "image_url", "image_data",
                     // table core
                     "show_column_product", "show_column_description", "show_column_qty", "show_column_uom",
                     "show_column_price", "show_column_discount", "show_column_tax", "show_column_subtotal",
@@ -150,7 +195,10 @@ export class InvoiceDesignerCanvas extends Component {
                 ]
             );
             this.state.elements = elements.sort((a, b) => a.z_index - b.z_index);
-            this.renderCanvas();
+            this.addToHistory();
+            if (this.fabricReady) {
+                this.buildFabricScene();
+            }
         } catch (error) {
             this.notification.add("Error loading elements", { type: "danger" });
         }
@@ -159,50 +207,27 @@ export class InvoiceDesignerCanvas extends Component {
     setupEventListeners() {
         if (!this.canvasRef.el) return;
         
-        this.canvasRef.el.addEventListener('mousedown', this.onMouseDown.bind(this));
-        this.canvasRef.el.addEventListener('mousemove', this.onMouseMove.bind(this));
-        this.canvasRef.el.addEventListener('mouseup', this.onMouseUp.bind(this));
+        this.canvasRef.el.addEventListener('mousedown', this._boundMouseDown);
+        this.canvasRef.el.addEventListener('mousemove', this._boundMouseMove);
+        this.canvasRef.el.addEventListener('mouseup', this._boundMouseUp);
     }
     
     removeEventListeners() {
         if (!this.canvasRef.el) return;
         
-        this.canvasRef.el.removeEventListener('mousedown', this.onMouseDown.bind(this));
-        this.canvasRef.el.removeEventListener('mousemove', this.onMouseMove.bind(this));
-        this.canvasRef.el.removeEventListener('mouseup', this.onMouseUp.bind(this));
+        this.canvasRef.el.removeEventListener('mousedown', this._boundMouseDown);
+        this.canvasRef.el.removeEventListener('mousemove', this._boundMouseMove);
+        this.canvasRef.el.removeEventListener('mouseup', this._boundMouseUp);
     }
     
     renderCanvas() {
+        if (this.fabricCanvas) {
+            this.fabricCanvas.requestRenderAll();
+            return;
+        }
         if (!this.canvasRef.el) return;
-        
-        const canvas = this.canvasRef.el;
-        const ctx = canvas.getContext('2d');
-        
-        // Clear canvas
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        // Background
-        if (this.state.template) {
-            ctx.fillStyle = this.state.template.background_color || '#FFFFFF';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-        }
-        
-        // Grid
-        if (this.state.showGrid) {
-            this.drawGrid(ctx);
-        }
-        
-        // Elements
-        this.state.elements.forEach(element => {
-            if (element.visible !== false) {
-                this.drawElement(ctx, element);
-            }
-        });
-        
-        // Selection
-        if (this.state.selectedElement) {
-            this.drawSelection(ctx, this.state.selectedElement);
-        }
+        const ctx = this.canvasRef.el.getContext('2d');
+        ctx.clearRect(0, 0, this.canvasRef.el.width, this.canvasRef.el.height);
     }
     
     drawGrid(ctx) {
@@ -231,6 +256,7 @@ export class InvoiceDesignerCanvas extends Component {
         const y = element.y * scale;
         const width = element.width * scale;
         const height = element.height * scale;
+        const fontSize = element.font_size || 12;
         
         // Background
         if (element.background_color && element.background_color !== 'transparent') {
@@ -238,12 +264,88 @@ export class InvoiceDesignerCanvas extends Component {
             ctx.fillRect(x, y, width, height);
         }
         
-        // Content
-        if (element.element_type === 'text' && element.content) {
-            ctx.fillStyle = element.color || '#000000';
-            ctx.font = `${element.font_size || 12}px Arial`;
-            ctx.fillText(element.content, x + 5, y + 20);
+        // Content rendering per element type
+        ctx.save();
+        ctx.fillStyle = element.color || '#000000';
+        ctx.font = `${fontSize}px ${element.font_family_name || "Arial"}`;
+        ctx.textBaseline = 'top';
+        ctx.textAlign = element.text_align || 'left';
+        
+        if (element.element_type === 'text') {
+            ctx.fillText(element.content || 'نص', x + 6, y + 6, width - 12);
+        } else if (element.element_type === 'field') {
+            ctx.fillText(element.content || `[${element.field_name || 'حقل'}]`, x + 6, y + 6, width - 12);
+        } else if (element.element_type === 'shape') {
+            ctx.strokeStyle = element.color || '#000000';
+            ctx.lineWidth = 1;
+            if (element.shape_type === 'circle') {
+                ctx.beginPath();
+                ctx.arc(x + width / 2, y + height / 2, Math.min(width, height) / 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+            } else if (element.shape_type === 'ellipse') {
+                ctx.beginPath();
+                ctx.ellipse(x + width / 2, y + height / 2, width / 2, height / 2, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+            } else if (element.shape_type === 'triangle') {
+                ctx.beginPath();
+                ctx.moveTo(x + width / 2, y);
+                ctx.lineTo(x + width, y + height);
+                ctx.lineTo(x, y + height);
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+            } else {
+                ctx.fillRect(x, y, width, height);
+                ctx.strokeRect(x, y, width, height);
+            }
+        } else if (element.element_type === 'line') {
+            ctx.strokeStyle = element.color || '#000000';
+            ctx.lineWidth = element.border_width || 2;
+            const x2 = (element.line_x2 || element.x + element.width) * scale;
+            const y2 = (element.line_y2 || element.y) * scale;
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+        } else if (element.element_type === 'table') {
+            ctx.fillStyle = '#f7f7f7';
+            ctx.fillRect(x, y, width, height);
+            ctx.strokeStyle = '#b0b0b0';
+            ctx.strokeRect(x, y, width, height);
+            ctx.fillStyle = '#4a5568';
+            ctx.fillRect(x, y, width, 24);
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText('جدول المنتجات', x + 8, y + 6);
+        } else if (element.element_type === 'barcode') {
+            ctx.fillStyle = '#000000';
+            for (let i = 0; i < width; i += 4) {
+                if ((i / 4) % 2 === 0) {
+                    ctx.fillRect(x + i, y, 2, height);
+                }
+            }
+        } else if (element.element_type === 'qr') {
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(x, y, width, height);
+            ctx.clearRect(x + 4, y + 4, width - 8, height - 8);
+            ctx.fillRect(x + width / 2 - 6, y + height / 2 - 6, 12, 12);
+        } else if (element.element_type === 'image') {
+            ctx.fillStyle = '#f0f0f0';
+            ctx.strokeStyle = '#bbbbbb';
+            ctx.fillRect(x, y, width, height);
+            ctx.strokeRect(x, y, width, height);
+            ctx.fillStyle = '#999999';
+            ctx.fillText('صورة', x + width / 2, y + height / 2);
+        } else if (element.element_type === 'gradient_box') {
+            const gradient = ctx.createLinearGradient(x, y, x + width, y);
+            gradient.addColorStop(0, '#667eea');
+            gradient.addColorStop(1, '#764ba2');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(x, y, width, height);
         }
+        
+        ctx.restore();
         
         // Border (for visualization)
         ctx.strokeStyle = '#CCCCCC';
@@ -274,16 +376,28 @@ export class InvoiceDesignerCanvas extends Component {
     }
     
     onMouseDown(event) {
-        const rect = this.canvasRef.el.getBoundingClientRect();
-        const x = (event.clientX - rect.left) / 3.78;
-        const y = (event.clientY - rect.top) / 3.78;
+        if (this.fabricReady) return; // Fabric handles interactions
+        const { x, y } = this._getCanvasCoordinates(event);
         
         // Find clicked element
         const clickedElement = this.findElementAt(x, y);
         
+        // Check resize handles first on currently selected element
+        if (this.state.selectedElement) {
+            const handle = this._getResizeHandle(this.state.selectedElement, x, y);
+            if (handle) {
+                this.state.isResizing = true;
+                this.state.resizeHandle = handle;
+                this.state.dragStart = { x, y };
+                this.state.initialElement = { ...this.state.selectedElement };
+                return;
+            }
+        }
+        
         if (clickedElement) {
             this.state.selectedElement = clickedElement;
             this.state.isDragging = true;
+            this.state.dragStart = { x, y };
             this.state.dragOffset = {
                 x: x - clickedElement.x,
                 y: y - clickedElement.y
@@ -296,24 +410,62 @@ export class InvoiceDesignerCanvas extends Component {
     }
     
     onMouseMove(event) {
-        if (!this.state.isDragging || !this.state.selectedElement) return;
+        if (this.fabricReady) return;
+        if (!this.state.selectedElement) return;
         
-        const rect = this.canvasRef.el.getBoundingClientRect();
-        const x = (event.clientX - rect.left) / 3.78;
-        const y = (event.clientY - rect.top) / 3.78;
+        const { x, y } = this._getCanvasCoordinates(event);
         
-        this.state.selectedElement.x = x - this.state.dragOffset.x;
-        this.state.selectedElement.y = y - this.state.dragOffset.y;
+        if (this.state.isResizing && this.state.initialElement) {
+            const el = this.state.selectedElement;
+            const init = this.state.initialElement;
+            const dx = x - this.state.dragStart.x;
+            const dy = y - this.state.dragStart.y;
+            
+            if (this.state.resizeHandle.includes('e')) {
+                el.width = this._snap(Math.max(5, init.width + dx));
+            }
+            if (this.state.resizeHandle.includes('s')) {
+                el.height = this._snap(Math.max(5, init.height + dy));
+            }
+            if (this.state.resizeHandle.includes('w')) {
+                const newWidth = this._snap(Math.max(5, init.width - dx));
+                const newX = this._snap(init.x + dx);
+                if (newWidth >= 5) {
+                    el.width = newWidth;
+                    el.x = newX;
+                }
+            }
+            if (this.state.resizeHandle.includes('n')) {
+                const newHeight = this._snap(Math.max(5, init.height - dy));
+                const newY = this._snap(init.y + dy);
+                if (newHeight >= 5) {
+                    el.height = newHeight;
+                    el.y = newY;
+                }
+            }
+            
+            this.renderCanvas();
+            return;
+        }
+        
+        if (!this.state.isDragging) return;
+        
+        this.state.selectedElement.x = this._snap(x - this.state.dragOffset.x);
+        this.state.selectedElement.y = this._snap(y - this.state.dragOffset.y);
         
         this.renderCanvas();
     }
     
     async onMouseUp() {
-        if (this.state.isDragging && this.state.selectedElement) {
-            // Save position
-            await this.saveElement(this.state.selectedElement);
+        if (this.fabricReady) return;
+        if (this.state.selectedElement && (this.state.isDragging || this.state.isResizing)) {
+            this.state.selectedElement.modified = true;
+            this.state.unsavedChanges = true;
+            this.addToHistory();
         }
         this.state.isDragging = false;
+        this.state.isResizing = false;
+        this.state.resizeHandle = null;
     }
     
     findElementAt(x, y) {
@@ -327,14 +479,30 @@ export class InvoiceDesignerCanvas extends Component {
         return null;
     }
     
-    async saveElement(element) {
+    async saveElement(element, extra = {}, persist = false) {
+        Object.assign(element, extra);
+        element.modified = true;
+        this.state.unsavedChanges = true;
+        this.refreshObjectFromElement(element);
+        if (!persist) return;
         try {
-            await this.orm.write(
-                "invoice.template.element",
-                [element.id],
-                { x: element.x, y: element.y }
-            );
-            this.notification.add("Element updated", { type: "success" });
+            const payload = {
+                x: element.x,
+                y: element.y,
+                width: element.width,
+                height: element.height,
+                z_index: element.z_index,
+                visible: element.visible,
+                rotation: element.rotation,
+                content: element.content,
+                font_size: element.font_size,
+                font_family_name: element.font_family_name,
+                font_weight: element.font_weight,
+                text_align: element.text_align,
+                color: element.color,
+                background_color: element.background_color,
+            };
+            await this.orm.write("invoice.template.element", [element.id], payload);
         } catch (error) {
             this.notification.add("Error saving element", { type: "danger" });
         }
@@ -374,16 +542,19 @@ export class InvoiceDesignerCanvas extends Component {
     
     zoomIn() {
         this.state.zoom = Math.min(this.state.zoom + 0.1, 2.0);
+        this.setZoom(this.state.zoom);
         this.renderCanvas();
     }
     
     zoomOut() {
         this.state.zoom = Math.max(this.state.zoom - 0.1, 0.5);
+        this.setZoom(this.state.zoom);
         this.renderCanvas();
     }
     
     toggleGrid() {
         this.state.showGrid = !this.state.showGrid;
+        this.updateGridBackground();
         this.renderCanvas();
     }
     
@@ -397,6 +568,7 @@ export class InvoiceDesignerCanvas extends Component {
     
     zoomReset() {
         this.state.zoom = 1.0;
+        this.setZoom(this.state.zoom);
         this.renderCanvas();
     }
     
@@ -551,12 +723,21 @@ export class InvoiceDesignerCanvas extends Component {
     
     selectElement(element) {
         this.state.selectedElement = element;
+        const obj = this.elementObjects.get(element.id);
+        if (obj && this.fabricCanvas) {
+            this.fabricCanvas.setActiveObject(obj);
+            this.fabricCanvas.requestRenderAll();
+        }
         this.renderCanvas();
     }
     
     toggleElementVisibility(element) {
         element.visible = element.visible !== false ? false : true;
-        this.saveElement(element);
+        this.saveElement(element, { visible: element.visible });
+        const obj = this.elementObjects.get(element.id);
+        if (obj) {
+            obj.set({ visible: element.visible !== false, opacity: element.visible === false ? 0 : 1, evented: element.visible !== false });
+        }
         this.renderCanvas();
     }
     
@@ -580,23 +761,29 @@ export class InvoiceDesignerCanvas extends Component {
     alignLeft() {
         if (!this.state.selectedElement) return;
         this.state.selectedElement.x = 10;
-        this.saveElement(this.state.selectedElement);
-        this.renderCanvas();
+        this.state.selectedElement.modified = true;
+        this.state.unsavedChanges = true;
+        this.refreshObjectFromElement(this.state.selectedElement);
+        this.addToHistory();
     }
     
     alignCenter() {
         if (!this.state.selectedElement || !this.state.template) return;
         const centerX = (this.state.template.page_width - this.state.selectedElement.width) / 2;
         this.state.selectedElement.x = centerX;
-        this.saveElement(this.state.selectedElement);
-        this.renderCanvas();
+        this.state.selectedElement.modified = true;
+        this.state.unsavedChanges = true;
+        this.refreshObjectFromElement(this.state.selectedElement);
+        this.addToHistory();
     }
     
     alignRight() {
         if (!this.state.selectedElement || !this.state.template) return;
         this.state.selectedElement.x = this.state.template.page_width - this.state.selectedElement.width - 10;
-        this.saveElement(this.state.selectedElement);
-        this.renderCanvas();
+        this.state.selectedElement.modified = true;
+        this.state.unsavedChanges = true;
+        this.refreshObjectFromElement(this.state.selectedElement);
+        this.addToHistory();
     }
     
     // ================ LAYER OPERATIONS ================
@@ -606,8 +793,8 @@ export class InvoiceDesignerCanvas extends Component {
         const maxZ = Math.max(...this.state.elements.map(e => e.z_index || 1));
         this.state.selectedElement.z_index = maxZ + 1;
         await this.saveElement(this.state.selectedElement);
-        await this.loadElements();
-        this.renderCanvas();
+        this.state.elements = [...this.state.elements].sort((a, b) => a.z_index - b.z_index);
+        this.buildFabricScene();
     }
     
     async sendToBack() {
@@ -615,8 +802,8 @@ export class InvoiceDesignerCanvas extends Component {
         const minZ = Math.min(...this.state.elements.map(e => e.z_index || 1));
         this.state.selectedElement.z_index = minZ - 1;
         await this.saveElement(this.state.selectedElement);
-        await this.loadElements();
-        this.renderCanvas();
+        this.state.elements = [...this.state.elements].sort((a, b) => a.z_index - b.z_index);
+        this.buildFabricScene();
     }
     
     // ================ PROPERTY CHANGES ================
@@ -625,6 +812,7 @@ export class InvoiceDesignerCanvas extends Component {
         this.state.unsavedChanges = true;
         if (this.state.selectedElement) {
             this.state.selectedElement.modified = true;
+            this.refreshObjectFromElement(this.state.selectedElement);
         }
         this.renderCanvas();
     }
@@ -649,7 +837,7 @@ export class InvoiceDesignerCanvas extends Component {
                 this.state.selectedElement.image_data = e.target.result.split(',')[1];
                 this.state.selectedElement.image_filename = file.name;
                 await this.saveElement(this.state.selectedElement);
-                this.renderCanvas();
+                this.buildFabricScene();
                 this.notification.add("تم رفع الصورة", { type: "success" });
             }
         };
@@ -758,6 +946,392 @@ export class InvoiceDesignerCanvas extends Component {
         
         this.state.canUndo = this.state.historyIndex > 0;
         this.state.canRedo = false;
+    }
+
+    // ================ FABRIC CANVAS ================
+
+    async ensureFabric() {
+        if (this.fabricReady) return;
+        await loadScriptOnce(FABRIC_URL);
+        if (!window.fabric) {
+            throw new Error("Fabric.js failed to load");
+        }
+        ensureGoogleFont("Almarai");
+        this.fabricReady = true;
+        this.createFabricCanvas();
+    }
+
+    createFabricCanvas() {
+        if (!this.canvasRef.el) return;
+        this.fabricCanvas = new window.fabric.Canvas(this.canvasRef.el, {
+            selection: true,
+            preserveObjectStacking: true,
+            stopContextMenu: true,
+        });
+
+        this.fabricCanvas.on("selection:created", (e) => this.onFabricSelection(e));
+        this.fabricCanvas.on("selection:updated", (e) => this.onFabricSelection(e));
+        this.fabricCanvas.on("selection:cleared", () => this.onFabricSelection(null));
+        this.fabricCanvas.on("object:moving", (e) => this.onFabricObjectChange(e));
+        this.fabricCanvas.on("object:scaling", (e) => this.onFabricObjectChange(e, true));
+        this.fabricCanvas.on("object:modified", (e) => this.onFabricObjectModified(e));
+
+        this.updateGridBackground();
+        this.setZoom(this.state.zoom);
+    }
+
+    buildFabricScene() {
+        if (!this.fabricCanvas) return;
+        this._updatingFabric = true;
+        this.fabricCanvas.clear();
+        this.elementObjects.clear();
+
+        this.updateGridBackground();
+
+        this.state.elements.forEach((element) => {
+            const obj = this.createFabricObject(element);
+            if (obj) {
+                obj.elementId = element.id;
+                obj.hasControls = true;
+                obj.lockScalingFlip = true;
+                obj.transparentCorners = false;
+                obj.cornerColor = "#4A90E2";
+                obj.cornerStyle = "rect";
+                obj.cornerSize = 10;
+                obj.borderColor = "#4A90E2";
+                obj.padding = 2;
+                obj.selectable = element.visible !== false;
+                this.fabricCanvas.add(obj);
+                this.elementObjects.set(element.id, obj);
+            }
+        });
+
+        this.fabricCanvas.requestRenderAll();
+        this._updatingFabric = false;
+    }
+
+    createFabricObject(element) {
+        const left = this._mmToPx(element.x || 0);
+        const top = this._mmToPx(element.y || 0);
+        const width = this._mmToPx(element.width || 50);
+        const height = this._mmToPx(element.height || 20);
+
+        const common = {
+            left,
+            top,
+            width,
+            height,
+            fill: element.background_color && element.background_color !== "transparent" ? element.background_color : "rgba(255,255,255,0)",
+            stroke: element.color || "#000",
+            strokeWidth: element.border_width || 0.5,
+            angle: element.rotation || 0,
+            selectable: true,
+            hasRotatingPoint: true,
+            objectCaching: false,
+        };
+
+        if (element.element_type === "text" || element.element_type === "field") {
+            return new window.fabric.Textbox(element.content || (element.element_type === "field" ? `[${element.field_name || "حقل"}]` : "نص"), {
+                ...common,
+                fontSize: element.font_size || 14,
+                fontFamily: element.font_family_name || "Almarai",
+                fontWeight: element.font_weight || "400",
+                textAlign: element.text_align || "left",
+                fill: element.color || "#000",
+                backgroundColor: element.background_color || "transparent",
+            });
+        }
+
+        if (element.element_type === "shape") {
+            if (element.shape_type === "circle" || element.shape_type === "ellipse") {
+                return new window.fabric.Ellipse({
+                    ...common,
+                    rx: width / 2,
+                    ry: height / 2,
+                    originX: "left",
+                    originY: "top",
+                });
+            }
+            if (element.shape_type === "triangle") {
+                return new window.fabric.Triangle({
+                    ...common,
+                });
+            }
+            return new window.fabric.Rect({
+                ...common,
+                rx: element.border_radius || 0,
+                ry: element.border_radius || 0,
+            });
+        }
+
+        if (element.element_type === "line") {
+            const x2 = this._mmToPx(element.line_x2 || (element.x || 0) + (element.width || 50));
+            const y2 = this._mmToPx(element.line_y2 || (element.y || 0));
+            return new window.fabric.Line([left, top, x2, y2], {
+                stroke: element.color || "#000",
+                strokeWidth: element.border_width || 2,
+                selectable: true,
+            });
+        }
+
+        if (element.element_type === "table") {
+            return new window.fabric.Rect({
+                ...common,
+                fill: "#f7f7f7",
+                stroke: "#b0b0b0",
+                rx: 2,
+                ry: 2,
+                hasBorders: true,
+            });
+        }
+
+        if (element.element_type === "barcode" || element.element_type === "qr") {
+            return new window.fabric.Rect({
+                ...common,
+                fill: "#ffffff",
+                stroke: "#000000",
+                rx: 2,
+                ry: 2,
+            });
+        }
+
+        if (element.element_type === "image") {
+            const placeholder = new window.fabric.Rect({
+                ...common,
+                fill: "#f0f0f0",
+                stroke: "#999",
+            });
+            if (element.image_data || element.image_url) {
+                const src = element.image_data
+                    ? `data:image/png;base64,${element.image_data}`
+                    : element.image_url;
+                window.fabric.Image.fromURL(src, (img) => {
+                    img.set({
+                        left,
+                        top,
+                        scaleX: width / img.width,
+                        scaleY: height / img.height,
+                        selectable: true,
+                    });
+                    img.elementId = element.id;
+                    this.fabricCanvas.add(img);
+                    this.elementObjects.set(element.id, img);
+                    this.fabricCanvas.remove(placeholder);
+                    this.fabricCanvas.requestRenderAll();
+                }, { crossOrigin: "anonymous" });
+            }
+            return placeholder;
+        }
+
+        if (element.element_type === "gradient_box") {
+            const gradient = new window.fabric.Gradient({
+                type: "linear",
+                gradientUnits: "percentage",
+                coords: { x1: 0, y1: 0, x2: 1, y2: 0 },
+                colorStops: [
+                    { offset: 0, color: "#667eea" },
+                    { offset: 1, color: "#764ba2" },
+                ],
+            });
+            return new window.fabric.Rect({
+                ...common,
+                fill: gradient,
+                stroke: "transparent",
+            });
+        }
+
+        // Default fallback rectangle
+        return new window.fabric.Rect({ ...common });
+    }
+
+    onFabricSelection(event) {
+        if (this._updatingFabric) return;
+        const obj = event && event.selected ? event.selected[0] : null;
+        if (!obj || !obj.elementId) {
+            this.state.selectedElement = null;
+            this.fabricCanvas?.requestRenderAll();
+            return;
+        }
+        const element = this.state.elements.find((el) => el.id === obj.elementId);
+        if (element) {
+            this.state.selectedElement = element;
+        }
+        this.fabricCanvas?.requestRenderAll();
+    }
+
+    onFabricObjectChange(event, isScaling = false) {
+        if (this._updatingFabric) return;
+        const obj = event.target;
+        if (!obj || !obj.elementId) return;
+
+        if (this.state.snapToGrid) {
+            const grid = this.GRID_MM * MM_TO_PX;
+            obj.set({
+                left: Math.round(obj.left / grid) * grid,
+                top: Math.round(obj.top / grid) * grid,
+            });
+            if (isScaling && obj.type !== "line") {
+                obj.set({
+                    width: Math.max(grid, Math.round(obj.width * obj.scaleX / grid) * grid),
+                    height: Math.max(grid, Math.round(obj.height * obj.scaleY / grid) * grid),
+                    scaleX: 1,
+                    scaleY: 1,
+                });
+            }
+        }
+
+        this.updateElementFromObject(obj);
+        this.fabricCanvas.requestRenderAll();
+    }
+
+    onFabricObjectModified(event) {
+        if (this._updatingFabric) return;
+        const obj = event.target;
+        if (!obj || !obj.elementId) return;
+        this.updateElementFromObject(obj);
+        this.addToHistory();
+    }
+
+    updateElementFromObject(obj) {
+        const element = this.state.elements.find((el) => el.id === obj.elementId);
+        if (!element) return;
+
+        if (obj.type === "line") {
+            const [x1, y1, x2, y2] = obj.calcLinePoints ? obj.calcLinePoints() : [0, 0, obj.width, obj.height];
+            element.x = this._pxToMm(obj.left + x1);
+            element.y = this._pxToMm(obj.top + y1);
+            element.line_x2 = this._pxToMm(obj.left + x2);
+            element.line_y2 = this._pxToMm(obj.top + y2);
+            element.width = this._pxToMm(Math.abs(x2 - x1));
+            element.height = this._pxToMm(Math.abs(y2 - y1) || (element.height || 2));
+        } else {
+            element.x = this._pxToMm(obj.left);
+            element.y = this._pxToMm(obj.top);
+            element.width = this._pxToMm(obj.getScaledWidth ? obj.getScaledWidth() : obj.width);
+            element.height = this._pxToMm(obj.getScaledHeight ? obj.getScaledHeight() : obj.height);
+            element.rotation = obj.angle || 0;
+        }
+
+        element.modified = true;
+        this.state.unsavedChanges = true;
+        this.state.selectedElement = element;
+    }
+
+    refreshObjectFromElement(element) {
+        const obj = this.elementObjects.get(element.id);
+        if (!obj) return;
+        this._updatingFabric = true;
+        obj.set({
+            left: this._mmToPx(element.x || 0),
+            top: this._mmToPx(element.y || 0),
+            angle: element.rotation || 0,
+        });
+
+        if (obj.type !== "line") {
+            obj.set({
+                width: this._mmToPx(element.width || 50),
+                height: this._mmToPx(element.height || 20),
+                scaleX: 1,
+                scaleY: 1,
+            });
+        }
+
+        if (obj.type === "textbox") {
+            obj.set({
+                text: element.content || "",
+                fontSize: element.font_size || 14,
+                fontFamily: element.font_family_name || "Almarai",
+                fontWeight: element.font_weight || "400",
+                textAlign: element.text_align || "left",
+                fill: element.color || "#000",
+                backgroundColor: element.background_color || "transparent",
+            });
+        }
+
+        if (obj.type === "rect" || obj.type === "ellipse" || obj.type === "triangle") {
+            obj.set({
+                fill: element.background_color && element.background_color !== "transparent" ? element.background_color : "rgba(255,255,255,0)",
+                stroke: element.color || "#000",
+                strokeWidth: element.border_width || 0.5,
+            });
+        }
+
+        this._updatingFabric = false;
+        this.fabricCanvas.requestRenderAll();
+    }
+
+    updateGridBackground() {
+        if (!this.fabricCanvas) return;
+        if (!this.state.showGrid) {
+            this.fabricCanvas.setBackgroundImage(null, this.fabricCanvas.requestRenderAll.bind(this.fabricCanvas));
+            return;
+        }
+        const gridSize = this.GRID_MM * MM_TO_PX;
+        const gridCanvas = document.createElement("canvas");
+        gridCanvas.width = gridSize;
+        gridCanvas.height = gridSize;
+        const ctx = gridCanvas.getContext("2d");
+        ctx.strokeStyle = "rgba(0,0,0,0.08)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(gridSize, 0);
+        ctx.lineTo(gridSize, gridSize);
+        ctx.moveTo(0, gridSize);
+        ctx.lineTo(gridSize, gridSize);
+        ctx.stroke();
+
+        const pattern = new window.fabric.Pattern({
+            source: gridCanvas,
+            repeat: "repeat",
+        });
+        this.fabricCanvas.setBackgroundColor(pattern, this.fabricCanvas.requestRenderAll.bind(this.fabricCanvas));
+    }
+
+    setZoom(zoom) {
+        if (!this.fabricCanvas) return;
+        const vpt = this.fabricCanvas.viewportTransform;
+        if (!vpt) return;
+        const center = this.fabricCanvas.getCenter();
+        this.fabricCanvas.zoomToPoint(new window.fabric.Point(center.left, center.top), zoom);
+        this.fabricCanvas.requestRenderAll();
+    }
+
+    _mmToPx(mm) {
+        return (mm || 0) * MM_TO_PX;
+    }
+
+    _pxToMm(px) {
+        return (px || 0) / MM_TO_PX;
+    }
+
+    _getCanvasCoordinates(event) {
+        const rect = this.canvasRef.el.getBoundingClientRect();
+        const scale = 3.78 * (this.state.zoom || 1);
+        return {
+            x: (event.clientX - rect.left) / scale,
+            y: (event.clientY - rect.top) / scale,
+        };
+    }
+
+    _snap(value) {
+        if (!this.state.snapToGrid) {
+            return value;
+        }
+        return Math.round(value / this.GRID_MM) * this.GRID_MM;
+    }
+
+    _getResizeHandle(element, x, y) {
+        const tolerance = 3; // mm tolerance around corners
+        const nearLeft = Math.abs(x - element.x) <= tolerance;
+        const nearRight = Math.abs(x - (element.x + element.width)) <= tolerance;
+        const nearTop = Math.abs(y - element.y) <= tolerance;
+        const nearBottom = Math.abs(y - (element.y + element.height)) <= tolerance;
+
+        if (nearTop && nearLeft) return 'nw';
+        if (nearTop && nearRight) return 'ne';
+        if (nearBottom && nearLeft) return 'sw';
+        if (nearBottom && nearRight) return 'se';
+        return null;
     }
 }
 
