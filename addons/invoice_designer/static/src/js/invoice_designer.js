@@ -963,6 +963,9 @@ export class InvoiceDesignerCanvas extends Component {
 
     createFabricCanvas() {
         if (!this.canvasRef.el) return;
+        // Neutralize CSS transform from template; zoom will be via fabric
+        this.canvasRef.el.style.transform = "none";
+        this.canvasRef.el.style.transformOrigin = "top left";
         this.fabricCanvas = new window.fabric.Canvas(this.canvasRef.el, {
             selection: true,
             preserveObjectStacking: true,
@@ -987,6 +990,13 @@ export class InvoiceDesignerCanvas extends Component {
         this.elementObjects.clear();
 
         this.updateGridBackground();
+        // Set page background color
+        if (this.state.template) {
+            this.fabricCanvas.setBackgroundColor(
+                this.state.template.background_color || "#ffffff",
+                this.fabricCanvas.requestRenderAll.bind(this.fabricCanvas)
+            );
+        }
 
         this.state.elements.forEach((element) => {
             const obj = this.createFabricObject(element);
@@ -1264,6 +1274,12 @@ export class InvoiceDesignerCanvas extends Component {
         if (!this.fabricCanvas) return;
         if (!this.state.showGrid) {
             this.fabricCanvas.setBackgroundImage(null, this.fabricCanvas.requestRenderAll.bind(this.fabricCanvas));
+            if (this.state.template) {
+                this.fabricCanvas.setBackgroundColor(
+                    this.state.template.background_color || "#ffffff",
+                    this.fabricCanvas.requestRenderAll.bind(this.fabricCanvas)
+                );
+            }
             return;
         }
         const gridSize = this.GRID_MM * MM_TO_PX;
