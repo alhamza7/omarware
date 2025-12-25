@@ -150,13 +150,13 @@ export class InvoiceDesignerCanvas extends Component {
     
     async loadTemplate() {
         if (!this.templateId) {
-            console.error("Cannot load template: templateId is missing");
+            console.error("❌ Cannot load template: templateId is missing");
             this.notification.add("Error: Template ID is missing", { type: "danger" });
             return;
         }
         
         try {
-            console.log("Loading template ID:", this.templateId);
+            console.log("📥 Loading template ID:", this.templateId);
             
             const template = await this.orm.read(
                 "invoice.template.designer",
@@ -164,30 +164,42 @@ export class InvoiceDesignerCanvas extends Component {
                 ["name", "page_width", "page_height", "background_color", "show_grid", "element_ids"]
             );
             
-            console.log("Template loaded:", template);
+            console.log("✅ Template loaded successfully:", template);
             
             if (template.length > 0) {
                 this.state.template = template[0];
                 this.state.showGrid = template[0].show_grid;
+                console.log("📐 Template dimensions:", this.state.template.page_width, "x", this.state.template.page_height, "mm");
+                
                 this.setCanvasSize();
+                console.log("✅ Canvas size set");
+                
                 await this.loadElements();
+                console.log("✅ Elements loaded, count:", this.state.elements.length);
+                
                 await this.ensureFabric();
+                console.log("🎨 Fabric ready status:", this.fabricReady);
+                
                 if (this.fabricReady) {
+                    console.log("🎨 Building Fabric scene...");
                     this.buildFabricScene();
                 } else {
+                    console.log("🖌️ Using fallback canvas rendering...");
                     this.renderCanvas(); // fallback
                 }
             } else {
+                console.error("❌ Template not found");
                 this.notification.add("Template not found", { type: "danger" });
             }
         } catch (error) {
-            console.error("Error loading template:", error);
+            console.error("❌ Error loading template:", error);
             this.notification.add(`Error loading template: ${error.message}`, { type: "danger" });
         }
     }
     
     async loadElements() {
         try {
+            console.log("📥 Loading elements for template:", this.templateId);
             const elements = await this.orm.searchRead(
                 "invoice.template.element",
                 [["template_id", "=", this.templateId]],
@@ -215,12 +227,19 @@ export class InvoiceDesignerCanvas extends Component {
                     "show_table_footer", "table_footer_text",
                 ]
             );
+            console.log("✅ Elements loaded:", elements.length, "elements");
+            if (elements.length > 0) {
+                console.log("📋 First element sample:", elements[0]);
+            } else {
+                console.warn("⚠️ No elements found for this template");
+            }
             this.state.elements = elements.sort((a, b) => a.z_index - b.z_index);
             this.addToHistory();
             if (this.fabricReady) {
                 this.buildFabricScene();
             }
         } catch (error) {
+            console.error("❌ Error loading elements:", error);
             this.notification.add("Error loading elements", { type: "danger" });
         }
     }
@@ -242,32 +261,45 @@ export class InvoiceDesignerCanvas extends Component {
     }
     
     renderCanvas() {
+        console.log("🎨 renderCanvas called, fabricCanvas exists:", !!this.fabricCanvas, "fabricReady:", this.fabricReady);
         if (this.fabricCanvas) {
             this.fabricCanvas.requestRenderAll();
+            console.log("✅ Fabric canvas rendered");
             return;
         }
-        if (!this.canvasRef.el) return;
+        if (!this.canvasRef.el) {
+            console.error("❌ Canvas element not found");
+            return;
+        }
+        console.log("🖌️ Using fallback canvas rendering");
         this.setCanvasSize();
         const ctx = this.canvasRef.el.getContext('2d');
+        console.log("📐 Canvas dimensions:", this.canvasRef.el.width, "x", this.canvasRef.el.height);
         ctx.clearRect(0, 0, this.canvasRef.el.width, this.canvasRef.el.height);
         if (this.state.template) {
             ctx.fillStyle = this.state.template.background_color || '#FFFFFF';
             ctx.fillRect(0, 0, this.canvasRef.el.width, this.canvasRef.el.height);
+            console.log("✅ Background drawn:", this.state.template.background_color || '#FFFFFF');
         }
         // Fallback rendering when Fabric is not ready
         if (!this.fabricReady) {
             if (this.state.showGrid) {
                 this.drawGrid(ctx);
+                console.log("✅ Grid drawn");
             }
-            this.state.elements.forEach(element => {
+            console.log("📦 Drawing", this.state.elements.length, "elements");
+            this.state.elements.forEach((element, idx) => {
                 if (element.visible !== false) {
+                    console.log(`  → Element ${idx}:`, element.element_type, `at (${element.x}, ${element.y})`);
                     this.drawElement(ctx, element);
                 }
             });
             if (this.state.selectedElement) {
                 this.drawSelection(ctx, this.state.selectedElement);
+                console.log("✅ Selection drawn");
             }
         }
+        console.log("✅ renderCanvas complete");
     }
     
     drawGrid(ctx) {
@@ -996,20 +1028,30 @@ export class InvoiceDesignerCanvas extends Component {
     // ================ FABRIC CANVAS ================
 
     async ensureFabric() {
-        if (this.fabricReady) return;
+        if (this.fabricReady) {
+            console.log("✅ Fabric already ready");
+            return;
+        }
+        console.log("📥 Attempting to load Fabric.js...");
         const ok = await loadFabricWithFallback();
         if (!ok || !window.fabric) {
-            console.warn("Fabric.js failed to load; falling back to classic canvas.");
+            console.warn("⚠️ Fabric.js failed to load; falling back to classic canvas.");
             this.fabricReady = false;
             return;
         }
+        console.log("✅ Fabric.js loaded successfully, version:", window.fabric.version);
         ensureGoogleFont("Almarai");
+        console.log("✅ Google Font Almarai loaded");
         this.fabricReady = true;
         this.createFabricCanvas();
     }
 
     createFabricCanvas() {
-        if (!this.canvasRef.el) return;
+        if (!this.canvasRef.el) {
+            console.error("❌ Cannot create Fabric canvas: canvas element not found");
+            return;
+        }
+        console.log("🎨 Creating Fabric canvas...");
         // Neutralize CSS transform from template; zoom will be via fabric
         this.canvasRef.el.style.transform = "none";
         this.canvasRef.el.style.transformOrigin = "top left";
@@ -1019,6 +1061,7 @@ export class InvoiceDesignerCanvas extends Component {
             preserveObjectStacking: true,
             stopContextMenu: true,
         });
+        console.log("✅ Fabric canvas created");
 
         this.fabricCanvas.on("selection:created", (e) => this.onFabricSelection(e));
         this.fabricCanvas.on("selection:updated", (e) => this.onFabricSelection(e));
@@ -1029,23 +1072,33 @@ export class InvoiceDesignerCanvas extends Component {
 
         this.updateGridBackground();
         this.setZoom(this.state.zoom);
+        console.log("✅ Fabric canvas configured and ready");
     }
 
     setCanvasSize() {
-        if (!this.canvasRef.el || !this.state.template) return;
+        if (!this.canvasRef.el || !this.state.template) {
+            console.warn("⚠️ setCanvasSize: Missing canvas element or template");
+            return;
+        }
         const w = (this.state.template.page_width || 210) * MM_TO_PX;
         const h = (this.state.template.page_height || 297) * MM_TO_PX;
+        console.log("📐 Setting canvas size:", w, "x", h, "px");
         this.canvasRef.el.width = w;
         this.canvasRef.el.height = h;
         if (this.fabricCanvas) {
             this.fabricCanvas.setWidth(w);
             this.fabricCanvas.setHeight(h);
             this.fabricCanvas.calcOffset();
+            console.log("✅ Fabric canvas size updated");
         }
     }
 
     buildFabricScene() {
-        if (!this.fabricCanvas) return;
+        if (!this.fabricCanvas) {
+            console.error("❌ buildFabricScene: fabricCanvas not available");
+            return;
+        }
+        console.log("🎨 Building Fabric scene with", this.state.elements.length, "elements");
         this._updatingFabric = true;
         this.fabricCanvas.clear();
         this.elementObjects.clear();
@@ -1057,9 +1110,10 @@ export class InvoiceDesignerCanvas extends Component {
                 this.state.template.background_color || "#ffffff",
                 this.fabricCanvas.requestRenderAll.bind(this.fabricCanvas)
             );
+            console.log("✅ Background color set:", this.state.template.background_color || "#ffffff");
         }
 
-        this.state.elements.forEach((element) => {
+        this.state.elements.forEach((element, idx) => {
             const obj = this.createFabricObject(element);
             if (obj) {
                 obj.elementId = element.id;
@@ -1074,11 +1128,15 @@ export class InvoiceDesignerCanvas extends Component {
                 obj.selectable = element.visible !== false;
                 this.fabricCanvas.add(obj);
                 this.elementObjects.set(element.id, obj);
+                console.log(`  ✅ Added element ${idx}:`, element.element_type, element.name);
+            } else {
+                console.warn(`  ⚠️ Failed to create object for element ${idx}:`, element.element_type);
             }
         });
 
         this.fabricCanvas.requestRenderAll();
         this._updatingFabric = false;
+        console.log("✅ Fabric scene built and rendered");
     }
 
     createFabricObject(element) {
