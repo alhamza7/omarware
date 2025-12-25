@@ -22,6 +22,22 @@ async function loadScriptOnce(src) {
     });
 }
 
+async function loadFabricWithFallback() {
+    try {
+        await loadScriptOnce(FABRIC_URL);
+        return true;
+    } catch (err) {
+        console.warn("CDN fabric failed, trying local fallback", err);
+        try {
+            await loadScriptOnce("/invoice_designer/static/lib/fabric.min.js");
+            return true;
+        } catch (err2) {
+            console.error("Fabric fallback failed", err2);
+            return false;
+        }
+    }
+}
+
 function ensureGoogleFont(family, weights = "300;400;700;800") {
     const id = `gf-${family.replace(/\s+/g, "-")}`;
     if (!document.getElementById(id)) {
@@ -153,9 +169,14 @@ export class InvoiceDesignerCanvas extends Component {
             if (template.length > 0) {
                 this.state.template = template[0];
                 this.state.showGrid = template[0].show_grid;
+                this.setCanvasSize();
                 await this.loadElements();
                 await this.ensureFabric();
-                this.buildFabricScene();
+                if (this.fabricReady) {
+                    this.buildFabricScene();
+                } else {
+                    this.renderCanvas(); // fallback
+                }
             } else {
                 this.notification.add("Template not found", { type: "danger" });
             }
@@ -226,8 +247,13 @@ export class InvoiceDesignerCanvas extends Component {
             return;
         }
         if (!this.canvasRef.el) return;
+        this.setCanvasSize();
         const ctx = this.canvasRef.el.getContext('2d');
         ctx.clearRect(0, 0, this.canvasRef.el.width, this.canvasRef.el.height);
+        if (this.state.template) {
+            ctx.fillStyle = this.state.template.background_color || '#FFFFFF';
+            ctx.fillRect(0, 0, this.canvasRef.el.width, this.canvasRef.el.height);
+        }
     }
     
     drawGrid(ctx) {
@@ -542,13 +568,13 @@ export class InvoiceDesignerCanvas extends Component {
     
     zoomIn() {
         this.state.zoom = Math.min(this.state.zoom + 0.1, 2.0);
-        this.setZoom(this.state.zoom);
+        if (this.fabricReady) this.setZoom(this.state.zoom);
         this.renderCanvas();
     }
     
     zoomOut() {
         this.state.zoom = Math.max(this.state.zoom - 0.1, 0.5);
-        this.setZoom(this.state.zoom);
+        if (this.fabricReady) this.setZoom(this.state.zoom);
         this.renderCanvas();
     }
     
@@ -568,7 +594,7 @@ export class InvoiceDesignerCanvas extends Component {
     
     zoomReset() {
         this.state.zoom = 1.0;
-        this.setZoom(this.state.zoom);
+        if (this.fabricReady) this.setZoom(this.state.zoom);
         this.renderCanvas();
     }
     
@@ -952,9 +978,11 @@ export class InvoiceDesignerCanvas extends Component {
 
     async ensureFabric() {
         if (this.fabricReady) return;
-        await loadScriptOnce(FABRIC_URL);
-        if (!window.fabric) {
-            throw new Error("Fabric.js failed to load");
+        const ok = await loadFabricWithFallback();
+        if (!ok || !window.fabric) {
+            console.warn("Fabric.js failed to load; falling back to classic canvas.");
+            this.fabricReady = false;
+            return;
         }
         ensureGoogleFont("Almarai");
         this.fabricReady = true;
@@ -966,6 +994,7 @@ export class InvoiceDesignerCanvas extends Component {
         // Neutralize CSS transform from template; zoom will be via fabric
         this.canvasRef.el.style.transform = "none";
         this.canvasRef.el.style.transformOrigin = "top left";
+        this.setCanvasSize();
         this.fabricCanvas = new window.fabric.Canvas(this.canvasRef.el, {
             selection: true,
             preserveObjectStacking: true,
@@ -981,6 +1010,19 @@ export class InvoiceDesignerCanvas extends Component {
 
         this.updateGridBackground();
         this.setZoom(this.state.zoom);
+    }
+
+    setCanvasSize() {
+        if (!this.canvasRef.el || !this.state.template) return;
+        const w = (this.state.template.page_width || 210) * MM_TO_PX;
+        const h = (this.state.template.page_height || 297) * MM_TO_PX;
+        this.canvasRef.el.width = w;
+        this.canvasRef.el.height = h;
+        if (this.fabricCanvas) {
+            this.fabricCanvas.setWidth(w);
+            this.fabricCanvas.setHeight(h);
+            this.fabricCanvas.calcOffset();
+        }
     }
 
     buildFabricScene() {

@@ -206,7 +206,6 @@
                         class="invoice_designer_canvas"
                         t-att-width="state.template ? state.template.page_width * 3.78 : 794"
                         t-att-height="state.template ? state.template.page_height * 3.78 : 1123"
-                        t-att-style="'transform: scale(' + state.zoom + ');'"
                         t-on-mousedown="onCanvasMouseDown"
                         t-on-mousemove="onCanvasMouseMove"
                         t-on-mouseup="onCanvasMouseUp">
