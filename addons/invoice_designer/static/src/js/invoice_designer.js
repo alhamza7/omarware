@@ -1243,13 +1243,17 @@ export class InvoiceDesignerCanvas extends Component {
             top,
             width,
             height,
-            fill: element.background_color && element.background_color !== "transparent" ? element.background_color : "rgba(240,240,240,0.3)",
-            stroke: element.color || "#333",
-            strokeWidth: element.border_width || 1,
             angle: element.rotation || 0,
             selectable: true,
             hasRotatingPoint: true,
             objectCaching: false,
+            lockScalingFlip: true,
+            transparentCorners: false,
+            cornerColor: "#4A90E2",
+            cornerStyle: "rect",
+            cornerSize: 10,
+            borderColor: "#4A90E2",
+            padding: 2,
         };
 
         if (element.element_type === "text" || element.element_type === "field") {
@@ -1277,10 +1281,15 @@ export class InvoiceDesignerCanvas extends Component {
 
         if (element.element_type === "shape") {
             const shapeFill = element.background_color || "#e0e0e0";
+            const shapeStroke = element.border_color || element.color || "#333";
+            const shapeStrokeWidth = element.border_width || 1;
+            
             if (element.shape_type === "circle" || element.shape_type === "ellipse") {
                 return new window.fabric.Ellipse({
                     ...common,
                     fill: shapeFill,
+                    stroke: shapeStroke,
+                    strokeWidth: shapeStrokeWidth,
                     rx: width / 2,
                     ry: height / 2,
                     originX: "left",
@@ -1291,11 +1300,15 @@ export class InvoiceDesignerCanvas extends Component {
                 return new window.fabric.Triangle({
                     ...common,
                     fill: shapeFill,
+                    stroke: shapeStroke,
+                    strokeWidth: shapeStrokeWidth,
                 });
             }
             return new window.fabric.Rect({
                 ...common,
                 fill: shapeFill,
+                stroke: shapeStroke,
+                strokeWidth: shapeStrokeWidth,
                 rx: element.border_radius || 0,
                 ry: element.border_radius || 0,
             });
@@ -1305,10 +1318,14 @@ export class InvoiceDesignerCanvas extends Component {
             const x2 = this._mmToPx(element.line_x2 || (element.x || 0) + (element.width || 50));
             const y2 = this._mmToPx(element.line_y2 || (element.y || 0));
             return new window.fabric.Line([left, top, x2, y2], {
+                ...common,
                 stroke: element.color || "#333333",
                 strokeWidth: element.border_width || 2,
-                selectable: true,
-                hasControls: false,
+                fill: null,
+                hasControls: true,
+                hasBorders: true,
+                evented: true,
+                hoverCursor: 'move',
             });
         }
 
