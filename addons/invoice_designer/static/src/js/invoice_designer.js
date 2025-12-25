@@ -1118,6 +1118,7 @@ export class InvoiceDesignerCanvas extends Component {
             if (obj) {
                 obj.elementId = element.id;
                 obj.hasControls = true;
+                obj.hasBorders = true;
                 obj.lockScalingFlip = true;
                 obj.transparentCorners = false;
                 obj.cornerColor = "#4A90E2";
@@ -1126,9 +1127,10 @@ export class InvoiceDesignerCanvas extends Component {
                 obj.borderColor = "#4A90E2";
                 obj.padding = 2;
                 obj.selectable = element.visible !== false;
+                obj.evented = element.visible !== false;
                 this.fabricCanvas.add(obj);
                 this.elementObjects.set(element.id, obj);
-                console.log(`  ✅ Added element ${idx}:`, element.element_type, element.name);
+                console.log(`  ✅ Added element ${idx}:`, element.element_type, element.name, 'selectable:', obj.selectable);
             } else {
                 console.warn(`  ⚠️ Failed to create object for element ${idx}:`, element.element_type);
             }
@@ -1219,85 +1221,110 @@ export class InvoiceDesignerCanvas extends Component {
         }
 
         if (element.element_type === "table") {
-            const tableText = new window.fabric.Group([
-                new window.fabric.Rect({
-                    ...common,
-                    fill: "#f7f7f7",
-                    stroke: "#b0b0b0",
-                    strokeWidth: 1,
-                    rx: 2,
-                    ry: 2,
-                }),
-                new window.fabric.Text('جدول المنتجات', {
-                    left: left + 10,
-                    top: top + 10,
-                    fontSize: 12,
-                    fill: '#333',
-                    fontFamily: 'Almarai',
-                })
-            ]);
-            return tableText;
+            const rect = new window.fabric.Rect({
+                left,
+                top,
+                width,
+                height,
+                fill: "#f7f7f7",
+                stroke: "#b0b0b0",
+                strokeWidth: 1,
+                rx: 2,
+                ry: 2,
+            });
+            const text = new window.fabric.Text('جدول المنتجات', {
+                left: 0,
+                top: 0,
+                fontSize: 12,
+                fill: '#333',
+                fontFamily: 'Almarai',
+            });
+            const tableGroup = new window.fabric.Group([rect, text], {
+                left,
+                top,
+                selectable: true,
+                hasControls: true,
+                lockScalingFlip: true,
+            });
+            return tableGroup;
         }
 
         if (element.element_type === "barcode" || element.element_type === "qr") {
             const label = element.element_type === "barcode" ? "باركود" : "QR";
-            return new window.fabric.Group([
-                new window.fabric.Rect({
-                    ...common,
-                    fill: "#ffffff",
-                    stroke: "#333333",
-                    strokeWidth: 1,
-                    rx: 2,
-                    ry: 2,
-                }),
-                new window.fabric.Text(`[${label}]`, {
-                    left: left + width / 2,
-                    top: top + height / 2,
-                    fontSize: 11,
-                    fill: '#666',
-                    fontFamily: 'Almarai',
-                    originX: 'center',
-                    originY: 'center',
-                })
-            ]);
+            const rect = new window.fabric.Rect({
+                left: 0,
+                top: 0,
+                width,
+                height,
+                fill: "#ffffff",
+                stroke: "#333333",
+                strokeWidth: 1,
+                rx: 2,
+                ry: 2,
+            });
+            const text = new window.fabric.Text(`[${label}]`, {
+                left: width / 2,
+                top: height / 2,
+                fontSize: 11,
+                fill: '#666',
+                fontFamily: 'Almarai',
+                originX: 'center',
+                originY: 'center',
+            });
+            return new window.fabric.Group([rect, text], {
+                left,
+                top,
+                selectable: true,
+                hasControls: true,
+            });
         }
 
         if (element.element_type === "image") {
-            const placeholder = new window.fabric.Rect({
-                ...common,
+            const rect = new window.fabric.Rect({
+                left: 0,
+                top: 0,
+                width,
+                height,
                 fill: "#f0f0f0",
                 stroke: "#999",
             });
             
-            // Add loading text
             const loadingText = new window.fabric.Text('[صورة]', {
-                left: left + width / 2,
-                top: top + height / 2,
+                left: width / 2,
+                top: height / 2,
                 fontSize: 11,
                 fill: '#999',
                 fontFamily: 'Almarai',
                 originX: 'center',
                 originY: 'center',
             });
-            const group = new window.fabric.Group([placeholder, loadingText]);
+            const group = new window.fabric.Group([rect, loadingText], {
+                left,
+                top,
+                selectable: true,
+                hasControls: true,
+            });
             
             if (element.image_data || element.image_url) {
                 const src = element.image_data
                     ? `data:image/png;base64,${element.image_data}`
                     : element.image_url;
                 window.fabric.Image.fromURL(src, (img) => {
-                    img.set({
-                        left,
-                        top,
-                        scaleX: width / img.width,
-                        scaleY: height / img.height,
-                        selectable: true,
-                    });
-                    img.elementId = element.id;
-                    this.fabricCanvas.add(img);
-                    this.elementObjects.set(element.id, img);
-                    this.fabricCanvas.remove(group);
-                    this.fabricCanvas.requestRenderAll();
+                    if (img && this.fabricCanvas) {
+                        img.set({
+                            left,
+                            top,
+                            scaleX: width / (img.width || 100),
+                            scaleY: height / (img.height || 100),
+                            selectable: true,
+                            hasControls: true,
+                        });
+                        img.elementId = element.id;
+                        this.fabricCanvas.remove(group);
+                        this.fabricCanvas.add(img);
+                        this.elementObjects.set(element.id, img);
+                        this.fabricCanvas.requestRenderAll();
+                    }
                 }, { crossOrigin: "anonymous" });
             }
             return group;
