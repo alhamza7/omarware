@@ -254,6 +254,20 @@ export class InvoiceDesignerCanvas extends Component {
             ctx.fillStyle = this.state.template.background_color || '#FFFFFF';
             ctx.fillRect(0, 0, this.canvasRef.el.width, this.canvasRef.el.height);
         }
+        // Fallback rendering when Fabric is not ready
+        if (!this.fabricReady) {
+            if (this.state.showGrid) {
+                this.drawGrid(ctx);
+            }
+            this.state.elements.forEach(element => {
+                if (element.visible !== false) {
+                    this.drawElement(ctx, element);
+                }
+            });
+            if (this.state.selectedElement) {
+                this.drawSelection(ctx, this.state.selectedElement);
+            }
+        }
     }
     
     drawGrid(ctx) {
