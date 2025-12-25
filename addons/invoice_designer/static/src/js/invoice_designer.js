@@ -313,9 +313,9 @@ export class InvoiceDesignerCanvas extends Component {
         ctx.textAlign = allowedAlign.includes(element.text_align) ? element.text_align : 'left';
         
         if (element.element_type === 'text') {
-            ctx.fillText(element.content || 'نص', x + 6, y + 6, width - 12);
+            ctx.fillText(element.content || 'نص', x + 6, y + fontSize + 6, width - 12);
         } else if (element.element_type === 'field') {
-            ctx.fillText(element.content || `[${element.field_name || 'حقل'}]`, x + 6, y + 6, width - 12);
+            ctx.fillText(element.content || `[${element.field_name || 'حقل'}]`, x + 6, y + fontSize + 6, width - 12);
         } else if (element.element_type === 'shape') {
             ctx.strokeStyle = element.color || '#000000';
             ctx.lineWidth = 1;
@@ -358,7 +358,7 @@ export class InvoiceDesignerCanvas extends Component {
             ctx.fillStyle = '#4a5568';
             ctx.fillRect(x, y, width, 24);
             ctx.fillStyle = '#ffffff';
-            ctx.fillText('جدول المنتجات', x + 8, y + 6);
+            ctx.fillText('جدول المنتجات', x + 8, y + 18);
         } else if (element.element_type === 'barcode') {
             ctx.fillStyle = '#000000';
             for (let i = 0; i < width; i += 4) {
@@ -408,11 +408,15 @@ export class InvoiceDesignerCanvas extends Component {
         ctx.setLineDash([]);
         
         // Resize handles
-        const handleSize = 8;
+        const handleSize = 10;
         ctx.fillStyle = '#4A90E2';
+        // Top-left
         ctx.fillRect(x - handleSize/2, y - handleSize/2, handleSize, handleSize);
+        // Top-right
         ctx.fillRect(x + width - handleSize/2, y - handleSize/2, handleSize, handleSize);
+        // Bottom-left
         ctx.fillRect(x - handleSize/2, y + height - handleSize/2, handleSize, handleSize);
+        // Bottom-right
         ctx.fillRect(x + width - handleSize/2, y + height - handleSize/2, handleSize, handleSize);
     }
     
