@@ -528,6 +528,17 @@ async function showAlreadyCountedDialog(item, lastCount, sapQuantity = null) {
     const createdAt = lastCount.created_at || "";
     const note = lastCount.note || "";
     const uomText = item.uom ? ` (${item.uom})` : "";
+    
+    // جلب بيانات الوحدات المتعددة إن وجدت
+    const qtyPieces = lastCount.qty_pieces;
+    const qtyDozen = lastCount.qty_dozen;
+    const qtyCarton = lastCount.qty_carton;
+    const hasMultiUnits = (qtyPieces && qtyPieces > 0) || 
+                          (qtyDozen && qtyDozen > 0) || 
+                          (qtyCarton && qtyCarton > 0);
+    
+    const unitType = getUnitType(item.uom);
+    const unitLabel = getUnitLabel(unitType);
 
     // إنشاء دايلوج مخصص بدلاً من confirm
     const dialogOverlay = document.createElement('div');
@@ -556,6 +567,39 @@ async function showAlreadyCountedDialog(item, lastCount, sapQuantity = null) {
       max-height: 90vh;
       overflow-y: auto;
     `;
+
+    // بناء عرض الوحدات المتعددة إن وجدت
+    let multiUnitsHtml = '';
+    if (hasMultiUnits) {
+      multiUnitsHtml = `
+        <div style="margin: 16px 0; padding: 16px; background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%); border: 3px solid #9C27B0; border-radius: 12px;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid #9C27B0;">
+            <span style="font-size: 20px;">📦</span>
+            <strong style="color: #7B1FA2; font-size: 16px;">الوحدات المسجلة:</strong>
+          </div>
+          <div style="display: grid; gap: 8px;">
+            ${qtyPieces && qtyPieces > 0 ? `
+              <div style="display: flex; justify-content: space-between; padding: 8px 12px; background: white; border-radius: 6px; border-right: 4px solid #2196F3;">
+                <span style="color: #1976D2; font-weight: 600;">📦 ${escapeHtml(unitLabel)}:</span>
+                <strong style="font-size: 18px; color: #1976D2;">${escapeHtml(String(qtyPieces))}</strong>
+              </div>
+            ` : ''}
+            ${qtyDozen && qtyDozen > 0 ? `
+              <div style="display: flex; justify-content: space-between; padding: 8px 12px; background: white; border-radius: 6px; border-right: 4px solid #FF9800;">
+                <span style="color: #F57C00; font-weight: 600;">📊 درزن:</span>
+                <strong style="font-size: 18px; color: #F57C00;">${escapeHtml(String(qtyDozen))}</strong>
+              </div>
+            ` : ''}
+            ${qtyCarton && qtyCarton > 0 ? `
+              <div style="display: flex; justify-content: space-between; padding: 8px 12px; background: white; border-radius: 6px; border-right: 4px solid #4CAF50;">
+                <span style="color: #388E3C; font-weight: 600;">📦 كارتون:</span>
+                <strong style="font-size: 18px; color: #388E3C;">${escapeHtml(String(qtyCarton))}</strong>
+              </div>
+            ` : ''}
+          </div>
+        </div>
+      `;
+    }
 
     // بناء محتوى كمية SAP إن وجدت
     let sapHtml = '';
@@ -592,14 +636,14 @@ async function showAlreadyCountedDialog(item, lastCount, sapQuantity = null) {
         <strong style="font-size: 16px;">${escapeHtml(item.item_code)} — ${escapeHtml(item.item_name)}${uomText}</strong>
         ${item.barcode ? `<br><small style="color: #666;">باركود: ${escapeHtml(item.barcode)}</small>` : ""}
       </div>
-      ${sapHtml}
       <div style="margin-bottom: 20px; padding: 12px; background: #f5f5f5; border-radius: 8px; text-align: right;">
         <strong style="display: block; margin-bottom: 8px; color: #333;">آخر جرد:</strong>
-        <div style="color: #555;">الكمية: <strong>${escapeHtml(String(qty))}</strong></div>
+        ${hasMultiUnits ? multiUnitsHtml : `<div style="color: #555;">الكمية: <strong>${escapeHtml(String(qty))}</strong></div>`}
         <div style="color: #555;">المستخدم: ${escapeHtml(username)}</div>
         <div style="color: #555;">الوقت: ${escapeHtml(createdAt)}</div>
         ${note ? `<div style="color: #555;">ملاحظة: ${escapeHtml(note)}</div>` : ""}
       </div>
+      ${sapHtml}
       <div style="margin-bottom: 20px; text-align: right; font-size: 16px;">
         هل تريد تعديل أو إضافة كمية؟
       </div>

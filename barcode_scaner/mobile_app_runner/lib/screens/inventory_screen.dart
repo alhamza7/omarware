@@ -260,6 +260,14 @@ class _InventoryScreenState extends State<InventoryScreen> {
     final createdAt = lastCount['created_at']?.toString() ?? '';
     final note = lastCount['note']?.toString();
     final uomText = uom != null && uom.isNotEmpty ? ' ($uom)' : '';
+    
+    // جلب بيانات الوحدات المتعددة إن وجدت
+    final qtyPieces = lastCount['qty_pieces'];
+    final qtyDozen = lastCount['qty_dozen'];
+    final qtyCarton = lastCount['qty_carton'];
+    final hasMultiUnits = (qtyPieces != null && qtyPieces > 0) || 
+                          (qtyDozen != null && qtyDozen > 0) || 
+                          (qtyCarton != null && qtyCarton > 0);
 
     return await showDialog<String>(
       context: context,
@@ -267,67 +275,110 @@ class _InventoryScreenState extends State<InventoryScreen> {
       builder: (ctx) {
         return AlertDialog(
           title: const Text('تم الجرد مسبقاً'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('$code — $name$uomText', style: Theme.of(ctx).textTheme.titleMedium),
-              if (barcode != null && barcode.isNotEmpty)
-                Text('باركود: $barcode', style: Theme.of(ctx).textTheme.bodySmall),
-              const SizedBox(height: 12),
-              Text('آخر جرد:', style: Theme.of(ctx).textTheme.labelLarge),
-              Text('الكمية: $qty'),
-              Text('المستخدم: $username'),
-              Text('الوقت: $createdAt'),
-              if (note != null && note.isNotEmpty) Text('ملاحظة: $note'),
-              // عرض كمية SAP إن وجدت
-              if (sapQuantity != null) ...[
-                const Divider(height: 24),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.blue.shade50,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.blue.shade200, width: 2),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.cloud_sync, size: 18, color: Colors.blue.shade700),
-                          const SizedBox(width: 6),
-                          Text(
-                            'كمية SAP الحالية:',
-                            style: Theme.of(ctx).textTheme.labelLarge?.copyWith(
-                              color: Colors.blue.shade900,
-                              fontWeight: FontWeight.bold,
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('$code — $name$uomText', style: Theme.of(ctx).textTheme.titleMedium),
+                if (barcode != null && barcode.isNotEmpty)
+                  Text('باركود: $barcode', style: Theme.of(ctx).textTheme.bodySmall),
+                const SizedBox(height: 12),
+                Text('آخر جرد:', style: Theme.of(ctx).textTheme.labelLarge),
+                
+                // عرض الوحدات المتعددة إن وجدت
+                if (hasMultiUnits) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.purple.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.purple.shade200, width: 2),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.inventory, size: 18, color: Colors.purple.shade700),
+                            const SizedBox(width: 6),
+                            Text(
+                              'الوحدات المسجلة:',
+                              style: TextStyle(
+                                color: Colors.purple.shade900,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
-                      const Divider(height: 16),
-                      _buildSAPRow(ctx, 'الكمية الموجودة', sapQuantity['quantity']?.toString() ?? '0', color: Colors.blue),
-                      const SizedBox(height: 6),
-                      _buildSAPRow(ctx, 'الكمية المحجوزة', sapQuantity['committed']?.toString() ?? '0', color: Colors.orange),
-                      const SizedBox(height: 6),
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.green.shade50,
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: Colors.green.shade300, width: 2),
+                          ],
                         ),
-                        child: _buildSAPRow(ctx, '✅ الكمية المتاحة', sapQuantity['available']?.toString() ?? '0', 
-                          color: Colors.green, isHighlight: true),
-                      ),
-                    ],
+                        const Divider(height: 16),
+                        if (qtyPieces != null && qtyPieces > 0)
+                          _buildUnitRow(ctx, '📦 ${_getUnitLabel(_getUnitType(uom))}:', qtyPieces.toString(), Colors.blue),
+                        if (qtyDozen != null && qtyDozen > 0)
+                          _buildUnitRow(ctx, '📊 درزن:', qtyDozen.toString(), Colors.orange),
+                        if (qtyCarton != null && qtyCarton > 0)
+                          _buildUnitRow(ctx, '📦 كارتون:', qtyCarton.toString(), Colors.green),
+                      ],
+                    ),
                   ),
-                ),
+                  const SizedBox(height: 8),
+                ] else ...[
+                  Text('الكمية: $qty'),
+                ],
+                
+                Text('المستخدم: $username'),
+                Text('الوقت: $createdAt'),
+                if (note != null && note.isNotEmpty) Text('ملاحظة: $note'),
+                // عرض كمية SAP إن وجدت
+                if (sapQuantity != null) ...[
+                  const Divider(height: 24),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.blue.shade200, width: 2),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.cloud_sync, size: 18, color: Colors.blue.shade700),
+                            const SizedBox(width: 6),
+                            Text(
+                              'كمية SAP الحالية:',
+                              style: Theme.of(ctx).textTheme.labelLarge?.copyWith(
+                                color: Colors.blue.shade900,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const Divider(height: 16),
+                        _buildSAPRow(ctx, 'الكمية الموجودة', sapQuantity['quantity']?.toString() ?? '0', color: Colors.blue),
+                        const SizedBox(height: 6),
+                        _buildSAPRow(ctx, 'الكمية المحجوزة', sapQuantity['committed']?.toString() ?? '0', color: Colors.orange),
+                        const SizedBox(height: 6),
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.green.shade50,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: Colors.green.shade300, width: 2),
+                          ),
+                          child: _buildSAPRow(ctx, '✅ الكمية المتاحة', sapQuantity['available']?.toString() ?? '0', 
+                            color: Colors.green, isHighlight: true),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                const Text('هل تريد تعديل أو إضافة كمية؟'),
               ],
-              const SizedBox(height: 12),
-              const Text('هل تريد تعديل أو إضافة كمية؟'),
-            ],
+            ),
           ),
           actions: [
             TextButton(
@@ -346,6 +397,31 @@ class _InventoryScreenState extends State<InventoryScreen> {
           ],
         );
       },
+    );
+  }
+
+  Widget _buildUnitRow(BuildContext ctx, String label, String value, MaterialColor color) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
+              color: color.shade700,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          Text(
+            value,
+            style: Theme.of(ctx).textTheme.bodyLarge?.copyWith(
+              fontWeight: FontWeight.bold,
+              color: color.shade700,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
