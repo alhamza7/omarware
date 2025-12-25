@@ -167,14 +167,19 @@
     overflow: auto;
     padding: 40px;
     background: linear-gradient(135deg, #e9ecef 0%, #dee2e6 100%);
+    min-height: 600px;
+    position: relative;
 }
 
 .invoice_designer_canvas {
-    background: white;
+    background: white !important;
     box-shadow: 0 8px 24px rgba(0,0,0,0.2);
     cursor: crosshair;
     transform-origin: top left;
     border-radius: 4px;
+    display: block !important;
+    position: relative !important;
+    z-index: 1 !important;
 }
 
 /* Properties Panel - Right Sidebar */

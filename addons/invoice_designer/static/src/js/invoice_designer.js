@@ -1145,14 +1145,22 @@ export class InvoiceDesignerCanvas extends Component {
         const width = this._mmToPx(element.width || 50);
         const height = this._mmToPx(element.height || 20);
 
+        console.log(`Creating ${element.element_type}:`, {
+            name: element.name,
+            position: `(${left}, ${top})`,
+            size: `${width} x ${height}`,
+            color: element.color,
+            bgColor: element.background_color
+        });
+
         const common = {
             left,
             top,
             width,
             height,
-            fill: element.background_color && element.background_color !== "transparent" ? element.background_color : "rgba(255,255,255,0)",
-            stroke: element.color || "#000",
-            strokeWidth: element.border_width || 0.5,
+            fill: element.background_color && element.background_color !== "transparent" ? element.background_color : "rgba(240,240,240,0.3)",
+            stroke: element.color || "#333",
+            strokeWidth: element.border_width || 1,
             angle: element.rotation || 0,
             selectable: true,
             hasRotatingPoint: true,
@@ -1166,15 +1174,19 @@ export class InvoiceDesignerCanvas extends Component {
                 fontFamily: element.font_family_name || "Almarai",
                 fontWeight: element.font_weight || "400",
                 textAlign: element.text_align || "left",
-                fill: element.color || "#000",
-                backgroundColor: element.background_color || "transparent",
+                fill: element.color || "#000000",
+                stroke: "",
+                strokeWidth: 0,
+                backgroundColor: element.background_color && element.background_color !== "transparent" ? element.background_color : "transparent",
             });
         }
 
         if (element.element_type === "shape") {
+            const shapeFill = element.background_color || "#e0e0e0";
             if (element.shape_type === "circle" || element.shape_type === "ellipse") {
                 return new window.fabric.Ellipse({
                     ...common,
+                    fill: shapeFill,
                     rx: width / 2,
                     ry: height / 2,
                     originX: "left",
@@ -1184,10 +1196,12 @@ export class InvoiceDesignerCanvas extends Component {
             if (element.shape_type === "triangle") {
                 return new window.fabric.Triangle({
                     ...common,
+                    fill: shapeFill,
                 });
             }
             return new window.fabric.Rect({
                 ...common,
+                fill: shapeFill,
                 rx: element.border_radius || 0,
                 ry: element.border_radius || 0,
             });
@@ -1197,31 +1211,55 @@ export class InvoiceDesignerCanvas extends Component {
             const x2 = this._mmToPx(element.line_x2 || (element.x || 0) + (element.width || 50));
             const y2 = this._mmToPx(element.line_y2 || (element.y || 0));
             return new window.fabric.Line([left, top, x2, y2], {
-                stroke: element.color || "#000",
+                stroke: element.color || "#333333",
                 strokeWidth: element.border_width || 2,
                 selectable: true,
+                hasControls: false,
             });
         }
 
         if (element.element_type === "table") {
-            return new window.fabric.Rect({
-                ...common,
-                fill: "#f7f7f7",
-                stroke: "#b0b0b0",
-                rx: 2,
-                ry: 2,
-                hasBorders: true,
-            });
+            const tableText = new window.fabric.Group([
+                new window.fabric.Rect({
+                    ...common,
+                    fill: "#f7f7f7",
+                    stroke: "#b0b0b0",
+                    strokeWidth: 1,
+                    rx: 2,
+                    ry: 2,
+                }),
+                new window.fabric.Text('جدول المنتجات', {
+                    left: left + 10,
+                    top: top + 10,
+                    fontSize: 12,
+                    fill: '#333',
+                    fontFamily: 'Almarai',
+                })
+            ]);
+            return tableText;
         }
 
         if (element.element_type === "barcode" || element.element_type === "qr") {
-            return new window.fabric.Rect({
-                ...common,
-                fill: "#ffffff",
-                stroke: "#000000",
-                rx: 2,
-                ry: 2,
-            });
+            const label = element.element_type === "barcode" ? "باركود" : "QR";
+            return new window.fabric.Group([
+                new window.fabric.Rect({
+                    ...common,
+                    fill: "#ffffff",
+                    stroke: "#333333",
+                    strokeWidth: 1,
+                    rx: 2,
+                    ry: 2,
+                }),
+                new window.fabric.Text(`[${label}]`, {
+                    left: left + width / 2,
+                    top: top + height / 2,
+                    fontSize: 11,
+                    fill: '#666',
+                    fontFamily: 'Almarai',
+                    originX: 'center',
+                    originY: 'center',
+                })
+            ]);
         }
 
         if (element.element_type === "image") {
@@ -1230,6 +1268,19 @@ export class InvoiceDesignerCanvas extends Component {
                 fill: "#f0f0f0",
                 stroke: "#999",
             });
+            
+            // Add loading text
+            const loadingText = new window.fabric.Text('[صورة]', {
+                left: left + width / 2,
+                top: top + height / 2,
+                fontSize: 11,
+                fill: '#999',
+                fontFamily: 'Almarai',
+                originX: 'center',
+                originY: 'center',
+            });
+            const group = new window.fabric.Group([placeholder, loadingText]);
+            
             if (element.image_data || element.image_url) {
                 const src = element.image_data
                     ? `data:image/png;base64,${element.image_data}`
@@ -1245,11 +1296,11 @@ export class InvoiceDesignerCanvas extends Component {
                     img.elementId = element.id;
                     this.fabricCanvas.add(img);
                     this.elementObjects.set(element.id, img);
-                    this.fabricCanvas.remove(placeholder);
+                    this.fabricCanvas.remove(group);
                     this.fabricCanvas.requestRenderAll();
                 }, { crossOrigin: "anonymous" });
             }
-            return placeholder;
+            return group;
         }
 
         if (element.element_type === "gradient_box") {
