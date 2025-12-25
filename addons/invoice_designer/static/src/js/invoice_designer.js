@@ -1063,9 +1063,14 @@ export class InvoiceDesignerCanvas extends Component {
         // Remove old event listeners FIRST to avoid conflicts
         this.removeEventListeners();
         
-        // Neutralize CSS transform from template; zoom will be via fabric
+        // Ensure canvas is visible and interactive
         this.canvasRef.el.style.transform = "none";
         this.canvasRef.el.style.transformOrigin = "top left";
+        this.canvasRef.el.style.display = "block";
+        this.canvasRef.el.style.position = "relative";
+        this.canvasRef.el.style.zIndex = "1";
+        this.canvasRef.el.style.pointerEvents = "auto";
+        
         this.setCanvasSize();
         this.fabricCanvas = new window.fabric.Canvas(this.canvasRef.el, {
             selection: true,
@@ -1073,9 +1078,23 @@ export class InvoiceDesignerCanvas extends Component {
             stopContextMenu: true,
             interactive: true,
             enableRetinaScaling: true,
+            allowTouchScrolling: false,
+            fireRightClick: false,
+            uniformScaling: false,
+            centeredScaling: false,
+            centeredRotation: true,
         });
         console.log("✅ Fabric canvas created");
+        
+        // Add alignment guidelines (snapping lines)
+        this.fabricCanvas.on('object:moving', (e) => {
+            this._showAlignmentGuides(e.target);
+        });
+        this.fabricCanvas.on('object:modified', () => {
+            this._hideAlignmentGuides();
+        });
 
+        // Fabric event handlers
         this.fabricCanvas.on("selection:created", (e) => {
             console.log("🎯 Selection created:", e.selected);
             this.onFabricSelection(e);
@@ -1088,16 +1107,32 @@ export class InvoiceDesignerCanvas extends Component {
             console.log("🎯 Selection cleared");
             this.onFabricSelection(null);
         });
-        this.fabricCanvas.on("object:moving", (e) => this.onFabricObjectChange(e));
-        this.fabricCanvas.on("object:scaling", (e) => this.onFabricObjectChange(e, true));
-        this.fabricCanvas.on("object:modified", (e) => this.onFabricObjectModified(e));
+        this.fabricCanvas.on("object:moving", (e) => {
+            console.log("🚚 Object moving");
+            this.onFabricObjectChange(e);
+        });
+        this.fabricCanvas.on("object:scaling", (e) => {
+            console.log("📏 Object scaling");
+            this.onFabricObjectChange(e, true);
+        });
+        this.fabricCanvas.on("object:rotating", (e) => {
+            console.log("🔄 Object rotating");
+            this.onFabricObjectChange(e);
+        });
+        this.fabricCanvas.on("object:modified", (e) => {
+            console.log("✏️ Object modified");
+            this.onFabricObjectModified(e);
+        });
         this.fabricCanvas.on("mouse:down", (e) => {
-            console.log("🖱️ Mouse down on canvas, target:", e.target);
+            console.log("🖱️ Mouse down, target:", e.target ? e.target.type : "canvas");
         });
 
         this.updateGridBackground();
         this.setZoom(this.state.zoom);
-        console.log("✅ Fabric canvas configured and ready");
+        
+        // Force render
+        this.fabricCanvas.requestRenderAll();
+        console.log("✅ Fabric canvas configured and ready, objects:", this.fabricCanvas.getObjects().length);
     }
 
     setCanvasSize() {
@@ -1195,7 +1230,7 @@ export class InvoiceDesignerCanvas extends Component {
         };
 
         if (element.element_type === "text" || element.element_type === "field") {
-            return new window.fabric.Textbox(element.content || (element.element_type === "field" ? `[${element.field_name || "حقل"}]` : "نص"), {
+            const textObj = new window.fabric.Textbox(element.content || (element.element_type === "field" ? `[${element.field_name || "حقل"}]` : "نص"), {
                 ...common,
                 fontSize: element.font_size || 14,
                 fontFamily: element.font_family_name || "Almarai",
@@ -1205,7 +1240,16 @@ export class InvoiceDesignerCanvas extends Component {
                 stroke: "",
                 strokeWidth: 0,
                 backgroundColor: element.background_color && element.background_color !== "transparent" ? element.background_color : "transparent",
+                editable: false,  // Prevent inline editing (confusing in designer)
+                lockUniScaling: false,  // Allow free scaling
             });
+            // Add double-click to edit text
+            textObj.on('mousedblclick', () => {
+                textObj.set({ editable: true });
+                textObj.enterEditing();
+                textObj.selectAll();
+            });
+            return textObj;
         }
 
         if (element.element_type === "shape") {
@@ -1540,6 +1584,96 @@ export class InvoiceDesignerCanvas extends Component {
 
     _pxToMm(px) {
         return (px || 0) / MM_TO_PX;
+    }
+    
+    // ================ ALIGNMENT GUIDES ================
+    
+    _showAlignmentGuides(activeObject) {
+        if (!this.fabricCanvas || !activeObject) return;
+        
+        const canvasObjects = this.fabricCanvas.getObjects().filter(obj => obj !== activeObject && obj.id !== 'vertical-guide' && obj.id !== 'horizontal-guide');
+        const activeCenter = activeObject.getCenterPoint();
+        const activeBounds = activeObject.getBoundingRect();
+        
+        const snapDistance = 5; // pixels
+        let verticalLine = null;
+        let horizontalLine = null;
+        
+        // Check alignment with other objects
+        for (const obj of canvasObjects) {
+            const objCenter = obj.getCenterPoint();
+            const objBounds = obj.getBoundingRect();
+            
+            // Vertical center alignment
+            if (Math.abs(activeCenter.x - objCenter.x) < snapDistance) {
+                activeObject.set({ left: objCenter.x - activeObject.width / 2 });
+                verticalLine = objCenter.x;
+            }
+            // Left edge alignment
+            else if (Math.abs(activeBounds.left - objBounds.left) < snapDistance) {
+                activeObject.set({ left: objBounds.left });
+                verticalLine = objBounds.left;
+            }
+            // Right edge alignment
+            else if (Math.abs(activeBounds.left + activeBounds.width - (objBounds.left + objBounds.width)) < snapDistance) {
+                activeObject.set({ left: objBounds.left + objBounds.width - activeBounds.width });
+                verticalLine = objBounds.left + objBounds.width;
+            }
+            
+            // Horizontal center alignment
+            if (Math.abs(activeCenter.y - objCenter.y) < snapDistance) {
+                activeObject.set({ top: objCenter.y - activeObject.height / 2 });
+                horizontalLine = objCenter.y;
+            }
+            // Top edge alignment
+            else if (Math.abs(activeBounds.top - objBounds.top) < snapDistance) {
+                activeObject.set({ top: objBounds.top });
+                horizontalLine = objBounds.top;
+            }
+            // Bottom edge alignment
+            else if (Math.abs(activeBounds.top + activeBounds.height - (objBounds.top + objBounds.height)) < snapDistance) {
+                activeObject.set({ top: objBounds.top + objBounds.height - activeBounds.height });
+                horizontalLine = objBounds.top + objBounds.height;
+            }
+        }
+        
+        // Draw guide lines
+        this._hideAlignmentGuides();
+        
+        if (verticalLine !== null) {
+            const line = new window.fabric.Line([verticalLine, 0, verticalLine, this.fabricCanvas.height], {
+                stroke: '#4A90E2',
+                strokeWidth: 1,
+                strokeDashArray: [5, 5],
+                selectable: false,
+                evented: false,
+                id: 'vertical-guide'
+            });
+            this.fabricCanvas.add(line);
+            this.fabricCanvas.renderAll();
+        }
+        
+        if (horizontalLine !== null) {
+            const line = new window.fabric.Line([0, horizontalLine, this.fabricCanvas.width, horizontalLine], {
+                stroke: '#4A90E2',
+                strokeWidth: 1,
+                strokeDashArray: [5, 5],
+                selectable: false,
+                evented: false,
+                id: 'horizontal-guide'
+            });
+            this.fabricCanvas.add(line);
+            this.fabricCanvas.renderAll();
+        }
+    }
+    
+    _hideAlignmentGuides() {
+        if (!this.fabricCanvas) return;
+        const objects = this.fabricCanvas.getObjects().filter(obj => 
+            obj.id === 'vertical-guide' || obj.id === 'horizontal-guide'
+        );
+        objects.forEach(obj => this.fabricCanvas.remove(obj));
+        this.fabricCanvas.renderAll();
     }
 
     _getCanvasCoordinates(event) {
