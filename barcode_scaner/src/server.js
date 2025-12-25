@@ -413,20 +413,13 @@ app.post("/api/counts", requireAuthApi, requireWarehouseApi, (req, res) => {
   const qty = Number(req.body.qty); // الكمية الإجمالية (للتوافق مع الإصدارات القديمة)
   const note = req.body.note == null ? null : String(req.body.note);
   
-  // بيانات الوحدات المتعددة
+  // بيانات الوحدات المتعددة (بدون حساب تلقائي - يتم تسجيلها كما هي)
   const qty_pieces = req.body.qty_pieces != null ? Number(req.body.qty_pieces) : 0;
   const qty_dozen = req.body.qty_dozen != null ? Number(req.body.qty_dozen) : 0;
   const qty_carton = req.body.qty_carton != null ? Number(req.body.qty_carton) : 0;
   
-  // حساب الإجمالي بناءً على وحدة القياس
-  let qty_total = qty; // القيمة الافتراضية
-  
-  // إذا كانت هناك وحدات متعددة، احسب الإجمالي
-  if (qty_pieces > 0 || qty_dozen > 0 || qty_carton > 0) {
-    // 1 درزن = 12 قطعة/باكيت/سيت
-    // 1 كارتون = 12 درزن = 144 قطعة
-    qty_total = qty_pieces + (qty_dozen * 12) + (qty_carton * 144);
-  }
+  // نحفظ الكمية كما هي بدون جمع تلقائي
+  let qty_total = qty; // القيمة التي يرسلها التطبيق
   
   // بيانات SAP (إن وجدت)
   const sap_qty = req.body.sap_qty != null ? Number(req.body.sap_qty) : null;

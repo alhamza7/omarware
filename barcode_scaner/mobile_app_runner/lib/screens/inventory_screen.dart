@@ -392,38 +392,93 @@ class _InventoryScreenState extends State<InventoryScreen> {
       }
     }
 
-    final qty = await _qtyDialog(
-      code: code, 
-      name: name, 
-      barcode: barcode,
-      uom: uom,
-      addMode: lastQty != null,
-      lastQty: lastQty,
-      sapQuantity: sapQuantity,
-    );
-    if (qty == null) return;
-
-    // إذا كان في وضع الإضافة، أضف الكمية للكمية السابقة
-    final finalQty = lastQty != null ? qty + lastQty : qty;
-
-    try {
-      await widget.api.saveCount(
-        itemId: itemId,
-        qty: finalQty,
-        sapQty: sapQuantity?['quantity'],
-        sapCommitted: sapQuantity?['committed'],
-        sapAvailable: sapQuantity?['available'],
+    // تحديد نوع الوحدة
+    final unitType = _getUnitType(uom);
+    
+    // اختيار Dialog المناسب
+    double? finalQty;
+    
+    if (unitType != 'default') {
+      // استخدام Dialog الوحدات المتعددة
+      final result = await _multiUnitDialog(
+        code: code,
+        name: name,
+        unitType: unitType,
+        barcode: barcode,
+        sapQuantity: sapQuantity,
       );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('تم الحفظ بنجاح')),
-        );
+      
+      if (result == null) return;
+      
+      finalQty = result['total']!;
+      
+      // إذا كان في وضع الإضافة، أضف الكمية للكمية السابقة
+      if (lastQty != null) {
+        finalQty = finalQty + lastQty;
       }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('خطأ في الحفظ: ${e.toString()}')),
+      
+      // حفظ الجرد مع تفاصيل الوحدات
+      try {
+        await widget.api.saveCount(
+          itemId: itemId,
+          qty: finalQty,
+          note: null,
+          sapQty: sapQuantity?['quantity']?.toDouble(),
+          sapCommitted: sapQuantity?['committed']?.toDouble(),
+          sapAvailable: sapQuantity?['available']?.toDouble(),
+          qtyPieces: result['pieces']!,
+          qtyDozen: result['dozen']!,
+          qtyCarton: result['carton']!,
         );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('تم الحفظ بنجاح')),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('خطأ في الحفظ: ${e.toString()}')),
+          );
+        }
+      }
+      
+    } else {
+      // استخدام Dialog العادي
+      final qty = await _qtyDialog(
+        code: code, 
+        name: name, 
+        barcode: barcode,
+        uom: uom,
+        addMode: lastQty != null,
+        lastQty: lastQty,
+        sapQuantity: sapQuantity,
+      );
+      
+      if (qty == null) return;
+
+      // إذا كان في وضع الإضافة، أضف الكمية للكمية السابقة
+      finalQty = lastQty != null ? qty + lastQty : qty;
+
+      try {
+        await widget.api.saveCount(
+          itemId: itemId,
+          qty: finalQty,
+          sapQty: sapQuantity?['quantity'],
+          sapCommitted: sapQuantity?['committed'],
+          sapAvailable: sapQuantity?['available'],
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('تم الحفظ بنجاح')),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('خطأ في الحفظ: ${e.toString()}')),
+          );
+        }
       }
     }
   }
@@ -701,18 +756,6 @@ class _InventoryScreenState extends State<InventoryScreen> {
     final piecesController = TextEditingController();
     final dozenController = TextEditingController();
     final cartonController = TextEditingController();
-    final totalNotifier = ValueNotifier<double>(0);
-
-    void calculateTotal() {
-      final pieces = double.tryParse(piecesController.text) ?? 0;
-      final dozen = double.tryParse(dozenController.text) ?? 0;
-      final carton = double.tryParse(cartonController.text) ?? 0;
-      totalNotifier.value = pieces + (dozen * 12) + (carton * 144);
-    }
-
-    piecesController.addListener(calculateTotal);
-    dozenController.addListener(calculateTotal);
-    cartonController.addListener(calculateTotal);
 
     final result = await showDialog<Map<String, double>>(
       context: context,
@@ -794,10 +837,10 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 TextField(
                   controller: dozenController,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: InputDecoration(
-                    labelText: 'درزن (1 درزن = 12 ${_getUnitLabel(unitType)})',
-                    prefixIcon: const Icon(Icons.grid_view),
-                    border: const OutlineInputBorder(),
+                  decoration: const InputDecoration(
+                    labelText: 'درزن',
+                    prefixIcon: Icon(Icons.grid_view),
+                    border: OutlineInputBorder(),
                   ),
                 ),
                 
@@ -807,42 +850,11 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 TextField(
                   controller: cartonController,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: InputDecoration(
-                    labelText: 'كارتون (1 كارتون = 144 ${_getUnitLabel(unitType)})',
-                    prefixIcon: const Icon(Icons.all_inbox),
-                    border: const OutlineInputBorder(),
+                  decoration: const InputDecoration(
+                    labelText: 'كارتون',
+                    prefixIcon: Icon(Icons.all_inbox),
+                    border: OutlineInputBorder(),
                   ),
-                ),
-                
-                const SizedBox(height: 16),
-                
-                // عرض الإجمالي
-                ValueListenableBuilder<double>(
-                  valueListenable: totalNotifier,
-                  builder: (context, total, child) {
-                    return Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.green.shade50,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.green.shade300, width: 3),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.calculate, color: Colors.green),
-                          const SizedBox(width: 8),
-                          Text(
-                            'الإجمالي: ${total.toStringAsFixed(0)} ${_getUnitLabel(unitType)}',
-                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                              color: Colors.green.shade900,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
                 ),
               ],
             ),
@@ -857,11 +869,10 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 final pieces = double.tryParse(piecesController.text) ?? 0;
                 final dozen = double.tryParse(dozenController.text) ?? 0;
                 final carton = double.tryParse(cartonController.text) ?? 0;
-                final total = pieces + (dozen * 12) + (carton * 144);
                 
-                if (total <= 0) {
+                if (pieces <= 0 && dozen <= 0 && carton <= 0) {
                   ScaffoldMessenger.of(ctx).showSnackBar(
-                    const SnackBar(content: Text('يجب إدخال كمية أكبر من صفر')),
+                    const SnackBar(content: Text('يجب إدخال كمية واحدة على الأقل')),
                   );
                   return;
                 }
@@ -870,7 +881,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   'pieces': pieces,
                   'dozen': dozen,
                   'carton': carton,
-                  'total': total,
+                  'total': pieces, // نحفظ القطع كإجمالي
                 });
               },
               child: const Text('حفظ'),
@@ -883,7 +894,6 @@ class _InventoryScreenState extends State<InventoryScreen> {
     piecesController.dispose();
     dozenController.dispose();
     cartonController.dispose();
-    totalNotifier.dispose();
 
     return result;
   }
