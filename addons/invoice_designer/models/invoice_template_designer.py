@@ -485,6 +485,11 @@ class InvoiceTemplateDesigner(models.Model):
             background-color: {self.background_color};
             position: relative;
             overflow: visible;
+            page-break-after: always;
+        }}
+        
+        .page:last-child {{
+            page-break-after: auto;
         }}
         
         .element {{
@@ -532,14 +537,69 @@ class InvoiceTemplateDesigner(models.Model):
         return html
 
     def _render_elements_for_pdf(self, data_dict):
-        """Render all elements for PDF"""
+        """Render all elements for PDF with automatic pagination for long tables"""
         self.ensure_one()
-        html = ''
         
-        for element in self.element_ids.sorted(key=lambda e: e.z_index):
-            html += element._render_for_pdf(data_dict)
+        # Check if we have a table element and if pagination is needed
+        table_element = None
+        max_rows_per_page = 20  # Default fallback
         
-        return html
+        for element in self.element_ids:
+            if element.element_type == 'table':
+                table_element = element
+                # Use element's configured max rows if set
+                if hasattr(element, 'table_max_rows_per_page') and element.table_max_rows_per_page > 0:
+                    max_rows_per_page = element.table_max_rows_per_page
+                break
+        
+        # If no table or pagination disabled (0) or few lines, render normally
+        order_lines = data_dict.get('order_line', [])
+        if not table_element or max_rows_per_page == 0 or len(order_lines) <= max_rows_per_page:
+            html = ''
+            for element in self.element_ids.sorted(key=lambda e: e.z_index):
+                html += element._render_for_pdf(data_dict)
+            return html
+        
+        # Multi-page rendering for long tables
+        return self._render_multipage_pdf(data_dict, table_element, max_rows_per_page)
+    
+    def _render_multipage_pdf(self, data_dict, table_element, max_rows_per_page):
+        """Render PDF with multiple pages for long tables"""
+        self.ensure_one()
+        
+        order_lines = data_dict.get('order_line', [])
+        total_pages = (len(order_lines) + max_rows_per_page - 1) // max_rows_per_page
+        
+        all_pages_html = ''
+        
+        for page_num in range(total_pages):
+            start_idx = page_num * max_rows_per_page
+            end_idx = min(start_idx + max_rows_per_page, len(order_lines))
+            
+            # Create data dict for this page with only current slice of lines
+            page_data = dict(data_dict)
+            page_data['order_line'] = order_lines[start_idx:end_idx]
+            page_data['_page_num'] = page_num + 1
+            page_data['_total_pages'] = total_pages
+            
+            # Start new page
+            if page_num > 0:
+                all_pages_html += '<div style="page-break-before: always;"></div>'
+            
+            all_pages_html += '<div class="page">'
+            
+            # Render all elements for this page
+            for element in self.element_ids.sorted(key=lambda e: e.z_index):
+                if element.element_type == 'table':
+                    # Render table with current page's lines only
+                    all_pages_html += element._render_for_pdf(page_data)
+                else:
+                    # Render other elements (static content) on every page
+                    all_pages_html += element._render_for_pdf(data_dict)
+            
+            all_pages_html += '</div>'
+        
+        return all_pages_html
 
     # ==================== Public Methods ====================
     def generate_invoice_pdf(self, order_id, model_name='sale.order'):

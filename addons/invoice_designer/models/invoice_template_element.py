@@ -530,6 +530,9 @@ class InvoiceTemplateElement(models.Model):
     # Table Footer
     show_table_footer = fields.Boolean('Show Table Footer', default=False)
     table_footer_text = fields.Char('Footer Text', default='')
+    
+    # Table pagination
+    table_max_rows_per_page = fields.Integer('Max Rows Per Page', default=20, help='Maximum number of rows per page before creating a new page. Set 0 for no pagination.')
 
     # ==================== CONDITIONAL VISIBILITY ====================
     visible_condition = fields.Char('Visible If (Python Expression)')  # e.g., "amount_total > 1000"

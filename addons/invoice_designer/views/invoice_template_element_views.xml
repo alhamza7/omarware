@@ -243,6 +243,11 @@
                                     <field name="show_table_footer"/>
                                     <field name="table_footer_text" invisible="not show_table_footer"/>
                                 </group>
+                                
+                                <group string="Pagination">
+                                    <field name="table_max_rows_per_page"/>
+                                    <label for="table_max_rows_per_page" string="(0 = no limit)"/>
+                                </group>
                             </page>
                             
                             <!-- Spacing -->

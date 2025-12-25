@@ -224,7 +224,7 @@ export class InvoiceDesignerCanvas extends Component {
                     "table_header_bg", "table_header_color", "table_header_font_size", "table_header_font_weight",
                     "table_row_bg", "table_row_alternate_bg", "table_row_color", "table_row_font_size",
                     "table_border_color", "table_border_width", "table_cell_padding",
-                    "show_table_footer", "table_footer_text",
+                    "show_table_footer", "table_footer_text", "table_max_rows_per_page",
                 ]
             );
             console.log("✅ Elements loaded:", elements.length, "elements");
@@ -245,8 +245,14 @@ export class InvoiceDesignerCanvas extends Component {
     }
     
     setupEventListeners() {
+        // Don't setup if Fabric is ready - Fabric handles its own events
+        if (this.fabricReady && this.fabricCanvas) {
+            console.log("⏩ Skipping native event listeners (Fabric handles events)");
+            return;
+        }
         if (!this.canvasRef.el) return;
         
+        console.log("📌 Setting up native canvas event listeners");
         this.canvasRef.el.addEventListener('mousedown', this._boundMouseDown);
         this.canvasRef.el.addEventListener('mousemove', this._boundMouseMove);
         this.canvasRef.el.addEventListener('mouseup', this._boundMouseUp);
@@ -255,6 +261,7 @@ export class InvoiceDesignerCanvas extends Component {
     removeEventListeners() {
         if (!this.canvasRef.el) return;
         
+        console.log("🗑️ Removing native canvas event listeners");
         this.canvasRef.el.removeEventListener('mousedown', this._boundMouseDown);
         this.canvasRef.el.removeEventListener('mousemove', this._boundMouseMove);
         this.canvasRef.el.removeEventListener('mouseup', this._boundMouseUp);
@@ -1052,6 +1059,10 @@ export class InvoiceDesignerCanvas extends Component {
             return;
         }
         console.log("🎨 Creating Fabric canvas...");
+        
+        // Remove old event listeners FIRST to avoid conflicts
+        this.removeEventListeners();
+        
         // Neutralize CSS transform from template; zoom will be via fabric
         this.canvasRef.el.style.transform = "none";
         this.canvasRef.el.style.transformOrigin = "top left";
@@ -1060,15 +1071,29 @@ export class InvoiceDesignerCanvas extends Component {
             selection: true,
             preserveObjectStacking: true,
             stopContextMenu: true,
+            interactive: true,
+            enableRetinaScaling: true,
         });
         console.log("✅ Fabric canvas created");
 
-        this.fabricCanvas.on("selection:created", (e) => this.onFabricSelection(e));
-        this.fabricCanvas.on("selection:updated", (e) => this.onFabricSelection(e));
-        this.fabricCanvas.on("selection:cleared", () => this.onFabricSelection(null));
+        this.fabricCanvas.on("selection:created", (e) => {
+            console.log("🎯 Selection created:", e.selected);
+            this.onFabricSelection(e);
+        });
+        this.fabricCanvas.on("selection:updated", (e) => {
+            console.log("🎯 Selection updated:", e.selected);
+            this.onFabricSelection(e);
+        });
+        this.fabricCanvas.on("selection:cleared", () => {
+            console.log("🎯 Selection cleared");
+            this.onFabricSelection(null);
+        });
         this.fabricCanvas.on("object:moving", (e) => this.onFabricObjectChange(e));
         this.fabricCanvas.on("object:scaling", (e) => this.onFabricObjectChange(e, true));
         this.fabricCanvas.on("object:modified", (e) => this.onFabricObjectModified(e));
+        this.fabricCanvas.on("mouse:down", (e) => {
+            console.log("🖱️ Mouse down on canvas, target:", e.target);
+        });
 
         this.updateGridBackground();
         this.setZoom(this.state.zoom);

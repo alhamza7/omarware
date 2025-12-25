@@ -477,6 +477,18 @@
                                 <input t-if="state.selectedElement.show_table_footer" type="text" class="form-control mt-2" placeholder="نص التذييل"
                                        t-model="state.selectedElement.table_footer_text" t-on-change="onPropertyChange"/>
                             </div>
+                            
+                            <div class="property_subsection">
+                                <h6 class="property_section_title small">التقسيم التلقائي (Pagination)</h6>
+                                <div class="form-group">
+                                    <label>الحد الأقصى للأسطر في الصفحة</label>
+                                    <input type="number" class="form-control" min="0" max="100"
+                                           t-model="state.selectedElement.table_max_rows_per_page"
+                                           t-on-change="onPropertyChange"
+                                           placeholder="20"/>
+                                    <small class="text-muted">اترك 0 لإلغاء التقسيم (جدول واحد فقط)</small>
+                                </div>
+                            </div>
                         </div>
 
                         <!-- Content (for text/field) -->
