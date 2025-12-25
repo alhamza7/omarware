@@ -1124,7 +1124,21 @@ export class InvoiceDesignerCanvas extends Component {
             this.onFabricObjectModified(e);
         });
         this.fabricCanvas.on("mouse:down", (e) => {
-            console.log("🖱️ Mouse down, target:", e.target ? e.target.type : "canvas");
+            console.log("🖱️ Mouse down, target:", e.target ? e.target.type : "canvas background", "pointer:", e.pointer);
+            if (e.target) {
+                console.log("   Object details:", {
+                    type: e.target.type,
+                    selectable: e.target.selectable,
+                    evented: e.target.evented,
+                    elementId: e.target.elementId,
+                });
+            }
+        });
+        this.fabricCanvas.on("mouse:move", (e) => {
+            const obj = this.fabricCanvas.findTarget(e.e);
+            if (obj) {
+                console.log("🔍 Hovering over:", obj.type, obj.elementId);
+            }
         });
 
         this.updateGridBackground();
@@ -1132,7 +1146,15 @@ export class InvoiceDesignerCanvas extends Component {
         
         // Force render
         this.fabricCanvas.requestRenderAll();
-        console.log("✅ Fabric canvas configured and ready, objects:", this.fabricCanvas.getObjects().length);
+        
+        // Log canvas state
+        console.log("✅ Fabric canvas configured and ready");
+        console.log("   Canvas element:", this.canvasRef.el);
+        console.log("   Canvas dimensions:", this.fabricCanvas.width, "x", this.fabricCanvas.height);
+        console.log("   Canvas interactive:", this.fabricCanvas.interactive);
+        console.log("   Canvas selection:", this.fabricCanvas.selection);
+        console.log("   Objects count:", this.fabricCanvas.getObjects().length);
+        console.log("   First object (if any):", this.fabricCanvas.getObjects()[0]);
     }
 
     setCanvasSize() {
@@ -1186,11 +1208,12 @@ export class InvoiceDesignerCanvas extends Component {
                 obj.cornerSize = 10;
                 obj.borderColor = "#4A90E2";
                 obj.padding = 2;
-                obj.selectable = element.visible !== false;
-                obj.evented = element.visible !== false;
+                obj.selectable = true;  // Force selectable
+                obj.evented = true;     // Force evented
+                obj.hoverCursor = 'move';  // Show it's movable
                 this.fabricCanvas.add(obj);
                 this.elementObjects.set(element.id, obj);
-                console.log(`  ✅ Added element ${idx}:`, element.element_type, element.name, 'selectable:', obj.selectable);
+                console.log(`  ✅ Added element ${idx}:`, element.element_type, element.name, 'selectable:', obj.selectable, 'evented:', obj.evented);
             } else {
                 console.warn(`  ⚠️ Failed to create object for element ${idx}:`, element.element_type);
             }
@@ -1312,8 +1335,11 @@ export class InvoiceDesignerCanvas extends Component {
                 left,
                 top,
                 selectable: true,
+                evented: true,
                 hasControls: true,
+                hasBorders: true,
                 lockScalingFlip: true,
+                hoverCursor: 'move',
             });
             return tableGroup;
         }
@@ -1344,7 +1370,10 @@ export class InvoiceDesignerCanvas extends Component {
                 left,
                 top,
                 selectable: true,
+                evented: true,
                 hasControls: true,
+                hasBorders: true,
+                hoverCursor: 'move',
             });
         }
 
@@ -1371,7 +1400,10 @@ export class InvoiceDesignerCanvas extends Component {
                 left,
                 top,
                 selectable: true,
+                evented: true,
                 hasControls: true,
+                hasBorders: true,
+                hoverCursor: 'move',
             });
             
             if (element.image_data || element.image_url) {

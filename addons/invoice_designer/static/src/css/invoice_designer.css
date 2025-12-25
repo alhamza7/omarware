@@ -174,12 +174,19 @@
 .invoice_designer_canvas {
     background: white !important;
     box-shadow: 0 8px 24px rgba(0,0,0,0.2);
-    cursor: crosshair;
+    cursor: default !important;
     transform-origin: top left;
     border-radius: 4px;
     display: block !important;
     position: relative !important;
     z-index: 1 !important;
+    pointer-events: auto !important;
+    touch-action: none !important;
+}
+
+/* Ensure canvas wrapper doesn't block events */
+.invoice_designer_canvas_wrapper {
+    pointer-events: auto !important;
 }
 
 /* Properties Panel - Right Sidebar */
