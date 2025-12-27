@@ -33,7 +33,7 @@
                     <group string="Features">
                         <group>
                             <field name="enable_caching"/>
-                            <field name="cache_duration_hours" attrs="{'invisible': [('enable_caching', '=', False)]}"/>
+                            <field name="cache_duration_hours" invisible="not enable_caching"/>
                         </group>
                         <group>
                             <field name="enable_question_indexing"/>
@@ -46,7 +46,7 @@
                         <field name="system_prompt" nolabel="1" widget="text"/>
                     </group>
                     
-                    <group string="Last Test" attrs="{'invisible': [('last_test_date', '=', False)]}">
+                    <group string="Last Test" invisible="not last_test_date">
                         <field name="last_test_date"/>
                         <field name="last_test_status"/>
                         <field name="last_test_message" widget="text" nolabel="1"/>

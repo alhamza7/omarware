@@ -12,7 +12,7 @@
                 </header>
                 <sheet>
                     <div class="oe_button_box" name="button_box">
-                        <button name="action_view_context_data" type="object" class="oe_stat_button" icon="fa-code" string="Context Data" attrs="{'invisible': [('context_data', '=', False)]}"/>
+                        <button name="action_view_context_data" type="object" class="oe_stat_button" icon="fa-code" string="Context Data" invisible="not context_data"/>
                     </div>
                     
                     <group>
@@ -25,7 +25,7 @@
                         <group>
                             <field name="category"/>
                             <field name="question_index_id"/>
-                            <field name="similarity_score" attrs="{'invisible': [('question_index_id', '=', False)]}"/>
+                            <field name="similarity_score" invisible="not question_index_id"/>
                             <field name="was_cached"/>
                         </group>
                     </group>
@@ -52,12 +52,12 @@
                         </group>
                     </group>
                     
-                    <group string="User Feedback" attrs="{'invisible': [('user_rating', '=', False)]}">
+                    <group string="User Feedback" invisible="not user_rating">
                         <field name="user_rating"/>
                         <field name="user_feedback" nolabel="1" widget="text"/>
                     </group>
                     
-                    <group string="Error" attrs="{'invisible': [('status', '!=', 'failed')]}">
+                    <group string="Error" invisible="status != 'failed'">
                         <field name="error_message" nolabel="1" widget="text"/>
                     </group>
                 </sheet>

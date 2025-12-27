@@ -233,6 +233,10 @@ class GeminiAPIController(http.Controller):
                 if not permission_model.check_permission(request.env.user, 'can_access_employees'):
                     return {'error': 'Access denied to employee data'}
                 
+                # Check if hr module is installed
+                if 'hr.employee' not in request.env:
+                    return {'error': 'HR module not installed'}
+                
                 employees = request.env['hr.employee'].search([], limit=max_records)
                 data['records'] = [{
                     'name': e.name,

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'Lugal AI',
-    'version': '1.0.0',
+    'version': '19.0.1.0.0',
     'category': 'Artificial Intelligence',
     'summary': 'Enterprise AI Control Layer for Odoo × Gemini',
     'description': """
@@ -27,7 +27,7 @@
         'base',
         'web',
         'product',
-        'sale',
+        'sale_management',
         'stock',
         'account',
     ],
