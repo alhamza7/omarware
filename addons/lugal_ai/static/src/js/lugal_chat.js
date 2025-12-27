@@ -6,7 +6,9 @@ import { useService } from "@web/core/utils/hooks";
 
 export class LugalChatComponent extends Component {
     setup() {
-        this.rpc = useService("rpc");
+        // Get services from the environment
+        this.orm = useService("orm");
+        this.action = useService("action");
         this.notification = useService("notification");
         
         this.state = useState({
@@ -15,7 +17,12 @@ export class LugalChatComponent extends Component {
             isLoading: false,
             history: [],
             showHistory: false,
-            stats: null,
+            stats: {
+                total_questions: 0,
+                avg_response_time: 0,
+                cached_percentage: 0,
+                today_questions: 0
+            },
         });
         
         this.chatContainerRef = useRef("chatContainer");
@@ -28,14 +35,21 @@ export class LugalChatComponent extends Component {
     
     async loadHistory() {
         try {
-            const result = await this.rpc("/lugal/api/chat/history", {
-                limit: 20,
-                offset: 0,
-            });
+            const result = await this.orm.call(
+                "lugal.conversation",
+                "search_read",
+                [],
+                {
+                    fields: ["id", "question", "answer", "create_date", "user_id", "category", "was_cached"],
+                    limit: 20,
+                    order: "create_date DESC"
+                }
+            );
             
-            if (result.success) {
-                this.state.history = result.conversations;
-            }
+            this.state.history = result.map(conv => ({
+                ...conv,
+                user_name: conv.user_id ? conv.user_id[1] : 'Unknown'
+            }));
         } catch (error) {
             console.error("Error loading history:", error);
         }
@@ -43,12 +57,15 @@ export class LugalChatComponent extends Component {
     
     async loadStats() {
         try {
-            const result = await this.rpc("/lugal/api/chat/stats", {
-                days: 30,
-            });
+            const result = await this.orm.call(
+                "lugal.conversation",
+                "get_stats",
+                [],
+                { days: 30 }
+            );
             
-            if (result.success) {
-                this.state.stats = result.stats;
+            if (result) {
+                this.state.stats = result;
             }
         } catch (error) {
             console.error("Error loading stats:", error);
@@ -74,12 +91,18 @@ export class LugalChatComponent extends Component {
         setTimeout(() => this.scrollToBottom(), 100);
         
         try {
-            const result = await this.rpc("/lugal/api/ask", {
-                question: question,
-                context: null,
-            });
+            // Call the Gemini API through Odoo backend
+            const result = await this.orm.call(
+                "lugal.conversation",
+                "ask_question",
+                [],
+                {
+                    question: question,
+                    context: {}
+                }
+            );
             
-            if (result.success) {
+            if (result && result.success) {
                 // Add AI response to UI
                 this.state.messages.push({
                     type: "ai",
@@ -100,11 +123,11 @@ export class LugalChatComponent extends Component {
             } else {
                 this.state.messages.push({
                     type: "error",
-                    text: result.error || "Unknown error",
+                    text: result?.error || "Failed to get response",
                     timestamp: new Date(),
                 });
                 
-                this.notification.add("Error: " + result.error, {
+                this.notification.add("Error: " + (result?.error || "Unknown error"), {
                     type: "danger",
                 });
             }
@@ -112,7 +135,7 @@ export class LugalChatComponent extends Component {
             console.error("Error sending message:", error);
             this.state.messages.push({
                 type: "error",
-                text: "Failed to send message: " + error,
+                text: "Failed to send message: " + error.message,
                 timestamp: new Date(),
             });
             
@@ -170,10 +193,12 @@ export class LugalChatComponent extends Component {
         if (!message.conversation_id) return;
         
         try {
-            await this.rpc("/lugal/api/rate", {
-                conversation_id: message.conversation_id,
-                rating: rating,
-            });
+            await this.orm.call(
+                "lugal.conversation",
+                "rate_conversation",
+                [message.conversation_id],
+                { rating: rating }
+            );
             
             message.rating = rating;
             this.notification.add("Thank you for your feedback!", {
@@ -191,5 +216,5 @@ export class LugalChatComponent extends Component {
 
 LugalChatComponent.template = "lugal_ai.LugalChatTemplate";
 
+// Register as a client action
 registry.category("actions").add("lugal_chat", LugalChatComponent);
-

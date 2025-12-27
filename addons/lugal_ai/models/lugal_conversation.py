@@ -162,4 +162,111 @@ class LugalConversation(models.Model):
             },
             'avg_rating': sum(int(c.user_rating) for c in conversations if c.user_rating) / len([c for c in conversations if c.user_rating]) if any(conversations.mapped('user_rating')) else 0,
         }
+    
+    def ask_question(self, question, context=None):
+        """Ask a question and get AI response - for chat interface"""
+        from datetime import datetime
+        
+        config = self.env['lugal.config'].search([], limit=1)
+        if not config or not config.gemini_api_key:
+            return {
+                'success': False,
+                'error': 'Gemini API not configured. Please configure it in Settings.'
+            }
+        
+        start_time = datetime.now()
+        
+        # Get user role
+        user = self.env.user
+        role = 'admin' if user.has_group('base.group_system') else 'employee'
+        
+        # Create conversation record
+        conversation = self.create({
+            'user_id': user.id,
+            'user_role': role,
+            'question': question,
+            'status': 'success'
+        })
+        
+        try:
+            # Call Gemini API
+            import google.generativeai as genai
+            genai.configure(api_key=config.gemini_api_key)
+            
+            model = genai.GenerativeModel(config.gemini_model or 'gemini-2.0-flash-exp')
+            
+            # Generate response
+            response = model.generate_content(question)
+            answer = response.text
+            
+            # Calculate response time
+            response_time = int((datetime.now() - start_time).total_seconds() * 1000)
+            
+            # Update conversation
+            conversation.write({
+                'answer': answer,
+                'response_time_ms': response_time,
+                'category': 'general'
+            })
+            
+            return {
+                'success': True,
+                'answer': answer,
+                'conversation_id': conversation.id,
+                'response_time_ms': response_time,
+                'was_cached': False,
+                'category': 'general'
+            }
+            
+        except Exception as e:
+            conversation.write({
+                'status': 'failed',
+                'error_message': str(e)
+            })
+            return {
+                'success': False,
+                'error': f'Failed to get response: {str(e)}'
+            }
+    
+    def get_stats(self, days=30):
+        """Get conversation statistics for chat interface"""
+        from datetime import datetime, timedelta
+        
+        domain = [('create_date', '>=', datetime.now() - timedelta(days=days))]
+        conversations = self.search(domain)
+        
+        total = len(conversations)
+        if total == 0:
+            return {
+                'total_questions': 0,
+                'avg_response_time': 0,
+                'cached_percentage': 0,
+                'today_questions': 0
+            }
+        
+        # Today's questions
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_conversations = self.search([('create_date', '>=', today_start)])
+        
+        # Average response time
+        completed = conversations.filtered(lambda c: c.status == 'success' and c.response_time_ms)
+        avg_time = sum(c.response_time_ms for c in completed) / len(completed) if completed else 0
+        
+        # Cached percentage
+        cached = conversations.filtered(lambda c: c.was_cached)
+        cached_pct = (len(cached) / total * 100) if total > 0 else 0
+        
+        return {
+            'total_questions': total,
+            'avg_response_time': int(avg_time),
+            'cached_percentage': int(cached_pct),
+            'today_questions': len(today_conversations)
+        }
+    
+    def rate_conversation(self, rating):
+        """Rate a conversation"""
+        self.ensure_one()
+        self.write({'user_rating': str(rating)})
+        return True
+
 
