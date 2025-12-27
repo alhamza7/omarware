@@ -163,6 +163,7 @@ class LugalConversation(models.Model):
             'avg_rating': sum(int(c.user_rating) for c in conversations if c.user_rating) / len([c for c in conversations if c.user_rating]) if any(conversations.mapped('user_rating')) else 0,
         }
     
+    @api.model
     def ask_question(self, question, context=None):
         """Ask a question and get AI response - for chat interface"""
         from datetime import datetime
@@ -228,6 +229,7 @@ class LugalConversation(models.Model):
                 'error': f'Failed to get response: {str(e)}'
             }
     
+    @api.model
     def get_stats(self, days=30):
         """Get conversation statistics for chat interface"""
         from datetime import datetime, timedelta
