@@ -191,13 +191,20 @@ class LugalConversation(models.Model):
         }
         
         question_lower = question.lower()
+        _logger.info(f"🔎 Analyzing question (lowercase): {question_lower}")
         
         # Check if asking about stock quantities in warehouses
         asking_about_warehouse_quantities = any(word in question_lower for word in ['كميات', 'كل مخزن', 'في المخازن', 'by location', 'per warehouse', 'في كل'])
+        _logger.info(f"📍 Asking about warehouse quantities: {asking_about_warehouse_quantities}")
         
         try:
             # Check for product-related questions
-            if any(word in question_lower for word in ['منتج', 'منتجات', 'product', 'products', 'مخزون', 'stock', 'كم', 'how many', 'لاكوست', 'lacoste', 'كميات']):
+            product_keywords = ['منتج', 'منتجات', 'product', 'products', 'مخزون', 'stock', 'كم', 'how many', 'لاكوست', 'lacoste', 'كميات']
+            is_product_question = any(word in question_lower for word in product_keywords)
+            _logger.info(f"🛍️ Is product question: {is_product_question}")
+            
+            if is_product_question:
+                _logger.info(f"📦 Starting product data collection...")
                 # Search for specific product if mentioned
                 product_domain = [('active', '=', True)]
                 
@@ -214,6 +221,8 @@ class LugalConversation(models.Model):
                         ('default_code', 'ilike', ' '.join(product_keywords)),
                         ('active', '=', True)
                     ]
+                
+                _logger.info(f"🔍 Searching products with domain: {product_domain}")
                 
                 products = self.env['product.product'].search_read(
                     product_domain,
@@ -249,6 +258,8 @@ class LugalConversation(models.Model):
                     ],
                     limit=100
                 )
+                
+                _logger.info(f"✅ Found {len(products)} products")
                 
                 # Get detailed stock and related info for products
                 if products:
@@ -803,7 +814,11 @@ class LugalConversation(models.Model):
         prompt_parts.append("4. كن واضحاً ومحدداً")
         prompt_parts.append("5. لا تذكر 'قاعدة البيانات' أو 'النظام' - أجب مباشرة")
         
-        return "\n".join(prompt_parts)
+        final_prompt = "\n".join(prompt_parts)
+        _logger.info(f"📝 Built prompt with {len(final_prompt)} characters, {len(final_prompt.split())} words")
+        _logger.info(f"📋 Prompt preview (first 500 chars): {final_prompt[:500]}")
+        
+        return final_prompt
     
     @api.model
     def ask_question(self, question, context=None):
@@ -833,7 +848,9 @@ class LugalConversation(models.Model):
         
         try:
             # Collect relevant data from Odoo
+            _logger.info(f"🔍 Collecting data for question: {question[:100]}")
             odoo_data = self._collect_odoo_data(question, role)
+            _logger.info(f"📊 Data collected: {len(odoo_data.get('records', []))} record sets")
             
             # Call Gemini API
             import google.generativeai as genai
@@ -848,8 +865,10 @@ class LugalConversation(models.Model):
             enriched_prompt = self._build_prompt(question, role, odoo_data)
             
             # Generate response
+            _logger.info(f"🤖 Sending to Gemini API...")
             response = model.generate_content(enriched_prompt)
             answer = response.text
+            _logger.info(f"✅ Got response from Gemini: {len(answer)} characters")
             
             # Calculate response time
             response_time = int((datetime.now() - start_time).total_seconds() * 1000)
@@ -858,13 +877,18 @@ class LugalConversation(models.Model):
             category = self._determine_category(odoo_data)
             
             # Update conversation
+            models_used = ', '.join([r['model'] for r in odoo_data['records']]) if odoo_data['records'] else None
+            records_count = sum([r['count'] for r in odoo_data['records']]) if odoo_data['records'] else 0
+            
+            _logger.info(f"💾 Saving conversation: category={category}, models={models_used}, records={records_count}")
+            
             conversation.write({
                 'answer': answer,
                 'response_time_ms': response_time,
                 'category': category,
                 'context_data': json.dumps(odoo_data, ensure_ascii=False),
-                'data_models_used': ', '.join([r['model'] for r in odoo_data['records']]) if odoo_data['records'] else None,
-                'records_count': sum([r['count'] for r in odoo_data['records']]) if odoo_data['records'] else 0
+                'data_models_used': models_used,
+                'records_count': records_count
             })
             
             # Calculate token usage (estimate)
