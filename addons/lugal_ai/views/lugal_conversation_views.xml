@@ -97,9 +97,9 @@
                 <filter string="Failed" name="failed" domain="[('status', '=', 'failed')]"/>
                 <filter string="From Cache" name="cached" domain="[('was_cached', '=', True)]"/>
                 <separator/>
-                <filter string="Today" name="today" domain="[('create_date', '&gt;=', context_today().strftime('%Y-%m-%d'))]"/>
-                <filter string="Last 7 Days" name="week" domain="[('create_date', '&gt;=', (context_today() - datetime.timedelta(days=7)).strftime('%Y-%m-%d'))]"/>
-                <filter string="Last 30 Days" name="month" domain="[('create_date', '&gt;=', (context_today() - datetime.timedelta(days=30)).strftime('%Y-%m-%d'))]"/>
+                <filter string="Today" name="today" domain="[('create_date', '&gt;=', context_today().strftime('%Y-%m-%d 00:00:00'))]"/>
+                <filter string="This Week" name="week" date="create_date" default_period="this_week"/>
+                <filter string="This Month" name="month" date="create_date" default_period="this_month"/>
                 <group expand="0" string="Group By">
                     <filter string="User" name="group_user" context="{'group_by': 'user_id'}"/>
                     <filter string="Category" name="group_category" context="{'group_by': 'category'}"/>
