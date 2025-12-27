@@ -67,10 +67,10 @@
     
     <!-- Lugal Conversation Tree View -->
     <record id="view_lugal_conversation_tree" model="ir.ui.view">
-        <field name="name">lugal.conversation.tree</field>
+        <field name="name">lugal.conversation.list</field>
         <field name="model">lugal.conversation</field>
         <field name="arch" type="xml">
-            <tree string="Conversations" create="false">
+            <list string="Conversations" create="false">
                 <field name="create_date"/>
                 <field name="user_id"/>
                 <field name="display_name"/>
@@ -79,7 +79,7 @@
                 <field name="response_time_ms"/>
                 <field name="total_tokens"/>
                 <field name="user_rating"/>
-            </tree>
+            </list>
         </field>
     </record>
     
@@ -114,7 +114,7 @@
     <record id="action_lugal_conversation" model="ir.actions.act_window">
         <field name="name">Conversations</field>
         <field name="res_model">lugal.conversation</field>
-        <field name="view_mode">tree,form</field>
+        <field name="view_mode">list,form</field>
         <field name="context">{'search_default_my_conversations': 1, 'search_default_month': 1}</field>
         <field name="help" type="html">
             <p class="o_view_nocontent_smiling_face">
