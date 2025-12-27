@@ -65,7 +65,7 @@
         </field>
     </record>
     
-    <!-- Lugal Conversation Tree View -->
+    <!-- Lugal Conversation List View -->
     <record id="view_lugal_conversation_tree" model="ir.ui.view">
         <field name="name">lugal.conversation.list</field>
         <field name="model">lugal.conversation</field>
@@ -83,38 +83,11 @@
         </field>
     </record>
     
-    <!-- Lugal Conversation Search View -->
-    <record id="view_lugal_conversation_search" model="ir.ui.view">
-        <field name="name">lugal.conversation.search</field>
-        <field name="model">lugal.conversation</field>
-        <field name="arch" type="xml">
-            <search string="Search Conversations">
-                <field name="question"/>
-                <field name="user_id"/>
-                <field name="category"/>
-                <separator/>
-                <filter string="My Conversations" name="my_conversations" domain="[('user_id', '=', uid)]"/>
-                <filter string="Success" name="success" domain="[('status', '=', 'success')]"/>
-                <filter string="Failed" name="failed" domain="[('status', '=', 'failed')]"/>
-                <filter string="From Cache" name="cached" domain="[('was_cached', '=', True)]"/>
-                <separator/>
-                <filter string="Today" name="today" date="create_date"/>
-                <group expand="0" string="Group By">
-                    <filter string="User" name="group_user" context="{'group_by': 'user_id'}"/>
-                    <filter string="Category" name="group_category" context="{'group_by': 'category'}"/>
-                    <filter string="Status" name="group_status" context="{'group_by': 'status'}"/>
-                    <filter string="Date" name="group_date" context="{'group_by': 'create_date:day'}"/>
-                </group>
-            </search>
-        </field>
-    </record>
-    
     <!-- Lugal Conversation Action -->
     <record id="action_lugal_conversation" model="ir.actions.act_window">
         <field name="name">Conversations</field>
         <field name="res_model">lugal.conversation</field>
         <field name="view_mode">list,form</field>
-        <field name="context">{'search_default_my_conversations': 1}</field>
         <field name="help" type="html">
             <p class="o_view_nocontent_smiling_face">
                 No conversations yet
@@ -126,4 +99,3 @@
     </record>
     
 </odoo>
-
