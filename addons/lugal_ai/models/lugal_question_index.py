@@ -16,6 +16,7 @@ class LugalQuestionIndex(models.Model):
     question_pattern = fields.Char(string='Question Pattern', required=True, 
                                      help='Pattern or template for similar questions')
     category = fields.Selection([
+        ('general', 'General Query'),
         ('product', 'Product Query'),
         ('sales', 'Sales Query'),
         ('customer', 'Customer Query'),
@@ -23,7 +24,7 @@ class LugalQuestionIndex(models.Model):
         ('analytical', 'Analytical Query'),
         ('operational', 'Operational Query'),
         ('out_of_scope', 'Out of Scope'),
-    ], string='Category', required=True, default='product')
+    ], string='Category', required=True, default='general')
     
     # Answer Template
     answer_template = fields.Text(string='Answer Template',

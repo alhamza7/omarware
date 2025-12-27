@@ -26,6 +26,7 @@ class LugalCache(models.Model):
     ], string='User Role', required=True, index=True)
     
     category = fields.Selection([
+        ('general', 'General Query'),
         ('product', 'Product Query'),
         ('sales', 'Sales Query'),
         ('customer', 'Customer Query'),
