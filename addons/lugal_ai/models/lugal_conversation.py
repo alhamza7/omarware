@@ -255,9 +255,6 @@ class LugalConversation(models.Model):
                 # Check if asking about count/number - highest priority
                 asking_about_count = any(word in question_lower for word in ['كم عدد', 'how many', 'عدد المنتجات', 'number of', 'كم منتج', 'how many products'])
                 
-                # Search for specific product if mentioned
-                product_domain = [('active', '=', True)]
-                
                 # If asking about count, just get count (minimal data)
                 if asking_about_count:
                     _logger.info(f"🔢 Asking about product COUNT - getting total count only")
@@ -271,30 +268,35 @@ class LugalConversation(models.Model):
                         'count': total_count,
                         'data': [{'total_products': total_count, 'message': f'لديكم إجمالي {total_count} منتج نشط'}]
                     })
-                    continue  # Skip detailed product search
+                    _logger.info(f"📦 Product count collected successfully")
                 
-                # Filter out generic words from potential product names
-                generic_words = ['المنتجات', 'منتجات', 'منتج', 'products', 'product', 'عدد', 'كمية', 'how', 'many', 'what', 'where']
-                specific_product_names = [word for word in potential_product_names if word not in generic_words]
-                
-                # Only search for specific products if we have actual product names
-                if specific_product_names:
-                    # Specific product search
-                    product_domain = ['|', '|',
-                        ('name', 'ilike', ' '.join(specific_product_names)),
-                        ('default_code', 'ilike', ' '.join(specific_product_names)),
-                        ('active', '=', True)
-                    ]
-                    _logger.info(f"🔎 Searching for specific products: {' '.join(specific_product_names)}")
-                else:
-                    # General product question - get sample of products
-                    _logger.info(f"🔎 General product question - getting product sample")
-                
-                _logger.info(f"🔍 Searching products with domain: {product_domain}")
-                
-                # Try to get full product data, fallback to basic if error
-                try:
-                    products = self.env['product.product'].search_read(
+                # Otherwise, get detailed product data
+                if not asking_about_count:
+                    # Search for specific product if mentioned
+                    product_domain = [('active', '=', True)]
+                    
+                    # Filter out generic words from potential product names
+                    generic_words = ['المنتجات', 'منتجات', 'منتج', 'products', 'product', 'عدد', 'كمية', 'how', 'many', 'what', 'where']
+                    specific_product_names = [word for word in potential_product_names if word not in generic_words]
+                    
+                    # Only search for specific products if we have actual product names
+                    if specific_product_names:
+                        # Specific product search
+                        product_domain = ['|', '|',
+                            ('name', 'ilike', ' '.join(specific_product_names)),
+                            ('default_code', 'ilike', ' '.join(specific_product_names)),
+                            ('active', '=', True)
+                        ]
+                        _logger.info(f"🔎 Searching for specific products: {' '.join(specific_product_names)}")
+                    else:
+                        # General product question - get sample of products
+                        _logger.info(f"🔎 General product question - getting product sample")
+                    
+                    _logger.info(f"🔍 Searching products with domain: {product_domain}")
+                    
+                    # Try to get full product data, fallback to basic if error
+                    try:
+                        products = self.env['product.product'].search_read(
                         product_domain,
                         [
                             # Basic Info
@@ -326,104 +328,104 @@ class LugalConversation(models.Model):
                             # Additional
                             'company_id', 'create_date', 'write_date'
                         ],
-                        limit=100
-                    )
-                    _logger.info(f"✅ Found {len(products)} products with full data")
-                except Exception as field_error:
-                    _logger.warning(f"⚠️ Full field search failed: {str(field_error)}, trying basic fields...")
-                    # Fallback to basic fields only
-                    products = self.env['product.product'].search_read(
-                        product_domain,
-                        ['name', 'default_code', 'list_price', 'qty_available', 'categ_id', 'uom_id', 'barcode'],
-                        limit=100
-                    )
-                    _logger.info(f"✅ Found {len(products)} products with basic data")
-                
-                # Get detailed stock and related info for products (but not if just asking for count)
-                if products and not asking_about_count:
-                    product_ids = [p['id'] for p in products]
+                            limit=100
+                        )
+                        _logger.info(f"✅ Found {len(products)} products with full data")
+                    except Exception as field_error:
+                        _logger.warning(f"⚠️ Full field search failed: {str(field_error)}, trying basic fields...")
+                        # Fallback to basic fields only
+                        products = self.env['product.product'].search_read(
+                            product_domain,
+                            ['name', 'default_code', 'list_price', 'qty_available', 'categ_id', 'uom_id', 'barcode'],
+                            limit=100
+                        )
+                        _logger.info(f"✅ Found {len(products)} products with basic data")
                     
-                    # 1. Get stock quantities by location
-                    stock_quants = self.env['stock.quant'].search_read(
-                        [
-                            ('product_id', 'in', product_ids),
-                            ('location_id.usage', '=', 'internal')
-                        ],
-                        ['product_id', 'location_id', 'quantity', 'reserved_quantity', 'available_quantity', 'lot_id'],
-                        limit=500
-                    )
-                    
-                    # 2. Get recent stock moves (last movements)
-                    recent_moves = self.env['stock.move'].search_read(
-                        [
-                            ('product_id', 'in', product_ids),
-                            ('state', '=', 'done')
-                        ],
-                        ['product_id', 'location_id', 'location_dest_id', 'product_uom_qty', 'date', 'reference', 'origin'],
-                        order='date desc',
-                        limit=50
-                    )
-                    
-                    # 3. Get supplier info
-                    supplier_info = self.env['product.supplierinfo'].search_read(
-                        [('product_id', 'in', product_ids)],
-                        ['product_id', 'partner_id', 'price', 'min_qty', 'delay', 'currency_id'],
-                        limit=100
-                    )
-                    
-                    # 4. Get recent sales
-                    sale_lines = self.env['sale.order.line'].search_read(
-                        [
-                            ('product_id', 'in', product_ids),
-                            ('state', 'in', ['sale', 'done'])
-                        ],
-                        ['product_id', 'order_id', 'product_uom_qty', 'price_unit', 'price_subtotal', 'order_partner_id'],
-                        order='create_date desc',
-                        limit=30
-                    )
-                    
-                    # 5. Get product variants info
-                    product_templates = list(set([p['product_tmpl_id'][0] if p.get('product_tmpl_id') else None for p in products if p.get('product_tmpl_id')]))
-                    variants_info = []
-                    if product_templates:
-                        variants_info = self.env['product.template'].search_read(
-                            [('id', 'in', product_templates)],
-                            ['name', 'product_variant_count', 'attribute_line_ids'],
+                    # Get detailed stock and related info for products
+                    if products:
+                        product_ids = [p['id'] for p in products]
+                        
+                        # 1. Get stock quantities by location
+                        stock_quants = self.env['stock.quant'].search_read(
+                            [
+                                ('product_id', 'in', product_ids),
+                                ('location_id.usage', '=', 'internal')
+                            ],
+                            ['product_id', 'location_id', 'quantity', 'reserved_quantity', 'available_quantity', 'lot_id'],
+                            limit=500
+                        )
+                        
+                        # 2. Get recent stock moves (last movements)
+                        recent_moves = self.env['stock.move'].search_read(
+                            [
+                                ('product_id', 'in', product_ids),
+                                ('state', '=', 'done')
+                            ],
+                            ['product_id', 'location_id', 'location_dest_id', 'product_uom_qty', 'date', 'reference', 'origin'],
+                            order='date desc',
                             limit=50
                         )
+                        
+                        # 3. Get supplier info
+                        supplier_info = self.env['product.supplierinfo'].search_read(
+                            [('product_id', 'in', product_ids)],
+                            ['product_id', 'partner_id', 'price', 'min_qty', 'delay', 'currency_id'],
+                            limit=100
+                        )
+                        
+                        # 4. Get recent sales
+                        sale_lines = self.env['sale.order.line'].search_read(
+                            [
+                                ('product_id', 'in', product_ids),
+                                ('state', 'in', ['sale', 'done'])
+                            ],
+                            ['product_id', 'order_id', 'product_uom_qty', 'price_unit', 'price_subtotal', 'order_partner_id'],
+                            order='create_date desc',
+                            limit=30
+                        )
+                        
+                        # 5. Get product variants info
+                        product_templates = list(set([p['product_tmpl_id'][0] if p.get('product_tmpl_id') else None for p in products if p.get('product_tmpl_id')]))
+                        variants_info = []
+                        if product_templates:
+                            variants_info = self.env['product.template'].search_read(
+                                [('id', 'in', product_templates)],
+                                ['name', 'product_variant_count', 'attribute_line_ids'],
+                                limit=50
+                            )
+                        
+                        # Organize all data by product
+                        for product in products:
+                            pid = product['id']
+                            
+                            # Stock by location
+                            product_quants = [q for q in stock_quants if q.get('product_id') and q['product_id'][0] == pid]
+                            product_quants = [q for q in product_quants if q.get('quantity', 0) > 0]
+                            product['stock_by_location'] = product_quants
+                            product['total_locations'] = len(product_quants)
+                            
+                            # Recent movements
+                            product_moves = [m for m in recent_moves if m.get('product_id') and m['product_id'][0] == pid]
+                            product['recent_movements'] = product_moves[:10]  # Last 10 movements
+                            
+                            # Suppliers
+                            product_suppliers = [s for s in supplier_info if s.get('product_id') and s['product_id'][0] == pid]
+                            product['suppliers'] = product_suppliers
+                            
+                            # Recent sales
+                            product_sales = [s for s in sale_lines if s.get('product_id') and s['product_id'][0] == pid]
+                            product['recent_sales'] = product_sales[:10]  # Last 10 sales
+                            product['total_sales_qty'] = sum([s.get('product_uom_qty', 0) for s in product_sales])
+                            product['total_sales_amount'] = sum([s.get('price_subtotal', 0) for s in product_sales])
+                            
+                            _logger.info(f"📍 Product {product['name']}: {len(product_quants)} locations, {len(product_moves)} movements, {len(product_suppliers)} suppliers, {len(product_sales)} sales")
                     
-                    # Organize all data by product
-                    for product in products:
-                        pid = product['id']
-                        
-                        # Stock by location
-                        product_quants = [q for q in stock_quants if q.get('product_id') and q['product_id'][0] == pid]
-                        product_quants = [q for q in product_quants if q.get('quantity', 0) > 0]
-                        product['stock_by_location'] = product_quants
-                        product['total_locations'] = len(product_quants)
-                        
-                        # Recent movements
-                        product_moves = [m for m in recent_moves if m.get('product_id') and m['product_id'][0] == pid]
-                        product['recent_movements'] = product_moves[:10]  # Last 10 movements
-                        
-                        # Suppliers
-                        product_suppliers = [s for s in supplier_info if s.get('product_id') and s['product_id'][0] == pid]
-                        product['suppliers'] = product_suppliers
-                        
-                        # Recent sales
-                        product_sales = [s for s in sale_lines if s.get('product_id') and s['product_id'][0] == pid]
-                        product['recent_sales'] = product_sales[:10]  # Last 10 sales
-                        product['total_sales_qty'] = sum([s.get('product_uom_qty', 0) for s in product_sales])
-                        product['total_sales_amount'] = sum([s.get('price_subtotal', 0) for s in product_sales])
-                        
-                        _logger.info(f"📍 Product {product['name']}: {len(product_quants)} locations, {len(product_moves)} movements, {len(product_suppliers)} suppliers, {len(product_sales)} sales")
-                
-                data['records'].append({
-                    'model': 'product.product',
-                    'count': len(products),
-                    'data': products
-                })
-                _logger.info(f"📦 Collected {len(products)} products with stock details for AI")
+                    data['records'].append({
+                        'model': 'product.product',
+                        'count': len(products),
+                        'data': products
+                    })
+                    _logger.info(f"📦 Collected {len(products)} products with stock details for AI")
             
             # Check for sales-related questions
             if any(word in question_lower for word in ['مبيعات', 'بيع', 'sales', 'sale', 'order', 'طلب', 'طلبات']):
