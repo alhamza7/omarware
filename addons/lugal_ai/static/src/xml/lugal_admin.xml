@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    
+    <t t-name="lugal_ai.LugalAdminTemplate">
+        <div class="lugal_admin_container">
+            <h3>⚙️ Lugal AI Administration</h3>
+            
+            <!-- Loading -->
+            <div class="text-center p-5" t-if="state.isLoading">
+                <i class="fa fa-spinner fa-spin fa-3x"/>
+            </div>
+            
+            <div t-else="">
+                <!-- Cache Statistics -->
+                <div class="card mb-3" t-if="state.cacheStats">
+                    <div class="card-header">
+                        <h5>💾 Cache Statistics</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-3">
+                                <div class="lugal_stat_box">
+                                    <div class="lugal_stat_value" t-esc="state.cacheStats.total_entries"/>
+                                    <div class="lugal_stat_label">Total Entries</div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="lugal_stat_box">
+                                    <div class="lugal_stat_value" t-esc="state.cacheStats.active_entries"/>
+                                    <div class="lugal_stat_label">Active</div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="lugal_stat_box">
+                                    <div class="lugal_stat_value" t-esc="state.cacheStats.total_hits"/>
+                                    <div class="lugal_stat_label">Total Hits</div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="lugal_stat_box">
+                                    <div class="lugal_stat_value">
+                                        <t t-esc="Math.round(state.cacheStats.hit_rate)"/>%
+                                    </div>
+                                    <div class="lugal_stat_label">Hit Rate</div>
+                                </div>
+                            </div>
+                        </div>
+                        <button class="btn btn-warning mt-3" t-on-click="cleanupCache">
+                            <i class="fa fa-trash"/> Cleanup Expired Cache
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Conversation Statistics -->
+                <div class="card mb-3" t-if="state.conversationStats">
+                    <div class="card-header">
+                        <h5>💬 Conversation Statistics (Last 30 Days)</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-3">
+                                <div class="lugal_stat_box">
+                                    <div class="lugal_stat_value" t-esc="state.conversationStats.total_conversations"/>
+                                    <div class="lugal_stat_label">Total Conversations</div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="lugal_stat_box">
+                                    <div class="lugal_stat_value">
+                                        <t t-esc="Math.round(state.conversationStats.avg_response_time)"/>ms
+                                    </div>
+                                    <div class="lugal_stat_label">Avg Response Time</div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="lugal_stat_box">
+                                    <div class="lugal_stat_value" t-esc="state.conversationStats.total_tokens"/>
+                                    <div class="lugal_stat_label">Total Tokens</div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="lugal_stat_box">
+                                    <div class="lugal_stat_value">
+                                        <t t-esc="state.conversationStats.avg_rating.toFixed(1)"/> ⭐
+                                    </div>
+                                    <div class="lugal_stat_label">Avg Rating</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </t>
+    
+</templates>
+

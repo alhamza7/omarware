@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    
+    <!-- Lugal Conversation Form View -->
+    <record id="view_lugal_conversation_form" model="ir.ui.view">
+        <field name="name">lugal.conversation.form</field>
+        <field name="model">lugal.conversation</field>
+        <field name="arch" type="xml">
+            <form string="Conversation" create="false" edit="false">
+                <header>
+                    <field name="status" widget="statusbar"/>
+                </header>
+                <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button name="action_view_context_data" type="object" class="oe_stat_button" icon="fa-code" string="Context Data" attrs="{'invisible': [('context_data', '=', False)]}"/>
+                    </div>
+                    
+                    <group>
+                        <group>
+                            <field name="user_id"/>
+                            <field name="partner_id"/>
+                            <field name="user_role"/>
+                            <field name="create_date"/>
+                        </group>
+                        <group>
+                            <field name="category"/>
+                            <field name="question_index_id"/>
+                            <field name="similarity_score" attrs="{'invisible': [('question_index_id', '=', False)]}"/>
+                            <field name="was_cached"/>
+                        </group>
+                    </group>
+                    
+                    <group string="Question">
+                        <field name="question" nolabel="1" widget="text"/>
+                        <field name="question_language"/>
+                    </group>
+                    
+                    <group string="Answer">
+                        <field name="answer" nolabel="1" widget="text"/>
+                    </group>
+                    
+                    <group>
+                        <group string="Performance">
+                            <field name="response_time_ms"/>
+                            <field name="input_tokens"/>
+                            <field name="output_tokens"/>
+                            <field name="total_tokens"/>
+                        </group>
+                        <group string="Data Used">
+                            <field name="data_models_used"/>
+                            <field name="records_count"/>
+                        </group>
+                    </group>
+                    
+                    <group string="User Feedback" attrs="{'invisible': [('user_rating', '=', False)]}">
+                        <field name="user_rating"/>
+                        <field name="user_feedback" nolabel="1" widget="text"/>
+                    </group>
+                    
+                    <group string="Error" attrs="{'invisible': [('status', '!=', 'failed')]}">
+                        <field name="error_message" nolabel="1" widget="text"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    
+    <!-- Lugal Conversation Tree View -->
+    <record id="view_lugal_conversation_tree" model="ir.ui.view">
+        <field name="name">lugal.conversation.tree</field>
+        <field name="model">lugal.conversation</field>
+        <field name="arch" type="xml">
+            <tree string="Conversations" create="false">
+                <field name="create_date"/>
+                <field name="user_id"/>
+                <field name="display_name"/>
+                <field name="category"/>
+                <field name="status" decoration-success="status=='success'" decoration-danger="status=='failed'" decoration-info="status=='cached'"/>
+                <field name="response_time_ms"/>
+                <field name="total_tokens"/>
+                <field name="user_rating"/>
+            </tree>
+        </field>
+    </record>
+    
+    <!-- Lugal Conversation Search View -->
+    <record id="view_lugal_conversation_search" model="ir.ui.view">
+        <field name="name">lugal.conversation.search</field>
+        <field name="model">lugal.conversation</field>
+        <field name="arch" type="xml">
+            <search string="Search Conversations">
+                <field name="question"/>
+                <field name="user_id"/>
+                <field name="category"/>
+                <separator/>
+                <filter string="My Conversations" name="my_conversations" domain="[('user_id', '=', uid)]"/>
+                <filter string="Failed" name="failed" domain="[('status', '=', 'failed')]"/>
+                <filter string="From Cache" name="cached" domain="[('was_cached', '=', True)]"/>
+                <separator/>
+                <filter string="Today" name="today" domain="[('create_date', '&gt;=', context_today().strftime('%Y-%m-%d'))]"/>
+                <filter string="Last 7 Days" name="week" domain="[('create_date', '&gt;=', (context_today() - datetime.timedelta(days=7)).strftime('%Y-%m-%d'))]"/>
+                <filter string="Last 30 Days" name="month" domain="[('create_date', '&gt;=', (context_today() - datetime.timedelta(days=30)).strftime('%Y-%m-%d'))]"/>
+                <group expand="0" string="Group By">
+                    <filter string="User" name="group_user" context="{'group_by': 'user_id'}"/>
+                    <filter string="Category" name="group_category" context="{'group_by': 'category'}"/>
+                    <filter string="Status" name="group_status" context="{'group_by': 'status'}"/>
+                    <filter string="Date" name="group_date" context="{'group_by': 'create_date:day'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+    
+    <!-- Lugal Conversation Action -->
+    <record id="action_lugal_conversation" model="ir.actions.act_window">
+        <field name="name">Conversations</field>
+        <field name="res_model">lugal.conversation</field>
+        <field name="view_mode">tree,form</field>
+        <field name="context">{'search_default_my_conversations': 1, 'search_default_month': 1}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                No conversations yet
+            </p>
+            <p>
+                Start chatting with Lugal AI to see your conversation history here.
+            </p>
+        </field>
+    </record>
+    
+</odoo>
+

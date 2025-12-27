@@ -183,7 +183,7 @@ export class InvoiceDesignerCanvas extends Component {
                 if (this.fabricReady) {
                     console.log("🎨 Building Fabric scene...");
                     this.buildFabricScene();
-                } else {
+            } else {
                     console.log("🖌️ Using fallback canvas rendering...");
                     this.renderCanvas(); // fallback
                 }
@@ -290,21 +290,21 @@ export class InvoiceDesignerCanvas extends Component {
         }
         // Fallback rendering when Fabric is not ready
         if (!this.fabricReady) {
-            if (this.state.showGrid) {
-                this.drawGrid(ctx);
+        if (this.state.showGrid) {
+            this.drawGrid(ctx);
                 console.log("✅ Grid drawn");
-            }
+        }
             console.log("📦 Drawing", this.state.elements.length, "elements");
             this.state.elements.forEach((element, idx) => {
-                if (element.visible !== false) {
+            if (element.visible !== false) {
                     console.log(`  → Element ${idx}:`, element.element_type, `at (${element.x}, ${element.y})`);
-                    this.drawElement(ctx, element);
-                }
-            });
-            if (this.state.selectedElement) {
-                this.drawSelection(ctx, this.state.selectedElement);
-                console.log("✅ Selection drawn");
+                this.drawElement(ctx, element);
             }
+        });
+        if (this.state.selectedElement) {
+            this.drawSelection(ctx, this.state.selectedElement);
+                console.log("✅ Selection drawn");
+        }
         }
         console.log("✅ renderCanvas complete");
     }
@@ -345,7 +345,7 @@ export class InvoiceDesignerCanvas extends Component {
         
         // Content rendering per element type
         ctx.save();
-        ctx.fillStyle = element.color || '#000000';
+            ctx.fillStyle = element.color || '#000000';
         ctx.font = `${fontSize}px ${element.font_family_name || "Arial"}`;
         ctx.textBaseline = 'alphabetic'; // avoid invalid baseline values
         const allowedAlign = ['left', 'right', 'center', 'start', 'end'];
@@ -403,7 +403,7 @@ export class InvoiceDesignerCanvas extends Component {
             for (let i = 0; i < width; i += 4) {
                 if ((i / 4) % 2 === 0) {
                     ctx.fillRect(x + i, y, 2, height);
-                }
+        }
             }
         } else if (element.element_type === 'qr') {
             ctx.fillStyle = '#000000';

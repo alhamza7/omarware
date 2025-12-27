@@ -1,0 +1,401 @@
+/* ============================================
+   Lugal AI - Main Styles
+   ============================================ */
+
+/* ============ Chat Interface ============ */
+.lugal_chat_container {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 100px);
+    max-width: 1200px;
+    margin: 0 auto;
+    background: #f8f9fa;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+}
+
+.lugal_chat_header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.lugal_chat_header h3 {
+    margin: 0;
+    font-size: 24px;
+}
+
+.lugal_chat_stats {
+    background: #fff3cd;
+    padding: 10px 20px;
+    display: flex;
+    gap: 20px;
+    font-size: 12px;
+    border-bottom: 1px solid #ddd;
+}
+
+.lugal_chat_messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    background: white;
+}
+
+.lugal_chat_message {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+    animation: fadeIn 0.3s;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.lugal_chat_message_user {
+    justify-content: flex-end;
+}
+
+.lugal_chat_message_ai {
+    justify-content: flex-start;
+}
+
+.lugal_chat_message_avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    background: #e9ecef;
+    flex-shrink: 0;
+}
+
+.lugal_chat_message_content {
+    max-width: 70%;
+}
+
+.lugal_chat_message_user .lugal_chat_message_content {
+    background: #667eea;
+    color: white;
+    border-radius: 18px 18px 0 18px;
+    padding: 12px 16px;
+}
+
+.lugal_chat_message_ai .lugal_chat_message_content {
+    background: #f1f3f5;
+    color: #212529;
+    border-radius: 18px 18px 18px 0;
+    padding: 12px 16px;
+}
+
+.lugal_chat_message_text {
+    white-space: pre-wrap;
+    line-height: 1.5;
+}
+
+.lugal_chat_message_header {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: 11px;
+}
+
+.lugal_chat_message_footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 8px;
+}
+
+.lugal_chat_message_time {
+    font-size: 10px;
+    opacity: 0.7;
+    margin-top: 4px;
+}
+
+.lugal_chat_message_rating button {
+    padding: 2px 6px;
+    font-size: 14px;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+}
+
+.lugal_chat_message_rating button:hover {
+    opacity: 1;
+}
+
+.lugal_chat_loading {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.lugal_chat_typing {
+    background: #f1f3f5;
+    border-radius: 18px;
+    padding: 16px 20px;
+    display: flex;
+    gap: 4px;
+}
+
+.lugal_chat_typing span {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #adb5bd;
+    animation: typing 1.4s infinite;
+}
+
+.lugal_chat_typing span:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.lugal_chat_typing span:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+@keyframes typing {
+    0%, 60%, 100% { transform: translateY(0); }
+    30% { transform: translateY(-10px); }
+}
+
+.lugal_chat_input_container {
+    display: flex;
+    gap: 12px;
+    padding: 16px;
+    background: white;
+    border-top: 1px solid #dee2e6;
+}
+
+.lugal_chat_input {
+    flex: 1;
+    resize: none;
+    border-radius: 20px;
+}
+
+.lugal_chat_send_btn {
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    flex-shrink: 0;
+}
+
+.lugal_chat_history_sidebar {
+    position: fixed;
+    right: 0;
+    top: 0;
+    width: 320px;
+    height: 100vh;
+    background: white;
+    box-shadow: -2px 0 12px rgba(0,0,0,0.15);
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+}
+
+.lugal_chat_history_header {
+    padding: 20px;
+    background: #667eea;
+    color: white;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.lugal_chat_history_list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+}
+
+.lugal_chat_history_item {
+    padding: 12px;
+    border-bottom: 1px solid #e9ecef;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.lugal_chat_history_item:hover {
+    background: #f8f9fa;
+}
+
+.lugal_chat_history_question {
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.lugal_chat_history_meta {
+    font-size: 11px;
+    color: #6c757d;
+    display: flex;
+    justify-content: space-between;
+}
+
+/* ============ Product Search ============ */
+.lugal_product_search_container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.lugal_product_search_header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.lugal_product_search_bar {
+    margin-bottom: 20px;
+}
+
+.lugal_product_filters {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.lugal_product_filters > * {
+    flex: 1;
+    min-width: 150px;
+}
+
+.lugal_ai_suggestion {
+    margin-bottom: 20px;
+    border-left: 4px solid #17a2b8;
+}
+
+.lugal_product_count {
+    margin-bottom: 20px;
+    font-size: 14px;
+    color: #6c757d;
+}
+
+.lugal_product_grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 20px;
+}
+
+.lugal_product_card {
+    background: white;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.lugal_product_card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+}
+
+.lugal_product_image {
+    height: 200px;
+    background: #f8f9fa;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.lugal_product_image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.lugal_product_no_image {
+    font-size: 64px;
+    opacity: 0.3;
+}
+
+.lugal_product_info {
+    padding: 16px;
+}
+
+.lugal_product_name {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.lugal_product_code {
+    font-size: 12px;
+    color: #6c757d;
+    margin-bottom: 8px;
+}
+
+.lugal_product_price {
+    font-size: 18px;
+    font-weight: 700;
+    color: #28a745;
+    margin-bottom: 8px;
+}
+
+.lugal_product_qty {
+    font-size: 13px;
+}
+
+/* ============ Admin Panel ============ */
+.lugal_admin_container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.lugal_stat_box {
+    text-align: center;
+    padding: 20px;
+    background: #f8f9fa;
+    border-radius: 8px;
+}
+
+.lugal_stat_value {
+    font-size: 32px;
+    font-weight: 700;
+    color: #667eea;
+}
+
+.lugal_stat_label {
+    font-size: 14px;
+    color: #6c757d;
+    margin-top: 8px;
+}
+
+/* ============ Responsive ============ */
+@media (max-width: 768px) {
+    .lugal_chat_container {
+        height: 100vh;
+        border-radius: 0;
+    }
+    
+    .lugal_chat_message_content {
+        max-width: 85%;
+    }
+    
+    .lugal_product_grid {
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    }
+    
+    .lugal_product_filters {
+        flex-direction: column;
+    }
+}
+
