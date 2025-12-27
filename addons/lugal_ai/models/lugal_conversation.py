@@ -212,14 +212,15 @@ class LugalConversation(models.Model):
             specific_product_keywords = [
                 'كم عدد', 'how many', 'عن منتج', 'about product', 'معلومات عن', 'info about',
                 'معلومات منتج', 'product info', 'تفاصيل', 'details', 'أرني', 'show me',
-                'اعرض', 'display', 'list', 'قائمة', 'ابحث', 'search'
+                'اعرض', 'display', 'list', 'قائمة', 'ابحث', 'search', 'كود', 'code',
+                'ما معلومات', 'what info', 'what is', 'ما هو', 'ما هي'
             ]
             
             # Check if question is too short or generic (1-2 words only with no context)
             question_words = question_lower.split()
             is_too_generic = len(question_words) <= 2 and not any(keyword in question_lower for keyword in specific_product_keywords)
             
-            # Extract potential product names (3+ chars that aren't common words)
+            # Extract potential product names - be smarter about it
             common_words = [
                 'منتج', 'منتجات', 'product', 'products',
                 'في', 'كل', 'the', 'in', 'على', 'عن', 'من', 'إلى', 
@@ -227,12 +228,51 @@ class LugalConversation(models.Model):
                 'تعرف', 'لدينا', 'لدينا؟', 'عندنا', 'عندك',
                 'موجود', 'موجودة', 'have', 'has', 'know',
                 'كم', 'how', 'many', 'much', 'عدد', 'number',
-                'ممكن', 'اريد', 'want', 'need', 'يرجى', 'please'
+                'ممكن', 'اريد', 'want', 'need', 'يرجى', 'please',
+                'معلومات', 'information', 'info', 'تفاصيل', 'details',
+                'كود', 'code', 'اسم', 'name', 'سعر', 'price'
             ]
+            
+            # Extract product name more intelligently
             potential_product_names = []
-            for word in question_words:
-                if len(word) > 2 and word not in common_words:
-                    potential_product_names.append(word)
+            
+            # Pattern 1: "معلومات عن X" or "info about X"
+            if 'معلومات عن' in question_lower:
+                product_part = question_lower.split('معلومات عن')[-1].strip()
+                # Clean up the extracted part
+                product_part = product_part.replace('منتج', '').replace('?', '').replace('؟', '').strip()
+                if product_part:
+                    potential_product_names = [product_part]
+                    _logger.info(f"🎯 Extracted from 'معلومات عن': {product_part}")
+            
+            elif 'info about' in question_lower:
+                product_part = question_lower.split('info about')[-1].strip()
+                product_part = product_part.replace('product', '').replace('?', '').strip()
+                if product_part:
+                    potential_product_names = [product_part]
+                    _logger.info(f"🎯 Extracted from 'info about': {product_part}")
+            
+            # Pattern 2: "كود X" or "code Y"
+            elif 'كود ' in question_lower or 'code ' in question_lower:
+                for word in question_words:
+                    # Look for codes (alphanumeric)
+                    if any(c.isdigit() for c in word) and len(word) >= 4:
+                        potential_product_names.append(word.upper())  # Codes usually uppercase
+                        _logger.info(f"🔢 Found potential code: {word.upper()}")
+            
+            # Pattern 3: Direct product name mention (first check for codes in the question)
+            elif not potential_product_names:
+                # First, look for product codes (ADF00016 format)
+                for word in question_words:
+                    if (any(c.isdigit() for c in word) and any(c.isalpha() for c in word) and len(word) >= 5):
+                        potential_product_names.append(word)
+                        _logger.info(f"🔢 Found product code in question: {word}")
+                
+                # If no codes found, extract meaningful words
+                if not potential_product_names:
+                    for word in question_words:
+                        if len(word) > 2 and word not in common_words:
+                            potential_product_names.append(word)
             
             # Only trigger if we have specific product keywords OR a product name
             is_product_question = any(word in question_lower for word in product_keywords)
@@ -281,16 +321,32 @@ class LugalConversation(models.Model):
                     
                     # Only search for specific products if we have actual product names
                     if specific_product_names:
-                        # Specific product search
-                        product_domain = ['|', '|',
-                            ('name', 'ilike', ' '.join(specific_product_names)),
-                            ('default_code', 'ilike', ' '.join(specific_product_names)),
-                            ('active', '=', True)
-                        ]
-                        _logger.info(f"🔎 Searching for specific products: {' '.join(specific_product_names)}")
+                        # Build search for name OR code
+                        search_term = ' '.join(specific_product_names)
+                        
+                        # Check if it looks like a product code (contains numbers/letters mix)
+                        looks_like_code = any(c.isdigit() for c in search_term) and any(c.isalpha() for c in search_term)
+                        
+                        if looks_like_code:
+                            # Prioritize code search
+                            product_domain = ['|', '|', '|',
+                                ('default_code', '=ilike', search_term),  # Exact match first
+                                ('default_code', 'ilike', search_term),
+                                ('name', 'ilike', search_term),
+                                ('active', '=', True)
+                            ]
+                            _logger.info(f"🔢 Searching for product CODE: {search_term}")
+                        else:
+                            # Name search
+                            product_domain = ['|', '|',
+                                ('name', 'ilike', search_term),
+                                ('default_code', 'ilike', search_term),
+                                ('active', '=', True)
+                            ]
+                            _logger.info(f"🔎 Searching for product NAME: {search_term}")
                     else:
                         # General product question - get sample of products
-                        _logger.info(f"🔎 General product question - getting product sample")
+                        _logger.info(f"🔎 General product question - getting sample of products")
                     
                     _logger.info(f"🔍 Searching products with domain: {product_domain}")
                     
