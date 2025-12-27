@@ -808,6 +808,54 @@ class LugalConversation(models.Model):
         
         return data
     
+    def _clean_ai_response(self, response_text):
+        """Clean AI response - remove JSON formatting if present"""
+        if not response_text:
+            return response_text
+        
+        text = response_text.strip()
+        
+        # Check if response is wrapped in JSON
+        if text.startswith('{') and text.endswith('}'):
+            try:
+                # Try to parse as JSON
+                import json
+                data = json.loads(text)
+                
+                # Extract the actual answer from common JSON patterns
+                if isinstance(data, dict):
+                    # Try different keys
+                    for key in ['answer', 'response', 'text', 'message', 'reply']:
+                        if key in data:
+                            _logger.info(f"🔧 Extracted text from JSON key '{key}'")
+                            return data[key]
+                
+                # If we can't extract, log and return original
+                _logger.warning(f"⚠️ Response is JSON but couldn't extract text")
+                return text
+            except:
+                # Not valid JSON, return as is
+                pass
+        
+        # Check if wrapped in ```json code blocks
+        if '```json' in text or '```' in text:
+            # Remove code block markers
+            text = text.replace('```json', '').replace('```', '').strip()
+            _logger.info(f"🔧 Removed code block markers")
+            
+            # Try to parse again
+            if text.startswith('{'):
+                try:
+                    data = json.loads(text)
+                    if isinstance(data, dict):
+                        for key in ['answer', 'response', 'text', 'message', 'reply']:
+                            if key in data:
+                                return data[key]
+                except:
+                    pass
+        
+        return text
+    
     def _build_prompt(self, question, role, odoo_data):
         """Build enriched prompt with Odoo data"""
         prompt_parts = []
@@ -1106,6 +1154,12 @@ class LugalConversation(models.Model):
         prompt_parts.append("- أجب بنفس لغة السؤال (عربي/إنجليزي)")
         prompt_parts.append("- كن واضحاً ومحدداً ومفيداً")
         prompt_parts.append("- لا تذكر 'قاعدة البيانات' أو 'Odoo' - تحدث بشكل طبيعي")
+        prompt_parts.append("")
+        prompt_parts.append("⚠️ مهم جداً:")
+        prompt_parts.append("- أجب بنص عادي فقط (Plain Text)")
+        prompt_parts.append("- لا ترد بـ JSON أو أي تنسيق برمجي")
+        prompt_parts.append("- استخدم أسطر جديدة ونقاط وترقيم عادي")
+        prompt_parts.append("- اكتب كأنك تتحدث مع شخص مباشرة")
         
         final_prompt = "\n".join(prompt_parts)
         _logger.info(f"📝 Built prompt with {len(final_prompt)} characters, {len(final_prompt.split())} words")
@@ -1165,10 +1219,19 @@ class LugalConversation(models.Model):
 - كن محترفاً ومفيداً دائماً
 - أجب بنفس لغة السؤال (عربي أو إنجليزي)
 
+⚠️ تنسيق الرد (مهم جداً):
+- أجب بنص عادي فقط (Plain Text) - بدون JSON
+- لا تضع الرد في أقواس {} أو []
+- استخدم أسطر جديدة عادية للتنسيق
+- استخدم * أو - للنقاط
+- استخدم أرقام عادية للترقيم (1. 2. 3.)
+- اكتب مباشرة كأنك تتحدث مع شخص
+
 🚫 ممنوع:
 - ذكر "قاعدة البيانات" أو "النظام" أو "Odoo"
 - اختراع أرقام أو بيانات غير موجودة
 - الرد بطريقة غير ودية أو جافة
+- الرد بـ JSON أو تنسيق برمجي
 """
             
             model = genai.GenerativeModel(
@@ -1184,6 +1247,10 @@ class LugalConversation(models.Model):
             response = model.generate_content(enriched_prompt)
             answer = response.text
             _logger.info(f"✅ Got response from Gemini: {len(answer)} characters")
+            
+            # Clean up response - remove JSON formatting if present
+            answer = self._clean_ai_response(answer)
+            _logger.info(f"✅ Cleaned response: {len(answer)} characters")
             
             # Calculate response time
             response_time = int((datetime.now() - start_time).total_seconds() * 1000)
