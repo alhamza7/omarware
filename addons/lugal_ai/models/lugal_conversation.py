@@ -787,10 +787,6 @@ class LugalConversation(models.Model):
                     else:
                         # For other models, show formatted data
                         prompt_parts.append(json.dumps(data[:20], ensure_ascii=False, indent=2))
-                    
-                    else:
-                        # For other models, show formatted data
-                        prompt_parts.append(json.dumps(data[:20], ensure_ascii=False, indent=2))
         else:
             prompt_parts.append("⚠️ لم يتم العثور على بيانات محددة.")
         
