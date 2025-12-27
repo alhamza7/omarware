@@ -236,8 +236,21 @@ class LugalConversation(models.Model):
             # Extract product name more intelligently
             potential_product_names = []
             
+            # Pattern 0: Direct product name - "منتج X" or "product X"
+            if question_lower.strip().startswith('منتج '):
+                product_name = question_lower.replace('منتج', '').strip()
+                if product_name:
+                    potential_product_names = [product_name]
+                    _logger.info(f"🎯 Direct product: {product_name}")
+            
+            elif question_lower.strip().startswith('product '):
+                product_name = question_lower.replace('product', '').strip()
+                if product_name:
+                    potential_product_names = [product_name]
+                    _logger.info(f"🎯 Direct product: {product_name}")
+            
             # Pattern 1: "معلومات عن X" or "info about X"
-            if 'معلومات عن' in question_lower:
+            elif 'معلومات عن' in question_lower:
                 product_part = question_lower.split('معلومات عن')[-1].strip()
                 # Clean up the extracted part
                 product_part = product_part.replace('منتج', '').replace('?', '').replace('؟', '').strip()
@@ -274,20 +287,54 @@ class LugalConversation(models.Model):
                         if len(word) > 2 and word not in common_words:
                             potential_product_names.append(word)
             
-            # Only trigger if we have specific product keywords OR a product name
+            # Determine if this is a product question
             is_product_question = any(word in question_lower for word in product_keywords)
             has_specific_intent = any(word in question_lower for word in specific_product_keywords)
             
-            # Filter out if too generic AND no specific intent
-            if is_too_generic and not has_specific_intent and len(potential_product_names) <= 1:
+            # Special case: If question is short (1-4 words) with potential product names, assume it's a direct product search
+            # But exclude greetings and common questions
+            greeting_words = ['السلام', 'عليكم', 'hello', 'hi', 'مرحبا', 'كيف', 'how', 'شكرا', 'thanks', 'وداعا', 'bye']
+            is_likely_greeting = any(word in question_lower for word in greeting_words)
+            
+            is_direct_product_search = (
+                len(question_words) <= 4 and 
+                len(potential_product_names) > 0 and
+                not is_likely_greeting
+            )
+            
+            # Also check if the ENTIRE question is just a product code (like "ADF00016")
+            is_just_a_code = (
+                len(question_words) == 1 and
+                len(question_words[0]) >= 5 and
+                any(c.isdigit() for c in question_words[0]) and
+                any(c.isalpha() for c in question_words[0])
+            )
+            
+            # Special case: Question starts with "منتج" = direct product search
+            starts_with_product = question_lower.strip().startswith('منتج ') or question_lower.strip().startswith('product ')
+            
+            # If direct search, just a code, or starts with "منتج", force it to be a product question
+            if is_direct_product_search or starts_with_product or is_just_a_code:
+                is_product_question = True
+                has_specific_intent = True
+                if is_just_a_code:
+                    _logger.info(f"🔢 Product code search detected: {question_words[0]}")
+                    # Make sure the code is in potential_product_names
+                    if not potential_product_names:
+                        potential_product_names = [question_words[0].upper()]
+                else:
+                    _logger.info(f"🎯 Direct product search detected!")
+            
+            # Filter out if too generic AND no specific intent AND not a direct search
+            elif is_too_generic and not has_specific_intent and len(potential_product_names) <= 1:
                 is_product_question = False
                 _logger.info(f"⚠️ Question too generic, treating as general conversation")
             
             # Only search if it's clearly a product question
-            if is_product_question:
+            elif is_product_question:
                 is_product_question = has_specific_intent or len(potential_product_names) > 0
             
-            _logger.info(f"🛍️ Is product question: {is_product_question}, has_intent: {has_specific_intent}, potential_products: {potential_product_names}")
+            _logger.info(f"🛍️ Is product question: {is_product_question}, has_intent: {has_specific_intent}, direct_search: {is_direct_product_search}, potential_products: {potential_product_names}")
             
             if is_product_question:
                 _logger.info(f"📦 Starting product data collection...")
@@ -397,6 +444,31 @@ class LugalConversation(models.Model):
                         )
                         _logger.info(f"✅ Found {len(products)} products with basic data")
                     
+                    # If no products found and we have a specific search term, try fuzzy search
+                    if not products and specific_product_names:
+                        _logger.warning(f"⚠️ No exact match, trying fuzzy search...")
+                        search_term = ' '.join(specific_product_names)
+                        # Try searching each word separately
+                        fuzzy_domain = ['|'] * (len(specific_product_names) - 1) if len(specific_product_names) > 1 else []
+                        for word in specific_product_names:
+                            fuzzy_domain.extend([
+                                '|',
+                                ('name', 'ilike', word),
+                                ('default_code', 'ilike', word)
+                            ])
+                        if fuzzy_domain:
+                            fuzzy_domain.append(('active', '=', True))
+                            try:
+                                products = self.env['product.product'].search_read(
+                                    fuzzy_domain,
+                                    ['name', 'default_code', 'list_price', 'qty_available', 'categ_id', 'uom_id', 'barcode'],
+                                    limit=10
+                                )
+                                if products:
+                                    _logger.info(f"✅ Fuzzy search found {len(products)} products")
+                            except:
+                                pass
+                    
                     # Get detailed stock and related info for products
                     if products:
                         product_ids = [p['id'] for p in products]
@@ -476,12 +548,22 @@ class LugalConversation(models.Model):
                             
                             _logger.info(f"📍 Product {product['name']}: {len(product_quants)} locations, {len(product_moves)} movements, {len(product_suppliers)} suppliers, {len(product_sales)} sales")
                     
-                    data['records'].append({
-                        'model': 'product.product',
-                        'count': len(products),
-                        'data': products
-                    })
-                    _logger.info(f"📦 Collected {len(products)} products with stock details for AI")
+                    if products:
+                        data['records'].append({
+                            'model': 'product.product',
+                            'count': len(products),
+                            'data': products
+                        })
+                        _logger.info(f"📦 Collected {len(products)} products with stock details for AI")
+                        _logger.info(f"📋 First product: {products[0].get('name', 'N/A')} (Code: {products[0].get('default_code', 'N/A')})")
+                    else:
+                        # No products found - add empty result to show we searched
+                        data['records'].append({
+                            'model': 'product.product',
+                            'count': 0,
+                            'data': []
+                        })
+                        _logger.warning(f"⚠️ No products found matching the search criteria")
             
             # Check for sales-related questions
             if any(word in question_lower for word in ['مبيعات', 'بيع', 'sales', 'sale', 'order', 'طلب', 'طلبات']):
@@ -714,6 +796,9 @@ class LugalConversation(models.Model):
                         # Check if we have detailed data or just basic
                         has_detailed_data = any('stock_by_location' in p or 'recent_movements' in p for p in data[:5])
                         
+                        # Check if this is a search for a specific product (count is low)
+                        is_specific_product_search = count <= 5
+                        
                         # If just asking for count, show minimal info
                         if asking_for_count:
                             prompt_parts.append(f"\n📦 إجمالي عدد المنتجات: {count}")
@@ -722,16 +807,21 @@ class LugalConversation(models.Model):
                                 prompt_parts.append(f"{idx}. {product.get('name', 'N/A')} (كود: {product.get('default_code', 'N/A')})")
                             if count > 10:
                                 prompt_parts.append(f"\n... و {count - 10} منتجات أخرى")
-                        elif has_detailed_data:
-                            prompt_parts.append("\n📦 تفاصيل المنتجات الكاملة:")
-                            for idx, product in enumerate(data[:50], 1):  # Show up to 50 products
-                                prompt_parts.append(f"\n{'='*60}")
-                                prompt_parts.append(f"المنتج #{idx}: {product.get('name', 'N/A')}")
-                                prompt_parts.append(f"{'='*60}")
+                        
+                        # If searching for specific product, show FULL details even if basic data
+                        elif is_specific_product_search or has_detailed_data:
+                            if count == 0:
+                                prompt_parts.append("\n⚠️ لم يتم العثور على أي منتج بهذا الاسم أو الكود.")
+                            else:
+                                prompt_parts.append(f"\n📦 {'تفاصيل المنتج' if count == 1 else f'تفاصيل المنتجات ({count} منتج)'}:")
+                                for idx, product in enumerate(data[:10], 1):  # Show up to 10 for specific search
+                                    prompt_parts.append(f"\n{'='*60}")
+                                    prompt_parts.append(f"{'المنتج' if count == 1 else f'المنتج #{idx}'}: {product.get('name', 'N/A')}")
+                                    prompt_parts.append(f"{'='*60}")
                         else:
-                            # Simplified view for basic data
-                            prompt_parts.append("\n📦 معلومات المنتجات:")
-                            for idx, product in enumerate(data[:50], 1):  # Show up to 50 products
+                            # Simplified view for basic data with many products
+                            prompt_parts.append(f"\n📦 معلومات المنتجات (وجد {count} منتج):")
+                            for idx, product in enumerate(data[:20], 1):  # Show up to 20 products
                                 prompt_parts.append(f"\n{idx}. {product.get('name', 'N/A')}")
                             # Skip all details if just asking for count
                             if asking_for_count:
@@ -1006,18 +1096,37 @@ class LugalConversation(models.Model):
         prompt_parts.append("=" * 50)
         prompt_parts.append("")
         prompt_parts.append("✅ تعليمات الإجابة:")
-        prompt_parts.append("1. إذا كانت البيانات متوفرة، أجب بناءً عليها فقط")
-        prompt_parts.append("2. إذا لم تكن البيانات متوفرة:")
-        prompt_parts.append("   - إذا كان السؤال تحية أو محادثة عامة، رد بشكل ودي ومهذب")
-        prompt_parts.append("   - إذا كان السؤال يطلب معلومات محددة، اذكر أنك بحاجة لمزيد من التفاصيل")
-        prompt_parts.append("   - إذا كان السؤال عن دعم أو مساعدة، قدم المساعدة المناسبة")
-        prompt_parts.append("3. أجب بنفس لغة السؤال (عربي/إنجليزي)")
-        prompt_parts.append("4. كن ودوداً ومحترفاً ومفيداً")
-        prompt_parts.append("5. أنت مساعد ذكي لنظام Odoo - يمكنك المساعدة في:")
-        prompt_parts.append("   - معلومات عن المنتجات والمخزون")
-        prompt_parts.append("   - معلومات عن المبيعات والعملاء")
-        prompt_parts.append("   - معلومات عن الفواتير والطلبات")
-        prompt_parts.append("   - الرد على الاستفسارات العامة والتحيات")
+        prompt_parts.append("")
+        
+        # Check if this looks like specific product search
+        has_product_data = any(r.get('model') in ['product.product', 'product.count'] for r in odoo_data.get('records', []))
+        product_count = next((r.get('count', 0) for r in odoo_data.get('records', []) if r.get('model') == 'product.product'), 0)
+        
+        if has_product_data and product_count <= 5 and product_count > 0:
+            # Specific product search - give detailed instructions
+            prompt_parts.append("⚠️ هذا سؤال محدد عن منتج أو منتجات معينة:")
+            prompt_parts.append("1. اعرض جميع التفاصيل المتوفرة عن المنتج/المنتجات")
+            prompt_parts.append("2. اذكر: الاسم، الكود، السعر، الكمية، والمخازن (إن وجدت)")
+            prompt_parts.append("3. إذا كان المنتج واحد فقط، اعرض كل تفاصيله بشكل مفصل")
+            prompt_parts.append("4. رتب المعلومات بشكل واضح ومنظم")
+        elif has_product_data and product_count == 0:
+            prompt_parts.append("⚠️ لم يتم العثور على المنتج المطلوب:")
+            prompt_parts.append("1. أخبر المستخدم أنه لم يتم العثور على منتج بهذا الاسم أو الكود")
+            prompt_parts.append("2. اقترح التحقق من الاسم أو الكود")
+            prompt_parts.append("3. يمكنك اقتراح طلب قائمة بالمنتجات المتوفرة")
+        else:
+            # General instructions
+            prompt_parts.append("1. إذا كانت البيانات متوفرة، أجب بناءً عليها فقط")
+            prompt_parts.append("2. إذا لم تكن البيانات متوفرة:")
+            prompt_parts.append("   - إذا كان السؤال تحية أو محادثة عامة، رد بشكل ودي ومهذب")
+            prompt_parts.append("   - إذا كان السؤال يطلب معلومات محددة، قدم ما لديك أو اطلب توضيح")
+            prompt_parts.append("   - إذا كان السؤال عن دعم أو مساعدة، قدم المساعدة المناسبة")
+        
+        prompt_parts.append("")
+        prompt_parts.append("📌 قواعد عامة:")
+        prompt_parts.append("- أجب بنفس لغة السؤال (عربي/إنجليزي)")
+        prompt_parts.append("- كن واضحاً ومحدداً ومفيداً")
+        prompt_parts.append("- لا تذكر 'قاعدة البيانات' أو 'Odoo' - تحدث بشكل طبيعي")
         
         final_prompt = "\n".join(prompt_parts)
         _logger.info(f"📝 Built prompt with {len(final_prompt)} characters, {len(final_prompt.split())} words")
