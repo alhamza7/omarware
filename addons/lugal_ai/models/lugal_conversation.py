@@ -207,7 +207,7 @@ class LugalConversation(models.Model):
             conversation.write({
                 'answer': answer,
                 'response_time_ms': response_time,
-                'category': 'general'
+                'category': 'operational'
             })
             
             return {
@@ -216,7 +216,7 @@ class LugalConversation(models.Model):
                 'conversation_id': conversation.id,
                 'response_time_ms': response_time,
                 'was_cached': False,
-                'category': 'general'
+                'category': 'operational'
             }
             
         except Exception as e:
