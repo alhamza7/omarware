@@ -56,10 +56,6 @@ class LugalCache(models.Model):
                                          help='Tokens saved by using cache instead of API')
     saved_output_tokens = fields.Integer(string='Saved Output Tokens')
     
-    _sql_constraints = [
-        ('cache_key_unique', 'unique(cache_key)', 'Cache key must be unique!')
-    ]
-    
     @api.depends('expires_at')
     def _compute_is_expired(self):
         now = fields.Datetime.now()

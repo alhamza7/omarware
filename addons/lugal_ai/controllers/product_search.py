@@ -10,7 +10,7 @@ _logger = logging.getLogger(__name__)
 
 class ProductSearchController(http.Controller):
     
-    @http.route('/lugal/api/products/search', type='json', auth='user', methods=['POST'], csrf=False)
+    @http.route('/lugal/api/products/search', type='jsonrpc', auth='user', methods=['POST'], csrf=False)
     def search_products(self, query='', filters=None, limit=50, **kwargs):
         """
         POS-style product search with AI assistance
@@ -142,7 +142,7 @@ Response:"""
         
         return None
     
-    @http.route('/lugal/api/products/details', type='json', auth='user', methods=['POST'], csrf=False)
+    @http.route('/lugal/api/products/details', type='jsonrpc', auth='user', methods=['POST'], csrf=False)
     def get_product_details(self, product_id, **kwargs):
         """Get detailed product information with AI insights"""
         try:
@@ -250,7 +250,7 @@ Response:"""
         except:
             return None
     
-    @http.route('/lugal/api/products/categories', type='json', auth='user', methods=['POST'], csrf=False)
+    @http.route('/lugal/api/products/categories', type='jsonrpc', auth='user', methods=['POST'], csrf=False)
     def get_categories(self, **kwargs):
         """Get product categories"""
         try:
@@ -298,7 +298,7 @@ Response:"""
             _logger.warning(f"Error getting SAP data: {str(e)}")
             return None
     
-    @http.route('/lugal/api/products/ask', type='json', auth='user', methods=['POST'], csrf=False)
+    @http.route('/lugal/api/products/ask', type='jsonrpc', auth='user', methods=['POST'], csrf=False)
     def ask_about_products(self, question, **kwargs):
         """Ask AI questions about products"""
         try:

@@ -138,7 +138,6 @@
                                         <tr t-if="state.selectedProduct.sales_stats">
                                             <th>Total Sold:</th>
                                             <td t-esc="formatNumber(state.selectedProduct.sales_stats.total_sold)"/>
-                                            </td>
                                         </tr>
                                     </table>
                                     

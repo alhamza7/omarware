@@ -11,7 +11,7 @@ _logger = logging.getLogger(__name__)
 
 class GeminiAPIController(http.Controller):
     
-    @http.route('/lugal/api/ask', type='json', auth='user', methods=['POST'], csrf=False)
+    @http.route('/lugal/api/ask', type='jsonrpc', auth='user', methods=['POST'], csrf=False)
     def ask_question(self, question, context=None, **kwargs):
         """
         Main API endpoint for asking questions to Lugal AI
@@ -308,7 +308,7 @@ class GeminiAPIController(http.Controller):
                 'error': str(e),
             }
     
-    @http.route('/lugal/api/rate', type='json', auth='user', methods=['POST'], csrf=False)
+    @http.route('/lugal/api/rate', type='jsonrpc', auth='user', methods=['POST'], csrf=False)
     def rate_conversation(self, conversation_id, rating, feedback=None, **kwargs):
         """Rate a conversation"""
         try:

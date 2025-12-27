@@ -18,7 +18,7 @@ class ChatController(http.Controller):
             'role': request.env['lugal.permission'].get_user_role(),
         })
     
-    @http.route('/lugal/api/chat/history', type='json', auth='user', methods=['POST'], csrf=False)
+    @http.route('/lugal/api/chat/history', type='jsonrpc', auth='user', methods=['POST'], csrf=False)
     def get_chat_history(self, limit=50, offset=0, **kwargs):
         """Get user's conversation history"""
         try:
@@ -47,7 +47,7 @@ class ChatController(http.Controller):
             _logger.error(f"Error getting chat history: {str(e)}")
             return {'success': False, 'error': str(e)}
     
-    @http.route('/lugal/api/chat/stats', type='json', auth='user', methods=['POST'], csrf=False)
+    @http.route('/lugal/api/chat/stats', type='jsonrpc', auth='user', methods=['POST'], csrf=False)
     def get_user_stats(self, days=30, **kwargs):
         """Get user's usage statistics"""
         try:
