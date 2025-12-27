@@ -275,11 +275,33 @@
 .message-text {
     line-height: 1.8;
     word-wrap: break-word;
+    margin: 0;
+    padding: 0;
+}
+
+/* Pre tag styling for formatted messages */
+pre.message-text {
+    font-family: 'Segoe UI', 'Cairo', Tahoma, Arial, sans-serif !important;
+    font-size: 14px;
+    line-height: 1.8;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    background: transparent !important;
+    border: none !important;
+    margin: 0;
+    padding: 0;
+    direction: rtl;
+    text-align: right;
+}
+
+.ai-message pre.message-text {
+    direction: inherit;
+    text-align: inherit;
 }
 
 /* Formatted text elements */
 .formatted-text {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-family: 'Segoe UI', 'Cairo', Tahoma, Geneva, Verdana, sans-serif;
 }
 
 .bullet-item {

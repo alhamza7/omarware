@@ -212,45 +212,6 @@ export class LugalChatComponent extends Component {
     clearChat() {
         this.state.messages = [];
     }
-    
-    formatMessage(text) {
-        if (!text) return '';
-        
-        // Convert markdown-style formatting to HTML
-        let formatted = text;
-        
-        // Escape HTML first to prevent XSS
-        const escapeHtml = (str) => {
-            const div = document.createElement('div');
-            div.textContent = str;
-            return div.innerHTML;
-        };
-        
-        formatted = escapeHtml(formatted);
-        
-        // Convert line breaks to <br>
-        formatted = formatted.replace(/\n/g, '<br>');
-        
-        // Convert bullets (* item) to proper list
-        formatted = formatted.replace(/\* (.+?)(<br>|$)/g, '<div class="bullet-item">• $1</div>');
-        
-        // Convert numbered lists (1. item)
-        formatted = formatted.replace(/(\d+)\. (.+?)(<br>)/g, '<div class="numbered-item"><strong>$1.</strong> $2</div><br>');
-        
-        // Make dividers
-        formatted = formatted.replace(/={3,}/g, '<hr class="my-2" style="border-color: #ddd;">');
-        
-        // Highlight product codes (ADF00XXX, EXP00XXX, etc.)
-        formatted = formatted.replace(/\b([A-Z]{2,}\d{5,})\b/g, '<code class="product-code badge bg-secondary">$1</code>');
-        
-        // Make emojis stand out
-        formatted = formatted.replace(/([\u{1F300}-\u{1F9FF}])/gu, '<span class="emoji" style="font-size: 1.2em;">$1</span>');
-        
-        // Format sections with icons (🏷️, 💰, 📊, etc.)
-        formatted = formatted.replace(/(🏷️|💰|📊|🏭|🏪|📦|💼|📄|👥|🔢) (.+?):/g, '<div class="section-header"><strong>$1 $2:</strong></div>');
-        
-        return formatted;
-    }
 }
 
 LugalChatComponent.template = "lugal_ai.LugalChatTemplate";
