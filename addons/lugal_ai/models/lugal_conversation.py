@@ -274,18 +274,21 @@ class LugalConversation(models.Model):
                         _logger.info(f"🔢 Found potential code: {word.upper()}")
             
             # Pattern 3: Direct product name mention (first check for codes in the question)
-            elif not potential_product_names:
+            if not potential_product_names:
                 # First, look for product codes (ADF00016 format)
                 for word in question_words:
                     if (any(c.isdigit() for c in word) and any(c.isalpha() for c in word) and len(word) >= 5):
                         potential_product_names.append(word)
                         _logger.info(f"🔢 Found product code in question: {word}")
                 
-                # If no codes found, extract meaningful words
+                # If no codes found, extract ALL meaningful words (even if just one word like "لاكوست")
                 if not potential_product_names:
-                    for word in question_words:
-                        if len(word) > 2 and word not in common_words:
-                            potential_product_names.append(word)
+                    # Join all non-common words together
+                    meaningful_words = [word for word in question_words if len(word) > 2 and word not in common_words]
+                    if meaningful_words:
+                        # Use the whole phrase if multiple words, or single word if alone
+                        potential_product_names = meaningful_words
+                        _logger.info(f"📝 Extracted potential product name(s): {meaningful_words}")
             
             # Determine if this is a product question
             is_product_question = any(word in question_lower for word in product_keywords)
@@ -293,13 +296,16 @@ class LugalConversation(models.Model):
             
             # Special case: If question is short (1-4 words) with potential product names, assume it's a direct product search
             # But exclude greetings and common questions
-            greeting_words = ['السلام', 'عليكم', 'hello', 'hi', 'مرحبا', 'كيف', 'how', 'شكرا', 'thanks', 'وداعا', 'bye']
+            greeting_words = ['السلام', 'عليكم', 'hello', 'hi', 'مرحبا', 'كيف', 'how', 'شكرا', 'thanks', 'وداعا', 'bye', 'صباح', 'مساء', 'good', 'morning']
+            common_questions = ['نعم', 'لا', 'yes', 'no', 'ok', 'حسنا', 'تمام', 'طيب']
             is_likely_greeting = any(word in question_lower for word in greeting_words)
+            is_common_reply = any(word == question_lower.strip() for word in common_questions)
             
             is_direct_product_search = (
                 len(question_words) <= 4 and 
                 len(potential_product_names) > 0 and
-                not is_likely_greeting
+                not is_likely_greeting and
+                not is_common_reply
             )
             
             # Also check if the ENTIRE question is just a product code (like "ADF00016")
@@ -310,11 +316,20 @@ class LugalConversation(models.Model):
                 any(c.isalpha() for c in question_words[0])
             )
             
+            # Check if it's just a product name (1-2 words, not greeting, looks like a product name)
+            is_just_product_name = (
+                len(question_words) <= 2 and
+                len(question_words[0]) >= 3 and  # At least 3 characters
+                not is_likely_greeting and
+                not is_common_reply and
+                len(potential_product_names) > 0
+            )
+            
             # Special case: Question starts with "منتج" = direct product search
             starts_with_product = question_lower.strip().startswith('منتج ') or question_lower.strip().startswith('product ')
             
-            # If direct search, just a code, or starts with "منتج", force it to be a product question
-            if is_direct_product_search or starts_with_product or is_just_a_code:
+            # If direct search, just a code, just a name, or starts with "منتج", force it to be a product question
+            if is_direct_product_search or starts_with_product or is_just_a_code or is_just_product_name:
                 is_product_question = True
                 has_specific_intent = True
                 if is_just_a_code:
@@ -322,17 +337,21 @@ class LugalConversation(models.Model):
                     # Make sure the code is in potential_product_names
                     if not potential_product_names:
                         potential_product_names = [question_words[0].upper()]
+                elif is_just_product_name:
+                    _logger.info(f"🏷️ Direct product name search: {' '.join(potential_product_names)}")
                 else:
                     _logger.info(f"🎯 Direct product search detected!")
             
-            # Filter out if too generic AND no specific intent AND not a direct search
-            elif is_too_generic and not has_specific_intent and len(potential_product_names) <= 1:
-                is_product_question = False
-                _logger.info(f"⚠️ Question too generic, treating as general conversation")
+            # REMOVE the generic filter - if we have potential product names, search for them!
+            # The old logic was too restrictive
             
-            # Only search if it's clearly a product question
-            elif is_product_question:
-                is_product_question = has_specific_intent or len(potential_product_names) > 0
+            # If we have potential product names but no explicit product keywords, still search
+            if len(potential_product_names) > 0 and not is_product_question:
+                # Check if it's likely a product search (not a greeting)
+                if not is_likely_greeting and not is_common_reply:
+                    is_product_question = True
+                    has_specific_intent = True
+                    _logger.info(f"🔄 No explicit product keywords, but have potential names - treating as product search")
             
             _logger.info(f"🛍️ Is product question: {is_product_question}, has_intent: {has_specific_intent}, direct_search: {is_direct_product_search}, potential_products: {potential_product_names}")
             
@@ -366,34 +385,60 @@ class LugalConversation(models.Model):
                     generic_words = ['المنتجات', 'منتجات', 'منتج', 'products', 'product', 'عدد', 'كمية', 'how', 'many', 'what', 'where']
                     specific_product_names = [word for word in potential_product_names if word not in generic_words]
                     
-                    # Only search for specific products if we have actual product names
+                    _logger.info(f"🔍 After filtering: potential_product_names={potential_product_names}, specific_product_names={specific_product_names}")
+                    
+                    # Search for products based on extracted names  
                     if specific_product_names:
                         # Build search for name OR code
                         search_term = ' '.join(specific_product_names)
                         
+                        # Clean up the search term
+                        search_term_clean = search_term.strip().replace('؟', '').replace('?', '')
+                        
                         # Check if it looks like a product code (contains numbers/letters mix)
-                        looks_like_code = any(c.isdigit() for c in search_term) and any(c.isalpha() for c in search_term)
+                        looks_like_code = any(c.isdigit() for c in search_term_clean) and any(c.isalpha() for c in search_term_clean)
                         
                         if looks_like_code:
                             # Prioritize code search
                             product_domain = ['|', '|', '|',
-                                ('default_code', '=ilike', search_term),  # Exact match first
-                                ('default_code', 'ilike', search_term),
-                                ('name', 'ilike', search_term),
+                                ('default_code', '=ilike', search_term_clean),  # Exact match first
+                                ('default_code', 'ilike', search_term_clean),
+                                ('name', 'ilike', search_term_clean),
                                 ('active', '=', True)
                             ]
-                            _logger.info(f"🔢 Searching for product CODE: {search_term}")
+                            _logger.info(f"🔢 Searching for product CODE: {search_term_clean}")
                         else:
                             # Name search
-                            product_domain = ['|', '|',
-                                ('name', 'ilike', search_term),
-                                ('default_code', 'ilike', search_term),
-                                ('active', '=', True)
-                            ]
-                            _logger.info(f"🔎 Searching for product NAME: {search_term}")
+                            if len(specific_product_names) == 1:
+                                # Single word search - very flexible
+                                product_domain = ['|',
+                                    ('name', 'ilike', search_term_clean),
+                                    ('default_code', 'ilike', search_term_clean),
+                                    ('active', '=', True)
+                                ]
+                                _logger.info(f"🔎 Searching for product NAME (single word): '{search_term_clean}'")
+                            else:
+                                # Multiple words - search for phrase first, then individual words
+                                product_domain = ['|', '|',
+                                    ('name', 'ilike', search_term_clean),  # Try full phrase first
+                                    ('default_code', 'ilike', search_term_clean),
+                                    ('active', '=', True)
+                                ]
+                                _logger.info(f"🔎 Searching for product NAME (phrase): '{search_term_clean}'")
+                    
+                    elif potential_product_names:
+                        # Fall back to using potential names if specific names are empty
+                        search_term = ' '.join(potential_product_names).strip()
+                        product_domain = ['|',
+                            ('name', 'ilike', search_term),
+                            ('default_code', 'ilike', search_term),
+                            ('active', '=', True)
+                        ]
+                        _logger.info(f"🔎 Fallback search using potential names: '{search_term}'")
+                    
                     else:
-                        # General product question - get sample of products
-                        _logger.info(f"🔎 General product question - getting sample of products")
+                        # No names at all - get sample
+                        _logger.info(f"🔎 No product names - getting product sample")
                     
                     _logger.info(f"🔍 Searching products with domain: {product_domain}")
                     
@@ -793,173 +838,107 @@ class LugalConversation(models.Model):
                         prompt_parts.append(f"\n{count_data.get('message', '')}")
                     
                     elif model_name == 'product.product':
-                        # Check if we have detailed data or just basic
-                        has_detailed_data = any('stock_by_location' in p or 'recent_movements' in p for p in data[:5])
+                        # Check if we have detailed data
+                        has_detailed_data = any('stock_by_location' in p or 'recent_movements' in p for p in data[:5] if p)
                         
-                        # Check if this is a search for a specific product (count is low)
-                        is_specific_product_search = count <= 5
+                        # Check if this is a search for a specific product
+                        is_specific_search = count <= 5
                         
-                        # If just asking for count, show minimal info
-                        if asking_for_count:
-                            prompt_parts.append(f"\n📦 إجمالي عدد المنتجات: {count}")
-                            prompt_parts.append("\nعينة من المنتجات (أول 10):")
+                        # Handle empty results
+                        if count == 0:
+                            prompt_parts.append("\n⚠️ لم يتم العثور على أي منتج بهذا الاسم أو الكود.")
+                            prompt_parts.append("يرجى التحقق من الاسم أو الكود والمحاولة مرة أخرى.")
+                        
+                        # If just asking for count
+                        elif asking_for_count:
+                            prompt_parts.append(f"\n📦 إجمالي عدد المنتجات المطابقة: {count}")
+                            prompt_parts.append("\nعينة من المنتجات:")
                             for idx, product in enumerate(data[:10], 1):
                                 prompt_parts.append(f"{idx}. {product.get('name', 'N/A')} (كود: {product.get('default_code', 'N/A')})")
                             if count > 10:
                                 prompt_parts.append(f"\n... و {count - 10} منتجات أخرى")
                         
-                        # If searching for specific product, show FULL details even if basic data
-                        elif is_specific_product_search or has_detailed_data:
-                            if count == 0:
-                                prompt_parts.append("\n⚠️ لم يتم العثور على أي منتج بهذا الاسم أو الكود.")
-                            else:
-                                prompt_parts.append(f"\n📦 {'تفاصيل المنتج' if count == 1 else f'تفاصيل المنتجات ({count} منتج)'}:")
-                                for idx, product in enumerate(data[:10], 1):  # Show up to 10 for specific search
-                                    prompt_parts.append(f"\n{'='*60}")
-                                    prompt_parts.append(f"{'المنتج' if count == 1 else f'المنتج #{idx}'}: {product.get('name', 'N/A')}")
-                                    prompt_parts.append(f"{'='*60}")
-                        else:
-                            # Simplified view for basic data with many products
-                            prompt_parts.append(f"\n📦 معلومات المنتجات (وجد {count} منتج):")
-                            for idx, product in enumerate(data[:20], 1):  # Show up to 20 products
-                                prompt_parts.append(f"\n{idx}. {product.get('name', 'N/A')}")
-                            # Skip all details if just asking for count
-                            if asking_for_count:
-                                continue
+                        # If specific search (1-5 products), show FULL details
+                        elif is_specific_search:
+                            prompt_parts.append(f"\n📦 {'وجدت منتج واحد' if count == 1 else f'وجدت {count} منتجات'}:")
+                            prompt_parts.append("")
                             
-                            # Basic Info - only if detailed view
-                            if has_detailed_data:
-                                prompt_parts.append("\n🏷️ معلومات أساسية:")
-                                prompt_parts.append(f"  • الكود: {product.get('default_code', 'غير محدد')}")
-                                prompt_parts.append(f"  • الباركود: {product.get('barcode', 'غير محدد')}")
-                                prompt_parts.append(f"  • النوع: {product.get('type', 'N/A')}")
-                                prompt_parts.append(f"  • الحالة: {'نشط' if product.get('active') else 'غير نشط'}")
-                            else:
-                                # Simplified info
+                            for idx, product in enumerate(data, 1):
+                                # Product header
+                                if count > 1:
+                                    prompt_parts.append(f"\n{'='*70}")
+                                    prompt_parts.append(f"المنتج #{idx}: {product.get('name', 'غير محدد')}")
+                                    prompt_parts.append(f"{'='*70}")
+                                else:
+                                    prompt_parts.append(f"المنتج: {product.get('name', 'غير محدد')}")
+                                    prompt_parts.append(f"{'='*70}")
+                                
+                                # الكود والباركود
+                                prompt_parts.append("")
+                                prompt_parts.append("🏷️ التعريف:")
                                 if product.get('default_code'):
-                                    prompt_parts.append(f"   الكود: {product['default_code']}")
+                                    prompt_parts.append(f"  • كود المنتج: {product['default_code']}")
+                                else:
+                                    prompt_parts.append(f"  • كود المنتج: غير محدد")
+                                
                                 if product.get('barcode'):
-                                    prompt_parts.append(f"   الباركود: {product['barcode']}")
-                            
-                            # Category - show in both views
-                            if product.get('categ_id'):
-                                cat_name = product['categ_id'][1] if isinstance(product['categ_id'], (list, tuple)) else str(product['categ_id'])
-                                if has_detailed_data:
+                                    prompt_parts.append(f"  • الباركود: {product['barcode']}")
+                                
+                                # الفئة
+                                if product.get('categ_id'):
+                                    cat_name = product['categ_id'][1] if isinstance(product['categ_id'], (list, tuple)) else str(product['categ_id'])
                                     prompt_parts.append(f"  • الفئة: {cat_name}")
-                                else:
-                                    prompt_parts.append(f"   الفئة: {cat_name}")
-                            
-                            # Pricing
-                            if has_detailed_data:
-                                prompt_parts.append("\n💰 الأسعار:")
+                                
+                                # الأسعار
+                                prompt_parts.append("")
+                                prompt_parts.append("💰 الأسعار:")
                                 prompt_parts.append(f"  • سعر البيع: {product.get('list_price', 0)}")
-                                prompt_parts.append(f"  • التكلفة: {product.get('standard_price', 0)}")
-                                if product.get('currency_id'):
-                                    curr = product['currency_id'][1] if isinstance(product['currency_id'], (list, tuple)) else ''
-                                    prompt_parts.append(f"  • العملة: {curr}")
-                            else:
-                                # Simplified pricing
-                                prompt_parts.append(f"   السعر: {product.get('list_price', 0)}")
-                            
-                            # Stock Quantities
-                            if has_detailed_data:
-                                prompt_parts.append("\n📊 الكميات:")
-                                prompt_parts.append(f"  • المتوفر حالياً: {product.get('qty_available', 0)}")
+                                if product.get('standard_price'):
+                                    prompt_parts.append(f"  • التكلفة: {product.get('standard_price', 0)}")
+                                
+                                # وحدة القياس
+                                if product.get('uom_id'):
+                                    uom = product['uom_id'][1] if isinstance(product['uom_id'], (list, tuple)) else str(product['uom_id'])
+                                    prompt_parts.append(f"  • وحدة القياس: {uom}")
+                                    prompt_parts.append(f"  • السعر لكل {uom}: {product.get('list_price', 0)}")
+                                
+                                # الكميات
+                                prompt_parts.append("")
+                                prompt_parts.append("📊 المخزون:")
+                                prompt_parts.append(f"  • الكمية المتوفرة: {product.get('qty_available', 0)}")
+                                
                                 if product.get('virtual_available') is not None:
-                                    prompt_parts.append(f"  • المتوقع (مع الطلبات): {product.get('virtual_available', 0)}")
-                                if product.get('incoming_qty'):
-                                    prompt_parts.append(f"  • الوارد: {product.get('incoming_qty', 0)}")
-                                if product.get('outgoing_qty'):
-                                    prompt_parts.append(f"  • الصادر: {product.get('outgoing_qty', 0)}")
-                            else:
-                                # Simplified stock
-                                prompt_parts.append(f"   الكمية المتوفرة: {product.get('qty_available', 0)}")
-                            
-                            # Units
-                            if product.get('uom_id'):
-                                uom_name = product['uom_id'][1] if isinstance(product['uom_id'], (list, tuple)) else ''
-                                if has_detailed_data:
-                                    prompt_parts.append(f"  • وحدة القياس: {uom_name}")
-                                else:
-                                    prompt_parts.append(f"   الوحدة: {uom_name}")
-                            
-                            # Stock by Location (detailed) - only in detailed view
-                            if has_detailed_data and 'stock_by_location' in product and product['stock_by_location']:
-                                prompt_parts.append(f"\n🏭 توزيع الكميات في المخازن ({product.get('total_locations', 0)} مخزن):")
-                                for quant in product['stock_by_location']:
-                                    loc_name = quant.get('location_id', ['', 'موقع غير معروف'])[1] if isinstance(quant.get('location_id'), (list, tuple)) else 'موقع غير معروف'
-                                    qty = quant.get('quantity', 0)
-                                    reserved = quant.get('reserved_quantity', 0)
-                                    available = quant.get('available_quantity', 0)
-                                    lot = quant.get('lot_id', ['', ''])[1] if quant.get('lot_id') else 'بدون رقم تسلسلي'
-                                    
-                                    prompt_parts.append(f"  • {loc_name}:")
-                                    prompt_parts.append(f"    - الكمية الكلية: {qty}")
-                                    prompt_parts.append(f"    - محجوز: {reserved}")
-                                    prompt_parts.append(f"    - متاح: {available}")
-                                    if lot != 'بدون رقم تسلسلي':
-                                        prompt_parts.append(f"    - الرقم التسلسلي: {lot}")
-                            
-                            # Suppliers - only in detailed view
-                            if has_detailed_data and 'suppliers' in product and product['suppliers']:
-                                prompt_parts.append(f"\n🏪 الموردين ({len(product['suppliers'])} مورد):")
-                                for supplier in product['suppliers'][:5]:  # Show top 5
-                                    supp_name = supplier.get('partner_id', ['', 'غير معروف'])[1] if isinstance(supplier.get('partner_id'), (list, tuple)) else 'غير معروف'
-                                    price = supplier.get('price', 0)
-                                    min_qty = supplier.get('min_qty', 1)
-                                    delay = supplier.get('delay', 0)
-                                    prompt_parts.append(f"  • {supp_name}:")
-                                    prompt_parts.append(f"    - السعر: {price}")
-                                    prompt_parts.append(f"    - الحد الأدنى للطلب: {min_qty}")
-                                    prompt_parts.append(f"    - مدة التوصيل: {delay} يوم")
-                            
-                            # Recent Movements - only in detailed view
-                            if has_detailed_data and 'recent_movements' in product and product['recent_movements']:
-                                prompt_parts.append(f"\n📦 آخر الحركات ({len(product['recent_movements'])} حركة):")
-                                for move in product['recent_movements'][:5]:  # Show last 5
-                                    date = move.get('date', '')[:10] if move.get('date') else ''
-                                    qty = move.get('product_uom_qty', 0)
-                                    origin = move.get('origin', '') or move.get('reference', 'غير محدد')
-                                    from_loc = move.get('location_id', ['', ''])[1] if isinstance(move.get('location_id'), (list, tuple)) else ''
-                                    to_loc = move.get('location_dest_id', ['', ''])[1] if isinstance(move.get('location_dest_id'), (list, tuple)) else ''
-                                    
-                                    prompt_parts.append(f"  • {date}: {qty} من {from_loc} → {to_loc}")
-                                    if origin and origin != 'غير محدد':
-                                        prompt_parts.append(f"    المرجع: {origin}")
-                            
-                            # Recent Sales - only in detailed view
-                            if has_detailed_data and 'recent_sales' in product and product['recent_sales']:
-                                total_qty = product.get('total_sales_qty', 0)
-                                total_amount = product.get('total_sales_amount', 0)
-                                prompt_parts.append(f"\n💰 المبيعات الأخيرة ({len(product['recent_sales'])} عملية):")
-                                prompt_parts.append(f"  • الكمية المباعة: {total_qty}")
-                                prompt_parts.append(f"  • قيمة المبيعات: {total_amount}")
+                                    prompt_parts.append(f"  • الكمية المتوقعة: {product.get('virtual_available', 0)}")
                                 
-                                for sale in product['recent_sales'][:5]:  # Show last 5
-                                    customer = sale.get('order_partner_id', ['', 'غير معروف'])[1] if isinstance(sale.get('order_partner_id'), (list, tuple)) else 'غير معروف'
-                                    qty = sale.get('product_uom_qty', 0)
-                                    price = sale.get('price_unit', 0)
-                                    subtotal = sale.get('price_subtotal', 0)
-                                    prompt_parts.append(f"  • {customer}: {qty} × {price} = {subtotal}")
-                            
-                            # Description - only in detailed view
-                            if has_detailed_data:
-                                if product.get('description_sale'):
-                                    prompt_parts.append(f"\n📝 الوصف: {product['description_sale'][:200]}")
-                                
-                                # Tracking
-                                if product.get('tracking') and product['tracking'] != 'none':
-                                    prompt_parts.append(f"\n🔍 التتبع: {product['tracking']}")
-                                
-                                # Weight & Volume
-                                if product.get('weight') or product.get('volume'):
-                                    prompt_parts.append("\n📏 الأبعاد:")
-                                    if product.get('weight'):
-                                        prompt_parts.append(f"  • الوزن: {product['weight']}")
-                                    if product.get('volume'):
-                                        prompt_parts.append(f"  • الحجم: {product['volume']}")
+                                # توزيع الكميات في المخازن
+                                if 'stock_by_location' in product and product['stock_by_location']:
+                                    prompt_parts.append("")
+                                    prompt_parts.append(f"🏭 توزيع الكميات في المخازن ({product.get('total_locations', 0)} مخزن):")
+                                    for quant in product['stock_by_location']:
+                                        loc_name = quant.get('location_id', ['', 'مخزن'])[1] if isinstance(quant.get('location_id'), (list, tuple)) else 'مخزن'
+                                        qty = quant.get('quantity', 0)
+                                        available = quant.get('available_quantity', 0)
+                                        prompt_parts.append(f"  • {loc_name}:")
+                                        prompt_parts.append(f"    - الكمية: {qty}")
+                                        prompt_parts.append(f"    - المتاح: {available}")
                         
-                        _logger.info(f"📍 Product {product['name']}: {len(product.get('stock_by_location', []))} locations, {len(product.get('recent_movements', []))} movements, {len(product.get('suppliers', []))} suppliers, {len(product.get('recent_sales', []))} sales")
+                        # Many products - show list
+                        else:
+                            prompt_parts.append(f"\n📦 وجدت {count} منتج:")
+                            prompt_parts.append("")
+                            for idx, product in enumerate(data[:20], 1):
+                                name = product.get('name', 'غير محدد')
+                                code = product.get('default_code', 'N/A')
+                                price = product.get('list_price', 0)
+                                qty = product.get('qty_available', 0)
+                                uom = product.get('uom_id', ['', 'وحدة'])[1] if isinstance(product.get('uom_id'), (list, tuple)) else 'وحدة'
+                                
+                                prompt_parts.append(f"{idx}. {name}")
+                                prompt_parts.append(f"   كود: {code} | سعر: {price} | كمية: {qty} {uom}")
+                                prompt_parts.append("")
+                            
+                            if count > 20:
+                                prompt_parts.append(f"... و {count - 20} منتج آخر")
                     
                     elif model_name == 'sale.order':
                         prompt_parts.append("\n💼 تفاصيل طلبات المبيعات:")
