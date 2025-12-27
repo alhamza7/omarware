@@ -3,8 +3,16 @@
 from odoo import models, fields, api
 import json
 import logging
+from datetime import datetime, date
 
 _logger = logging.getLogger(__name__)
+
+
+def json_serial(obj):
+    """JSON serializer for objects not serializable by default json code"""
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    raise TypeError(f"Type {type(obj)} not serializable")
 
 
 class LugalConversation(models.Model):
@@ -127,7 +135,7 @@ class LugalConversation(models.Model):
         self.ensure_one()
         try:
             context_json = json.loads(self.context_data) if self.context_data else {}
-            formatted_json = json.dumps(context_json, indent=2, ensure_ascii=False)
+            formatted_json = json.dumps(context_json, indent=2, ensure_ascii=False, default=json_serial)
         except:
             formatted_json = self.context_data or "No context data"
         
@@ -171,7 +179,7 @@ class LugalConversation(models.Model):
         
         models_used = [r['model'] for r in odoo_data['records']]
         
-        if 'product.product' in models_used:
+        if 'product.product' in models_used or 'product.count' in models_used:
             return 'product'
         elif 'sale.order' in models_used:
             return 'sales'
@@ -212,9 +220,18 @@ class LugalConversation(models.Model):
             is_too_generic = len(question_words) <= 2 and not any(keyword in question_lower for keyword in specific_product_keywords)
             
             # Extract potential product names (3+ chars that aren't common words)
+            common_words = [
+                'منتج', 'منتجات', 'product', 'products',
+                'في', 'كل', 'the', 'in', 'على', 'عن', 'من', 'إلى', 
+                'هل', 'ما', 'ماذا', 'كيف', 'أين', 'لماذا',
+                'تعرف', 'لدينا', 'لدينا؟', 'عندنا', 'عندك',
+                'موجود', 'موجودة', 'have', 'has', 'know',
+                'كم', 'how', 'many', 'much', 'عدد', 'number',
+                'ممكن', 'اريد', 'want', 'need', 'يرجى', 'please'
+            ]
             potential_product_names = []
             for word in question_words:
-                if len(word) > 2 and word not in ['منتج', 'منتجات', 'product', 'في', 'كل', 'the', 'in', 'على', 'عن', 'من', 'إلى', 'هل', 'ما', 'ماذا', 'كيف', 'أين']:
+                if len(word) > 2 and word not in common_words:
                     potential_product_names.append(word)
             
             # Only trigger if we have specific product keywords OR a product name
@@ -234,15 +251,35 @@ class LugalConversation(models.Model):
             
             if is_product_question:
                 _logger.info(f"📦 Starting product data collection...")
+                
+                # Check if asking about count/number - highest priority
+                asking_about_count = any(word in question_lower for word in ['كم عدد', 'how many', 'عدد المنتجات', 'number of', 'كم منتج', 'how many products'])
+                
                 # Search for specific product if mentioned
                 product_domain = [('active', '=', True)]
+                
+                # If asking about count, just get count (minimal data)
+                if asking_about_count:
+                    _logger.info(f"🔢 Asking about product COUNT - getting total count only")
+                    # Get count only
+                    total_count = self.env['product.product'].search_count([('active', '=', True)])
+                    _logger.info(f"✅ Total products: {total_count}")
+                    
+                    # Add count to data directly
+                    data['records'].append({
+                        'model': 'product.count',
+                        'count': total_count,
+                        'data': [{'total_products': total_count, 'message': f'لديكم إجمالي {total_count} منتج نشط'}]
+                    })
+                    continue  # Skip detailed product search
                 
                 # Filter out generic words from potential product names
                 generic_words = ['المنتجات', 'منتجات', 'منتج', 'products', 'product', 'عدد', 'كمية', 'how', 'many', 'what', 'where']
                 specific_product_names = [word for word in potential_product_names if word not in generic_words]
                 
-                # Only search for specific product if we have actual product names
+                # Only search for specific products if we have actual product names
                 if specific_product_names:
+                    # Specific product search
                     product_domain = ['|', '|',
                         ('name', 'ilike', ' '.join(specific_product_names)),
                         ('default_code', 'ilike', ' '.join(specific_product_names)),
@@ -250,8 +287,8 @@ class LugalConversation(models.Model):
                     ]
                     _logger.info(f"🔎 Searching for specific products: {' '.join(specific_product_names)}")
                 else:
-                    # General product question - get all products
-                    _logger.info(f"🔎 General product question - getting all products")
+                    # General product question - get sample of products
+                    _logger.info(f"🔎 General product question - getting product sample")
                 
                 _logger.info(f"🔍 Searching products with domain: {product_domain}")
                 
@@ -302,8 +339,8 @@ class LugalConversation(models.Model):
                     )
                     _logger.info(f"✅ Found {len(products)} products with basic data")
                 
-                # Get detailed stock and related info for products
-                if products:
+                # Get detailed stock and related info for products (but not if just asking for count)
+                if products and not asking_about_count:
                     product_ids = [p['id'] for p in products]
                     
                     # 1. Get stock quantities by location
@@ -590,6 +627,10 @@ class LugalConversation(models.Model):
         """Build enriched prompt with Odoo data"""
         prompt_parts = []
         
+        # Check if asking for simple count
+        question_lower = question.lower()
+        asking_for_count = any(word in question_lower for word in ['كم عدد', 'how many', 'عدد المنتجات', 'number of'])
+        
         # Add Odoo data directly
         if odoo_data['records']:
             prompt_parts.append("📊 البيانات المتوفرة من النظام:")
@@ -604,23 +645,39 @@ class LugalConversation(models.Model):
                 
                 # Include ALL data (not limited) - formatted clearly
                 if data:
-                    if model_name == 'product.product':
+                    if model_name == 'product.count':
+                        # Simple count response
+                        count_data = data[0] if data else {}
+                        total = count_data.get('total_products', 0)
+                        prompt_parts.append(f"\n📦 إجمالي عدد المنتجات: {total}")
+                        prompt_parts.append(f"\n{count_data.get('message', '')}")
+                    
+                    elif model_name == 'product.product':
                         # Check if we have detailed data or just basic
                         has_detailed_data = any('stock_by_location' in p or 'recent_movements' in p for p in data[:5])
                         
-                        if has_detailed_data:
+                        # If just asking for count, show minimal info
+                        if asking_for_count:
+                            prompt_parts.append(f"\n📦 إجمالي عدد المنتجات: {count}")
+                            prompt_parts.append("\nعينة من المنتجات (أول 10):")
+                            for idx, product in enumerate(data[:10], 1):
+                                prompt_parts.append(f"{idx}. {product.get('name', 'N/A')} (كود: {product.get('default_code', 'N/A')})")
+                            if count > 10:
+                                prompt_parts.append(f"\n... و {count - 10} منتجات أخرى")
+                        elif has_detailed_data:
                             prompt_parts.append("\n📦 تفاصيل المنتجات الكاملة:")
-                        else:
-                            prompt_parts.append("\n📦 معلومات المنتجات:")
-                        
-                        for idx, product in enumerate(data[:50], 1):  # Show up to 50 products
-                            if has_detailed_data:
+                            for idx, product in enumerate(data[:50], 1):  # Show up to 50 products
                                 prompt_parts.append(f"\n{'='*60}")
                                 prompt_parts.append(f"المنتج #{idx}: {product.get('name', 'N/A')}")
                                 prompt_parts.append(f"{'='*60}")
-                            else:
-                                # Simplified view for basic data
+                        else:
+                            # Simplified view for basic data
+                            prompt_parts.append("\n📦 معلومات المنتجات:")
+                            for idx, product in enumerate(data[:50], 1):  # Show up to 50 products
                                 prompt_parts.append(f"\n{idx}. {product.get('name', 'N/A')}")
+                            # Skip all details if just asking for count
+                            if asking_for_count:
+                                continue
                             
                             # Basic Info - only if detailed view
                             if has_detailed_data:
@@ -874,7 +931,7 @@ class LugalConversation(models.Model):
                     
                     else:
                         # For other models, show formatted data
-                        prompt_parts.append(json.dumps(data[:20], ensure_ascii=False, indent=2))
+                        prompt_parts.append(json.dumps(data[:20], ensure_ascii=False, indent=2, default=json_serial))
         else:
             # No specific data found - this is a general conversation
             prompt_parts.append("📊 البيانات المتوفرة من النظام:")
@@ -998,7 +1055,7 @@ class LugalConversation(models.Model):
                 'answer': answer,
                 'response_time_ms': response_time,
                 'category': category,
-                'context_data': json.dumps(odoo_data, ensure_ascii=False),
+                'context_data': json.dumps(odoo_data, ensure_ascii=False, default=json_serial),
                 'data_models_used': models_used,
                 'records_count': records_count
             })
