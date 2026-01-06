@@ -38,6 +38,8 @@ class ImportFragranticaData(models.TransientModel):
     imported_accords = fields.Integer('Imported Accords', readonly=True)
     
     log_message = fields.Text('Import Log', readonly=True)
+    skip_images = fields.Boolean('Skip Images (Import Later)', default=False,
+        help='Skip image loading to speed up import. Images can be loaded later using Python code.')
     
     def _get_db_path(self):
         """Get the path to perfumes.db"""
@@ -131,10 +133,12 @@ class ImportFragranticaData(models.TransientModel):
             # Import accords
             self._import_accords(cursor)
             
-            # Load images if requested
-            if self.import_images:
+            # Load images if requested and not skipped
+            if self.import_images and not self.skip_images:
                 self._log("Loading images from static folder...")
                 self._load_images()
+            elif self.skip_images:
+                self._log("Skipping images (as requested). Load them later using Python code.")
             
             conn.close()
             

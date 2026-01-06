@@ -13,6 +13,7 @@
                     <group>
                         <field name="db_path" placeholder="/path/to/perfumes.db"/>
                         <field name="import_images"/>
+                        <field name="skip_images" invisible="not import_images"/>
                         <field name="batch_size"/>
                     </group>
                 </group>
