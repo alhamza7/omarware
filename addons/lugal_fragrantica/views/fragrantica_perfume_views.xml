@@ -135,25 +135,6 @@
         </field>
     </record>
     
-    <!-- Fragrantica Perfume Search View -->
-    <record id="view_fragrantica_perfume_search" model="ir.ui.view">
-        <field name="name">fragrantica.perfume.search</field>
-        <field name="model">fragrantica.perfume</field>
-        <field name="arch" type="xml">
-            <search>
-                <field name="name"/>
-                <field name="arabic_name"/>
-                <field name="brand_name"/>
-                <filter string="Has Image" name="has_image" domain="[('image', '!=', False)]"/>
-                <filter string="Has Arabic Name" name="has_arabic" domain="[('arabic_name', '!=', False)]"/>
-                <group expand="0" string="Group By">
-                    <filter string="Brand" name="group_brand" context="{'group_by': 'brand_name'}"/>
-                    <filter string="Year" name="group_year" context="{'group_by': 'year'}"/>
-                </group>
-            </search>
-        </field>
-    </record>
-    
     <!-- Fragrantica Perfume Action -->
     <record id="action_fragrantica_perfume" model="ir.actions.act_window">
         <field name="name">Fragrantica Perfumes</field>
