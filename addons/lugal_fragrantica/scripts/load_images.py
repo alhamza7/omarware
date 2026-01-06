@@ -14,7 +14,7 @@ from datetime import datetime
 ODOO_DB_NAME = 'lugal'
 ODOO_DB_USER = 'odoo'
 ODOO_DB_PASSWORD = ''
-ODOO_DB_HOST = 'localhost'
+ODOO_DB_HOST = ''  # فارغ للاستخدام Unix socket
 
 # مسارات الصور
 FREGRAN_PATH = '/home/lugalai/Lugal-ai/fregran'

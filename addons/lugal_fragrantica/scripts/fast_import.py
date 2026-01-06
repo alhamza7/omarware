@@ -14,7 +14,7 @@ from datetime import datetime
 ODOO_DB_NAME = 'lugal'  # أو 'nbs_lugalai' - عدّلها حسب اسم قاعدة بياناتك
 ODOO_DB_USER = 'odoo'
 ODOO_DB_PASSWORD = ''  # عادة فارغ للاتصال المحلي
-ODOO_DB_HOST = 'localhost'
+ODOO_DB_HOST = ''  # فارغ للاستخدام Unix socket بدلاً من TCP
 
 # مسار قاعدة بيانات SQLite
 SQLITE_DB_PATH = '/home/lugalai/Lugal-ai/fregran/perfumes.db'
