@@ -25,11 +25,11 @@
             <form string="Pending Request">
                 <header>
                     <button name="action_mark_completed" string="Mark as Completed" 
-                            type="object" states="pending,processing" class="oe_highlight"/>
+                            type="object" invisible="state not in ['pending', 'processing']" class="oe_highlight"/>
                     <button name="action_mark_failed" string="Mark as Failed" 
-                            type="object" states="pending,processing"/>
+                            type="object" invisible="state not in ['pending', 'processing']"/>
                     <button name="action_retry" string="Retry" 
-                            type="object" states="failed"/>
+                            type="object" invisible="state != 'failed'"/>
                     <field name="state" widget="statusbar" 
                            statusbar_visible="pending,processing,completed"/>
                 </header>
@@ -48,7 +48,7 @@
                     
                     <group>
                         <field name="notes" placeholder="Additional notes..."/>
-                        <field name="error_message" attrs="{'invisible': [('error_message', '=', False)]}"/>
+                        <field name="error_message" invisible="not error_message"/>
                     </group>
                 </sheet>
             </form>
