@@ -1,0 +1,236 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    
+    <!-- Product Template Form View - Add Fragrantica Tab -->
+    <record id="view_product_template_form_fragrantica" model="ir.ui.view">
+        <field name="name">product.template.form.fragrantica</field>
+        <field name="model">product.template</field>
+        <field name="inherit_id" ref="product.product_template_only_form_view"/>
+        <field name="arch" type="xml">
+            
+            <!-- Add Fragrantica Tab -->
+            <xpath expr="//notebook" position="inside">
+                <page string="Fragrantica" name="fragrantica" groups="base.group_user">
+                    <group>
+                        <group string="Fragrantica Link" name="fragrantica_link">
+                            <field name="fragrantica_perfume_id" 
+                                   options="{'no_create': True, 'no_open': True}"
+                                   context="{'show_brand': True}"/>
+                            
+                            <label for="fragrantica_pending_url" 
+                                   attrs="{'invisible': [('fragrantica_perfume_id', '!=', False)]}"/>
+                            <div attrs="{'invisible': [('fragrantica_perfume_id', '!=', False)]}">
+                                <field name="fragrantica_pending_url" 
+                                       placeholder="https://www.fragrantica.com/perfume/..."
+                                       class="oe_inline"/>
+                                <button name="action_create_pending_request" 
+                                        string="Create Request" 
+                                        type="object" 
+                                        class="oe_link"
+                                        attrs="{'invisible': [('fragrantica_pending_url', '=', False)]}"/>
+                            </div>
+                            
+                            <field name="fragrantica_request_id" 
+                                   attrs="{'invisible': [('fragrantica_request_id', '=', False)]}"
+                                   readonly="1"/>
+                            
+                            <button name="action_clear_fragrantica_link" 
+                                    string="Clear Link" 
+                                    type="object" 
+                                    class="oe_link text-danger"
+                                    attrs="{'invisible': [('fragrantica_perfume_id', '=', False)]}"/>
+                        </group>
+                        
+                        <group string="Customization" name="customization">
+                            <field name="fragrantica_use_custom"/>
+                        </group>
+                    </group>
+                    
+                    <!-- Display Perfume Info -->
+                    <div attrs="{'invisible': [('fragrantica_perfume_id', '=', False)]}" 
+                         class="mt-3">
+                        
+                        <!-- Header with Images -->
+                        <div class="row">
+                            <div class="col-md-3">
+                                <field name="display_image" widget="image" 
+                                       options="{'preview_image': 'display_image', 'size': [250, 250]}"/>
+                            </div>
+                            <div class="col-md-9">
+                                <h2>
+                                    <field name="display_perfume_name" readonly="1" class="font-weight-bold"/>
+                                </h2>
+                                <h3 class="text-muted">
+                                    <field name="display_perfume_arabic_name" readonly="1"/>
+                                </h3>
+                                <div class="mt-2">
+                                    <field name="display_brand_logo" widget="image" 
+                                           options="{'size': [80, 80]}" class="d-inline-block mr-2"/>
+                                    <span class="h4">
+                                        <field name="display_brand_name" readonly="1" class="d-inline"/>
+                                    </span>
+                                    <span class="ml-3 text-muted" 
+                                          attrs="{'invisible': [('display_year', '=', False)]}">
+                                        Year: <field name="display_year" readonly="1" class="d-inline font-weight-bold"/>
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <separator string="Description" class="mt-4"/>
+                        <group>
+                            <field name="display_description" readonly="1" 
+                                   attrs="{'invisible': [('fragrantica_use_custom', '=', True)]}"
+                                   nolabel="1"/>
+                            <field name="custom_description" 
+                                   attrs="{'invisible': [('fragrantica_use_custom', '=', False)]}"
+                                   placeholder="Enter custom description..."
+                                   nolabel="1"/>
+                        </group>
+                        
+                        <separator string="Main Accords" class="mt-4"/>
+                        <div class="fragrantica_accords">
+                            <field name="display_accord_ids" 
+                                   attrs="{'invisible': [('fragrantica_use_custom', '=', True)]}"
+                                   nolabel="1">
+                                <tree>
+                                    <field name="accord_name"/>
+                                    <field name="accord_width" widget="progressbar"/>
+                                    <field name="accord_color" widget="color"/>
+                                </tree>
+                            </field>
+                            
+                            <field name="custom_accord_ids" 
+                                   attrs="{'invisible': [('fragrantica_use_custom', '=', False)]}"
+                                   nolabel="1">
+                                <tree editable="bottom">
+                                    <field name="sequence" widget="handle"/>
+                                    <field name="accord_id"/>
+                                </tree>
+                            </field>
+                        </div>
+                        
+                        <separator string="Perfume Notes" class="mt-4"/>
+                        <div class="row">
+                            <!-- Top Notes -->
+                            <div class="col-md-4">
+                                <div class="alert alert-info">
+                                    <h5 class="alert-heading">
+                                        <i class="fa fa-arrow-up"/> Top Notes
+                                    </h5>
+                                    <field name="display_top_notes_ids" nolabel="1" 
+                                           attrs="{'invisible': [('fragrantica_use_custom', '=', True)]}">
+                                        <tree>
+                                            <field name="note_image" widget="image" width="40px"/>
+                                            <field name="note_name"/>
+                                            <field name="note_opacity" widget="progressbar"/>
+                                        </tree>
+                                    </field>
+                                    
+                                    <!-- Custom Top Notes -->
+                                    <field name="custom_note_ids" nolabel="1"
+                                           attrs="{'invisible': [('fragrantica_use_custom', '=', False)]}"
+                                           domain="[('note_type', '=', 'Top')]"
+                                           context="{'default_note_type': 'Top', 'tree_view_ref': 'lugal_fragrantica.view_product_fragrantica_note_tree'}">
+                                        <tree editable="bottom">
+                                            <field name="sequence" widget="handle"/>
+                                            <field name="note_id" domain="[('note_type', '=', 'Top')]"/>
+                                            <field name="note_type" invisible="1"/>
+                                        </tree>
+                                    </field>
+                                </div>
+                            </div>
+                            
+                            <!-- Middle Notes -->
+                            <div class="col-md-4">
+                                <div class="alert alert-warning">
+                                    <h5 class="alert-heading">
+                                        <i class="fa fa-heart"/> Middle Notes
+                                    </h5>
+                                    <field name="display_middle_notes_ids" nolabel="1"
+                                           attrs="{'invisible': [('fragrantica_use_custom', '=', True)]}">
+                                        <tree>
+                                            <field name="note_image" widget="image" width="40px"/>
+                                            <field name="note_name"/>
+                                            <field name="note_opacity" widget="progressbar"/>
+                                        </tree>
+                                    </field>
+                                    
+                                    <!-- Custom Middle Notes -->
+                                    <field name="custom_note_ids" nolabel="1"
+                                           attrs="{'invisible': [('fragrantica_use_custom', '=', False)]}"
+                                           domain="[('note_type', '=', 'Middle')]"
+                                           context="{'default_note_type': 'Middle'}">
+                                        <tree editable="bottom">
+                                            <field name="sequence" widget="handle"/>
+                                            <field name="note_id" domain="[('note_type', '=', 'Middle')]"/>
+                                            <field name="note_type" invisible="1"/>
+                                        </tree>
+                                    </field>
+                                </div>
+                            </div>
+                            
+                            <!-- Base Notes -->
+                            <div class="col-md-4">
+                                <div class="alert alert-success">
+                                    <h5 class="alert-heading">
+                                        <i class="fa fa-arrow-down"/> Base Notes
+                                    </h5>
+                                    <field name="display_base_notes_ids" nolabel="1"
+                                           attrs="{'invisible': [('fragrantica_use_custom', '=', True)]}">
+                                        <tree>
+                                            <field name="note_image" widget="image" width="40px"/>
+                                            <field name="note_name"/>
+                                            <field name="note_opacity" widget="progressbar"/>
+                                        </tree>
+                                    </field>
+                                    
+                                    <!-- Custom Base Notes -->
+                                    <field name="custom_note_ids" nolabel="1"
+                                           attrs="{'invisible': [('fragrantica_use_custom', '=', False)]}"
+                                           domain="[('note_type', '=', 'Base')]"
+                                           context="{'default_note_type': 'Base'}">
+                                        <tree editable="bottom">
+                                            <field name="sequence" widget="handle"/>
+                                            <field name="note_id" domain="[('note_type', '=', 'Base')]"/>
+                                            <field name="note_type" invisible="1"/>
+                                        </tree>
+                                    </field>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Link to original perfume -->
+                        <div class="mt-3" attrs="{'invisible': [('fragrantica_perfume_id', '=', False)]}">
+                            <button name="%(action_fragrantica_perfume)d" 
+                                    string="View Full Perfume Details" 
+                                    type="action" 
+                                    class="btn btn-primary"
+                                    context="{'form_view_initial_mode': 'readonly', 'form_view_ref': 'lugal_fragrantica.view_fragrantica_perfume_form'}"/>
+                        </div>
+                    </div>
+                    
+                    <!-- Help Text when no perfume linked -->
+                    <div attrs="{'invisible': [('fragrantica_perfume_id', '!=', False)]}" 
+                         class="alert alert-info mt-3">
+                        <h4>How to link a Fragrantica perfume:</h4>
+                        <ol>
+                            <li>Select a perfume from the "Fragrantica Perfume" field above (search by name in English or Arabic)</li>
+                            <li>OR, if the perfume doesn't exist in the database:
+                                <ul>
+                                    <li>Paste the Fragrantica URL in the field above</li>
+                                    <li>Click "Create Request" to add it to the scraping queue</li>
+                                    <li>The perfume will be added later by the administrator</li>
+                                </ul>
+                            </li>
+                        </ol>
+                    </div>
+                    
+                </page>
+            </xpath>
+            
+        </field>
+    </record>
+
+</odoo>
+

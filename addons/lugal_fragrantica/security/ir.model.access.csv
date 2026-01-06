@@ -1,0 +1,13 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_fragrantica_perfume_user,fragrantica.perfume.user,model_fragrantica_perfume,base.group_user,1,0,0,0
+access_fragrantica_perfume_manager,fragrantica.perfume.manager,model_fragrantica_perfume,base.group_system,1,1,1,1
+access_fragrantica_note_user,fragrantica.note.user,model_fragrantica_note,base.group_user,1,0,0,0
+access_fragrantica_note_manager,fragrantica.note.manager,model_fragrantica_note,base.group_system,1,1,1,1
+access_fragrantica_accord_user,fragrantica.accord.user,model_fragrantica_accord,base.group_user,1,0,0,0
+access_fragrantica_accord_manager,fragrantica.accord.manager,model_fragrantica_accord,base.group_system,1,1,1,1
+access_fragrantica_pending_request_user,fragrantica.pending.request.user,model_fragrantica_pending_request,base.group_user,1,1,1,0
+access_fragrantica_pending_request_manager,fragrantica.pending.request.manager,model_fragrantica_pending_request,base.group_system,1,1,1,1
+access_product_fragrantica_note_user,product.fragrantica.note.user,model_product_fragrantica_note,base.group_user,1,1,1,1
+access_product_fragrantica_accord_user,product.fragrantica.accord.user,model_product_fragrantica_accord,base.group_user,1,1,1,1
+access_import_fragrantica_data,import.fragrantica.data,model_import_fragrantica_data,base.group_system,1,1,1,1
+

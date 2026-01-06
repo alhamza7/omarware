@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    
+    <!-- Pending Request Tree View -->
+    <record id="view_fragrantica_pending_request_tree" model="ir.ui.view">
+        <field name="name">fragrantica.pending.request.tree</field>
+        <field name="model">fragrantica.pending.request</field>
+        <field name="arch" type="xml">
+            <tree string="Pending Requests" decoration-info="state == 'pending'" 
+                  decoration-success="state == 'completed'" decoration-danger="state == 'failed'">
+                <field name="create_date"/>
+                <field name="fragrantica_url"/>
+                <field name="product_id"/>
+                <field name="state"/>
+                <field name="requested_by"/>
+            </tree>
+        </field>
+    </record>
+    
+    <!-- Pending Request Form View -->
+    <record id="view_fragrantica_pending_request_form" model="ir.ui.view">
+        <field name="name">fragrantica.pending.request.form</field>
+        <field name="model">fragrantica.pending.request</field>
+        <field name="arch" type="xml">
+            <form string="Pending Request">
+                <header>
+                    <button name="action_mark_completed" string="Mark as Completed" 
+                            type="object" states="pending,processing" class="oe_highlight"/>
+                    <button name="action_mark_failed" string="Mark as Failed" 
+                            type="object" states="pending,processing"/>
+                    <button name="action_retry" string="Retry" 
+                            type="object" states="failed"/>
+                    <field name="state" widget="statusbar" 
+                           statusbar_visible="pending,processing,completed"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="fragrantica_url" widget="url"/>
+                            <field name="product_id"/>
+                        </group>
+                        <group>
+                            <field name="requested_by"/>
+                            <field name="create_date"/>
+                            <field name="completed_date"/>
+                        </group>
+                    </group>
+                    
+                    <group>
+                        <field name="notes" placeholder="Additional notes..."/>
+                        <field name="error_message" attrs="{'invisible': [('error_message', '=', False)]}"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    
+    <!-- Pending Request Search View -->
+    <record id="view_fragrantica_pending_request_search" model="ir.ui.view">
+        <field name="name">fragrantica.pending.request.search</field>
+        <field name="model">fragrantica.pending.request</field>
+        <field name="arch" type="xml">
+            <search string="Search Requests">
+                <field name="fragrantica_url"/>
+                <field name="product_id"/>
+                
+                <filter string="Pending" name="pending" domain="[('state', '=', 'pending')]"/>
+                <filter string="Processing" name="processing" domain="[('state', '=', 'processing')]"/>
+                <filter string="Completed" name="completed" domain="[('state', '=', 'completed')]"/>
+                <filter string="Failed" name="failed" domain="[('state', '=', 'failed')]"/>
+                
+                <group expand="0" string="Group By">
+                    <filter string="Status" name="group_state" context="{'group_by': 'state'}"/>
+                    <filter string="Requested By" name="group_user" context="{'group_by': 'requested_by'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+    
+    <!-- Pending Request Action -->
+    <record id="action_fragrantica_pending_request" model="ir.actions.act_window">
+        <field name="name">Pending Requests</field>
+        <field name="res_model">fragrantica.pending.request</field>
+        <field name="view_mode">tree,form</field>
+        <field name="context">{'search_default_pending': 1}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                No pending requests!
+            </p>
+            <p>
+                Requests are created when users link products to perfumes that don't exist in the database yet.
+            </p>
+        </field>
+    </record>
+
+</odoo>
+

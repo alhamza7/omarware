@@ -1,0 +1,11 @@
+# Ignore all exported data (too large for git)
+*.db
+*.db-shm
+*.db-wal
+images/
+
+# Keep the script and README
+!prepare_export.py
+!README.md
+!.gitignore
+

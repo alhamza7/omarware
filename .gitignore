@@ -66,3 +66,18 @@ odoo.conf
 !addons/web/static/
 !addons/web/static/**
 
+# Fragrantica data (كبيرة جداً - تُنقل يدوياً)
+/fregran/
+/fragrantica_data_export/perfumes.db
+/fragrantica_data_export/images/
+
+# لكن نبقي سكريبتات التصدير والتوثيق
+!/fragrantica_data_export/prepare_export.py
+!/fragrantica_data_export/START_PREPARE_EXPORT.bat
+!/fragrantica_data_export/README.md
+!/fragrantica_data_export/.gitignore
+
+# تجاهل البيانات داخل المودول (تُنقل يدوياً)
+addons/lugal_fragrantica/static/fragrantica_data/
+addons/lugal_fragrantica/static/fregran/
+

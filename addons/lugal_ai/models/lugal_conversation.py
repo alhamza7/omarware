@@ -342,18 +342,24 @@ class LugalConversation(models.Model):
                 else:
                     _logger.info(f"🎯 Direct product search detected!")
             
-            # REMOVE the generic filter - if we have potential product names, search for them!
-            # The old logic was too restrictive
-            
-            # If we have potential product names but no explicit product keywords, still search
-            if len(potential_product_names) > 0 and not is_product_question:
-                # Check if it's likely a product search (not a greeting)
+            # IMPORTANT: If we have potential product names, it's likely a product search
+            # Even without explicit keywords like "منتج" or "product"
+            if len(potential_product_names) > 0:
+                # Check if it's NOT a greeting or common reply
                 if not is_likely_greeting and not is_common_reply:
-                    is_product_question = True
-                    has_specific_intent = True
-                    _logger.info(f"🔄 No explicit product keywords, but have potential names - treating as product search")
+                    if not is_product_question:
+                        is_product_question = True
+                        has_specific_intent = True
+                        _logger.info(f"🔄 Forcing product search - have names but no keywords: {potential_product_names}")
+                    else:
+                        _logger.info(f"✅ Already detected as product question")
             
-            _logger.info(f"🛍️ Is product question: {is_product_question}, has_intent: {has_specific_intent}, direct_search: {is_direct_product_search}, potential_products: {potential_product_names}")
+            _logger.info(f"🛍️ FINAL DECISION: is_product_question={is_product_question}")
+            _logger.info(f"   - has_intent: {has_specific_intent}")
+            _logger.info(f"   - direct_search: {is_direct_product_search}")
+            _logger.info(f"   - is_just_product_name: {is_just_product_name}")
+            _logger.info(f"   - potential_products: {potential_product_names}")
+            _logger.info(f"   - is_likely_greeting: {is_likely_greeting}")
             
             if is_product_question:
                 _logger.info(f"📦 Starting product data collection...")
@@ -593,14 +599,17 @@ class LugalConversation(models.Model):
                             
                             _logger.info(f"📍 Product {product['name']}: {len(product_quants)} locations, {len(product_moves)} movements, {len(product_suppliers)} suppliers, {len(product_sales)} sales")
                     
+                    _logger.info(f"📊 Product search completed. Found: {len(products) if products else 0} products")
+                    
                     if products:
                         data['records'].append({
                             'model': 'product.product',
                             'count': len(products),
                             'data': products
                         })
-                        _logger.info(f"📦 Collected {len(products)} products with stock details for AI")
-                        _logger.info(f"📋 First product: {products[0].get('name', 'N/A')} (Code: {products[0].get('default_code', 'N/A')})")
+                        _logger.info(f"✅ Successfully added {len(products)} products to data['records']")
+                        _logger.info(f"📋 Sample: {products[0].get('name', 'N/A')} (Code: {products[0].get('default_code', 'N/A')})")
+                        _logger.info(f"📊 Total records in data: {len(data['records'])}")
                     else:
                         # No products found - add empty result to show we searched
                         data['records'].append({
@@ -608,7 +617,8 @@ class LugalConversation(models.Model):
                             'count': 0,
                             'data': []
                         })
-                        _logger.warning(f"⚠️ No products found matching the search criteria")
+                        _logger.warning(f"⚠️ No products found - added empty record")
+                        _logger.info(f"📊 Total records in data: {len(data['records'])}")
             
             # Check for sales-related questions
             if any(word in question_lower for word in ['مبيعات', 'بيع', 'sales', 'sale', 'order', 'طلب', 'طلبات']):
