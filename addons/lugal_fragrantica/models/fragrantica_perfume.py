@@ -110,25 +110,35 @@ class FragranticaPerfume(models.Model):
             
             # Load brand logo
             if perfume.brand_name and not perfume.brand_logo:
-                # Brand images are named by brand name
-                brand_filename = perfume.brand_name.lower().replace(' ', '-').replace('.', '') + '.jpg'
+                # Brand images may have different formats
                 module_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
                 
-                # Possible paths for brand logos
-                brand_paths = [
-                    # Path 1: fragrantica_data/images/brands/
-                    os.path.join(module_path, 'static', 'fragrantica_data', 'images', 'brands', brand_filename),
-                    # Path 2: fregran/static/images/brands/
-                    os.path.join(module_path, 'static', 'fregran', 'static', 'images', 'brands', brand_filename),
-                    # Path 3: Project root / fregran
-                    os.path.join(project_root, 'fregran', 'static', 'images', 'brands', brand_filename),
-                    # Path 4: /opt/odoo/fregran (alternative)
-                    f"/opt/odoo/fregran/static/images/brands/{brand_filename}",
+                # Possible base directories for brands
+                base_dirs = [
+                    os.path.join(module_path, 'static', 'fragrantica_data', 'images', 'brands'),
+                    os.path.join(module_path, 'static', 'fregran', 'static', 'images', 'brands'),
+                    os.path.join(project_root, 'fregran', 'static', 'images', 'brands'),
+                    '/opt/odoo/fregran/static/images/brands',
                 ]
                 
-                for brand_path in brand_paths:
-                    if os.path.exists(brand_path):
-                        with open(brand_path, 'rb') as f:
-                            perfume.brand_logo = base64.b64encode(f.read())
+                for base_dir in base_dirs:
+                    if not os.path.exists(base_dir):
+                        continue
+                    
+                    # Try multiple filename formats
+                    brand_filenames = [
+                        perfume.brand_name.lower().replace(' ', '-').replace('.', '') + '.jpg',
+                        perfume.brand_name.replace(' ', '_') + '.jpg',
+                        perfume.brand_name + '.jpg',
+                    ]
+                    
+                    for brand_filename in brand_filenames:
+                        brand_path = os.path.join(base_dir, brand_filename)
+                        if os.path.exists(brand_path):
+                            with open(brand_path, 'rb') as f:
+                                perfume.brand_logo = base64.b64encode(f.read())
+                            break
+                    
+                    if perfume.brand_logo:
                         break
 
