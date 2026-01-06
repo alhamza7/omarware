@@ -33,8 +33,10 @@ class FragranticaPendingRequest(models.Model):
         for request in self:
             if request.product_id:
                 request.name = f"Request for: {request.product_id.name}"
-            else:
+            elif request.fragrantica_url:
                 request.name = f"Request: {request.fragrantica_url[:50]}..."
+            else:
+                request.name = "New Request"
     
     def action_mark_completed(self):
         """Mark request as completed"""
