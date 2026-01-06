@@ -1,6 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
     
+    <!-- Product Template Action (filtered by fragrantica) - Define FIRST -->
+    <record id="action_product_template_fragrantica" model="ir.actions.act_window">
+        <field name="name">Linked Products</field>
+        <field name="res_model">product.template</field>
+        <field name="view_mode">list,form</field>
+        <field name="domain">[('fragrantica_perfume_id', '!=', False)]</field>
+        <field name="context">{'search_default_fragrantica_perfume_id': active_id}</field>
+    </record>
+    
     <!-- Fragrantica Perfume List View -->
     <record id="view_fragrantica_perfume_list" model="ir.ui.view">
         <field name="name">fragrantica.perfume.list</field>
@@ -163,15 +172,6 @@
                 Click the "Import Data" menu to import perfumes from the Fragrantica database.
             </p>
         </field>
-    </record>
-    
-    <!-- Product Template Action (filtered by fragrantica) -->
-    <record id="action_product_template_fragrantica" model="ir.actions.act_window">
-        <field name="name">Linked Products</field>
-        <field name="res_model">product.template</field>
-        <field name="view_mode">list,form</field>
-        <field name="domain">[('fragrantica_perfume_id', '!=', False)]</field>
-        <field name="context">{'search_default_fragrantica_perfume_id': active_id}</field>
     </record>
 
 </odoo>
