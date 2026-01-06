@@ -29,14 +29,16 @@
         # Security
         'security/ir.model.access.csv',
         
+        # Wizards (load BEFORE menus!)
+        'wizards/import_fragrantica_data_views.xml',
+        
         # Views
         'views/fragrantica_perfume_views.xml',
         'views/fragrantica_pending_request_views.xml',
         'views/product_template_views.xml',
-        'views/fragrantica_menu.xml',
         
-        # Wizards
-        'wizards/import_fragrantica_data_views.xml',
+        # Menu (load LAST)
+        'views/fragrantica_menu.xml',
     ],
     'assets': {
         'web.assets_backend': [
