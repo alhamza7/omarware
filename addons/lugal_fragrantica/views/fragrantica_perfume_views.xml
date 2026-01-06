@@ -140,15 +140,12 @@
         <field name="name">fragrantica.perfume.search</field>
         <field name="model">fragrantica.perfume</field>
         <field name="arch" type="xml">
-            <search string="Search Perfumes">
+            <search>
                 <field name="name"/>
                 <field name="arabic_name"/>
                 <field name="brand_name"/>
-                <field name="description_full"/>
-                
                 <filter string="Has Image" name="has_image" domain="[('image', '!=', False)]"/>
                 <filter string="Has Arabic Name" name="has_arabic" domain="[('arabic_name', '!=', False)]"/>
-                
                 <group expand="0" string="Group By">
                     <filter string="Brand" name="group_brand" context="{'group_by': 'brand_name'}"/>
                     <filter string="Year" name="group_year" context="{'group_by': 'year'}"/>
