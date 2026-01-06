@@ -82,11 +82,21 @@ class ImportFragranticaData(models.TransientModel):
             "3. Or specify the full path: /home/lugalai/Lugal-ai/fregran/perfumes.db"
         )
     
-    def _log(self, message):
+    def _log(self, message, save_to_field=True):
         """Add message to log"""
-        current_log = self.log_message or ""
-        self.log_message = current_log + message + "\n"
+        # Always log to logger
         _logger.info(message)
+        
+        # Only save important messages to field (to avoid MemoryError)
+        if save_to_field and (
+            '===' in message or 
+            '---' in message or 
+            '✓' in message or 
+            'ERROR' in message or
+            'Found' in message
+        ):
+            current_log = self.log_message or ""
+            self.log_message = current_log + message + "\n"
     
     def action_import_data(self):
         """Start the import process"""
@@ -186,7 +196,7 @@ class ImportFragranticaData(models.TransientModel):
             if len(batch) >= self.batch_size:
                 FragranticaPerfume.create(batch)
                 self.imported_perfumes = count
-                self._log(f"Imported {count}/{self.total_perfumes} perfumes...")
+                self._log(f"Imported {count}/{self.total_perfumes} perfumes...", save_to_field=False)
                 batch = []
         
         # Import remaining
@@ -235,7 +245,7 @@ class ImportFragranticaData(models.TransientModel):
             if len(batch) >= self.batch_size:
                 FragranticaNote.create(batch)
                 self.imported_notes = count
-                self._log(f"Imported {count}/{self.total_notes} notes...")
+                self._log(f"Imported {count}/{self.total_notes} notes...", save_to_field=False)
                 batch = []
         
         if batch:
@@ -282,7 +292,7 @@ class ImportFragranticaData(models.TransientModel):
             if len(batch) >= self.batch_size:
                 FragranticaAccord.create(batch)
                 self.imported_accords = count
-                self._log(f"Imported {count}/{self.total_accords} accords...")
+                self._log(f"Imported {count}/{self.total_accords} accords...", save_to_field=False)
                 batch = []
         
         if batch:
@@ -307,7 +317,7 @@ class ImportFragranticaData(models.TransientModel):
             if perfume.image:
                 success += 1
             if count % 50 == 0:  # كل 50 بدلاً من 100
-                self._log(f"Processed {count}/{len(perfumes)} perfumes ({success} images loaded)...")
+                self._log(f"Processed {count}/{len(perfumes)} perfumes ({success} images loaded)...", save_to_field=False)
         
         self._log(f"✓ Loaded {success} perfume images out of {count} perfumes")
         
@@ -323,7 +333,7 @@ class ImportFragranticaData(models.TransientModel):
             if note.note_image:
                 success += 1
             if count % 100 == 0:
-                self._log(f"Processed {count}/{len(notes)} notes ({success} images loaded)...")
+                self._log(f"Processed {count}/{len(notes)} notes ({success} images loaded)...", save_to_field=False)
         
         self._log(f"✓ Loaded {success} note images out of {count} notes")
     
