@@ -1,19 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
     
-    <!-- Pending Request Tree View -->
-    <record id="view_fragrantica_pending_request_tree" model="ir.ui.view">
-        <field name="name">fragrantica.pending.request.tree</field>
+    <!-- Pending Request List View -->
+    <record id="view_fragrantica_pending_request_list" model="ir.ui.view">
+        <field name="name">fragrantica.pending.request.list</field>
         <field name="model">fragrantica.pending.request</field>
         <field name="arch" type="xml">
-            <tree string="Pending Requests" decoration-info="state == 'pending'" 
+            <list string="Pending Requests" decoration-info="state == 'pending'" 
                   decoration-success="state == 'completed'" decoration-danger="state == 'failed'">
                 <field name="create_date"/>
                 <field name="fragrantica_url"/>
                 <field name="product_id"/>
                 <field name="state"/>
                 <field name="requested_by"/>
-            </tree>
+            </list>
         </field>
     </record>
     
@@ -81,7 +81,7 @@
     <record id="action_fragrantica_pending_request" model="ir.actions.act_window">
         <field name="name">Pending Requests</field>
         <field name="res_model">fragrantica.pending.request</field>
-        <field name="view_mode">tree,form</field>
+        <field name="view_mode">list,form</field>
         <field name="context">{'search_default_pending': 1}</field>
         <field name="help" type="html">
             <p class="o_view_nocontent_smiling_face">

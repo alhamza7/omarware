@@ -1,19 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
     
-    <!-- Fragrantica Perfume Tree View -->
-    <record id="view_fragrantica_perfume_tree" model="ir.ui.view">
-        <field name="name">fragrantica.perfume.tree</field>
+    <!-- Fragrantica Perfume List View -->
+    <record id="view_fragrantica_perfume_list" model="ir.ui.view">
+        <field name="name">fragrantica.perfume.list</field>
         <field name="model">fragrantica.perfume</field>
         <field name="arch" type="xml">
-            <tree string="Fragrantica Perfumes">
+            <list string="Fragrantica Perfumes">
                 <field name="image" widget="image" width="50px"/>
                 <field name="name"/>
                 <field name="arabic_name"/>
                 <field name="brand_name"/>
                 <field name="year"/>
                 <field name="fragrantica_id"/>
-            </tree>
+            </list>
         </field>
     </record>
     
@@ -69,12 +69,12 @@
                         
                         <page string="Main Accords" name="accords">
                             <field name="accord_ids">
-                                <tree editable="bottom">
+                                <list editable="bottom">
                                     <field name="accord_order" widget="handle"/>
                                     <field name="accord_name"/>
                                     <field name="accord_width"/>
                                     <field name="accord_color" widget="color"/>
-                                </tree>
+                                </list>
                             </field>
                         </page>
                         
@@ -82,29 +82,29 @@
                             <group>
                                 <group string="Top Notes">
                                     <field name="top_notes_ids" nolabel="1">
-                                        <tree>
+                                        <list>
                                             <field name="note_image" widget="image" width="30px"/>
                                             <field name="note_name"/>
                                             <field name="note_opacity"/>
-                                        </tree>
+                                        </list>
                                     </field>
                                 </group>
                                 <group string="Middle Notes">
                                     <field name="middle_notes_ids" nolabel="1">
-                                        <tree>
+                                        <list>
                                             <field name="note_image" widget="image" width="30px"/>
                                             <field name="note_name"/>
                                             <field name="note_opacity"/>
-                                        </tree>
+                                        </list>
                                     </field>
                                 </group>
                                 <group string="Base Notes">
                                     <field name="base_notes_ids" nolabel="1">
-                                        <tree>
+                                        <list>
                                             <field name="note_image" widget="image" width="30px"/>
                                             <field name="note_name"/>
                                             <field name="note_opacity"/>
-                                        </tree>
+                                        </list>
                                     </field>
                                 </group>
                             </group>
@@ -112,13 +112,13 @@
                         
                         <page string="All Notes (Detailed)" name="all_notes">
                             <field name="note_ids">
-                                <tree editable="bottom">
+                                <list editable="bottom">
                                     <field name="note_order" widget="handle"/>
                                     <field name="note_type"/>
                                     <field name="note_name"/>
                                     <field name="note_image" widget="image" width="30px"/>
                                     <field name="note_opacity"/>
-                                </tree>
+                                </list>
                             </field>
                         </page>
                     </notebook>
@@ -153,7 +153,7 @@
     <record id="action_fragrantica_perfume" model="ir.actions.act_window">
         <field name="name">Fragrantica Perfumes</field>
         <field name="res_model">fragrantica.perfume</field>
-        <field name="view_mode">tree,form</field>
+        <field name="view_mode">list,form</field>
         <field name="context">{}</field>
         <field name="help" type="html">
             <p class="o_view_nocontent_smiling_face">
@@ -169,7 +169,7 @@
     <record id="action_product_template_fragrantica" model="ir.actions.act_window">
         <field name="name">Linked Products</field>
         <field name="res_model">product.template</field>
-        <field name="view_mode">tree,form</field>
+        <field name="view_mode">list,form</field>
         <field name="domain">[('fragrantica_perfume_id', '!=', False)]</field>
         <field name="context">{'search_default_fragrantica_perfume_id': active_id}</field>
     </record>

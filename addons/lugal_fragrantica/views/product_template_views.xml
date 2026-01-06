@@ -93,20 +93,20 @@
                             <field name="display_accord_ids" 
                                    attrs="{'invisible': [('fragrantica_use_custom', '=', True)]}"
                                    nolabel="1">
-                                <tree>
+                                <list>
                                     <field name="accord_name"/>
                                     <field name="accord_width" widget="progressbar"/>
                                     <field name="accord_color" widget="color"/>
-                                </tree>
+                                </list>
                             </field>
                             
                             <field name="custom_accord_ids" 
                                    attrs="{'invisible': [('fragrantica_use_custom', '=', False)]}"
                                    nolabel="1">
-                                <tree editable="bottom">
+                                <list editable="bottom">
                                     <field name="sequence" widget="handle"/>
                                     <field name="accord_id"/>
-                                </tree>
+                                </list>
                             </field>
                         </div>
                         
@@ -120,23 +120,23 @@
                                     </h5>
                                     <field name="display_top_notes_ids" nolabel="1" 
                                            attrs="{'invisible': [('fragrantica_use_custom', '=', True)]}">
-                                        <tree>
+                                        <list>
                                             <field name="note_image" widget="image" width="40px"/>
                                             <field name="note_name"/>
                                             <field name="note_opacity" widget="progressbar"/>
-                                        </tree>
+                                        </list>
                                     </field>
                                     
                                     <!-- Custom Top Notes -->
                                     <field name="custom_note_ids" nolabel="1"
                                            attrs="{'invisible': [('fragrantica_use_custom', '=', False)]}"
                                            domain="[('note_type', '=', 'Top')]"
-                                           context="{'default_note_type': 'Top', 'tree_view_ref': 'lugal_fragrantica.view_product_fragrantica_note_tree'}">
-                                        <tree editable="bottom">
+                                           context="{'default_note_type': 'Top', 'tree_view_ref': 'lugal_fragrantica.view_product_fragrantica_note_list'}">
+                                        <list editable="bottom">
                                             <field name="sequence" widget="handle"/>
                                             <field name="note_id" domain="[('note_type', '=', 'Top')]"/>
                                             <field name="note_type" invisible="1"/>
-                                        </tree>
+                                        </list>
                                     </field>
                                 </div>
                             </div>
@@ -149,11 +149,11 @@
                                     </h5>
                                     <field name="display_middle_notes_ids" nolabel="1"
                                            attrs="{'invisible': [('fragrantica_use_custom', '=', True)]}">
-                                        <tree>
+                                        <list>
                                             <field name="note_image" widget="image" width="40px"/>
                                             <field name="note_name"/>
                                             <field name="note_opacity" widget="progressbar"/>
-                                        </tree>
+                                        </list>
                                     </field>
                                     
                                     <!-- Custom Middle Notes -->
@@ -161,11 +161,11 @@
                                            attrs="{'invisible': [('fragrantica_use_custom', '=', False)]}"
                                            domain="[('note_type', '=', 'Middle')]"
                                            context="{'default_note_type': 'Middle'}">
-                                        <tree editable="bottom">
+                                        <list editable="bottom">
                                             <field name="sequence" widget="handle"/>
                                             <field name="note_id" domain="[('note_type', '=', 'Middle')]"/>
                                             <field name="note_type" invisible="1"/>
-                                        </tree>
+                                        </list>
                                     </field>
                                 </div>
                             </div>
@@ -178,11 +178,11 @@
                                     </h5>
                                     <field name="display_base_notes_ids" nolabel="1"
                                            attrs="{'invisible': [('fragrantica_use_custom', '=', True)]}">
-                                        <tree>
+                                        <list>
                                             <field name="note_image" widget="image" width="40px"/>
                                             <field name="note_name"/>
                                             <field name="note_opacity" widget="progressbar"/>
-                                        </tree>
+                                        </list>
                                     </field>
                                     
                                     <!-- Custom Base Notes -->
@@ -190,11 +190,11 @@
                                            attrs="{'invisible': [('fragrantica_use_custom', '=', False)]}"
                                            domain="[('note_type', '=', 'Base')]"
                                            context="{'default_note_type': 'Base'}">
-                                        <tree editable="bottom">
+                                        <list editable="bottom">
                                             <field name="sequence" widget="handle"/>
                                             <field name="note_id" domain="[('note_type', '=', 'Base')]"/>
                                             <field name="note_type" invisible="1"/>
-                                        </tree>
+                                        </list>
                                     </field>
                                 </div>
                             </div>
