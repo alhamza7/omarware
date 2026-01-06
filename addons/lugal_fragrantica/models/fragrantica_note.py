@@ -32,12 +32,17 @@ class FragranticaNote(models.Model):
                 note_filename = note.note_name.lower().replace(' ', '-').replace('.', '') + '.jpg'
                 
                 # Possible paths for note images
+                module_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                project_root = os.path.dirname(os.path.dirname(module_path))
+                
                 note_paths = [
                     # Path 1: fragrantica_data/images/notes/
                     os.path.join(module_path, 'static', 'fragrantica_data', 'images', 'notes', note_filename),
                     # Path 2: fregran/static/images/notes/
                     os.path.join(module_path, 'static', 'fregran', 'static', 'images', 'notes', note_filename),
-                    # Path 3: /opt/odoo/fregran/static/images/notes/
+                    # Path 3: Project root / fregran
+                    os.path.join(project_root, 'fregran', 'static', 'images', 'notes', note_filename),
+                    # Path 4: /opt/odoo/fregran (alternative)
                     f"/opt/odoo/fregran/static/images/notes/{note_filename}",
                 ]
                 

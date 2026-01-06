@@ -88,12 +88,17 @@ class FragranticaPerfume(models.Model):
                 module_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
                 
                 # Possible paths for perfume images
+                module_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                project_root = os.path.dirname(os.path.dirname(module_path))
+                
                 image_paths = [
                     # Path 1: fragrantica_data/images/perfumes/
                     os.path.join(module_path, 'static', 'fragrantica_data', 'images', 'perfumes', f"{perfume.fragrantica_id}.jpg"),
                     # Path 2: fregran/static/images/perfumes/
                     os.path.join(module_path, 'static', 'fregran', 'static', 'images', 'perfumes', f"{perfume.fragrantica_id}.jpg"),
-                    # Path 3: /opt/odoo/fregran/static/images/perfumes/
+                    # Path 3: Project root / fregran
+                    os.path.join(project_root, 'fregran', 'static', 'images', 'perfumes', f"{perfume.fragrantica_id}.jpg"),
+                    # Path 4: /opt/odoo/fregran (alternative)
                     f"/opt/odoo/fregran/static/images/perfumes/{perfume.fragrantica_id}.jpg",
                 ]
                 
@@ -115,7 +120,9 @@ class FragranticaPerfume(models.Model):
                     os.path.join(module_path, 'static', 'fragrantica_data', 'images', 'brands', brand_filename),
                     # Path 2: fregran/static/images/brands/
                     os.path.join(module_path, 'static', 'fregran', 'static', 'images', 'brands', brand_filename),
-                    # Path 3: /opt/odoo/fregran/static/images/brands/
+                    # Path 3: Project root / fregran
+                    os.path.join(project_root, 'fregran', 'static', 'images', 'brands', brand_filename),
+                    # Path 4: /opt/odoo/fregran (alternative)
                     f"/opt/odoo/fregran/static/images/brands/{brand_filename}",
                 ]
                 

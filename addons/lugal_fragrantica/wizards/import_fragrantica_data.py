@@ -57,21 +57,29 @@ class ImportFragranticaData(models.TransientModel):
         if os.path.exists(path2):
             return path2
         
-        # Path 3: /opt/odoo/fregran/perfumes.db
-        path3 = '/opt/odoo/fregran/perfumes.db'
+        # Path 3: Project root / fregran (most common)
+        # Get to project root (go up from addons/lugal_fragrantica/)
+        project_root = os.path.dirname(os.path.dirname(module_path))
+        path3 = os.path.join(project_root, 'fregran', 'perfumes.db')
         if os.path.exists(path3):
             return path3
+        
+        # Path 4: /opt/odoo/fregran/perfumes.db (alternative installation)
+        path4 = '/opt/odoo/fregran/perfumes.db'
+        if os.path.exists(path4):
+            return path4
         
         raise UserError(
             "Database file not found!\n\n"
             f"Looked in:\n"
             f"  - {path1}\n"
             f"  - {path2}\n"
-            f"  - {path3}\n\n"
+            f"  - {path3}\n"
+            f"  - {path4}\n\n"
             "Please:\n"
-            "1. Copy fregran folder to /opt/odoo/fregran/\n"
+            "1. Make sure fregran folder exists in project root\n"
             "2. Or copy perfumes.db to addons/lugal_fragrantica/static/fragrantica_data/\n"
-            "3. Or specify the full path in the wizard"
+            "3. Or specify the full path: /home/lugalai/Lugal-ai/fregran/perfumes.db"
         )
     
     def _log(self, message):
