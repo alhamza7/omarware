@@ -10,11 +10,12 @@ import os
 import base64
 from datetime import datetime
 
-# إعدادات
-ODOO_DB_NAME = 'lugal'
-ODOO_DB_USER = 'odoo'
-ODOO_DB_PASSWORD = ''
-ODOO_DB_HOST = ''  # فارغ للاستخدام Unix socket
+# إعدادات (من odoo.conf)
+ODOO_DB_NAME = 'nbs_lugalai'  # أو 'lugal' - تحقق بأمر: sudo -u postgres psql -l
+ODOO_DB_USER = 'odoo_user'
+ODOO_DB_PASSWORD = 'root'
+ODOO_DB_HOST = 'localhost'
+ODOO_DB_PORT = 5432
 
 # مسارات الصور
 FREGRAN_PATH = '/home/lugalai/Lugal-ai/fregran'
@@ -33,7 +34,8 @@ conn = psycopg2.connect(
     dbname=ODOO_DB_NAME,
     user=ODOO_DB_USER,
     password=ODOO_DB_PASSWORD,
-    host=ODOO_DB_HOST
+    host=ODOO_DB_HOST,
+    port=ODOO_DB_PORT
 )
 cursor = conn.cursor()
 print("✓ متصل!\n")

@@ -10,11 +10,12 @@ import psycopg2
 import os
 from datetime import datetime
 
-# إعدادات Odoo Database
-ODOO_DB_NAME = 'lugal'  # أو 'nbs_lugalai' - عدّلها حسب اسم قاعدة بياناتك
-ODOO_DB_USER = 'odoo'
-ODOO_DB_PASSWORD = ''  # عادة فارغ للاتصال المحلي
-ODOO_DB_HOST = ''  # فارغ للاستخدام Unix socket بدلاً من TCP
+# إعدادات Odoo Database (من odoo.conf)
+ODOO_DB_NAME = 'nbs_lugalai'  # أو 'lugal' - تحقق بأمر: sudo -u postgres psql -l
+ODOO_DB_USER = 'odoo_user'
+ODOO_DB_PASSWORD = 'root'
+ODOO_DB_HOST = 'localhost'
+ODOO_DB_PORT = 5432
 
 # مسار قاعدة بيانات SQLite
 SQLITE_DB_PATH = '/home/lugalai/Lugal-ai/fregran/perfumes.db'
@@ -34,7 +35,8 @@ pg_conn = psycopg2.connect(
     dbname=ODOO_DB_NAME,
     user=ODOO_DB_USER,
     password=ODOO_DB_PASSWORD,
-    host=ODOO_DB_HOST
+    host=ODOO_DB_HOST,
+    port=ODOO_DB_PORT
 )
 pg_cursor = pg_conn.cursor()
 
