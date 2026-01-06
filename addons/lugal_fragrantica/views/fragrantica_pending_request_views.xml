@@ -55,27 +55,6 @@
         </field>
     </record>
     
-    <!-- Pending Request Search View -->
-    <record id="view_fragrantica_pending_request_search" model="ir.ui.view">
-        <field name="name">fragrantica.pending.request.search</field>
-        <field name="model">fragrantica.pending.request</field>
-        <field name="arch" type="xml">
-            <search string="Search Requests">
-                <field name="fragrantica_url"/>
-                <field name="product_id"/>
-                
-                <filter string="Pending" name="pending" domain="[('state', '=', 'pending')]"/>
-                <filter string="Processing" name="processing" domain="[('state', '=', 'processing')]"/>
-                <filter string="Completed" name="completed" domain="[('state', '=', 'completed')]"/>
-                <filter string="Failed" name="failed" domain="[('state', '=', 'failed')]"/>
-                
-                <group expand="0" string="Group By">
-                    <filter string="Status" name="group_state" context="{'group_by': 'state'}"/>
-                    <filter string="Requested By" name="group_user" context="{'group_by': 'requested_by'}"/>
-                </group>
-            </search>
-        </field>
-    </record>
     
     <!-- Pending Request Action -->
     <record id="action_fragrantica_pending_request" model="ir.actions.act_window">
