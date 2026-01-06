@@ -300,26 +300,32 @@ class ImportFragranticaData(models.TransientModel):
         self._log(f"Loading images for {len(perfumes)} perfumes...")
         
         count = 0
+        success = 0
         for perfume in perfumes:
             perfume.load_image_from_static()
             count += 1
-            if count % 100 == 0:
-                self._log(f"Loaded {count} perfume images...")
+            if perfume.image:
+                success += 1
+            if count % 50 == 0:  # كل 50 بدلاً من 100
+                self._log(f"Processed {count}/{len(perfumes)} perfumes ({success} images loaded)...")
         
-        self._log(f"✓ Loaded {count} perfume images")
+        self._log(f"✓ Loaded {success} perfume images out of {count} perfumes")
         
         # Load note images
         notes = self.env['fragrantica.note'].search([('note_image', '=', False)])
         self._log(f"Loading images for {len(notes)} notes...")
         
         count = 0
+        success = 0
         for note in notes:
             note.load_image_from_static()
             count += 1
+            if note.note_image:
+                success += 1
             if count % 100 == 0:
-                self._log(f"Loaded {count} note images...")
+                self._log(f"Processed {count}/{len(notes)} notes ({success} images loaded)...")
         
-        self._log(f"✓ Loaded {count} note images")
+        self._log(f"✓ Loaded {success} note images out of {count} notes")
     
     def action_close(self):
         """Close wizard"""
