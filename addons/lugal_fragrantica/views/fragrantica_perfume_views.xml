@@ -141,10 +141,10 @@
         <field name="model">fragrantica.perfume</field>
         <field name="arch" type="xml">
             <search string="Search Perfumes">
-                <field name="name" string="Perfume" 
-                       filter_domain="['|', '|', '|', ('name', 'ilike', self), ('arabic_name', 'ilike', self), ('brand_name', 'ilike', self), ('description_full', 'ilike', self)]"/>
+                <field name="name"/>
+                <field name="arabic_name"/>
                 <field name="brand_name"/>
-                <field name="year"/>
+                <field name="description_full"/>
                 
                 <filter string="Has Image" name="has_image" domain="[('image', '!=', False)]"/>
                 <filter string="Has Arabic Name" name="has_arabic" domain="[('arabic_name', '!=', False)]"/>
