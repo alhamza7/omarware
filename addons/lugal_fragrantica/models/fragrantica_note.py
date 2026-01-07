@@ -23,6 +23,15 @@ class FragranticaNote(models.Model):
     note_opacity = fields.Float('Opacity', help='Visual opacity/intensity of the note')
     note_order = fields.Integer('Display Order', default=0)
     
+    # Display URL if image not loaded
+    display_note_image_url = fields.Char('Display Note Image URL', compute='_compute_display_image_url')
+    
+    @api.depends('note_image', 'note_image_url')
+    def _compute_display_image_url(self):
+        """Return image URL if local image not available"""
+        for note in self:
+            note.display_note_image_url = note.note_image_url if not note.note_image and note.note_image_url else False
+    
     def load_image_from_static(self):
         """Load note image from static folder if exists"""
         for note in self:
@@ -51,6 +60,20 @@ class FragranticaNote(models.Model):
                         with open(note_path, 'rb') as f:
                             note.note_image = base64.b64encode(f.read())
                         break
+    
+    def download_image_from_url(self):
+        """Download note image from external URL"""
+        import requests
+        
+        for note in self:
+            if not note.note_image and note.note_image_url:
+                try:
+                    response = requests.get(note.note_image_url, timeout=10)
+                    if response.status_code == 200:
+                        note.note_image = base64.b64encode(response.content)
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).warning(f"Failed to download note image for {note.note_name}: {e}")
     
     def name_get(self):
         """Custom name display"""

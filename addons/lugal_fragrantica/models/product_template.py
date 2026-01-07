@@ -38,6 +38,10 @@ class ProductTemplate(models.Model):
     display_image = fields.Binary('Perfume Image', compute='_compute_fragrantica_display')
     display_brand_logo = fields.Binary('Brand Logo', compute='_compute_fragrantica_display')
     
+    # Image URLs for displaying external images temporarily
+    display_image_url = fields.Char('Image URL', compute='_compute_fragrantica_display')
+    display_brand_logo_url = fields.Char('Brand Logo URL', compute='_compute_fragrantica_display')
+    
     # Notes by type (computed)
     display_top_notes_ids = fields.Many2many('fragrantica.note', compute='_compute_fragrantica_notes', string='Top Notes')
     display_middle_notes_ids = fields.Many2many('fragrantica.note', compute='_compute_fragrantica_notes', string='Middle Notes')
@@ -59,6 +63,8 @@ class ProductTemplate(models.Model):
                 product.display_description = product.custom_description if product.fragrantica_use_custom and product.custom_description else perfume.description_full
                 product.display_image = perfume.image
                 product.display_brand_logo = perfume.brand_logo
+                product.display_image_url = perfume.display_image_url
+                product.display_brand_logo_url = perfume.display_brand_logo_url
             else:
                 product.display_perfume_name = False
                 product.display_perfume_arabic_name = False
@@ -67,6 +73,8 @@ class ProductTemplate(models.Model):
                 product.display_description = product.custom_description if product.fragrantica_use_custom else False
                 product.display_image = False
                 product.display_brand_logo = False
+                product.display_image_url = False
+                product.display_brand_logo_url = False
     
     @api.depends('fragrantica_perfume_id', 'fragrantica_use_custom', 'custom_note_ids')
     def _compute_fragrantica_notes(self):

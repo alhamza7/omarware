@@ -24,6 +24,10 @@ class FragranticaPerfume(models.Model):
     image = fields.Binary('Perfume Image', attachment=True)
     brand_logo = fields.Binary('Brand Logo', attachment=True)
     
+    # Computed image - shows URL image if local not available
+    display_image_url = fields.Char('Display Image URL', compute='_compute_display_image_url')
+    display_brand_logo_url = fields.Char('Display Brand Logo URL', compute='_compute_display_image_url')
+    
     # Description
     description_title = fields.Char('Description Title')
     description_full = fields.Text('Full Description')
@@ -45,6 +49,13 @@ class FragranticaPerfume(models.Model):
     _sql_constraints = [
         ('fragrantica_id_unique', 'UNIQUE(fragrantica_id)', 'This perfume already exists in the database!')
     ]
+    
+    @api.depends('image', 'image_url', 'brand_logo', 'brand_logo_url')
+    def _compute_display_image_url(self):
+        """Return image URL if local image not available"""
+        for perfume in self:
+            perfume.display_image_url = perfume.image_url if not perfume.image and perfume.image_url else False
+            perfume.display_brand_logo_url = perfume.brand_logo_url if not perfume.brand_logo and perfume.brand_logo_url else False
     
     @api.depends('note_ids', 'note_ids.note_type')
     def _compute_notes_by_type(self):
@@ -141,4 +152,27 @@ class FragranticaPerfume(models.Model):
                     
                     if perfume.brand_logo:
                         break
+    
+    def download_image_from_url(self):
+        """Download image from external URL if local not found"""
+        import requests
+        
+        for perfume in self:
+            # Download perfume image
+            if not perfume.image and perfume.image_url:
+                try:
+                    response = requests.get(perfume.image_url, timeout=10)
+                    if response.status_code == 200:
+                        perfume.image = base64.b64encode(response.content)
+                except Exception as e:
+                    _logger.warning(f"Failed to download image for {perfume.name}: {e}")
+            
+            # Download brand logo
+            if not perfume.brand_logo and perfume.brand_logo_url:
+                try:
+                    response = requests.get(perfume.brand_logo_url, timeout=10)
+                    if response.status_code == 200:
+                        perfume.brand_logo = base64.b64encode(response.content)
+                except Exception as e:
+                    _logger.warning(f"Failed to download brand logo for {perfume.brand_name}: {e}")
 
