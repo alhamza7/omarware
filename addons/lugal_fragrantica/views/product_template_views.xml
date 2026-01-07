@@ -53,14 +53,14 @@
                         <!-- Header with Images -->
                         <div class="row">
                             <div class="col-md-3">
-                                <!-- Show perfume image -->
-                                <field name="fragrantica_perfume_id" invisible="1"/>
-                                <div class="text-center">
-                                    <img t-if="fragrantica_perfume_id and fragrantica_perfume_id.image_url"
-                                         t-att-src="fragrantica_perfume_id.image_url" 
-                                         style="max-width: 250px; max-height: 250px; object-fit: contain; border: 1px solid #ddd; border-radius: 8px;"
-                                         class="img-fluid"/>
-                                </div>
+                                <!-- Show perfume image from external URL -->
+                                <group invisible="not fragrantica_perfume_id">
+                                    <field name="fragrantica_perfume_id" invisible="1"/>
+                                    <field name="fragrantica_perfume_id" 
+                                           widget="image" 
+                                           options="{'field': 'image_url', 'size': [250, 250]}"
+                                           nolabel="1"/>
+                                </group>
                             </div>
                             <div class="col-md-9">
                                 <h2>
@@ -70,11 +70,14 @@
                                     <field name="display_perfume_arabic_name" readonly="1"/>
                                 </h3>
                                 <div class="mt-2">
-                                    <!-- Brand Logo from URL -->
-                                    <img t-if="fragrantica_perfume_id and fragrantica_perfume_id.brand_logo_url"
-                                         t-att-src="fragrantica_perfume_id.brand_logo_url"
-                                         style="max-width: 80px; max-height: 80px; object-fit: contain; margin-right: 10px;"
-                                         class="d-inline-block"/>
+                                    <!-- Brand Logo -->
+                                    <group invisible="not fragrantica_perfume_id" class="d-inline-block">
+                                        <field name="fragrantica_perfume_id" 
+                                               widget="image" 
+                                               options="{'field': 'brand_logo_url', 'size': [80, 80]}"
+                                               nolabel="1"
+                                               class="d-inline-block mr-2"/>
+                                    </group>
                                     
                                     <span class="h4">
                                         <field name="display_brand_name" readonly="1" class="d-inline"/>
