@@ -700,6 +700,16 @@ class PosPerfumeOrder(models.Model):
             'target': 'current',
         }
     
+    def action_print_order(self):
+        """طباعة الطلب باستخدام تقرير Odoo الأصلي"""
+        self.ensure_one()
+        
+        # الحصول على التقرير
+        report = self.env.ref('pos_perfume_custom.action_report_pos_perfume_order_simple')
+        
+        # إرجاع action للطباعة
+        return report.report_action(self)
+    
     def action_print_to_sap(self):
         """إرسال طلب طباعة إلى SAP على DEFAULT LAYOUT"""
         import logging

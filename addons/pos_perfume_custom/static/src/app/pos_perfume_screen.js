@@ -2174,31 +2174,32 @@ export class PosPerfumeScreen extends Component {
             console.log('=== Print POS Order (Odoo Report) ===');
             console.log('Order ID:', orderId);
             
-            // طباعة باستخدام تقرير Odoo الأصلي
-            const action = {
-                type: 'ir.actions.report',
-                report_type: 'qweb-pdf',
-                report_name: 'pos_perfume_custom.report_pos_perfume_order_simple',
-                report_file: 'pos_perfume_custom.report_pos_perfume_order_simple',
-                data: {
-                    ids: [orderId],
-                },
-                context: {
-                    active_id: orderId,
-                    active_ids: [orderId],
-                    active_model: 'pos.perfume.order',
-                },
-            };
+            // استدعاء دالة Python لطباعة التقرير
+            // هذه الطريقة الأكثر موثوقية لأنها تستخدم report.report_action()
+            const result = await this.orm.call(
+                'pos.perfume.order',
+                'action_print_order',
+                [[orderId]]
+            );
             
-            console.log('Print action:', action);
+            console.log('Print result:', result);
             
-            // تنفيذ action الطباعة
-            await this.action.doAction(action);
-            
-            this.notification.add(_t("Order sent to printer!"), { 
-                type: "success",
-                title: _t("Print Success")
-            });
+            // تنفيذ الـ action (فتح PDF)
+            if (result && result.type) {
+                await this.action.doAction(result);
+                this.notification.add(_t("Opening print preview..."), { 
+                    type: "success",
+                    title: _t("Print")
+                });
+            } else {
+                // Fallback: فتح التقرير مباشرة عبر URL
+                const reportUrl = `/report/pdf/pos_perfume_custom.report_pos_perfume_order_simple/${orderId}`;
+                window.open(reportUrl, '_blank');
+                this.notification.add(_t("Opening print preview..."), { 
+                    type: "success",
+                    title: _t("Print")
+                });
+            }
             
         } catch (error) {
             console.error('=== Print Order Error ===');
