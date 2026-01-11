@@ -26,19 +26,19 @@
         'uom_in_pricelist',          # ⭐ أسعار حسب UoM
         'sap_integration',           # ⭐ معلومات SAP
         'ultramsg_integration',      # ⭐ WhatsApp Integration
-        'invoice_designer',          # ⭐ مصمم الفواتير
+        # 'invoice_designer',          # ⭐ معطل: استخدام الفاتورة الأصلية من Odoo
     ],
     'data': [
         'security/ir.model.access.csv',
         'data/pos_perfume_sequence.xml',
-        'data/invoice_templates.xml',
+        # 'data/invoice_templates.xml',  # ⛔ معطل: استخدام الفاتورة الأصلية
         'views/pos_perfume_views.xml',
         'views/pos_perfume_order_views.xml',
         'views/pos_perfume_session_views.xml',
-        'reports/pos_perfume_order_report.xml',
-        'reports/pos_perfume_order_report_gold.xml',
-        'reports/pos_perfume_order_report_nbs.xml',
-        'reports/pos_perfume_report_action.xml',
+        # 'reports/pos_perfume_order_report.xml',  # ⛔ معطل: استخدام الفاتورة الأصلية
+        # 'reports/pos_perfume_order_report_gold.xml',  # ⛔ معطل: استخدام الفاتورة الأصلية
+        # 'reports/pos_perfume_order_report_nbs.xml',  # ⛔ معطل: استخدام الفاتورة الأصلية
+        # 'reports/pos_perfume_report_action.xml',  # ⛔ معطل: استخدام الفاتورة الأصلية
     ],
     'assets': {
         'web.assets_backend': [
@@ -64,9 +64,9 @@
             'pos_perfume_custom/static/src/xml/payment_screen_inherit.xml',
             'pos_perfume_custom/static/src/xml/product_screen_button.xml',
         ],
-        'web.report_assets_common': [
-            'pos_perfume_custom/static/src/css/report_style.css',
-        ],
+        # 'web.report_assets_common': [  # ⛔ معطل: استخدام الفاتورة الأصلية
+        #     'pos_perfume_custom/static/src/css/report_style.css',
+        # ],
     },
     'installable': True,
     'application': False,
