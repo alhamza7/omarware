@@ -148,13 +148,13 @@ class PosPerfumeOrder(models.Model):
         copy=False
     )
     
-    # Invoice Designer Template
-    invoice_template_id = fields.Many2one(
-        'invoice.template.designer',
-        string='Invoice Template',
-        domain=[('template_type', 'in', ['pos_receipt', 'invoice'])],
-        help='Custom template for printing this order'
-    )
+    # Invoice Designer Template - DISABLED: Using default Odoo invoices
+    # invoice_template_id = fields.Many2one(
+    #     'invoice.template.designer',
+    #     string='Invoice Template',
+    #     domain=[('template_type', 'in', ['pos_receipt', 'invoice'])],
+    #     help='Custom template for printing this order'
+    # )
     
     # SAP Fields (from related sale order)
     sap_doc_num = fields.Char(
@@ -801,75 +801,76 @@ class PosPerfumeOrder(models.Model):
             _logger.error(f"[POS Print] ❌ Error sending print request to SAP: {str(e)}", exc_info=True)
             raise UserError(_('Error sending print request to SAP: %s') % str(e))
     
-    def action_print_with_designer(self):
-        """طباعة الفاتورة باستخدام Invoice Designer"""
-        self.ensure_one()
-        
-        # Get template
-        template = self.invoice_template_id
-        if not template:
-            # Try to get default template for POS
-            template = self.env['invoice.template.designer'].search([
-                ('template_type', '=', 'pos_receipt'),
-                ('is_default', '=', True),
-            ], limit=1)
-        
-        if not template:
-            # Fallback to any invoice template
-            template = self.env['invoice.template.designer'].search([
-                ('template_type', 'in', ['invoice', 'pos_receipt']),
-            ], limit=1)
-        
-        if not template:
-            raise UserError(_('No invoice template found. Please create one from Invoice Designer module.'))
-        
-        # Generate PDF using template
-        try:
-            pdf_data = template.generate_invoice_pdf(self.id, model_name='pos.perfume.order')
-            
-            if not pdf_data:
-                raise UserError(_('Failed to generate PDF from template.'))
-            
-            # Save PDF as attachment
-            import base64
-            attachment = self.env['ir.attachment'].create({
-                'name': f'{self.name}.pdf',
-                'type': 'binary',
-                'datas': base64.b64encode(pdf_data),
-                'res_model': 'pos.perfume.order',
-                'res_id': self.id,
-                'mimetype': 'application/pdf',
-            })
-            
-            # Return PDF as download
-            return {
-                'type': 'ir.actions.act_url',
-                'url': f'/web/content/{attachment.id}?download=true',
-                'target': 'new',
-            }
-        except Exception as e:
-            raise UserError(_('Error generating invoice: %s') % str(e))
-    
-    def action_open_designer(self):
-        """فتح مصمم الفواتير"""
-        self.ensure_one()
-        
-        # Get or create template
-        template = self.invoice_template_id
-        if not template:
-            # Create a new template for this order
-            template = self.env['invoice.template.designer'].create({
-                'name': f'Template for {self.name}',
-                'code': f'pos_perfume_{self.id}',
-                'template_type': 'pos_receipt',
-                'page_format': 'A4',
-                'page_width': 210,
-                'page_height': 297,
-            })
-            self.invoice_template_id = template.id
-        
-        # Open designer
-        return template.action_open_visual_designer()
+    # DISABLED: Invoice Designer functions - Use default Odoo reports instead
+    # def action_print_with_designer(self):
+    #     """طباعة الفاتورة باستخدام Invoice Designer"""
+    #     self.ensure_one()
+    #     
+    #     # Get template
+    #     template = self.invoice_template_id
+    #     if not template:
+    #         # Try to get default template for POS
+    #         template = self.env['invoice.template.designer'].search([
+    #             ('template_type', '=', 'pos_receipt'),
+    #             ('is_default', '=', True),
+    #         ], limit=1)
+    #     
+    #     if not template:
+    #         # Fallback to any invoice template
+    #         template = self.env['invoice.template.designer'].search([
+    #             ('template_type', 'in', ['invoice', 'pos_receipt']),
+    #         ], limit=1)
+    #     
+    #     if not template:
+    #         raise UserError(_('No invoice template found. Please create one from Invoice Designer module.'))
+    #     
+    #     # Generate PDF using template
+    #     try:
+    #         pdf_data = template.generate_invoice_pdf(self.id, model_name='pos.perfume.order')
+    #         
+    #         if not pdf_data:
+    #             raise UserError(_('Failed to generate PDF from template.'))
+    #         
+    #         # Save PDF as attachment
+    #         import base64
+    #         attachment = self.env['ir.attachment'].create({
+    #             'name': f'{self.name}.pdf',
+    #             'type': 'binary',
+    #             'datas': base64.b64encode(pdf_data),
+    #             'res_model': 'pos.perfume.order',
+    #             'res_id': self.id,
+    #             'mimetype': 'application/pdf',
+    #         })
+    #         
+    #         # Return PDF as download
+    #         return {
+    #             'type': 'ir.actions.act_url',
+    #             'url': f'/web/content/{attachment.id}?download=true',
+    #             'target': 'new',
+    #         }
+    #     except Exception as e:
+    #         raise UserError(_('Error generating invoice: %s') % str(e))
+    # 
+    # def action_open_designer(self):
+    #     """فتح مصمم الفواتير"""
+    #     self.ensure_one()
+    #     
+    #     # Get or create template
+    #     template = self.invoice_template_id
+    #     if not template:
+    #         # Create a new template for this order
+    #         template = self.env['invoice.template.designer'].create({
+    #             'name': f'Template for {self.name}',
+    #             'code': f'pos_perfume_{self.id}',
+    #             'template_type': 'pos_receipt',
+    #             'page_format': 'A4',
+    #             'page_width': 210,
+    #             'page_height': 297,
+    #         })
+    #         self.invoice_template_id = template.id
+    #     
+    #     # Open designer
+    #     return template.action_open_visual_designer()
 
 
 
