@@ -16,10 +16,10 @@
         <template id="pos_order_arabic_document">
             <t t-call="web.html_container">
                 <t t-foreach="docs" t-as="o">
-                    <div class="article o_report_layout_standard" style="direction: rtl; font-family: 'DejaVu Sans', 'Arial', sans-serif; padding: 20px;">
+                    <div class="article o_report_layout_standard" style="direction: rtl; font-family: 'DejaVu Sans', 'Arial', sans-serif; padding: 20px; width: 100%; box-sizing: border-box;">
                     
                     <!-- Header -->
-                    <table style="width: 100%; margin-bottom: 20px; border-bottom: 3px solid #2c3e50;">
+                    <table style="width: 100%; margin-bottom: 20px; border-bottom: 3px solid #2c3e50; border-collapse: collapse; table-layout: fixed;">
                         <tr>
                             <td style="width: 30%; vertical-align: middle;">
                                 <img t-if="o.env.company.logo" 
@@ -40,37 +40,33 @@
                     </table>
                     
                     <!-- Order Info -->
-                    <table style="width: 100%; margin-bottom: 20px;">
+                    <table style="width: 100%; margin-bottom: 20px; border-collapse: separate; border-spacing: 12px 0; table-layout: fixed;">
                         <tr>
-                            <td style="width: 50%; padding-left: 10px;">
-                                <table style="width: 100%; border: 2px solid #2c3e50; background: #ecf0f1;">
+                            <td style="width: 50%; padding: 0; vertical-align: top;">
+                                <table style="width: 100%; border: 2px solid #2c3e50; background: #ecf0f1; border-collapse: collapse; table-layout: fixed;">
                                     <tr>
-                                        <td style="padding: 10px; width: 40%; text-align: right; border-bottom: 1px solid #bdc3c7;"><strong>رقم الطلب:</strong></td>
-                                        <td style="padding: 10px; text-align: center; border-bottom: 1px solid #bdc3c7; font-weight: bold;"><t t-esc="o.name"/></td>
+                                        <td style="padding: 10px; width: 40%; text-align: right; border-bottom: 1px solid #bdc3c7; white-space: nowrap;"><strong>رقم الطلب:</strong></td>
+                                        <td style="padding: 10px; text-align: center; border-bottom: 1px solid #bdc3c7; font-weight: bold;"><span style="direction:ltr; unicode-bidi:bidi-override; display:inline-block;"><t t-esc="o.name"/></span></td>
                                     </tr>
                                     <tr>
-                                        <td style="padding: 10px; text-align: right; border-bottom: 1px solid #bdc3c7;"><strong>التاريخ:</strong></td>
-                                        <td style="padding: 10px; text-align: center; border-bottom: 1px solid #bdc3c7;"><t t-esc="o.date.strftime('%Y-%m-%d') if o.date else ''"/></td>
+                                        <td style="padding: 10px; text-align: right; border-bottom: 1px solid #bdc3c7; white-space: nowrap;"><strong>التاريخ:</strong></td>
+                                        <td style="padding: 10px; text-align: center; border-bottom: 1px solid #bdc3c7;"><span style="direction:ltr; unicode-bidi:bidi-override; display:inline-block;"><t t-esc="o.date.strftime('%Y-%m-%d') if o.date else ''"/></span></td>
                                     </tr>
                                     <tr t-if="o.sap_doc_num">
-                                        <td style="padding: 10px; text-align: right; background: #d5f4e6;"><strong style="color: #27ae60;">رقم فاتورة SAP:</strong></td>
-                                        <td style="padding: 10px; text-align: center; background: #d5f4e6; font-weight: bold; font-size: 18px; color: #27ae60;"><t t-esc="o.sap_doc_num"/></td>
+                                        <td style="padding: 10px; text-align: right; background: #d5f4e6; white-space: nowrap;"><strong style="color: #27ae60;">رقم فاتورة SAP:</strong></td>
+                                        <td style="padding: 10px; text-align: center; background: #d5f4e6; font-weight: bold; font-size: 18px; color: #27ae60;"><span style="direction:ltr; unicode-bidi:bidi-override; display:inline-block;"><t t-esc="o.sap_doc_num"/></span></td>
                                     </tr>
                                 </table>
                             </td>
-                            <td style="width: 50%; padding-right: 10px;">
-                                <table style="width: 100%; border: 2px solid #2c3e50; background: #ecf0f1;">
+                            <td style="width: 50%; padding: 0; vertical-align: top;">
+                                <table style="width: 100%; border: 2px solid #2c3e50; background: #ecf0f1; border-collapse: collapse; table-layout: fixed;">
                                     <tr>
-                                        <td style="padding: 10px; width: 40%; text-align: right; border-bottom: 1px solid #bdc3c7;"><strong>البائع:</strong></td>
+                                        <td style="padding: 10px; width: 40%; text-align: right; border-bottom: 1px solid #bdc3c7; white-space: nowrap;"><strong>البائع:</strong></td>
                                         <td style="padding: 10px; text-align: center; border-bottom: 1px solid #bdc3c7;"><t t-esc="o.user_id.name"/></td>
                                     </tr>
                                     <tr t-if="o.invoice_type">
-                                        <td style="padding: 10px; text-align: right; border-bottom: 1px solid #bdc3c7;"><strong>نوع الفاتورة:</strong></td>
+                                        <td style="padding: 10px; text-align: right; border-bottom: 1px solid #bdc3c7; white-space: nowrap;"><strong>نوع الفاتورة:</strong></td>
                                         <td style="padding: 10px; text-align: center; border-bottom: 1px solid #bdc3c7;"><t t-esc="dict(o._fields['invoice_type'].selection).get(o.invoice_type, '')"/></td>
-                                    </tr>
-                                    <tr>
-                                        <td style="padding: 10px; text-align: right;"><strong>سعر الصرف:</strong></td>
-                                        <td style="padding: 10px; text-align: center;"><t t-esc="'{:,.0f}'.format(o.exchange_rate)"/> د.ع</td>
                                     </tr>
                                 </table>
                             </td>
@@ -138,38 +134,47 @@
                         </table>
                     </div>
                     
-                    <!-- Totals -->
-                    <table style="width: 50%; float: left; margin-bottom: 20px;">
-                        <tr t-if="o.note">
-                            <td colspan="2">
-                                <div style="border: 2px solid #f39c12; background: #fef5e7; padding: 12px; margin-bottom: 10px;">
+                    <!-- Totals + Notes (NO floats to avoid overlap in wkhtmltopdf) -->
+                    <table style="width: 100%; margin-bottom: 20px; border-collapse: separate; border-spacing: 12px 0; table-layout: fixed;">
+                        <tr>
+                            <!-- Totals (right side in RTL) -->
+                            <td style="width: 50%; padding: 0; vertical-align: top;">
+                                <table style="width: 100%; border: 2px solid #2c3e50; border-collapse: collapse; table-layout: fixed;">
+                                    <tr style="background: #ecf0f1;">
+                                        <td style="padding: 10px; text-align: right; border-bottom: 1px solid #bdc3c7; white-space: nowrap;"><strong>المجموع الفرعي:</strong></td>
+                                        <td style="padding: 10px; text-align: center; border-bottom: 1px solid #bdc3c7; font-weight: bold;">
+                                            <span style="direction:ltr; unicode-bidi:bidi-override; display:inline-block;">$<t t-esc="'{:.2f}'.format(o.amount_subtotal)"/></span>
+                                        </td>
+                                    </tr>
+                                    <tr t-if="o.amount_discount &gt; 0" style="background: #ecf0f1;">
+                                        <td style="padding: 10px; text-align: right; border-bottom: 1px solid #bdc3c7; white-space: nowrap;"><strong style="color: #e74c3c;">الخصم:</strong></td>
+                                        <td style="padding: 10px; text-align: center; border-bottom: 1px solid #bdc3c7; color: #e74c3c; font-weight: bold;">
+                                            <span style="direction:ltr; unicode-bidi:bidi-override; display:inline-block;">-$<t t-esc="'{:.2f}'.format(o.amount_discount)"/></span>
+                                        </td>
+                                    </tr>
+                                    <tr style="background: #3498db; color: white;">
+                                        <td style="padding: 12px; text-align: right; white-space: nowrap;"><strong style="font-size: 16px;">المجموع الكلي:</strong></td>
+                                        <td style="padding: 12px; text-align: center;"><strong style="font-size: 18px;">
+                                            <span style="direction:ltr; unicode-bidi:bidi-override; display:inline-block;">$<t t-esc="'{:.2f}'.format(o.amount_total)"/></span>
+                                        </strong></td>
+                                    </tr>
+                                    <tr style="background: #27ae60; color: white;">
+                                        <td style="padding: 12px; text-align: right; white-space: nowrap;"><strong>المجموع بالدينار:</strong></td>
+                                        <td style="padding: 12px; text-align: center;"><strong style="font-size: 17px;">
+                                            <span style="direction:ltr; unicode-bidi:bidi-override; display:inline-block;"><t t-esc="'{:,.0f}'.format(o.amount_total_iqd)"/></span> د.ع
+                                        </strong></td>
+                                    </tr>
+                                </table>
+                            </td>
+                            <!-- Notes -->
+                            <td style="width: 50%; padding: 0; vertical-align: top;">
+                                <div t-if="o.note" style="border: 2px solid #f39c12; background: #fef5e7; padding: 12px; min-height: 110px; box-sizing: border-box;">
                                     <strong style="color: #d68910;">ملاحظات:</strong>
                                     <p style="margin: 8px 0 0 0; color: #7d6608; text-align: right;"><t t-esc="o.note"/></p>
                                 </div>
                             </td>
                         </tr>
                     </table>
-                    
-                    <table style="width: 50%; float: right; border: 2px solid #2c3e50; border-collapse: collapse;">
-                        <tr style="background: #ecf0f1;">
-                            <td style="padding: 10px; text-align: right; border-bottom: 1px solid #bdc3c7;"><strong>المجموع الفرعي:</strong></td>
-                            <td style="padding: 10px; text-align: center; border-bottom: 1px solid #bdc3c7; font-weight: bold;">$<t t-esc="'{:.2f}'.format(o.amount_subtotal)"/></td>
-                        </tr>
-                        <tr t-if="o.amount_discount &gt; 0" style="background: #ecf0f1;">
-                            <td style="padding: 10px; text-align: right; border-bottom: 1px solid #bdc3c7;"><strong style="color: #e74c3c;">الخصم:</strong></td>
-                            <td style="padding: 10px; text-align: center; border-bottom: 1px solid #bdc3c7; color: #e74c3c; font-weight: bold;">-$<t t-esc="'{:.2f}'.format(o.amount_discount)"/></td>
-                        </tr>
-                        <tr style="background: #3498db; color: white;">
-                            <td style="padding: 12px; text-align: right;"><strong style="font-size: 16px;">المجموع الكلي:</strong></td>
-                            <td style="padding: 12px; text-align: center;"><strong style="font-size: 18px;">$<t t-esc="'{:.2f}'.format(o.amount_total)"/></strong></td>
-                        </tr>
-                        <tr style="background: #27ae60; color: white;">
-                            <td style="padding: 12px; text-align: right;"><strong>المجموع بالدينار:</strong></td>
-                            <td style="padding: 12px; text-align: center;"><strong style="font-size: 17px;"><t t-esc="'{:,.0f}'.format(o.amount_total_iqd)"/> د.ع</strong></td>
-                        </tr>
-                    </table>
-                    
-                    <div style="clear: both;"></div>
                     
                     <!-- Footer -->
                     <div style="margin-top: 40px; padding-top: 15px; border-top: 3px solid #2c3e50; text-align: center;">
