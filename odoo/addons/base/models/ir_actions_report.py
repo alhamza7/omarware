@@ -312,6 +312,9 @@ class IrActionsReport(models.Model):
             landscape = specific_paperformat_args.get('data-report-landscape')
 
         command_args = ['--disable-local-file-access']
+        # Force UTF-8 to avoid mojibake (e.g. Arabic showing as ØªØ³Ø...)
+        # wkhtmltopdf otherwise may assume a legacy encoding depending on environment.
+        command_args.extend(['--encoding', 'utf-8'])
         if set_viewport_size:
             command_args.extend(['--viewport-size', landscape and '1024x1280' or '1280x1024'])
 
