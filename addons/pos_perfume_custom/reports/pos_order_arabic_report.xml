@@ -14,19 +14,9 @@
 
         <!-- Main Template -->
         <template id="pos_order_arabic_document">
-            <t t-call="web.basic_layout">
+            <t t-call="web.html_container">
                 <t t-foreach="docs" t-as="o">
-                    <t t-call="pos_perfume_custom.pos_order_arabic_layout"/>
-                </t>
-            </t>
-        </template>
-
-        <!-- Report Layout -->
-        <template id="pos_order_arabic_layout">
-            <div class="article" t-att-data-oe-model="o and o._name" t-att-data-oe-id="o and o.id">
-                <t t-raw="'&lt;meta charset=&quot;UTF-8&quot;/&gt;'"/>
-                
-                <div style="direction: rtl; font-family: DejaVu Sans, Arial, sans-serif; padding: 20px;">
+                    <div class="article o_report_layout_standard" style="direction: rtl; font-family: 'DejaVu Sans', 'Arial', sans-serif; padding: 20px;">
                     
                     <!-- Header -->
                     <table style="width: 100%; margin-bottom: 20px; border-bottom: 3px solid #2c3e50;">
@@ -187,8 +177,9 @@
                         <p style="margin: 5px 0; font-size: 13px; color: #95a5a6;">Thank you for your business</p>
                     </div>
                     
-                </div>
-            </div>
+                    </div>
+                </t>
+            </t>
         </template>
     </data>
 </odoo>
