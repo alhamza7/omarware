@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <data>
+        <!-- Report Action -->
+        <record id="action_report_pos_perfume_arabic" model="ir.actions.report">
+            <field name="name">فاتورة POS</field>
+            <field name="model">pos.perfume.order</field>
+            <field name="report_type">qweb-pdf</field>
+            <field name="report_name">pos_perfume_custom.pos_order_arabic_document</field>
+            <field name="print_report_name">'Invoice_%s' % (object.name)</field>
+            <field name="binding_model_id" ref="model_pos_perfume_order"/>
+            <field name="binding_type">report</field>
+        </record>
+
+        <!-- Main Template -->
+        <template id="pos_order_arabic_document">
+            <t t-call="web.basic_layout">
+                <t t-foreach="docs" t-as="o">
+                    <t t-call="pos_perfume_custom.pos_order_arabic_layout"/>
+                </t>
+            </t>
+        </template>
+
+        <!-- Report Layout -->
+        <template id="pos_order_arabic_layout">
+            <div class="article" t-att-data-oe-model="o and o._name" t-att-data-oe-id="o and o.id">
+                <t t-raw="'&lt;meta charset=&quot;UTF-8&quot;/&gt;'"/>
+                
+                <div style="direction: rtl; font-family: DejaVu Sans, Arial, sans-serif; padding: 20px;">
+                    
+                    <!-- Header -->
+                    <table style="width: 100%; margin-bottom: 20px; border-bottom: 3px solid #2c3e50;">
+                        <tr>
+                            <td style="width: 30%; vertical-align: middle;">
+                                <img t-if="o.env.company.logo" 
+                                     t-att-src="image_data_uri(o.env.company.logo)"
+                                     style="max-height: 100px; max-width: 200px;"/>
+                            </td>
+                            <td style="width: 70%; text-align: center; vertical-align: middle;">
+                                <h2 style="margin: 5px 0; color: #2c3e50; font-size: 22px;">
+                                    <t t-esc="o.env.company.name"/>
+                                </h2>
+                                <h1 style="margin: 10px 0; color: #3498db; font-size: 26px;">
+                                    <t t-if="o.state == 'quotation'">عرض سعر</t>
+                                    <t t-elif="o.state == 'sale'">فاتورة</t>
+                                    <t t-else="">طلب</t>
+                                </h1>
+                            </td>
+                        </tr>
+                    </table>
+                    
+                    <!-- Order Info -->
+                    <table style="width: 100%; margin-bottom: 20px;">
+                        <tr>
+                            <td style="width: 50%; padding-left: 10px;">
+                                <table style="width: 100%; border: 2px solid #2c3e50; background: #ecf0f1;">
+                                    <tr>
+                                        <td style="padding: 10px; width: 40%; text-align: right; border-bottom: 1px solid #bdc3c7;"><strong>رقم الطلب:</strong></td>
+                                        <td style="padding: 10px; text-align: center; border-bottom: 1px solid #bdc3c7; font-weight: bold;"><t t-esc="o.name"/></td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 10px; text-align: right; border-bottom: 1px solid #bdc3c7;"><strong>التاريخ:</strong></td>
+                                        <td style="padding: 10px; text-align: center; border-bottom: 1px solid #bdc3c7;"><t t-esc="o.date.strftime('%Y-%m-%d') if o.date else ''"/></td>
+                                    </tr>
+                                    <tr t-if="o.sap_doc_num">
+                                        <td style="padding: 10px; text-align: right; background: #d5f4e6;"><strong style="color: #27ae60;">رقم فاتورة SAP:</strong></td>
+                                        <td style="padding: 10px; text-align: center; background: #d5f4e6; font-weight: bold; font-size: 18px; color: #27ae60;"><t t-esc="o.sap_doc_num"/></td>
+                                    </tr>
+                                </table>
+                            </td>
+                            <td style="width: 50%; padding-right: 10px;">
+                                <table style="width: 100%; border: 2px solid #2c3e50; background: #ecf0f1;">
+                                    <tr>
+                                        <td style="padding: 10px; width: 40%; text-align: right; border-bottom: 1px solid #bdc3c7;"><strong>البائع:</strong></td>
+                                        <td style="padding: 10px; text-align: center; border-bottom: 1px solid #bdc3c7;"><t t-esc="o.user_id.name"/></td>
+                                    </tr>
+                                    <tr t-if="o.invoice_type">
+                                        <td style="padding: 10px; text-align: right; border-bottom: 1px solid #bdc3c7;"><strong>نوع الفاتورة:</strong></td>
+                                        <td style="padding: 10px; text-align: center; border-bottom: 1px solid #bdc3c7;"><t t-esc="dict(o._fields['invoice_type'].selection).get(o.invoice_type, '')"/></td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 10px; text-align: right;"><strong>سعر الصرف:</strong></td>
+                                        <td style="padding: 10px; text-align: center;"><t t-esc="'{:,.0f}'.format(o.exchange_rate)"/> د.ع</td>
+                                    </tr>
+                                </table>
+                            </td>
+                        </tr>
+                    </table>
+                    
+                    <!-- Customer Info -->
+                    <div style="background: #ecf0f1; padding: 15px; border: 2px solid #2c3e50; margin-bottom: 20px;">
+                        <h4 style="margin: 0 0 10px 0; padding-bottom: 8px; border-bottom: 2px solid #2c3e50; text-align: right;">معلومات العميل</h4>
+                        <table style="width: 100%;">
+                            <tr>
+                                <td style="width: 15%; text-align: right; padding: 5px;"><strong>الاسم:</strong></td>
+                                <td style="width: 35%; text-align: right; padding: 5px;"><t t-esc="o.partner_id.name"/></td>
+                                <td style="width: 15%; text-align: right; padding: 5px;" t-if="o.partner_id.phone"><strong>الهاتف:</strong></td>
+                                <td style="width: 35%; text-align: right; padding: 5px;" t-if="o.partner_id.phone"><t t-esc="o.partner_id.phone"/></td>
+                            </tr>
+                            <tr t-if="o.partner_id.street">
+                                <td style="text-align: right; padding: 5px;"><strong>العنوان:</strong></td>
+                                <td colspan="3" style="text-align: right; padding: 5px;"><t t-esc="o.partner_id.street"/></td>
+                            </tr>
+                        </table>
+                    </div>
+                    
+                    <!-- Products Table -->
+                    <div style="margin-bottom: 20px;">
+                        <h4 style="margin: 0 0 10px 0; padding-bottom: 8px; border-bottom: 2px solid #2c3e50; text-align: right;">تفاصيل الطلب</h4>
+                        <table style="width: 100%; border: 2px solid #2c3e50; border-collapse: collapse;">
+                            <thead style="background: #34495e; color: white;">
+                                <tr>
+                                    <th style="padding: 10px; text-align: center; width: 5%;">#</th>
+                                    <th style="padding: 10px; text-align: right; width: 42%;">اسم المنتج</th>
+                                    <th style="padding: 10px; text-align: center; width: 13%;">الكمية</th>
+                                    <th style="padding: 10px; text-align: center; width: 13%;">السعر</th>
+                                    <th style="padding: 10px; text-align: center; width: 10%;">الخصم %</th>
+                                    <th style="padding: 10px; text-align: center; width: 17%;">المجموع</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <t t-set="line_num" t-value="0"/>
+                                <tr t-foreach="o.order_line_ids" t-as="line">
+                                    <t t-set="line_num" t-value="line_num + 1"/>
+                                    <td style="padding: 8px; text-align: center; border: 1px solid #bdc3c7; background: #ecf0f1; font-weight: bold;">
+                                        <t t-esc="line_num"/>
+                                    </td>
+                                    <td style="padding: 8px; text-align: right; border: 1px solid #bdc3c7;">
+                                        <strong><t t-if="line.custom_product_name" t-esc="line.custom_product_name"/><t t-else="" t-esc="line.product_id.name"/></strong>
+                                        <br t-if="line.product_code"/>
+                                        <small style="color: #7f8c8d;" t-if="line.product_code">كود: <t t-esc="line.product_code"/></small>
+                                    </td>
+                                    <td style="padding: 8px; text-align: center; border: 1px solid #bdc3c7;">
+                                        <t t-esc="'{:.2f}'.format(line.quantity)"/> <t t-esc="line.product_uom_id.name"/>
+                                    </td>
+                                    <td style="padding: 8px; text-align: center; border: 1px solid #bdc3c7;">
+                                        $<t t-esc="'{:.2f}'.format(line.unit_price)"/>
+                                    </td>
+                                    <td style="padding: 8px; text-align: center; border: 1px solid #bdc3c7;">
+                                        <t t-if="line.discount_percent &gt; 0"><strong style="color: #e74c3c;"><t t-esc="'{:.0f}'.format(line.discount_percent)"/>%</strong></t>
+                                        <t t-else="">-</t>
+                                    </td>
+                                    <td style="padding: 8px; text-align: center; border: 1px solid #bdc3c7; background: #ecf0f1; font-weight: bold;">
+                                        $<t t-esc="'{:.2f}'.format(line.line_total)"/>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <!-- Totals -->
+                    <table style="width: 50%; float: left; margin-bottom: 20px;">
+                        <tr t-if="o.note">
+                            <td colspan="2">
+                                <div style="border: 2px solid #f39c12; background: #fef5e7; padding: 12px; margin-bottom: 10px;">
+                                    <strong style="color: #d68910;">ملاحظات:</strong>
+                                    <p style="margin: 8px 0 0 0; color: #7d6608; text-align: right;"><t t-esc="o.note"/></p>
+                                </div>
+                            </td>
+                        </tr>
+                    </table>
+                    
+                    <table style="width: 50%; float: right; border: 2px solid #2c3e50; border-collapse: collapse;">
+                        <tr style="background: #ecf0f1;">
+                            <td style="padding: 10px; text-align: right; border-bottom: 1px solid #bdc3c7;"><strong>المجموع الفرعي:</strong></td>
+                            <td style="padding: 10px; text-align: center; border-bottom: 1px solid #bdc3c7; font-weight: bold;">$<t t-esc="'{:.2f}'.format(o.amount_subtotal)"/></td>
+                        </tr>
+                        <tr t-if="o.amount_discount &gt; 0" style="background: #ecf0f1;">
+                            <td style="padding: 10px; text-align: right; border-bottom: 1px solid #bdc3c7;"><strong style="color: #e74c3c;">الخصم:</strong></td>
+                            <td style="padding: 10px; text-align: center; border-bottom: 1px solid #bdc3c7; color: #e74c3c; font-weight: bold;">-$<t t-esc="'{:.2f}'.format(o.amount_discount)"/></td>
+                        </tr>
+                        <tr style="background: #3498db; color: white;">
+                            <td style="padding: 12px; text-align: right;"><strong style="font-size: 16px;">المجموع الكلي:</strong></td>
+                            <td style="padding: 12px; text-align: center;"><strong style="font-size: 18px;">$<t t-esc="'{:.2f}'.format(o.amount_total)"/></strong></td>
+                        </tr>
+                        <tr style="background: #27ae60; color: white;">
+                            <td style="padding: 12px; text-align: right;"><strong>المجموع بالدينار:</strong></td>
+                            <td style="padding: 12px; text-align: center;"><strong style="font-size: 17px;"><t t-esc="'{:,.0f}'.format(o.amount_total_iqd)"/> د.ع</strong></td>
+                        </tr>
+                    </table>
+                    
+                    <div style="clear: both;"></div>
+                    
+                    <!-- Footer -->
+                    <div style="margin-top: 40px; padding-top: 15px; border-top: 3px solid #2c3e50; text-align: center;">
+                        <p style="margin: 5px 0; font-size: 16px; color: #3498db; font-weight: bold;">شكراً لتعاملكم معنا</p>
+                        <p style="margin: 5px 0; font-size: 13px; color: #95a5a6;">Thank you for your business</p>
+                    </div>
+                    
+                </div>
+            </div>
+        </template>
+    </data>
+</odoo>
+
