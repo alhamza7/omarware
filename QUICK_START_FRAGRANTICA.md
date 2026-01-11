@@ -185,3 +185,5 @@ sudo chown -R odoo:odoo /opt/odoo/addons/lugal_fragrantica/static/
 
 للدعم، راجع الوثائق الكاملة في `addons/lugal_fragrantica/`
 
+
+

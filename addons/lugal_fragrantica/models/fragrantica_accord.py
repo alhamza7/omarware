@@ -24,3 +24,5 @@ class FragranticaAccord(models.Model):
             result.append((record.id, name))
         return result
 
+
+

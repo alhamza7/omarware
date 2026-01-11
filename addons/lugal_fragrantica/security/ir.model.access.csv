@@ -11,3 +11,5 @@ access_product_fragrantica_note_user,product.fragrantica.note.user,model_product
 access_product_fragrantica_accord_user,product.fragrantica.accord.user,model_product_fragrantica_accord,base.group_user,1,1,1,1
 access_import_fragrantica_data,import.fragrantica.data,model_import_fragrantica_data,base.group_system,1,1,1,1
 
+
+

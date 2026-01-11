@@ -121,3 +121,5 @@ sudo chown -R odoo:odoo fragrantica_data/
 
 **🚀 استمتع! الطريقة الأسهل والأسرع لتشغيل Fragrantica!**
 
+
+

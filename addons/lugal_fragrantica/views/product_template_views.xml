@@ -52,15 +52,18 @@
                         
                         <!-- Header with Images -->
                         <div class="row">
-                            <div class="col-md-3">
-                                <!-- Show perfume image from external URL -->
-                                <group invisible="not fragrantica_perfume_id">
-                                    <field name="fragrantica_perfume_id" invisible="1"/>
+                            <div class="col-md-3" invisible="not fragrantica_perfume_id">
+                                <!-- Display perfume image URL directly -->
+                                <label for="fragrantica_perfume_id" string="Perfume Image" invisible="1"/>
+                                <div class="o_field_widget text-center">
+                                    <field name="fragrantica_perfume_id" widget="many2one" invisible="1"/>
+                                    <!-- Show the related perfume's image_url as image -->
                                     <field name="fragrantica_perfume_id" 
-                                           widget="image" 
-                                           options="{'field': 'image_url', 'size': [250, 250]}"
-                                           nolabel="1"/>
-                                </group>
+                                           related_field="image_url"
+                                           widget="image"
+                                           nolabel="1"
+                                           options="{'size': [250, 250]}"/>
+                                </div>
                             </div>
                             <div class="col-md-9">
                                 <h2>

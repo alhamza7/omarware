@@ -120,3 +120,5 @@ ls static/fragrantica_data/images/perfumes/ | head
 
 لا تنسَ: البيانات **ضخمة** (~3 GB) - النقل قد يستغرق وقتاً طويلاً على الإنترنت البطيء.
 
+
+

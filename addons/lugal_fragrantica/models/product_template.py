@@ -63,8 +63,9 @@ class ProductTemplate(models.Model):
                 product.display_description = product.custom_description if product.fragrantica_use_custom and product.custom_description else perfume.description_full
                 product.display_image = perfume.image
                 product.display_brand_logo = perfume.brand_logo
-                product.display_image_url = perfume.display_image_url
-                product.display_brand_logo_url = perfume.display_brand_logo_url
+                # Always provide URLs for external images
+                product.display_image_url = perfume.image_url
+                product.display_brand_logo_url = perfume.brand_logo_url
             else:
                 product.display_perfume_name = False
                 product.display_perfume_arabic_name = False
