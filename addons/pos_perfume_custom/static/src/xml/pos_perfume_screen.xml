@@ -943,6 +943,7 @@
                             onmouseout="this.style.background='#22c55e'">
                         📱 WhatsApp
                     </button>
+                    <!-- Print button - Using Odoo default report -->
                     <button t-if="state.currentOrder.order_id"
                             class="action-btn btn-print" 
                             t-on-click="printOrder"

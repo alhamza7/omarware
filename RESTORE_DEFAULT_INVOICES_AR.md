@@ -1,10 +1,11 @@
 # استعادة الفواتير الأصلية من Odoo
 ## تم بتاريخ: 2026-01-11
+## آخر تحديث: 2026-01-11 - إضافة الطباعة المباشرة
 
 ---
 
 ## 🎯 الهدف
-تعطيل جميع قوالب الفواتير المخصصة والعودة لاستخدام الفاتورة الأصلية من Odoo.
+تعطيل جميع قوالب الفواتير المخصصة من `invoice_designer` والعودة لاستخدام تقارير Odoo الأصلية (QWeb) مع إمكانية الطباعة المباشرة من POS.
 
 ---
 
@@ -59,7 +60,7 @@
 
 ---
 
-### 4. إخفاء الأزرار من الواجهة - `views/pos_perfume_order_views.xml`
+### 4. إخفاء الأزرار من الواجهة Backend - `views/pos_perfume_order_views.xml`
 
 #### أ) أزرار المصمم:
 ```xml
@@ -70,6 +71,40 @@
 #### ب) حقل اختيار القالب:
 ```xml
 <!-- <field name="invoice_template_id" ... /> -->  معطل
+```
+
+---
+
+### 5. إنشاء تقرير Odoo أصلي للطباعة المباشرة ⭐ جديد
+
+#### أ) تقرير QWeb جديد - `reports/pos_perfume_order_simple_report.xml`:
+```xml
+<template id="report_pos_perfume_order_simple">
+    <!-- تقرير احترافي بسيط يستخدم نمط Odoo الأصلي -->
+    <!-- يدعم: custom_product_name، العملات المتعددة، SAP info -->
+</template>
+```
+
+#### ب) إضافة التقرير للـ manifest - `__manifest__.py`:
+```python
+'reports/pos_perfume_order_simple_report.xml',  # ✅ تقرير Odoo الأصلي
+```
+
+#### ج) تفعيل دالة printOrder مع التقرير الجديد - `static/src/app/pos_perfume_screen.js`:
+```javascript
+async printOrder() {
+    // الآن تستخدم تقرير Odoo الأصلي بدلاً من invoice_designer ✅
+    const action = {
+        type: 'ir.actions.report',
+        report_name: 'pos_perfume_custom.report_pos_perfume_order_simple',
+        ...
+    };
+}
+```
+
+#### د) تفعيل زر Print في الواجهة - `static/src/xml/pos_perfume_screen.xml`:
+```xml
+<button t-on-click="printOrder">🖨️ Print</button>  ✅ مفعّل
 ```
 
 ---
@@ -140,7 +175,27 @@ UPDATE pos_perfume_order SET invoice_template_id = NULL;
 
 بعد هذه التغييرات، ستستخدم الفواتير الأصلية من Odoo:
 
-### لـ POS Perfume Orders (Backend):
+### لـ POS Perfume Orders (من واجهة POS) - ⭐ الطريقة السريعة:
+1. أدخل الطلب في واجهة POS Perfume
+2. اضغط على **💾 Save** لحفظ الطلب
+3. اضغط على **🖨️ Print** للطباعة المباشرة
+4. ✅ سيُفتح PDF جاهز للطباعة باستخدام تقرير Odoo الأصلي
+
+**مميزات التقرير الجديد:**
+- ✅ يعرض `custom_product_name` (الأسماء المخصصة للمنتجات)
+- ✅ يدعم العملات المتعددة (USD + IQD)
+- ✅ يعرض الخصومات والمخازن
+- ✅ تصميم احترافي نظيف بنمط Odoo
+- ✅ سريع وموثوق
+
+### الطريقة البديلة (عبر Sale Order):
+1. اضغط على **📋 Create Sale Order** أو **📄 Create Quotation**
+2. سينفتح Sale Order في صفحة جديدة
+3. من Sale Order، اضغط **Print** → اختر:
+   - **Quotation** (لعرض السعر)
+   - **Sale Order** (للطلب المؤكد)
+
+### لـ POS Perfume Orders (من Backend):
 1. افتح أي طلب من **POS Perfume** → **Backend Orders**
 2. اضغط على زر **Confirm Sale Order** لتحويله لـ Sale Order
 3. سينفتح Sale Order، ومن هناك يمكنك:
@@ -208,20 +263,47 @@ UPDATE pos_perfume_order SET invoice_template_id = NULL;
 ## 📝 ملاحظات مهمة
 
 ### ✅ ما يعمل الآن:
-- جميع وظائف POS Perfume (الطلبات، المنتجات، العملاء)
-- البحث والفلترة
-- حفظ الطلبات
-- العملات المتعددة (USD/IQD)
-- طباعة الإيصالات باستخدام قالب Odoo الافتراضي
+- ✅ جميع وظائف POS Perfume (الطلبات، المنتجات، العملاء)
+- ✅ البحث والفلترة
+- ✅ حفظ الطلبات (💾 Save)
+- ✅ **الطباعة المباشرة** (🖨️ Print) - باستخدام تقرير Odoo الأصلي ⭐ جديد
+- ✅ إنشاء Sale Orders (📋 Create Sale Order)
+- ✅ إنشاء Quotations (📄 Create Quotation)
+- ✅ إرسال WhatsApp (📱 WhatsApp)
+- ✅ العملات المتعددة (USD/IQD)
+- ✅ دعم الأسماء المخصصة للمنتجات (custom_product_name)
+- ✅ طباعة من Sale Orders باستخدام قوالب Odoo الأصلية
 
-### ⚠️ ما لن يعمل:
-- القوالب المخصصة (كلاسيكي، عصري، ذهبي، NBS)
-- مصمم الفواتير المرئي
-- التخصيصات المتقدمة للفواتير
+### ⚠️ ما لن يعمل (تم تعطيله):
+- ❌ زر **طباعة مع المصمم** في Backend
+- ❌ زر **فتح المصمم** في Backend
+- ❌ القوالب المخصصة من invoice_designer (كلاسيكي، عصري، ذهبي، NBS)
+- ❌ مصمم الفواتير المرئي (invoice_designer)
+- ❌ التخصيصات المتقدمة للفواتير من invoice_designer
+
+### ℹ️ البديل الأفضل:
+بدلاً من invoice_designer المعطل، الآن لديك:
+- ✅ تقرير Odoo QWeb احترافي ونظيف
+- ✅ طباعة سريعة ومباشرة من POS
+- ✅ دعم كامل للمنتجات المخصصة والعملات
+- ✅ سهولة التعديل والتخصيص (ملف XML بسيط)
 
 ---
 
 ## 🆘 حل المشاكل
+
+### المشكلة: "The method 'pos.perfume.order.action_print_with_designer' does not exist"
+**السبب:** كود قديم يحاول استدعاء دالة من invoice_designer المعطلة
+
+**الحل:** ✅ تم حلها! الآن يستخدم النظام تقرير Odoo الأصلي
+1. أعد تشغيل Odoo
+2. حدّث الوحدة `POS Perfume Custom`
+3. امسح الكاش من المتصفح (Ctrl + Shift + Delete)
+4. أعد تحميل الصفحة (Ctrl + F5)
+
+**للطباعة الآن:** اضغط زر **🖨️ Print** مباشرة - يعمل بتقرير Odoo الأصلي!
+
+---
 
 ### المشكلة: خطأ عند بدء Odoo
 **الحل:** تأكد من حفظ جميع الملفات وأعد التشغيل مرة أخرى
@@ -235,6 +317,20 @@ UPDATE pos_perfume_order SET invoice_template_id = NULL;
 ### المشكلة: رسالة خطأ "Module dependency not found"
 **الحل:** إذا كان `invoice_designer` لا يزال مثبتاً ولكن معطلاً في depends، قم بإلغاء تثبيته أولاً
 
+### المشكلة: زر Print لا يظهر في POS (أو لا يعمل)
+**الحل:**
+1. تأكد من تحديث الوحدة `POS Perfume Custom` من Apps
+2. امسح الكاش: Settings → Developer Tools → Clear Assets
+3. أعد تحميل الصفحة (Ctrl + F5)
+4. تأكد من حفظ الطلب أولاً (💾 Save) قبل الطباعة
+5. إذا لم يعمل، أعد تشغيل Odoo
+
+### المشكلة: PDF لا يُفتح عند الطباعة
+**الحل:**
+1. تحقق من إعدادات Pop-up في المتصفح (يجب السماح)
+2. جرب في نافذة تصفح خاص (Incognito)
+3. تحقق من console log في المتصفح (F12) لرؤية الأخطاء
+
 ---
 
 ## 📞 الدعم الفني
@@ -246,6 +342,49 @@ UPDATE pos_perfume_order SET invoice_template_id = NULL;
 
 ---
 
-**تاريخ التعديل الأخير:** 2026-01-11  
+## 🎨 تخصيص التقرير الجديد (اختياري)
+
+التقرير الجديد موجود في ملف XML بسيط وسهل التعديل:
+```
+addons/pos_perfume_custom/reports/pos_perfume_order_simple_report.xml
+```
+
+### أمثلة على التخصيصات الممكنة:
+
+#### 1. تغيير الألوان:
+```xml
+<!-- في الـ template، ابحث عن: -->
+style="background-color: #f8f9fa;"
+<!-- وغيّرها للون المطلوب -->
+```
+
+#### 2. إضافة شعار الشركة:
+التقرير يستخدم `web.external_layout` الذي يعرض شعار الشركة تلقائياً من:
+- **Settings** → **Companies** → رفع الشعار (Logo)
+
+#### 3. إضافة حقول إضافية:
+```xml
+<!-- أضف أي حقل من pos.perfume.order -->
+<div class="row">
+    <strong>Field Name:</strong>
+    <span t-field="o.field_name"/>
+</div>
+```
+
+#### 4. تغيير التنسيق:
+- يمكنك تعديل الجداول، الخطوط، الهوامش
+- التقرير يستخدم Bootstrap 5 classes
+- راجع توثيق Odoo QWeb Reports: [Odoo Reports Documentation](https://www.odoo.com/documentation/17.0/developer/reference/backend/reports.html)
+
+#### 5. إنشاء تقرير آخر (مثلاً: نسخة مبسطة للإيصالات):
+1. انسخ الملف `pos_perfume_order_simple_report.xml`
+2. غيّر الـ IDs والأسماء
+3. أضف التقرير الجديد في `__manifest__.py`
+4. عدّل دالة `printOrder` لاستخدام التقرير المناسب
+
+---
+
+**تاريخ الإنشاء:** 2026-01-11  
+**آخر تحديث:** 2026-01-11 - إضافة الطباعة المباشرة  
 **الحالة:** ✅ جاهز للتطبيق
 

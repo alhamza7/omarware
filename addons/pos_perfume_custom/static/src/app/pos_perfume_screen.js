@@ -2160,7 +2160,7 @@ export class PosPerfumeScreen extends Component {
     }
     
     /**
-     * Print order - طباعة باستخدام Invoice Designer
+     * Print order - Using Odoo default report (QWeb)
      */
     async printOrder() {
         if (!this.state.currentOrder.order_id) {
@@ -2171,49 +2171,41 @@ export class PosPerfumeScreen extends Component {
         try {
             const orderId = this.state.currentOrder.order_id;
             
-            console.log('=== Print Order with Invoice Designer ===');
+            console.log('=== Print POS Order (Odoo Report) ===');
             console.log('Order ID:', orderId);
             
-            // طباعة باستخدام Invoice Designer
-            const result = await this.orm.call(
-                'pos.perfume.order',
-                'action_print_with_designer',
-                [[orderId]]
-            );
+            // طباعة باستخدام تقرير Odoo الأصلي
+            const action = {
+                type: 'ir.actions.report',
+                report_type: 'qweb-pdf',
+                report_name: 'pos_perfume_custom.report_pos_perfume_order_simple',
+                report_file: 'pos_perfume_custom.report_pos_perfume_order_simple',
+                data: {
+                    ids: [orderId],
+                },
+                context: {
+                    active_id: orderId,
+                    active_ids: [orderId],
+                    active_model: 'pos.perfume.order',
+                },
+            };
             
-            console.log('Print result:', result);
+            console.log('Print action:', action);
             
-            // إذا كان هناك إجراء (مثل فتح PDF)، قم بتنفيذه
-            if (result && result.type) {
-                if (result.type === 'ir.actions.act_url') {
-                    // فتح PDF في نافذة جديدة
-                    window.open(result.url, '_blank');
-                    this.notification.add(_t("Invoice generated successfully!"), { type: "success" });
-                } else {
-                    // تنفيذ الإجراء العادي
-                    await this.action.doAction(result);
-                }
-            } else {
-                this.notification.add(_t("Invoice printed successfully!"), { type: "success" });
-            }
+            // تنفيذ action الطباعة
+            await this.action.doAction(action);
+            
+            this.notification.add(_t("Order sent to printer!"), { 
+                type: "success",
+                title: _t("Print Success")
+            });
             
         } catch (error) {
             console.error('=== Print Order Error ===');
-            console.error('Error object:', error);
-            console.error('Error message:', error.message);
-            console.error('Error data:', error.data);
-            console.error('Error stack:', error.stack);
+            console.error('Error:', error);
             
-            let errorMessage = _t("Error printing invoice: ");
-            
-            if (error.data && error.data.message) {
-                errorMessage += error.data.message;
-                console.error('Server message:', error.data.message);
-                
-                if (error.data.debug) {
-                    console.error('Server debug:', error.data.debug);
-                }
-            } else if (error.message) {
+            let errorMessage = _t("Error printing order: ");
+            if (error.message) {
                 errorMessage += error.message;
             } else {
                 errorMessage += String(error);

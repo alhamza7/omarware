@@ -35,6 +35,7 @@
         'views/pos_perfume_views.xml',
         'views/pos_perfume_order_views.xml',
         'views/pos_perfume_session_views.xml',
+        'reports/pos_perfume_order_simple_report.xml',  # ✅ تقرير Odoo الأصلي البسيط
         # 'reports/pos_perfume_order_report.xml',  # ⛔ معطل: استخدام الفاتورة الأصلية
         # 'reports/pos_perfume_order_report_gold.xml',  # ⛔ معطل: استخدام الفاتورة الأصلية
         # 'reports/pos_perfume_order_report_nbs.xml',  # ⛔ معطل: استخدام الفاتورة الأصلية
