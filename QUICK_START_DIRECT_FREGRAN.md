@@ -124,3 +124,4 @@ sudo chown -R odoo:odoo fragrantica_data/
 
 
 
+
