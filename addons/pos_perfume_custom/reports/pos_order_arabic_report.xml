@@ -23,7 +23,12 @@
                         .pos_pdf_safe * { box-sizing: border-box; }
                         .pos_pdf_safe { direction: rtl; }
                         .pos_pdf_safe table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-                        .pos_pdf_safe td, .pos_pdf_safe th { vertical-align: top; }
+                        .pos_pdf_safe td, .pos_pdf_safe th {
+                            vertical-align: top;
+                            overflow-wrap: anywhere;
+                            word-break: break-word;
+                            white-space: normal;
+                        }
                         .pos_ltr_num { direction: ltr; unicode-bidi: bidi-override; display: inline-block; }
                         .pos_box { background: #ecf0f1; border: 2px solid #2c3e50; padding: 12px 14px; overflow: hidden; }
                         .pos_title { margin: 0; color: #3498db; font-size: 24px; font-weight: 700; }
@@ -34,6 +39,10 @@
                         .pos_no_border_bottom { border-bottom: none !important; }
                         .pos_field_label { width: 90px; padding: 6px 0 6px 10px; text-align: right; white-space: nowrap; }
                         .pos_field_value { padding: 6px 10px 6px 0; text-align: right; overflow-wrap: anywhere; word-break: break-word; }
+                        .pos_table_head th { font-size: 13px; padding: 8px 6px !important; }
+                        .pos_table_body td { font-size: 13px; padding: 8px 6px !important; }
+                        .pos_td_num { text-align: center; }
+                        .pos_td_name { text-align: right; }
                     </style>
 
                     <div class="pos_pdf_safe">
@@ -118,40 +127,46 @@
                     <div style="margin-bottom: 20px;">
                         <h4 class="pos_section_h">تفاصيل الطلب</h4>
                         <table style="width: 100%; border: 2px solid #2c3e50; border-collapse: collapse;">
-                            <thead style="background: #34495e; color: white;">
+                            <thead class="pos_table_head" style="background: #34495e; color: white;">
                                 <tr>
-                                    <th style="padding: 10px; text-align: center; width: 5%;">#</th>
-                                    <th style="padding: 10px; text-align: right; width: 42%;">اسم المنتج</th>
-                                    <th style="padding: 10px; text-align: center; width: 13%;">الكمية</th>
-                                    <th style="padding: 10px; text-align: center; width: 13%;">السعر</th>
-                                    <th style="padding: 10px; text-align: center; width: 10%;">الخصم %</th>
-                                    <th style="padding: 10px; text-align: center; width: 17%;">المجموع</th>
+                                    <th style="text-align: center; width: 34px;">#</th>
+                                    <th style="text-align: right; width: 320px;">اسم المنتج</th>
+                                    <th style="text-align: center; width: 90px;">الكمية</th>
+                                    <th style="text-align: center; width: 90px;">السعر</th>
+                                    <th style="text-align: center; width: 80px;">الخصم %</th>
+                                    <th style="text-align: center; width: 110px;">المجموع</th>
                                 </tr>
                             </thead>
-                            <tbody>
+                            <tbody class="pos_table_body">
                                 <t t-set="line_num" t-value="0"/>
                                 <tr t-foreach="o.order_line_ids" t-as="line">
                                     <t t-set="line_num" t-value="line_num + 1"/>
-                                    <td style="padding: 8px; text-align: center; border: 1px solid #bdc3c7; background: #ecf0f1; font-weight: bold;">
+                                    <td class="pos_td_num" style="border: 1px solid #bdc3c7; background: #ecf0f1; font-weight: bold;">
                                         <t t-esc="line_num"/>
                                     </td>
-                                    <td style="padding: 8px; text-align: right; border: 1px solid #bdc3c7;">
-                                        <strong><t t-if="line.custom_product_name" t-esc="line.custom_product_name"/><t t-else="" t-esc="line.product_id.name"/></strong>
-                                        <br t-if="line.product_code"/>
-                                        <small style="color: #7f8c8d;" t-if="line.product_code">كود: <t t-esc="line.product_code"/></small>
+                                    <td class="pos_td_name" style="border: 1px solid #bdc3c7;">
+                                        <div style="font-weight: 700;">
+                                            <t t-if="line.custom_product_name" t-esc="line.custom_product_name"/>
+                                            <t t-else="" t-esc="line.product_id.name"/>
+                                        </div>
+                                        <div t-if="line.product_code" style="color: #7f8c8d; font-size: 11px; margin-top: 2px;">
+                                            كود: <span class="pos_ltr_num"><t t-esc="line.product_code"/></span>
+                                        </div>
                                     </td>
-                                    <td style="padding: 8px; text-align: center; border: 1px solid #bdc3c7;">
+                                    <td class="pos_td_num" style="border: 1px solid #bdc3c7;">
                                         <span class="pos_ltr_num"><t t-esc="'{:.2f}'.format(line.quantity)"/></span>
-                                        <t t-esc="line.product_uom_id.name"/>
+                                        <div style="font-size: 11px; color: #2c3e50; margin-top: 2px;">
+                                            <t t-esc="line.product_uom_id.name"/>
+                                        </div>
                                     </td>
-                                    <td style="padding: 8px; text-align: center; border: 1px solid #bdc3c7;">
+                                    <td class="pos_td_num" style="border: 1px solid #bdc3c7;">
                                         <span class="pos_ltr_num">$<t t-esc="'{:.2f}'.format(line.unit_price)"/></span>
                                     </td>
-                                    <td style="padding: 8px; text-align: center; border: 1px solid #bdc3c7;">
+                                    <td class="pos_td_num" style="border: 1px solid #bdc3c7;">
                                         <t t-if="line.discount_percent &gt; 0"><strong style="color: #e74c3c;"><t t-esc="'{:.0f}'.format(line.discount_percent)"/>%</strong></t>
                                         <t t-else="">-</t>
                                     </td>
-                                    <td style="padding: 8px; text-align: center; border: 1px solid #bdc3c7; background: #ecf0f1; font-weight: bold;">
+                                    <td class="pos_td_num" style="border: 1px solid #bdc3c7; background: #ecf0f1; font-weight: bold;">
                                         <span class="pos_ltr_num">$<t t-esc="'{:.2f}'.format(line.line_total)"/></span>
                                     </td>
                                 </tr>
