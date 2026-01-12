@@ -1,6 +1,21 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <odoo>
     <data>
+        <!-- Paperformat: add extra right margin to avoid RTL clipping in wkhtmltopdf -->
+        <record id="paperformat_pos_perfume_rtl" model="report.paperformat">
+            <field name="name">POS Perfume RTL</field>
+            <field name="default" eval="False"/>
+            <field name="format">A4</field>
+            <field name="orientation">Portrait</field>
+            <field name="margin_top">10</field>
+            <field name="margin_bottom">10</field>
+            <field name="margin_left">10</field>
+            <field name="margin_right">15</field>
+            <field name="header_line" eval="False"/>
+            <field name="header_spacing">0</field>
+            <field name="dpi">90</field>
+        </record>
+
         <!-- Report Action -->
         <record id="action_report_pos_perfume_arabic" model="ir.actions.report">
             <field name="name">فاتورة POS</field>
@@ -10,13 +25,15 @@
             <field name="print_report_name">'Invoice_%s' % (object.name)</field>
             <field name="binding_model_id" ref="model_pos_perfume_order"/>
             <field name="binding_type">report</field>
+            <field name="paperformat_id" ref="pos_perfume_custom.paperformat_pos_perfume_rtl"/>
         </record>
 
         <!-- Main Template -->
         <template id="pos_order_arabic_document">
             <t t-call="web.html_container">
                 <t t-foreach="docs" t-as="o">
-                    <div style="direction: rtl; font-family: 'DejaVu Sans', 'Arial', sans-serif; padding: 16px; width: 100%; box-sizing: border-box; line-height: 1.45;">
+                    <!-- Increase right padding to shift everything left (wkhtmltopdf + RTL can clip/overflow on the right edge) -->
+                    <div style="direction: rtl; font-family: 'DejaVu Sans', 'Arial', sans-serif; padding: 16px 36px 16px 18px; width: 100%; box-sizing: border-box; line-height: 1.45;">
 
                     <!-- PDF-safe styling (avoid overlap in wkhtmltopdf) -->
                     <style type="text/css">
@@ -26,14 +43,16 @@
                         .pos_pdf_safe table { width: 100%; border-collapse: collapse; }
                         .pos_pdf_safe td, .pos_pdf_safe th {
                             vertical-align: top;
-                            overflow-wrap: anywhere;
+                            word-wrap: break-word;
                             word-break: break-word;
                             white-space: normal;
-                            overflow: hidden; /* prevent text escaping outside borders */
+                            overflow: visible; /* IMPORTANT: avoid clipping RTL glyphs */
                         }
                         .pos_ltr_num { direction: ltr; unicode-bidi: bidi-override; display: inline-block; }
-                        .pos_box { background: #ecf0f1; border: 2px solid #2c3e50; padding: 12px 14px; overflow: hidden; width: 100%; }
-                        .pos_box table { table-layout: fixed; }
+                        /* Don't clip containers, let content expand vertically */
+                        .pos_box { background: #ecf0f1; border: 2px solid #2c3e50; padding: 12px 14px; overflow: visible; width: 100%; }
+                        /* Small info tables: let browser size columns naturally */
+                        .pos_box table { table-layout: auto; }
                         .pos_title { margin: 0; color: #3498db; font-size: 24px; font-weight: 700; }
                         .pos_company { margin: 0; color: #2c3e50; font-size: 20px; font-weight: 700; }
                         .pos_section_h { margin: 0 0 8px 0; padding-bottom: 6px; border-bottom: 2px solid #2c3e50; text-align: right; font-size: 16px; color: #2c3e50; }
@@ -41,8 +60,9 @@
                         .pos_cell_label { width: 120px; text-align: right; padding: 8px; border-bottom: 1px solid #bdc3c7; }
                         .pos_cell_value { text-align: center; padding: 8px; border-bottom: 1px solid #bdc3c7; }
                         .pos_no_border_bottom { border-bottom: none !important; }
-                        .pos_field_label { width: 90px; padding: 6px 0 6px 10px; text-align: right; white-space: nowrap; }
-                        .pos_field_value { padding: 6px 10px 6px 0; text-align: right; overflow-wrap: anywhere; word-break: break-word; }
+                        /* IMPORTANT: give right padding in RTL so labels don't touch border and get clipped */
+                        .pos_field_label { width: 110px; padding: 6px 12px; text-align: right; white-space: nowrap; }
+                        .pos_field_value { padding: 6px 12px; text-align: right; word-wrap: break-word; word-break: break-word; }
                         .pos_table_head th { font-size: 13px; padding: 8px 6px !important; }
                         .pos_table_body td { font-size: 13px; padding: 8px 6px !important; }
                         .pos_td_num { text-align: center; }
@@ -56,7 +76,7 @@
                     <!-- Header -->
                     <table style="margin-bottom: 18px; border-bottom: 3px solid #2c3e50;">
                         <tr>
-                            <td style="width: 30%; vertical-align: middle; text-align: right; padding-bottom: 8px;">
+                            <td style="width: 30%; vertical-align: middle; text-align: right; padding-bottom: 8px; padding-right: 6px;">
                                 <img t-if="o.env.company.logo" 
                                      t-att-src="image_data_uri(o.env.company.logo)"
                                      style="max-height: 100px; max-width: 200px;"/>
@@ -119,8 +139,13 @@
                             <tr>
                                 <td class="pos_field_label"><strong>الاسم:</strong></td>
                                 <td class="pos_field_value"><t t-esc="o.partner_id.name"/></td>
-                                <td class="pos_field_label" t-if="o.partner_id.phone"><strong>الهاتف:</strong></td>
-                                <td class="pos_field_value" t-if="o.partner_id.phone"><span class="pos_ltr_num"><t t-esc="o.partner_id.phone"/></span></td>
+                                <td class="pos_field_label"><strong>الهاتف:</strong></td>
+                                <td class="pos_field_value">
+                                    <t t-if="o.partner_id.phone">
+                                        <span class="pos_ltr_num"><t t-esc="o.partner_id.phone"/></span>
+                                    </t>
+                                    <t t-else="">&nbsp;</t>
+                                </td>
                             </tr>
                             <tr t-if="o.partner_id.street">
                                 <td class="pos_field_label"><strong>العنوان:</strong></td>
@@ -133,6 +158,14 @@
                     <div style="margin-bottom: 20px;">
                         <h4 class="pos_section_h">تفاصيل الطلب</h4>
                         <table class="pos_products" style="width: 100%; border: 2px solid #2c3e50; border-collapse: collapse;">
+                            <colgroup>
+                                <col style="width:34px;"/>
+                                <col/> <!-- اسم المنتج -->
+                                <col style="width:90px;"/>
+                                <col style="width:90px;"/>
+                                <col style="width:80px;"/>
+                                <col style="width:110px;"/>
+                            </colgroup>
                             <thead class="pos_table_head" style="background: #34495e; color: white;">
                                 <tr>
                                     <th style="text-align: center; width: 34px;">#</th>
