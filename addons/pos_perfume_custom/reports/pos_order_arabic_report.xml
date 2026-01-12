@@ -32,8 +32,9 @@
         <template id="pos_order_arabic_document">
             <t t-call="web.html_container">
                 <t t-foreach="docs" t-as="o">
-                    <!-- Increase right padding to shift everything left (wkhtmltopdf + RTL can clip/overflow on the right edge) -->
-                    <div style="direction: rtl; font-family: 'DejaVu Sans', 'Arial', sans-serif; padding: 16px 36px 16px 18px; width: 100%; box-sizing: border-box; line-height: 1.45;">
+                    <!-- Use a fixed-width container (mm) to keep ALL blocks aligned consistently in wkhtmltopdf -->
+                    <div style="direction: rtl; font-family: 'DejaVu Sans', 'Arial', sans-serif; width: 100%; box-sizing: border-box; line-height: 1.45;">
+                    <div class="pos_container" style="width: 180mm; margin: 0 auto; padding: 0 4mm; box-sizing: border-box;">
 
                     <!-- PDF-safe styling (avoid overlap in wkhtmltopdf) -->
                     <style type="text/css">
