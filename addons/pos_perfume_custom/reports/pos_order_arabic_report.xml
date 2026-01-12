@@ -22,20 +22,24 @@
                     <style type="text/css">
                         .pos_pdf_safe * { box-sizing: border-box; }
                         .pos_pdf_safe { direction: rtl; }
-                        .pos_pdf_safe table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+                        /* IMPORTANT: don't force table-layout:fixed on ALL tables (wkhtmltopdf can miscompute widths in RTL) */
+                        .pos_pdf_safe table { width: 100%; border-collapse: collapse; }
                         .pos_pdf_safe td, .pos_pdf_safe th {
                             vertical-align: top;
                             overflow-wrap: anywhere;
                             word-break: break-word;
                             white-space: normal;
+                            overflow: hidden; /* prevent text escaping outside borders */
                         }
                         .pos_ltr_num { direction: ltr; unicode-bidi: bidi-override; display: inline-block; }
-                        .pos_box { background: #ecf0f1; border: 2px solid #2c3e50; padding: 12px 14px; overflow: hidden; }
+                        .pos_box { background: #ecf0f1; border: 2px solid #2c3e50; padding: 12px 14px; overflow: hidden; width: 100%; }
+                        .pos_box table { table-layout: fixed; }
                         .pos_title { margin: 0; color: #3498db; font-size: 24px; font-weight: 700; }
                         .pos_company { margin: 0; color: #2c3e50; font-size: 20px; font-weight: 700; }
                         .pos_section_h { margin: 0 0 8px 0; padding-bottom: 6px; border-bottom: 2px solid #2c3e50; text-align: right; font-size: 16px; color: #2c3e50; }
-                        .pos_cell_label { width: 32%; text-align: right; padding: 8px; border-bottom: 1px solid #bdc3c7; overflow-wrap: anywhere; word-break: break-word; }
-                        .pos_cell_value { width: 68%; text-align: center; padding: 8px; border-bottom: 1px solid #bdc3c7; overflow-wrap: anywhere; word-break: break-word; }
+                        /* Use fixed px label width for PDF stability */
+                        .pos_cell_label { width: 120px; text-align: right; padding: 8px; border-bottom: 1px solid #bdc3c7; }
+                        .pos_cell_value { text-align: center; padding: 8px; border-bottom: 1px solid #bdc3c7; }
                         .pos_no_border_bottom { border-bottom: none !important; }
                         .pos_field_label { width: 90px; padding: 6px 0 6px 10px; text-align: right; white-space: nowrap; }
                         .pos_field_value { padding: 6px 10px 6px 0; text-align: right; overflow-wrap: anywhere; word-break: break-word; }
@@ -43,6 +47,8 @@
                         .pos_table_body td { font-size: 13px; padding: 8px 6px !important; }
                         .pos_td_num { text-align: center; }
                         .pos_td_name { text-align: right; }
+                        .pos_products { table-layout: fixed; }
+                        .pos_totals { table-layout: fixed; }
                     </style>
 
                     <div class="pos_pdf_safe">
@@ -126,11 +132,11 @@
                     <!-- Products Table -->
                     <div style="margin-bottom: 20px;">
                         <h4 class="pos_section_h">تفاصيل الطلب</h4>
-                        <table style="width: 100%; border: 2px solid #2c3e50; border-collapse: collapse;">
+                        <table class="pos_products" style="width: 100%; border: 2px solid #2c3e50; border-collapse: collapse;">
                             <thead class="pos_table_head" style="background: #34495e; color: white;">
                                 <tr>
                                     <th style="text-align: center; width: 34px;">#</th>
-                                    <th style="text-align: right; width: 320px;">اسم المنتج</th>
+                                    <th style="text-align: right;">اسم المنتج</th>
                                     <th style="text-align: center; width: 90px;">الكمية</th>
                                     <th style="text-align: center; width: 90px;">السعر</th>
                                     <th style="text-align: center; width: 80px;">الخصم %</th>
@@ -180,27 +186,27 @@
                             <!-- Totals (right side in RTL) -->
                             <td style="width: 50%; padding: 0 0 0 6px; vertical-align: top;">
                                 <div>
-                                <table style="width: 100%; border: 2px solid #2c3e50; border-collapse: collapse; table-layout: fixed;">
+                                <table class="pos_totals" style="width: 100%; border: 2px solid #2c3e50; border-collapse: collapse;">
                                     <tr style="background: #ecf0f1;">
-                                        <td style="padding: 10px; text-align: right; border-bottom: 1px solid #bdc3c7;"><strong>المجموع الفرعي:</strong></td>
+                                        <td style="padding: 10px; width: 55%; text-align: right; border-bottom: 1px solid #bdc3c7;"><strong>المجموع الفرعي:</strong></td>
                                         <td style="padding: 10px; text-align: center; border-bottom: 1px solid #bdc3c7; font-weight: bold;">
                                             <span class="pos_ltr_num">$<t t-esc="'{:.2f}'.format(o.amount_subtotal)"/></span>
                                         </td>
                                     </tr>
                                     <tr t-if="o.amount_discount &gt; 0" style="background: #ecf0f1;">
-                                        <td style="padding: 10px; text-align: right; border-bottom: 1px solid #bdc3c7;"><strong style="color: #e74c3c;">الخصم:</strong></td>
+                                        <td style="padding: 10px; width: 55%; text-align: right; border-bottom: 1px solid #bdc3c7;"><strong style="color: #e74c3c;">الخصم:</strong></td>
                                         <td style="padding: 10px; text-align: center; border-bottom: 1px solid #bdc3c7; color: #e74c3c; font-weight: bold;">
                                             <span class="pos_ltr_num">-$<t t-esc="'{:.2f}'.format(o.amount_discount)"/></span>
                                         </td>
                                     </tr>
                                     <tr style="background: #3498db; color: white;">
-                                        <td style="padding: 12px; text-align: right;"><strong style="font-size: 16px;">المجموع الكلي:</strong></td>
+                                        <td style="padding: 12px; width: 55%; text-align: right;"><strong style="font-size: 16px;">المجموع الكلي:</strong></td>
                                         <td style="padding: 12px; text-align: center;"><strong style="font-size: 18px;">
                                             <span class="pos_ltr_num">$<t t-esc="'{:.2f}'.format(o.amount_total)"/></span>
                                         </strong></td>
                                     </tr>
                                     <tr style="background: #27ae60; color: white;">
-                                        <td style="padding: 12px; text-align: right;"><strong>المجموع بالدينار:</strong></td>
+                                        <td style="padding: 12px; width: 55%; text-align: right;"><strong>المجموع بالدينار:</strong></td>
                                         <td style="padding: 12px; text-align: center;"><strong style="font-size: 17px;">
                                             <span class="pos_ltr_num"><t t-esc="'{:,.0f}'.format(o.amount_total_iqd)"/></span> د.ع
                                         </strong></td>
