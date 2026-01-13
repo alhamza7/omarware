@@ -304,7 +304,7 @@ class PosPerfumeController(http.Controller):
                 'error': str(e)
             }
     
-    @http.route('/pos_perfume/send_whatsapp', type='json', auth='user')
+    @http.route('/pos_perfume/send_whatsapp', type='json', auth='user', methods=['POST'], csrf=False)
     def send_whatsapp(self, order_id):
         """
         Send POS Order as PDF via WhatsApp using ULTRAMSG
@@ -328,12 +328,14 @@ class PosPerfumeController(http.Controller):
             if not config:
                 return {'success': False, 'error': 'ULTRAMSG not configured. Please contact administrator.'}
             
-            # Generate PDF report (use correct signature for _render_qweb_pdf)
-            # In Odoo 19, _render_qweb_pdf(report_ref, res_ids=None, data=None)
-            pdf_content, _ = request.env['ir.actions.report']._render_qweb_pdf(
-                'pos_perfume_custom.action_report_pos_perfume_order',
-                [order.id],
-            )
+            # Generate PDF report
+            # In Odoo 19+, use report.with_context()._render_qweb_pdf()
+            try:
+                report = request.env.ref('pos_perfume_custom.action_report_pos_perfume_order')
+                pdf_content, _ = report._render_qweb_pdf([order.id])
+            except Exception as pdf_error:
+                _logger.error(f"Error generating PDF: {pdf_error}", exc_info=True)
+                return {'success': False, 'error': f'Failed to generate PDF: {str(pdf_error)}'}
             
             # Encode PDF as base64 so we can send it directly to ULTRAMSG without relying on a public URL
             import base64
