@@ -1,12 +1,15 @@
 <?xml version="1.0"?>
 <odoo>
     <data noupdate="0">
-        <!-- Professional POS Order Report Template -->
+        <!-- Professional POS Order Report Template - RTL -->
         <template id="report_pos_perfume_order_simple">
             <t t-call="web.external_layout">
-                <div class="page">
-                    <!-- Custom CSS for professional look -->
+                <div class="page" dir="rtl">
+                    <!-- Custom CSS for professional RTL look -->
                     <style>
+                        * {
+                            font-family: 'DejaVu Sans', 'Arial', sans-serif;
+                        }
                         .invoice-header {
                             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                             color: white;
@@ -26,7 +29,7 @@
                         }
                         .info-card {
                             background: #f8f9fa;
-                            border-left: 4px solid #667eea;
+                            border-right: 4px solid #667eea;
                             padding: 20px;
                             border-radius: 5px;
                             margin-bottom: 20px;
@@ -36,6 +39,7 @@
                             font-weight: 600;
                             margin-bottom: 10px;
                             font-size: 16px;
+                            text-align: right;
                         }
                         .product-table {
                             border-radius: 8px;
@@ -50,6 +54,7 @@
                             padding: 15px 10px;
                             font-weight: 600;
                             border: none;
+                            text-align: center;
                         }
                         .product-table tbody td {
                             padding: 12px 10px;
@@ -70,7 +75,7 @@
                             border-radius: 12px;
                             font-size: 11px;
                             font-weight: 600;
-                            margin-left: 8px;
+                            margin-right: 8px;
                             vertical-align: middle;
                         }
                         .totals-section {
@@ -94,10 +99,11 @@
                         }
                         .notes-section {
                             background: #fff9e6;
-                            border-left: 4px solid #ffc107;
+                            border-right: 4px solid #ffc107;
                             padding: 15px;
                             border-radius: 5px;
                             margin-top: 20px;
+                            text-align: right;
                         }
                         .sap-badge {
                             background: #28a745;
@@ -107,6 +113,7 @@
                             font-size: 12px;
                             font-weight: 600;
                             display: inline-block;
+                            margin-right: 10px;
                         }
                     </style>
                     
@@ -122,12 +129,12 @@
                                 </h1>
                                 <div class="order-number">
                                     <t t-field="o.name"/>
-                                    <span t-if="o.sap_doc_num" class="sap-badge ml-3">
+                                    <span t-if="o.sap_doc_num" class="sap-badge">
                                         SAP: <t t-field="o.sap_doc_num"/>
                                     </span>
                                 </div>
                             </div>
-                            <div class="col-4 text-right">
+                            <div class="col-4 text-left">
                                 <img t-if="o.company_id.logo" 
                                      t-att-src="image_data_uri(o.company_id.logo)"
                                      style="max-height: 80px; max-width: 150px;"/>
@@ -175,11 +182,11 @@
                         <thead>
                             <tr>
                                 <th style="width: 5%;">#</th>
-                                <th style="width: 40%;">المنتج</th>
+                                <th style="width: 40%; text-align: right;">المنتج</th>
                                 <th class="text-center" style="width: 15%;">الكمية</th>
-                                <th class="text-right" style="width: 15%;">السعر</th>
+                                <th class="text-center" style="width: 15%;">السعر</th>
                                 <th class="text-center" style="width: 10%;">الخصم</th>
-                                <th class="text-right" style="width: 15%;">المجموع</th>
+                                <th class="text-center" style="width: 15%;">المجموع</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -192,7 +199,7 @@
                                     <td class="text-center" style="font-weight: 600; color: #667eea;">
                                         <t t-esc="line_index"/>
                                     </td>
-                                    <td>
+                                    <td style="text-align: right;">
                                         <span class="product-name">
                                             <t t-if="line.custom_product_name">
                                                 <t t-esc="line.custom_product_name"/>
@@ -214,7 +221,7 @@
                                             <t t-field="line.product_uom_id.name"/>
                                         </small>
                                     </td>
-                                    <td class="text-right">
+                                    <td class="text-center">
                                         <t t-esc="'{:.2f}'.format(line.unit_price)"/> $
                                     </td>
                                     <td class="text-center">
@@ -225,7 +232,7 @@
                                         </t>
                                         <t t-else="">-</t>
                                     </td>
-                                    <td class="text-right">
+                                    <td class="text-center">
                                         <strong style="color: #667eea;">
                                             <t t-esc="'{:.2f}'.format(line.line_total)"/> $
                                         </strong>
@@ -242,24 +249,24 @@
                             <div class="totals-section">
                                 <div class="total-row">
                                     <div class="row">
-                                        <div class="col-6"><strong>المجموع الفرعي:</strong></div>
-                                        <div class="col-6 text-right">
+                                        <div class="col-6 text-right"><strong>المجموع الفرعي:</strong></div>
+                                        <div class="col-6 text-left">
                                             <t t-esc="'{:.2f}'.format(o.amount_subtotal)"/> $
                                         </div>
                                     </div>
                                 </div>
                                 <div t-if="o.amount_discount > 0" class="total-row">
                                     <div class="row">
-                                        <div class="col-6"><strong style="color: #dc3545;">الخصم:</strong></div>
-                                        <div class="col-6 text-right" style="color: #dc3545;">
+                                        <div class="col-6 text-right"><strong style="color: #dc3545;">الخصم:</strong></div>
+                                        <div class="col-6 text-left" style="color: #dc3545;">
                                             -<t t-esc="'{:.2f}'.format(o.amount_discount)"/> $
                                         </div>
                                     </div>
                                 </div>
                                 <div class="total-row final">
                                     <div class="row">
-                                        <div class="col-6">الإجمالي:</div>
-                                        <div class="col-6 text-right">
+                                        <div class="col-6 text-right">الإجمالي:</div>
+                                        <div class="col-6 text-left">
                                             <t t-esc="'{:.2f}'.format(o.amount_total)"/> $
                                         </div>
                                     </div>
