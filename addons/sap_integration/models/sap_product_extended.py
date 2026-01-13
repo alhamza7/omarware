@@ -415,10 +415,11 @@ class SapProductExtended(models.Model):
             if extended:
                 # Update existing
                 extended.write(vals)
-                _logger.info(f"Updated extended info for product: {product.name}")
+                _logger.info(f"✏️ Updated extended info for: {product.name}")
             else:
                 # Create new
                 extended = self.create(vals)
+                _logger.info(f"✅ Created extended info for: {product.name}")
                 _logger.info(f"Created extended info for product: {product.name}")
             
             return extended

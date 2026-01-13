@@ -214,12 +214,12 @@ class SapProductPricelistSync(models.Model):
                         # Update existing
                         sync_record.write(vals)
                         results['updated'] += 1
-                        _logger.info(f"Updated price for {product.name} in pricelist {pricelist_num}")
+                        _logger.info(f"✏️ UPDATED price for {product.name} (PriceList: {pricelist_num})")
                     else:
                         # Create new
                         sync_record = self.create(vals)
                         results['created'] += 1
-                        _logger.info(f"Created price for {product.name} in pricelist {pricelist_num}")
+                        _logger.info(f"✅ CREATED price for {product.name} (PriceList: {pricelist_num})")
                     
                     # Create or update pricelist item in Odoo
                     self._create_or_update_pricelist_item(sync_record, product, odoo_pricelist, price, uom)
@@ -270,9 +270,11 @@ class SapProductPricelistSync(models.Model):
                                 if uom_sync_record:
                                     uom_sync_record.write(uom_vals)
                                     results['updated'] += 1
+                                    _logger.info(f"  ✏️ UPDATED UoM price: {product.name} ({uom_specific.name})")
                                 else:
                                     uom_sync_record = self.create(uom_vals)
                                     results['created'] += 1
+                                    _logger.info(f"  ✅ CREATED UoM price: {product.name} ({uom_specific.name})")
                                 
                                 # Create pricelist item for this UoM
                                 self._create_or_update_pricelist_item(

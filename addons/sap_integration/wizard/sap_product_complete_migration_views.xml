@@ -58,6 +58,17 @@
                                 </group>
                                 
                                 <group string="Stage Descriptions">
+                                    <div class="alert alert-info">
+                                        <strong>⚡ Update Mode:</strong>
+                                        <p>This wizard will <strong>UPDATE existing records</strong> and only CREATE new ones when needed:</p>
+                                        <ul>
+                                            <li>✏️ <strong>Products:</strong> Updates existing products if "Update Existing" is checked</li>
+                                            <li>✏️ <strong>Pricelists:</strong> Always updates existing prices + creates new ones</li>
+                                            <li>✏️ <strong>Extended Info:</strong> Updates existing records (no duplicates)</li>
+                                            <li>✏️ <strong>Warehouse Info:</strong> Updates existing stock data</li>
+                                        </ul>
+                                        <p><strong>Result:</strong> No duplicate products or prices! Safe to run multiple times. 🎯</p>
+                                    </div>
                                     <div>
                                         <p><strong>Stage 1: UoM Groups</strong></p>
                                         <ul>
@@ -78,6 +89,7 @@
                                             <li>Import ItemPrices from SAP</li>
                                             <li>Create Odoo pricelists</li>
                                             <li>Support UoM-specific pricing</li>
+                                            <li><strong>⚡ Focus: Update all prices from SAP</strong></li>
                                         </ul>
                                         
                                         <p><strong>Stage 4: Warehouse Info</strong></p>

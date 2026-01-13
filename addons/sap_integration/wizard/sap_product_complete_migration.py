@@ -853,8 +853,12 @@ class SapProductCompleteMigration(models.TransientModel):
         # Create or update product
         if product and self.update_existing:
             product.write(vals)
+            _logger.info(f"✏️ Updated product: {item_code} - {item_name}")
         elif not product:
             product = self.env['product.product'].create(vals)
+            _logger.info(f"✅ Created product: {item_code} - {item_name}")
+        else:
+            _logger.info(f"⏭️ Skipped update for: {item_code} (update_existing=False)")
         
         return product
     
@@ -969,7 +973,8 @@ class SapProductCompleteMigration(models.TransientModel):
         """Stage 3: Import Pricelists"""
         log = []
         try:
-            log.append("Starting Pricelists import...")
+            log.append("🔄 Starting Pricelists import...")
+            log.append("⚡ This will UPDATE existing prices and CREATE new ones")
             log.append("")
             
             # Import all pricelists
@@ -979,7 +984,8 @@ class SapProductCompleteMigration(models.TransientModel):
             )
             
             log.append(f"✓ Processed {result['total_products']} products")
-            log.append(f"✓ Created/updated {result['created_prices']} price records")
+            log.append(f"✅ CREATED {result['created_prices']} NEW price records")
+            log.append(f"✏️  UPDATED {result['updated_prices']} EXISTING price records")
             log.append(f"✓ Successful: {result['successful_products']} products")
             
             if result['failed_products'] > 0:
