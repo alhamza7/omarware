@@ -57,6 +57,9 @@
                                     <div class="info-card">
                                         <h4>معلومات العميل</h4>
                                         <strong><span t-field="o.partner_id.name"/></strong><br/>
+                                        <t t-if="o.partner_id.street">
+                                            <span t-field="o.partner_id.street"/><br/>
+                                        </t>
                                         <t t-if="o.partner_id.phone">
                                             <span t-field="o.partner_id.phone"/>
                                         </t>
@@ -90,6 +93,7 @@
                                     <t t-set="line_index" t-value="line_index + 1"/>
                                     <t t-set="code" t-value="line.product_code or ''"/>
                                     <t t-set="show_code" t-value="code[:1] in ['G', 'R'] or code[:2] in ['N1'] or code[:2] == 'FL' or code[:3] == 'ADF'"/>
+                                    <t t-set="code_prefix" t-value="code[:3] if code[:3] == 'ADF' else (code[:2] if code[:2] in ['FL', 'N1'] else code[:1])"/>
                                     <tr>
                                         <td style="text-align: center;"><t t-esc="line_index"/></td>
                                         <td style="text-align: right;">
@@ -99,22 +103,22 @@
                                             <t t-else="">
                                                 <span t-field="line.product_id.name"/>
                                             </t>
-                                            <t t-if="show_code and code">
-                                                <span class="product-code-badge"><t t-esc="code"/></span>
+                                            <t t-if="show_code and code_prefix">
+                                                <span class="product-code-badge"><t t-esc="code_prefix"/></span>
                                             </t>
                                         </td>
                                         <td style="text-align: center;">
                                             <strong><t t-esc="'{:.2f}'.format(line.quantity)"/></strong>
                                             <span t-field="line.product_uom_id.name"/>
                                         </td>
-                                        <td style="text-align: center;"><t t-esc="'{:.2f}'.format(line.unit_price)"/> $</td>
+                                        <td style="text-align: center;"><t t-esc="'{:.2f}'.format(line.unit_price)"/></td>
                                         <td style="text-align: center;">
                                             <t t-if="line.discount_percent > 0">
                                                 <strong style="color: #dc3545;"><t t-esc="'{:.0f}'.format(line.discount_percent)"/>%</strong>
                                             </t>
                                             <t t-else="">-</t>
                                         </td>
-                                        <td style="text-align: center;"><strong><t t-esc="'{:.2f}'.format(line.line_total)"/> $</strong></td>
+                                        <td style="text-align: center;"><strong><t t-esc="'{:.2f}'.format(line.line_total)"/></strong></td>
                                     </tr>
                                 </t>
                             </tbody>
@@ -128,19 +132,19 @@
                                         <table style="width: 100%;">
                                             <tr>
                                                 <td style="text-align: right;"><strong>المجموع الفرعي:</strong></td>
-                                                <td style="text-align: left;"><t t-esc="'{:.2f}'.format(o.amount_subtotal)"/> $</td>
+                                                <td style="text-align: left;"><t t-esc="'{:.2f}'.format(o.amount_subtotal)"/></td>
                                             </tr>
                                             <tr t-if="o.amount_discount > 0">
                                                 <td style="text-align: right;"><strong>الخصم:</strong></td>
-                                                <td style="text-align: left; color: #dc3545;">-<t t-esc="'{:.2f}'.format(o.amount_discount)"/> $</td>
+                                                <td style="text-align: left; color: #dc3545;">-<t t-esc="'{:.2f}'.format(o.amount_discount)"/></td>
                                             </tr>
                                         </table>
                                     </div>
                                     <div class="total-final">
-                                        الإجمالي: <t t-esc="'{:.2f}'.format(o.amount_total)"/> $
+                                        الإجمالي: <t t-esc="'{:.2f}'.format(o.amount_total)"/>
                                     </div>
-                                    <div t-if="o.amount_total_iqd > 0" style="text-align: center; margin-top: 10px; background: #e8f5e9; padding: 8px; border-radius: 5px;">
-                                        <strong style="color: #2e7d32;">المجموع بالدينار: <t t-esc="'{:,.0f}'.format(o.amount_total_iqd)"/> د.ع</strong>
+                                    <div style="text-align: center; margin-top: 10px; background: #e8f5e9; padding: 8px; border-radius: 5px;">
+                                        <strong style="color: #2e7d32;">المجموع بالدينار: <t t-esc="'{:,.0f}'.format(o.amount_total * 1470)"/> د.ع</strong>
                                     </div>
                                 </td>
                             </tr>
