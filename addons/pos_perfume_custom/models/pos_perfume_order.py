@@ -48,6 +48,32 @@ class PosPerfumeOrder(models.Model):
         tracking=True
     )
     
+    # Fields for sale.order report compatibility
+    company_id = fields.Many2one(
+        'res.company',
+        string='Company',
+        compute='_compute_company_id',
+        store=False,
+        help='Computed from user context'
+    )
+    
+    fiscal_position_id = fields.Many2one(
+        'account.fiscal.position',
+        string='Fiscal Position',
+        help='Dummy field for report compatibility'
+    )
+    
+    payment_term_id = fields.Many2one(
+        'account.payment.term',
+        string='Payment Terms',
+        help='Dummy field for report compatibility'
+    )
+    
+    validity_date = fields.Date(
+        string='Expiration',
+        help='Dummy field for report compatibility'
+    )
+    
     def _get_default_pricelist(self):
         """Get default pricelist - try to find 'Price list 1' first"""
         # Try to find "Price list 1" - case insensitive
@@ -234,6 +260,12 @@ class PosPerfumeOrder(models.Model):
         """Convert total to IQD"""
         for order in self:
             order.amount_total_iqd = order.amount_total * order.exchange_rate
+    
+    @api.depends('user_id')
+    def _compute_company_id(self):
+        """Compute company from user/salesperson"""
+        for order in self:
+            order.company_id = order.user_id.company_id if order.user_id else self.env.company
     
     @api.onchange('partner_id')
     def _onchange_partner_pricelist(self):
