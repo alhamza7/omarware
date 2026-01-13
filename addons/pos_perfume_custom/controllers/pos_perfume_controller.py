@@ -332,7 +332,7 @@ class PosPerfumeController(http.Controller):
             # In Odoo 19+, use report.with_context()._render_qweb_pdf()
             try:
                 report = request.env.ref('pos_perfume_custom.action_report_pos_perfume_order')
-                pdf_content, _ = report._render_qweb_pdf([order.id])
+                pdf_content, _ = report._render_qweb_pdf(res_ids=order.ids)
             except Exception as pdf_error:
                 _logger.error(f"Error generating PDF: {pdf_error}", exc_info=True)
                 return {'success': False, 'error': f'Failed to generate PDF: {str(pdf_error)}'}
