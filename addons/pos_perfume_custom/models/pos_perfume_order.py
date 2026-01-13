@@ -32,20 +32,6 @@ class PosPerfumeOrder(models.Model):
         default=lambda self: self.env.user,
         tracking=True
     )
-
-    # NOTE: Some reports/templates expect `company_id` (e.g. `o.company_id.logo/vat/phone`).
-    # This model isn't tied to a POS config/session, so we derive it from the salesperson/company context.
-    company_id = fields.Many2one(
-        'res.company',
-        string='Company',
-        compute='_compute_company_id',
-        readonly=True,
-    )
-
-    @api.depends('user_id')
-    def _compute_company_id(self):
-        for order in self:
-            order.company_id = order.user_id.company_id or self.env.company
     
     partner_id = fields.Many2one(
         'res.partner',
