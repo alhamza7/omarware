@@ -704,8 +704,8 @@ class PosPerfumeOrder(models.Model):
         """طباعة الطلب باستخدام تقرير Odoo الأصلي"""
         self.ensure_one()
         
-        # الحصول على التقرير العربي الجديد
-        report = self.env.ref('pos_perfume_custom.action_report_pos_perfume_arabic')
+        # الحصول على التقرير الأساسي (يرث من sale.order)
+        report = self.env.ref('pos_perfume_custom.action_report_pos_perfume_order')
         
         # إرجاع action للطباعة
         return report.report_action(self)

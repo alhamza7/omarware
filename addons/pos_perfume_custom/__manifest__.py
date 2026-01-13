@@ -35,11 +35,11 @@
         'views/pos_perfume_views.xml',
         'views/pos_perfume_order_views.xml',
         'views/pos_perfume_session_views.xml',
-        'reports/pos_order_arabic_report.xml',  # ✅ تقرير عربي بترميز صحيح
-        # 'reports/pos_perfume_order_report.xml',  # ⛔ معطل: استخدام الفاتورة الأصلية
-        # 'reports/pos_perfume_order_report_gold.xml',  # ⛔ معطل: استخدام الفاتورة الأصلية
-        # 'reports/pos_perfume_order_report_nbs.xml',  # ⛔ معطل: استخدام الفاتورة الأصلية
-        # 'reports/pos_perfume_report_action.xml',  # ⛔ معطل: استخدام الفاتورة الأصلية
+        # 'reports/pos_order_arabic_report.xml',  # ⛔ معطل: استخدام التقرير الأساسي
+        'reports/pos_perfume_order_report.xml',  # ✅ تقرير أساسي يرث من sale.order
+        'reports/pos_perfume_report_action.xml',  # ✅ إجراء الطباعة
+        # 'reports/pos_perfume_order_report_gold.xml',  # ⛔ تصاميم بديلة معطلة
+        # 'reports/pos_perfume_order_report_nbs.xml',  # ⛔ تصاميم بديلة معطلة
     ],
     'assets': {
         'web.assets_backend': [
