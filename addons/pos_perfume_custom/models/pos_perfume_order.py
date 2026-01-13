@@ -74,6 +74,22 @@ class PosPerfumeOrder(models.Model):
         help='Dummy field for report compatibility'
     )
     
+    partner_invoice_id = fields.Many2one(
+        'res.partner',
+        string='Invoice Address',
+        compute='_compute_partner_addresses',
+        store=False,
+        help='Same as partner_id for POS orders'
+    )
+    
+    partner_shipping_id = fields.Many2one(
+        'res.partner',
+        string='Delivery Address',
+        compute='_compute_partner_addresses',
+        store=False,
+        help='Same as partner_id for POS orders'
+    )
+    
     def _get_default_pricelist(self):
         """Get default pricelist - try to find 'Price list 1' first"""
         # Try to find "Price list 1" - case insensitive
@@ -266,6 +282,13 @@ class PosPerfumeOrder(models.Model):
         """Compute company from user/salesperson"""
         for order in self:
             order.company_id = order.user_id.company_id if order.user_id else self.env.company
+    
+    @api.depends('partner_id')
+    def _compute_partner_addresses(self):
+        """For POS orders, invoice and shipping addresses are the same as customer"""
+        for order in self:
+            order.partner_invoice_id = order.partner_id
+            order.partner_shipping_id = order.partner_id
     
     @api.onchange('partner_id')
     def _onchange_partner_pricelist(self):
