@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0"?>
 <odoo>
     <data>
         <!-- Paperformat: add extra right margin to avoid RTL clipping in wkhtmltopdf -->
