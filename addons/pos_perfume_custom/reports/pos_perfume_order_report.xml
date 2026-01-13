@@ -2,7 +2,7 @@
 <odoo>
     <data noupdate="0">
         <!-- Simple POS Order Report Template -->
-        <template id="report_pos_perfume_order_document">
+        <template id="report_pos_perfume_order_simple">
             <t t-call="web.external_layout">
                 <div class="page">
                     <div class="oe_structure"/>
@@ -123,7 +123,7 @@
         <template id="report_pos_perfume_order">
             <t t-call="web.html_container">
                 <t t-foreach="docs" t-as="o">
-                    <t t-call="pos_perfume_custom.report_pos_perfume_order_document"/>
+                    <t t-call="pos_perfume_custom.report_pos_perfume_order_simple"/>
                 </t>
             </t>
         </template>
