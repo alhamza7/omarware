@@ -757,9 +757,19 @@ class SapProductCompleteMigration(models.TransientModel):
             _logger.warning(f"Item {item_code} has no name, using: {item_name}")
         
         # Search for existing (using normalized item_code)
+        # IMPORTANT: Search for EXACT match (strip whitespace) and prefer active products
         product = self.env['product.product'].search([
-            ('default_code', '=', item_code)
-        ], limit=1)
+            ('default_code', '=', item_code),
+            ('active', 'in', [True, False])  # Search in both active and archived
+        ], order='active desc, id desc', limit=1)
+        
+        # Double-check: if multiple products with same code exist, log warning
+        duplicate_count = self.env['product.product'].search_count([
+            ('default_code', '=', item_code),
+            ('active', 'in', [True, False])
+        ])
+        if duplicate_count > 1:
+            _logger.warning(f"⚠️ Found {duplicate_count} products with code '{item_code}'. Using most recent active one.")
         
         # ========== Get and Map UoMs ==========
         sales_unit = item_data.get('SalesUnit')
