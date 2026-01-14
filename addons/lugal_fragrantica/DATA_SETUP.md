@@ -124,3 +124,4 @@ ls static/fragrantica_data/images/perfumes/ | head
 
 
 
+

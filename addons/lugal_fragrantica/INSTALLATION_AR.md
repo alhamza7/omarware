@@ -506,3 +506,4 @@ sudo chmod -R 755 /opt/odoo/addons/lugal_fragrantica/static/
 
 
 
+

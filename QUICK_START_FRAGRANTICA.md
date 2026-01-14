@@ -189,3 +189,4 @@ sudo chown -R odoo:odoo /opt/odoo/addons/lugal_fragrantica/static/
 
 
 
+

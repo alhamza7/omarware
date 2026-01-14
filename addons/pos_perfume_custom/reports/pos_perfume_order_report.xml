@@ -162,6 +162,28 @@
                         </div>
                     </div>
                 </t>
+                
+                <!-- Auto-print script -->
+                <script type="text/javascript">
+                    // Auto-trigger print dialog when page loads
+                    window.addEventListener('load', function() {
+                        // Small delay to ensure page is fully rendered
+                        setTimeout(function() {
+                            window.print();
+                        }, 500);
+                    });
+                    
+                    // Also bind to Print button if exists
+                    document.addEventListener('DOMContentLoaded', function() {
+                        var printButton = document.querySelector('.o_report_print, .btn-print, a[title*="Print"], button[title*="Print"]');
+                        if (printButton) {
+                            printButton.addEventListener('click', function(e) {
+                                e.preventDefault();
+                                window.print();
+                            });
+                        }
+                    });
+                </script>
             </t>
         </template>
 
