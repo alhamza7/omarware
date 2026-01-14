@@ -371,19 +371,6 @@ class PosPerfumeController(http.Controller):
                 })
                 _logger.info(f"✅ [WhatsApp] TEXT sent successfully to {order.partner_id.phone}")
                 
-                # OPTIONAL: Generate PDF in background (takes time but doesn't block user)
-                # User already got the text message instantly
-                try:
-                    _logger.info(f"[WhatsApp] Generating PDF in background...")
-                    request.env.cr.commit()  # Commit the message first
-                    
-                    # Start PDF generation (non-blocking)
-                    order.with_delay()._generate_and_send_pdf_whatsapp(config.id, message.id)
-                    
-                except Exception as bg_error:
-                    _logger.warning(f"[WhatsApp] Background PDF generation failed: {bg_error}")
-                    # Don't fail the whole operation - user already got text message
-                
                 return {
                     'success': True,
                     'message': f'رسالة مرسلة بنجاح إلى {order.partner_id.phone}',
