@@ -328,9 +328,9 @@ class PosPerfumeController(http.Controller):
             if not config:
                 return {'success': False, 'error': 'ULTRAMSG not configured. Please contact administrator.'}
             
-            # Generate PDF report
+            # Generate PDF report (use PDF-only template without auto-print)
             try:
-                report = request.env.ref('pos_perfume_custom.action_report_pos_perfume_order')
+                report = request.env.ref('pos_perfume_custom.action_report_pos_perfume_order_pdf')
                 pdf_content, _ = report._render_qweb_pdf(report.report_name, res_ids=order.ids)
             except Exception as pdf_error:
                 _logger.error(f"Error generating PDF: {pdf_error}", exc_info=True)

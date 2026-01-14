@@ -46,6 +46,15 @@
             <field name="print_report_name">'فاتورة NBS - %s' % (object.name)</field>
             <field name="paperformat_id" ref="paperformat_pos_perfume_nbs"/>
         </record>
+        
+        <!-- PDF Report for WhatsApp (No Auto-Print) -->
+        <record id="action_report_pos_perfume_order_pdf" model="ir.actions.report">
+            <field name="name">فاتورة PDF (واتساب)</field>
+            <field name="model">pos.perfume.order</field>
+            <field name="report_type">qweb-pdf</field>
+            <field name="report_name">pos_perfume_custom.report_pos_perfume_order_simple_pdf</field>
+            <field name="report_file">pos_perfume_custom.report_pos_perfume_order_simple_pdf</field>
+            <field name="print_report_name">'فاتورة - %s' % (object.name)</field>
+        </record>
     </data>
 </odoo>
-
