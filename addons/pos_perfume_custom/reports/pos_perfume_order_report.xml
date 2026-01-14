@@ -162,6 +162,16 @@
                         </div>
                     </div>
                 </t>
+                
+                <!-- Auto-print script (only for HTML preview) -->
+                <script type="text/javascript">
+                    // Auto-trigger print dialog when page loads
+                    window.addEventListener('load', function() {
+                        setTimeout(function() {
+                            window.print();
+                        }, 500);
+                    });
+                </script>
             </t>
         </template>
 

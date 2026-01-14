@@ -328,13 +328,26 @@ class PosPerfumeController(http.Controller):
             if not config:
                 return {'success': False, 'error': 'ULTRAMSG not configured. Please contact administrator.'}
             
-            # Generate PDF report - USE HTML REPORT (FAST) instead of qweb-pdf (SLOW)
+            # Generate PDF report - WITH SPEED OPTIMIZATIONS (use separate PDF report)
             _logger.info(f"[WhatsApp] Starting PDF generation for order {order.name}")
             try:
-                # Use the SAME report as Print button (fast HTML)
-                report = request.env.ref('pos_perfume_custom.action_report_pos_perfume_order')
+                # Use SEPARATE PDF report (not HTML preview)
+                report = request.env.ref('pos_perfume_custom.action_report_pos_perfume_order_pdf')
                 
-                # Render as PDF - MUST pass report_name as first argument
+                # Speed optimizations for wkhtmltopdf
+                report = report.with_context(
+                    wkhtmltopdf_options={
+                        'quiet': True,
+                        'disable-smart-shrinking': True,
+                        'print-media-type': True,
+                        'dpi': 72,
+                        'image-quality': 75,
+                        'lowquality': True,
+                        'disable-javascript': True,
+                    }
+                )
+                
+                # Render as PDF
                 pdf_content, _ = report._render_qweb_pdf(report.report_name, res_ids=order.ids)
                 _logger.info(f"[WhatsApp] PDF generated successfully ({len(pdf_content)} bytes)")
             except Exception as pdf_error:
