@@ -308,6 +308,7 @@ class PosPerfumeController(http.Controller):
     def send_whatsapp(self, order_id):
         """
         Send POS Order as PDF via WhatsApp using ULTRAMSG
+        FAST VERSION: Generate PDF in background, return immediately
         """
         try:
             # Get order
@@ -328,112 +329,39 @@ class PosPerfumeController(http.Controller):
             if not config:
                 return {'success': False, 'error': 'ULTRAMSG not configured. Please contact administrator.'}
             
-            # Generate PDF report - WITH SPEED OPTIMIZATIONS (use separate PDF report)
-            _logger.info(f"[WhatsApp] Starting PDF generation for order {order.name}")
-            try:
-                # Use SEPARATE PDF report (not HTML preview)
-                report = request.env.ref('pos_perfume_custom.action_report_pos_perfume_order_pdf')
-                
-                # Speed optimizations for wkhtmltopdf
-                report = report.with_context(
-                    wkhtmltopdf_options={
-                        'quiet': True,
-                        'disable-smart-shrinking': True,
-                        'print-media-type': True,
-                        'dpi': 72,
-                        'image-quality': 75,
-                        'lowquality': True,
-                        'disable-javascript': True,
-                    }
-                )
-                
-                # Render as PDF
-                pdf_content, _ = report._render_qweb_pdf(report.report_name, res_ids=order.ids)
-                _logger.info(f"[WhatsApp] PDF generated successfully ({len(pdf_content)} bytes)")
-            except Exception as pdf_error:
-                _logger.error(f"Error generating PDF: {pdf_error}", exc_info=True)
-                return {'success': False, 'error': f'Failed to generate PDF: {str(pdf_error)}'}
+            _logger.info(f"[WhatsApp] Starting FAST send for order {order.name}")
             
-            # Encode PDF as base64 so we can send it directly to ULTRAMSG without relying on a public URL
-            import base64
-            pdf_base64 = base64.b64encode(pdf_content).decode('utf-8')
-            _logger.info(f"[WhatsApp] PDF encoded to base64 ({len(pdf_base64)} chars)")
+            # OPTION 1: Send TEXT message immediately (instant)
+            # Then user can click to view PDF online
+            invoice_url = f"{request.httprequest.host_url}web#id={order.id}&model=pos.perfume.order&view_type=form"
             
-            # Also create an attachment in Odoo for internal viewing/archiving
-            attachment = request.env['ir.attachment'].create({
-                'name': f'Invoice_{order.name}.pdf',
-                'type': 'binary',
-                'datas': base64.b64encode(pdf_content),
-                'res_model': 'pos.perfume.order',
-                'res_id': order.id,
-                'public': True,
-            })
-            _logger.info(f"[WhatsApp] Attachment created (ID: {attachment.id})")
-            
-            # Prepare invoice type and notes for WhatsApp (temporary)
-            invoice_type_label = ''
-            try:
-                if order.invoice_type:
-                    # Use the same selection list defined on pos.perfume.order to get Arabic label
-                    selection_map = dict(request.env['pos.perfume.order']._get_invoice_type_selection())
-                    invoice_type_label = selection_map.get(order.invoice_type, order.invoice_type)
-            except Exception as e:
-                _logger.warning(f"Failed to resolve invoice type label for WhatsApp: {e}")
-            
-            note_text = (order.note or '').strip()
-            
-            # Prepare message (include invoice type and notes temporarily)
-            message_body_lines = [
-                f"مرحباً {order.partner_id.name}،",
-                "",
-                "هذه فاتورتك من متجرنا:",
-                f"📄 رقم الطلب: {order.name}",
-                f"💰 المجموع: ${order.amount_total:.2f}",
-            ]
-            if invoice_type_label:
-                message_body_lines.append(f"📋 نوع الفاتورة: {invoice_type_label}")
-            if note_text:
-                message_body_lines.append(f"📝 الملاحظات: {note_text}")
-            message_body_lines.append("")
-            message_body_lines.append("شكراً لتعاملك معنا!")
-            
-            message_body = "\n".join(message_body_lines).strip()
+            message_body = f"""مرحباً {order.partner_id.name}،
+
+هذه فاتورتك من متجرنا:
+📄 رقم الطلب: {order.name}
+💰 المجموع: ${order.amount_total:.2f}
+💵 المجموع بالدينار: {int(order.amount_total * 1470):,} د.ع
+
+شكراً لتعاملك معنا!"""
             
             # Create message log
             message = request.env['ultramsg.message'].create({
                 'phone': order.partner_id.phone,
-                'message_type': 'document',
+                'message_type': 'text',
                 'message_body': message_body,
-                # Store the Odoo attachment URL for reference (not used by ULTRAMSG)
-                'document_url': f'/web/content/{attachment.id}?download=true',
-                'document_name': f'Invoice_{order.name}.pdf',
                 'res_model': 'pos.perfume.order',
                 'res_id': order.id,
                 'state': 'sending',
             })
-            _logger.info(f"[WhatsApp] Message log created (ID: {message.id})")
             
-            # Send via ULTRAMSG
-            _logger.info(f"[WhatsApp] Sending to ULTRAMSG API...")
+            # Send TEXT via ULTRAMSG (instant!)
+            _logger.info(f"[WhatsApp] Sending TEXT message (instant)...")
             result = config.send_message(
                 phone=order.partner_id.phone,
-                message_type='document',
+                message_type='text',
                 message_body=message_body,
-                # Send the PDF content directly as base64 instead of a URL
-                document_url=pdf_base64,
-                document_name=f'Invoice_{order.name}.pdf',
             )
-            _logger.info(f"[WhatsApp] ULTRAMSG result: {result}")
             
-            # Normalize result to a dictionary
-            if not isinstance(result, dict):
-                # In unexpected cases, convert to generic error
-                return {
-                    'success': False,
-                    'error': 'Invalid response from WhatsApp service',
-                }
-            
-            # Update message status
             if result.get('success'):
                 message.write({
                     'state': 'sent',
@@ -441,10 +369,24 @@ class PosPerfumeController(http.Controller):
                     'ultramsg_id': result.get('ultramsg_id'),
                     'ultramsg_response': str(result.get('response')),
                 })
-                _logger.info(f"✅ [WhatsApp] Message sent successfully to {order.partner_id.phone}")
+                _logger.info(f"✅ [WhatsApp] TEXT sent successfully to {order.partner_id.phone}")
+                
+                # OPTIONAL: Generate PDF in background (takes time but doesn't block user)
+                # User already got the text message instantly
+                try:
+                    _logger.info(f"[WhatsApp] Generating PDF in background...")
+                    request.env.cr.commit()  # Commit the message first
+                    
+                    # Start PDF generation (non-blocking)
+                    order.with_delay()._generate_and_send_pdf_whatsapp(config.id, message.id)
+                    
+                except Exception as bg_error:
+                    _logger.warning(f"[WhatsApp] Background PDF generation failed: {bg_error}")
+                    # Don't fail the whole operation - user already got text message
+                
                 return {
                     'success': True,
-                    'message': f'Invoice sent successfully to {order.partner_id.phone}',
+                    'message': f'رسالة مرسلة بنجاح إلى {order.partner_id.phone}',
                     'message_id': message.id,
                 }
             else:
@@ -453,21 +395,11 @@ class PosPerfumeController(http.Controller):
                     'error_message': result.get('error'),
                     'ultramsg_response': str(result.get('response')),
                 })
-                response_error = result.get('error')
-                # Ensure error is a readable string (avoid objects/lists)
-                if isinstance(response_error, (dict, list)):
-                    try:
-                        import json
-                        response_error = json.dumps(response_error, ensure_ascii=False)
-                    except Exception:
-                        response_error = str(response_error)
-                elif not isinstance(response_error, str):
-                    response_error = str(response_error)
-                
-                _logger.error(f"❌ [WhatsApp] Failed to send: {response_error}")
+                error_msg = result.get('error') or 'Failed to send message'
+                _logger.error(f"❌ [WhatsApp] Failed: {error_msg}")
                 return {
                     'success': False,
-                    'error': response_error or 'Failed to send message',
+                    'error': error_msg,
                     'message_id': message.id,
                 }
                 
