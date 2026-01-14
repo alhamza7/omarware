@@ -329,9 +329,11 @@ class PosPerfumeController(http.Controller):
                 return {'success': False, 'error': 'ULTRAMSG not configured. Please contact administrator.'}
             
             # Generate PDF report (use PDF-only template without auto-print)
+            _logger.info(f"[WhatsApp] Starting PDF generation for order {order.name}")
             try:
                 report = request.env.ref('pos_perfume_custom.action_report_pos_perfume_order_pdf')
                 pdf_content, _ = report._render_qweb_pdf(report.report_name, res_ids=order.ids)
+                _logger.info(f"[WhatsApp] PDF generated successfully ({len(pdf_content)} bytes)")
             except Exception as pdf_error:
                 _logger.error(f"Error generating PDF: {pdf_error}", exc_info=True)
                 return {'success': False, 'error': f'Failed to generate PDF: {str(pdf_error)}'}
@@ -339,6 +341,7 @@ class PosPerfumeController(http.Controller):
             # Encode PDF as base64 so we can send it directly to ULTRAMSG without relying on a public URL
             import base64
             pdf_base64 = base64.b64encode(pdf_content).decode('utf-8')
+            _logger.info(f"[WhatsApp] PDF encoded to base64 ({len(pdf_base64)} chars)")
             
             # Also create an attachment in Odoo for internal viewing/archiving
             attachment = request.env['ir.attachment'].create({
@@ -349,6 +352,7 @@ class PosPerfumeController(http.Controller):
                 'res_id': order.id,
                 'public': True,
             })
+            _logger.info(f"[WhatsApp] Attachment created (ID: {attachment.id})")
             
             # Prepare invoice type and notes for WhatsApp (temporary)
             invoice_type_label = ''
@@ -391,8 +395,10 @@ class PosPerfumeController(http.Controller):
                 'res_id': order.id,
                 'state': 'sending',
             })
+            _logger.info(f"[WhatsApp] Message log created (ID: {message.id})")
             
             # Send via ULTRAMSG
+            _logger.info(f"[WhatsApp] Sending to ULTRAMSG API...")
             result = config.send_message(
                 phone=order.partner_id.phone,
                 message_type='document',
@@ -401,6 +407,7 @@ class PosPerfumeController(http.Controller):
                 document_url=pdf_base64,
                 document_name=f'Invoice_{order.name}.pdf',
             )
+            _logger.info(f"[WhatsApp] ULTRAMSG result: {result}")
             
             # Normalize result to a dictionary
             if not isinstance(result, dict):
@@ -418,6 +425,7 @@ class PosPerfumeController(http.Controller):
                     'ultramsg_id': result.get('ultramsg_id'),
                     'ultramsg_response': str(result.get('response')),
                 })
+                _logger.info(f"✅ [WhatsApp] Message sent successfully to {order.partner_id.phone}")
                 return {
                     'success': True,
                     'message': f'Invoice sent successfully to {order.partner_id.phone}',
@@ -440,6 +448,7 @@ class PosPerfumeController(http.Controller):
                 elif not isinstance(response_error, str):
                     response_error = str(response_error)
                 
+                _logger.error(f"❌ [WhatsApp] Failed to send: {response_error}")
                 return {
                     'success': False,
                     'error': response_error or 'Failed to send message',
