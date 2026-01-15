@@ -32,7 +32,7 @@ class POSPerfumeWhatsAppImage(http.Controller):
                 # Step 1: Generate HTML
                 _logger.info("[WhatsApp Image] Step 1: Generating HTML...")
                 report = request.env.ref('pos_perfume_custom.action_report_pos_perfume_order')
-                html_content = report._render_qweb_html(report.report_name, res_ids=order.ids)[0]
+                html_content, _ = report._render_qweb_html(order.ids)
                 
                 # Convert bytes to string if needed
                 if isinstance(html_content, bytes):
