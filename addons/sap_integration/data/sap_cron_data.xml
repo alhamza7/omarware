@@ -10,7 +10,7 @@
             <field name="code">model.run_daily_sync()</field>
             <field name="interval_number">1</field>
             <field name="interval_type">days</field>
-            <field name="nextcall" eval="(datetime.datetime.now() + datetime.timedelta(days=1)).replace(hour=2, minute=0, second=0)"/>
+            <field name="nextcall" eval="(datetime.now() + timedelta(days=1)).replace(hour=2, minute=0, second=0)"/>
             <field name="numbercall">-1</field>
             <field name="active">True</field>
             <field name="doall">False</field>
