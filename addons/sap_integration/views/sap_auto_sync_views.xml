@@ -71,7 +71,7 @@
             <field name="name">sap.auto.sync.tree</field>
             <field name="model">sap.auto.sync</field>
             <field name="arch" type="xml">
-                <tree string="SAP Auto Sync">
+                <list string="SAP Auto Sync">
                     <field name="name"/>
                     <field name="backend_id"/>
                     <field name="active" widget="boolean_toggle"/>
@@ -82,7 +82,7 @@
                            decoration-warning="last_sync_status == 'running'"/>
                     <field name="total_synced"/>
                     <field name="total_errors"/>
-                </tree>
+                </list>
             </field>
         </record>
         
@@ -90,7 +90,7 @@
         <record id="action_sap_auto_sync" model="ir.actions.act_window">
             <field name="name">SAP Auto Sync</field>
             <field name="res_model">sap.auto.sync</field>
-            <field name="view_mode">tree,form</field>
+            <field name="view_mode">list,form</field>
             <field name="help" type="html">
                 <p class="o_view_nocontent_smiling_face">
                     إنشاء تكوين للتزامن التلقائي مع SAP
