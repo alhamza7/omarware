@@ -32,6 +32,7 @@
         'security/ir.model.access.csv',
         'data/pos_perfume_sequence.xml',
         # 'data/invoice_templates.xml',  # ⛔ معطل: استخدام الفاتورة الأصلية
+        'views/assets.xml',  # ✅ JavaScript assets للجدول المحسّن
         'views/pos_perfume_views.xml',
         'views/pos_perfume_order_views.xml',
         'views/pos_perfume_session_views.xml',

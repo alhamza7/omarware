@@ -2631,7 +2631,7 @@ export class PosPerfumeScreen extends Component {
                 ],
                 ['id', 'name', 'partner_id', 'date', 'amount_total', 'state', 'sap_doc_num', 'sap_doc_entry', 'sap_synced'],
                 { 
-                    limit: 50, 
+                    limit: 100, 
                     order: 'date DESC, id DESC' 
                 }
             );
@@ -2641,16 +2641,78 @@ export class PosPerfumeScreen extends Component {
                 return;
             }
             
+            // Group orders by date
+            const groupedOrders = this.groupOrdersByDate(orders);
+            
             // Store orders and show dialog
             this.state.previousOrders = orders;
+            this.state.groupedPreviousOrders = groupedOrders;
             this.state.filteredPreviousOrders = orders;
             this.state.previousOrdersSearchTerm = '';
+            this.state.collapsedDates = {}; // Track which dates are collapsed
             this.state.showPreviousOrdersDialog = true;
             
         } catch (error) {
             console.error('Error loading previous orders:', error);
             this.notification.add(_t("Error loading previous orders"), { type: "danger" });
         }
+    }
+    
+    /**
+     * Group orders by date
+     */
+    groupOrdersByDate(orders) {
+        const groups = {};
+        
+        orders.forEach(order => {
+            if (!order.date) return;
+            
+            // Extract date only (YYYY-MM-DD)
+            const dateStr = order.date.split(' ')[0];
+            const dateObj = new Date(dateStr);
+            
+            // Format date for display
+            const displayDate = dateObj.toLocaleDateString('ar-IQ', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            });
+            
+            if (!groups[dateStr]) {
+                groups[dateStr] = {
+                    date: dateStr,
+                    displayDate: displayDate,
+                    orders: [],
+                    totalAmount: 0,
+                    count: 0
+                };
+            }
+            
+            groups[dateStr].orders.push(order);
+            groups[dateStr].totalAmount += order.amount_total || 0;
+            groups[dateStr].count += 1;
+        });
+        
+        // Convert to array and sort by date descending
+        return Object.values(groups).sort((a, b) => b.date.localeCompare(a.date));
+    }
+    
+    /**
+     * Toggle date group collapse/expand
+     */
+    toggleDateGroup(dateStr) {
+        if (!this.state.collapsedDates) {
+            this.state.collapsedDates = {};
+        }
+        this.state.collapsedDates[dateStr] = !this.state.collapsedDates[dateStr];
+    }
+    
+    /**
+     * Check if date group is collapsed
+     */
+    isDateGroupCollapsed(dateStr) {
+        return this.state.collapsedDates && this.state.collapsedDates[dateStr];
     }
     
     /**

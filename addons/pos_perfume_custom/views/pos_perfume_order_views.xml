@@ -4,20 +4,23 @@
     <!--                    POS PERFUME ORDER VIEWS                   -->
     <!-- ============================================================ -->
 
-    <!-- Order Line List View -->
+    <!-- Order Line List View with Enhanced Navigation -->
     <record id="view_pos_perfume_order_line_tree" model="ir.ui.view">
         <field name="name">pos.perfume.order.line.list</field>
         <field name="model">pos.perfume.order.line</field>
         <field name="arch" type="xml">
-            <list editable="bottom" decoration-muted="quantity == 0">
+            <list editable="bottom" 
+                  decoration-muted="quantity == 0"
+                  js_class="pos_perfume_order_line_list">
                 <field name="product_id" 
                        required="1"
                        domain="[('sale_ok', '=', True)]"
-                       context="{'default_detailed_type': 'product'}"/>
+                       context="{'default_detailed_type': 'product'}"
+                       options="{'no_create': False, 'no_open': False}"/>
                 <field name="custom_product_name" optional="show" string="اسم مخصص (للفاتورة فقط)" placeholder="اترك فارغاً لاستخدام الاسم الأصلي"/>
                 <field name="product_code" optional="show"/>
                 <field name="product_foreign_name" optional="show" string="Foreign Name"/>
-                <field name="warehouse_id" required="1"/>
+                <field name="warehouse_id" required="1" options="{'no_create': True}"/>
                 <field name="available_qty" optional="show" readonly="1"/>
                 <field name="quantity" widget="float" options="{'precision': 2}"/>
                 <field name="unit_price"/>
