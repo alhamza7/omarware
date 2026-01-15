@@ -31,10 +31,12 @@
     'data': [
         'security/ir.model.access.csv',
         'data/pos_perfume_sequence.xml',
+        'data/default_exchange_rate.xml',  # ✅ Default exchange rate configuration
         # 'data/invoice_templates.xml',  # ⛔ معطل: استخدام الفاتورة الأصلية
         'views/pos_perfume_views.xml',
         'views/pos_perfume_order_views.xml',
         'views/pos_perfume_session_views.xml',
+        'views/res_config_settings_views.xml',  # ✅ Sales settings for exchange rate
         # 'reports/pos_order_arabic_report.xml',  # ⛔ معطل: استخدام التقرير الأساسي
         'reports/pos_perfume_order_report.xml',  # ✅ تقرير أساسي يرث من sale.order
         'reports/pos_perfume_report_action.xml',  # ✅ إجراء الطباعة

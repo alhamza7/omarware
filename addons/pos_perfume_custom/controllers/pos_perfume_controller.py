@@ -335,12 +335,21 @@ class PosPerfumeController(http.Controller):
             # Then user can click to view PDF online
             invoice_url = f"{request.httprequest.host_url}web#id={order.id}&model=pos.perfume.order&view_type=form"
             
+            # Get exchange rate from order or default from settings
+            exchange_rate = order.exchange_rate if order.exchange_rate else float(
+                request.env['ir.config_parameter'].sudo().get_param(
+                    'pos_perfume.default_exchange_rate_usd_iqd', '1470.0'
+                )
+            )
+            iqd_amount = order.amount_total * exchange_rate
+            iqd_rounded = round(iqd_amount / 1000) * 1000
+            
             message_body = f"""مرحباً {order.partner_id.name}،
 
 هذه فاتورتك من متجرنا:
 📄 رقم الطلب: {order.name}
 💰 المجموع: ${order.amount_total:.2f}
-💵 المجموع بالدينار: {int(order.amount_total * 1470):,} د.ع
+💵 المجموع بالدينار: {int(iqd_rounded):,} د.ع
 
 شكراً لتعاملك معنا!"""
             

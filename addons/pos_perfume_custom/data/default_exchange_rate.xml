@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<odoo>
+    <data noupdate="1">
+        <!-- Default Exchange Rate Configuration -->
+        <record id="default_exchange_rate_usd_iqd" model="ir.config_parameter">
+            <field name="key">pos_perfume.default_exchange_rate_usd_iqd</field>
+            <field name="value">1470.0</field>
+        </record>
+    </data>
+</odoo>
+
