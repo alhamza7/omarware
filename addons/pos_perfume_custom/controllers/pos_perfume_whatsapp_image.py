@@ -143,19 +143,28 @@ class POSPerfumeWhatsAppImage(http.Controller):
             
             # Step 9: Send IMAGE via ULTRAMSG
             _logger.info("[WhatsApp Image] Sending to ULTRAMSG...")
-            result = config.send_message(
-                phone=order.partner_id.phone,
-                message_type='image',
-                message_body=message_body,
-                document_url=img_base64,
-                document_name=f'Invoice_{order.name}.png',
-            )
-            _logger.info(f"[WhatsApp Image] ULTRAMSG result: {result}")
             
-            # Ensure message is a recordset, not a list
-            if isinstance(message, list):
-                message = request.env['ultramsg.message'].browse(message[0] if message else False)
+            try:
+                result = config.send_message(
+                    phone=order.partner_id.phone,
+                    message_type='image',
+                    message_body=message_body,
+                    document_url=img_base64,
+                    document_name=f'Invoice_{order.name}.png',
+                )
+                
+                # Ensure result is a dict
+                if not isinstance(result, dict):
+                    _logger.error(f"Unexpected result type: {type(result)}, value: {result}")
+                    result = {'success': False, 'error': f'Unexpected response type: {type(result)}'}
+                
+                _logger.info(f"[WhatsApp Image] ULTRAMSG result: {result}")
+                
+            except Exception as send_error:
+                _logger.error(f"Error sending to ULTRAMSG: {send_error}", exc_info=True)
+                result = {'success': False, 'error': str(send_error)}
             
+            # Process result
             if result.get('success'):
                 message.write({
                     'state': 'sent',
