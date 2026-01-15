@@ -15,10 +15,10 @@
                                      help="معامل التحويل من الدولار إلى الدينار العراقي للفواتير الجديدة">
                                 <div class="content-group">
                                     <div class="row mt16">
-                                        <label for="default_exchange_rate_usd_iqd" 
+                                        <label for="pos_perfume_exchange_rate" 
                                                string="1 USD = " 
                                                class="col-lg-3 o_light_label"/>
-                                        <field name="default_exchange_rate_usd_iqd" 
+                                        <field name="pos_perfume_exchange_rate" 
                                                widget="float"
                                                class="oe_inline"/>
                                         <span class="o_form_label oe_inline"> IQD</span>

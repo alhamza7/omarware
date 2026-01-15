@@ -5,7 +5,7 @@ from odoo import fields, models
 class ResConfigSettings(models.TransientModel):
     _inherit = 'res.config.settings'
 
-    default_exchange_rate_usd_iqd = fields.Float(
+    pos_perfume_exchange_rate = fields.Float(
         string='سعر الصرف الافتراضي (دولار → دينار)',
         default=1470.0,
         digits=(12, 2),
