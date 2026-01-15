@@ -1,4 +1,6 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_sap_auto_sync_manager,sap.auto.sync manager,model_sap_auto_sync,sap_integration.group_sap_manager,1,1,1,1
+access_sap_auto_sync_user,sap.auto.sync user,model_sap_auto_sync,sap_integration.group_sap_user,1,0,0,0
 access_sap_clear_pricelist_wizard,access_sap_clear_pricelist_wizard,model_sap_clear_pricelist_wizard,base.group_user,1,1,1,1
 access_stock_duplicate_cleaner,access_stock_duplicate_cleaner,model_stock_duplicate_cleaner,base.group_user,1,1,1,1
 access_sap_backend_manager,sap.backend manager,model_sap_backend,sap_integration.group_sap_manager,1,1,1,1

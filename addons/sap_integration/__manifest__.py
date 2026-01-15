@@ -53,11 +53,12 @@
         'security/sap_security.xml',
         'security/ir.model.access.csv',
         'data/sap_backend_data.xml',
-        # 'data/sap_cron_data.xml',  # Disabled - uses advanced models not yet enabled
+        'data/sap_cron_data.xml',  # ✅ Enabled: Includes SAP Daily Auto-Sync
         
         # Views (Actions & Forms)
         'views/sap_menus_minimal.xml',            # Minimal root menus: menu_sap_integration + menu_sap_tools
         'views/sap_dashboard_action_minimal.xml', # Minimal dashboard action for menu_sap_dashboard
+        'views/sap_auto_sync_views.xml',          # ✅ Auto Sync Configuration
         # 'views/sap_dashboard_views.xml',       # Full dashboard view (still disabled for now)
         
         # Wizards - Load AFTER menus so they can reference menu items

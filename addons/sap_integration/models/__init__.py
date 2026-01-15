@@ -39,6 +39,9 @@ from . import sale_order_line_procurement  # Compatibility shim for procurement 
 from . import res_partner_sap  # SAP integration for partners/customers
 from . import ir_asset  # Patch for ir.asset to handle None manifest
 
+# Auto Sync
+from . import sap_auto_sync
+
 # Custom Report Designer
 from . import custom_report_template
 from . import custom_report_qweb_generator
