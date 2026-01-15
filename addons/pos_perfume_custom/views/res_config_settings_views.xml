@@ -1,50 +1,36 @@
 <?xml version="1.0"?>
 <odoo>
     <data>
-        <!-- Inherit Sales Configuration Settings -->
+        <!-- Inherit General Configuration Settings -->
         <record id="res_config_settings_view_form_inherit_pos_perfume" model="ir.ui.view">
             <field name="name">res.config.settings.view.form.inherit.pos.perfume</field>
             <field name="model">res.config.settings</field>
-            <field name="inherit_id" ref="sale.res_config_settings_view_form"/>
+            <field name="inherit_id" ref="base.res_config_settings_view_form"/>
             <field name="arch" type="xml">
-                <xpath expr="//div[hasclass('settings')]" position="inside">
-                    <div class="app_settings_block" data-string="POS Perfume" string="POS Perfume" data-key="pos_perfume">
-                        <h2>إعدادات POS Perfume</h2>
-                        <div class="row mt16 o_settings_container">
-                            <div class="col-12 col-lg-6 o_setting_box">
-                                <div class="o_setting_left_pane">
-                                    <i class="fa fa-dollar"/>
-                                </div>
-                                <div class="o_setting_right_pane">
-                                    <label for="default_exchange_rate_usd_iqd" string="سعر الصرف الافتراضي"/>
-                                    <div class="text-muted">
-                                        معامل التحويل من الدولار إلى الدينار العراقي للفواتير الجديدة
-                                    </div>
-                                    <div class="content-group mt16">
-                                        <div class="row">
-                                            <label for="default_exchange_rate_usd_iqd" 
-                                                   string="1 USD = " 
-                                                   class="col-lg-3 o_light_label"/>
-                                            <field name="default_exchange_rate_usd_iqd" 
-                                                   widget="float"
-                                                   class="oe_inline"/>
-                                            <span class="o_form_label oe_inline"> IQD</span>
-                                        </div>
-                                        <div class="row mt8">
-                                            <div class="col-12">
-                                                <div class="alert alert-info" role="alert">
-                                                    <i class="fa fa-info-circle"/> 
-                                                    <strong>ملاحظة:</strong> 
-                                                    هذا السعر سيُستخدم افتراضياً لجميع الفواتير الجديدة. 
-                                                    يمكنك تغيير السعر لكل فاتورة على حدة عند الحاجة.
-                                                </div>
-                                            </div>
-                                        </div>
+                <xpath expr="//form" position="inside">
+                    <app string="POS Perfume" name="pos_perfume_settings">
+                        <block title="سعر الصرف">
+                            <setting id="pos_perfume_exchange_rate_setting" 
+                                     string="سعر الصرف الافتراضي"
+                                     help="معامل التحويل من الدولار إلى الدينار العراقي للفواتير الجديدة">
+                                <div class="content-group">
+                                    <div class="row mt16">
+                                        <label for="default_exchange_rate_usd_iqd" 
+                                               string="1 USD = " 
+                                               class="col-lg-3 o_light_label"/>
+                                        <field name="default_exchange_rate_usd_iqd" 
+                                               widget="float"
+                                               class="oe_inline"/>
+                                        <span class="o_form_label oe_inline"> IQD</span>
                                     </div>
                                 </div>
-                            </div>
-                        </div>
-                    </div>
+                                <div class="text-muted">
+                                    هذا السعر سيُستخدم افتراضياً لجميع الفواتير الجديدة في POS Perfume. 
+                                    يمكنك تغيير السعر لكل فاتورة على حدة عند الحاجة.
+                                </div>
+                            </setting>
+                        </block>
+                    </app>
                 </xpath>
             </field>
         </record>
