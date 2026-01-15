@@ -32,14 +32,29 @@ class POSPerfumeWhatsAppImage(http.Controller):
                 # Step 1: Generate HTML
                 _logger.info("[WhatsApp Image] Step 1: Generating HTML...")
                 
-                # Use the report to render HTML
+                # Use the report to render HTML - with proper data structure
                 IrActionsReport = request.env['ir.actions.report']
                 report_name = 'pos_perfume_custom.report_pos_perfume_order'
-                html_content = IrActionsReport._render_template(report_name, order.ids)
+                
+                # Render with proper data dict
+                html_result = IrActionsReport._render_template(report_name, order.ids, data={})
+                
+                # Handle different return types
+                if isinstance(html_result, tuple):
+                    html_content = html_result[0]
+                elif isinstance(html_result, list):
+                    html_content = html_result[0] if html_result else ''
+                elif isinstance(html_result, dict):
+                    html_content = html_result.get('html', '')
+                else:
+                    html_content = html_result
                 
                 # Convert bytes to string if needed
                 if isinstance(html_content, bytes):
                     html_content = html_content.decode('utf-8')
+                
+                if not html_content or len(html_content) < 100:
+                    raise Exception(f"HTML generation returned empty or invalid content: {type(html_result)}")
                 
                 _logger.info(f"[WhatsApp Image] HTML generated ({len(html_content)} chars)")
                 
