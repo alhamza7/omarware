@@ -32,7 +32,6 @@
         'security/ir.model.access.csv',
         'data/pos_perfume_sequence.xml',
         # 'data/invoice_templates.xml',  # ⛔ معطل: استخدام الفاتورة الأصلية
-        'views/assets.xml',  # ✅ JavaScript assets للجدول المحسّن
         'views/pos_perfume_views.xml',
         'views/pos_perfume_order_views.xml',
         'views/pos_perfume_session_views.xml',
@@ -45,6 +44,8 @@
     'assets': {
         'web.assets_backend': [
             'pos_perfume_custom/static/src/scss/perfume_pos.scss',
+            # Enhanced table navigation
+            'pos_perfume_custom/static/src/js/pos_perfume_order_line_list.js',
             # Components (يجب أن تُحمَّل أولاً)
             'pos_perfume_custom/static/src/app/product_search_uom.js',
             'pos_perfume_custom/static/src/app/customer_search.js',
