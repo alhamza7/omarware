@@ -80,11 +80,12 @@
                             <thead>
                                 <tr>
                                     <th style="width: 5%;">#</th>
-                                    <th style="width: 45%; text-align: right;">المنتج</th>
-                                    <th style="width: 15%;">الكمية</th>
-                                    <th style="width: 13%;">السعر</th>
+                                    <th style="width: 38%; text-align: right;">المنتج</th>
+                                    <th style="width: 10%;">الكمية</th>
+                                    <th style="width: 12%;">الوحدة</th>
+                                    <th style="width: 11%;">السعر</th>
                                     <th style="width: 10%;">الخصم</th>
-                                    <th style="width: 12%;">المجموع</th>
+                                    <th style="width: 14%;">المجموع</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -109,6 +110,8 @@
                                         </td>
                                         <td style="text-align: center;">
                                             <strong><t t-esc="'{:.2f}'.format(line.quantity)"/></strong>
+                                        </td>
+                                        <td style="text-align: center;">
                                             <span t-field="line.product_uom_id.name"/>
                                         </td>
                                         <td style="text-align: center;"><t t-esc="'{:.2f}'.format(line.unit_price)"/></td>
@@ -143,8 +146,10 @@
                                     <div class="total-final">
                                         الإجمالي: <t t-esc="'{:.2f}'.format(o.amount_total)"/>
                                     </div>
+                                    <t t-set="iqd_amount" t-value="o.amount_total * (o.exchange_rate or 1470)"/>
+                                    <t t-set="iqd_rounded" t-value="round(iqd_amount / 1000) * 1000"/>
                                     <div style="text-align: center; margin-top: 10px; background: #e8f5e9; padding: 8px; border-radius: 5px;">
-                                        <strong style="color: #2e7d32;">المجموع بالدينار: <t t-esc="'{:,.0f}'.format(o.amount_total * 1470)"/> د.ع</strong>
+                                        <strong style="color: #2e7d32;">المجموع بالدينار: <t t-esc="'{:,.0f}'.format(iqd_rounded)"/> د.ع</strong>
                                     </div>
                                 </td>
                             </tr>

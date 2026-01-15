@@ -178,8 +178,10 @@ class PosPerfumeOrder(models.Model):
     
     exchange_rate = fields.Float(
         string='Exchange Rate (USD to IQD)',
-        default=1300.0,
-        digits=(12, 2)
+        default=1470.0,  # Updated default to 1470
+        digits=(12, 2),
+        help='Conversion rate from USD to IQD (e.g., 1470)',
+        tracking=True
     )
     
     # Related Sale Order
