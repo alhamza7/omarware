@@ -40,6 +40,14 @@ class POSPerfumeWhatsAppImage(http.Controller):
                 if isinstance(html_content, bytes):
                     html_content = html_content.decode('utf-8')
                 
+                # Add base tag for relative URLs
+                base_url = request.httprequest.host_url
+                if '<head>' in html_content:
+                    html_content = html_content.replace('<head>', f'<head><base href="{base_url}"/>')
+                elif '<!DOCTYPE' in html_content or '<html' in html_content:
+                    # Add head if missing
+                    html_content = html_content.replace('<html', f'<html><head><base href="{base_url}"/></head', 1)
+                
                 if not html_content or len(html_content) < 100:
                     raise Exception("HTML generation returned empty content")
                 
@@ -60,6 +68,10 @@ class POSPerfumeWhatsAppImage(http.Controller):
                     '--quality', '85',
                     '--width', '800',  # Good for WhatsApp
                     '--enable-local-file-access',
+                    '--load-error-handling', 'ignore',
+                    '--load-media-error-handling', 'ignore',
+                    '--disable-javascript',
+                    '--no-stop-slow-scripts',
                     '--quiet',
                     html_path,
                     png_path
