@@ -53,37 +53,45 @@ class POSPerfumeWhatsAppImage(http.Controller):
                 
                 _logger.info(f"[WhatsApp Image] HTML generated ({len(html_content)} chars)")
                 
-                # Step 2: Save HTML to temp file
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8') as html_file:
-                    html_file.write(html_content)
-                    html_path = html_file.name
-                
-                # Step 3: Convert HTML → PNG using wkhtmltoimage
+                # Step 2: Convert HTML → PNG using wkhtmltoimage (via stdin)
                 _logger.info("[WhatsApp Image] Step 2: Converting HTML to PNG...")
-                png_path = html_path.replace('.html', '.png')
                 
-                # wkhtmltoimage command
+                # Create temp output file
+                png_path = tempfile.mktemp(suffix='.png')
+                
+                # wkhtmltoimage command - read from stdin
                 cmd = [
                     'wkhtmltoimage',
                     '--quality', '85',
-                    '--width', '800',  # Good for WhatsApp
-                    '--enable-local-file-access',
+                    '--width', '800',
+                    '--height', '0',  # Auto height
                     '--load-error-handling', 'ignore',
                     '--load-media-error-handling', 'ignore',
                     '--disable-javascript',
                     '--no-stop-slow-scripts',
-                    '--quiet',
-                    html_path,
+                    '--encoding', 'utf-8',
+                    '-',  # Read from stdin
                     png_path
                 ]
                 
-                # Run conversion
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                # Set environment variables
+                env = os.environ.copy()
+                env['XDG_RUNTIME_DIR'] = '/tmp/runtime-odoo'
+                
+                # Run conversion with HTML as stdin
+                result = subprocess.run(
+                    cmd,
+                    input=html_content.encode('utf-8'),
+                    capture_output=True,
+                    timeout=30,
+                    env=env
+                )
                 
                 if result.returncode != 0:
-                    raise Exception(f"wkhtmltoimage failed: {result.stderr}")
+                    _logger.error(f"wkhtmltoimage stderr: {result.stderr.decode('utf-8')}")
+                    raise Exception(f"wkhtmltoimage failed with code {result.returncode}")
                 
-                # Step 4: Read image
+                # Step 3: Read image
                 with open(png_path, 'rb') as img_file:
                     img_content = img_file.read()
                 
@@ -91,9 +99,8 @@ class POSPerfumeWhatsAppImage(http.Controller):
                 
                 _logger.info(f"[WhatsApp Image] Image generated ({len(img_content)} bytes)")
                 
-                # Cleanup temp files
+                # Cleanup temp file
                 try:
-                    os.unlink(html_path)
                     os.unlink(png_path)
                 except:
                     pass
