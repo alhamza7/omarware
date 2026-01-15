@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-    <template id="assets_backend" inherit_id="web.assets_backend">
+    <template id="assets_backend" name="pos_perfume_custom assets" inherit_id="web.assets_backend">
         <xpath expr="." position="inside">
             <script type="text/javascript" src="/pos_perfume_custom/static/src/js/pos_perfume_order_line_list.js"/>
         </xpath>
