@@ -151,6 +151,10 @@ class POSPerfumeWhatsAppImage(http.Controller):
             )
             _logger.info(f"[WhatsApp Image] ULTRAMSG result: {result}")
             
+            # Ensure message is a recordset, not a list
+            if isinstance(message, list):
+                message = request.env['ultramsg.message'].browse(message[0] if message else False)
+            
             if result.get('success'):
                 message.write({
                     'state': 'sent',
