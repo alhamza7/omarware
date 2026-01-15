@@ -306,6 +306,129 @@ class PosPerfumeController(http.Controller):
     
     @http.route('/pos_perfume/send_whatsapp', type='json', auth='user', methods=['POST'], csrf=False)
     def send_whatsapp(self, order_id):
+        """Send invoice as PDF via WhatsApp - Same as Print version"""
+        try:
+            order = request.env['pos.perfume.order'].browse(order_id)
+            if not order.exists():
+                return {'success': False, 'error': 'Order not found'}
+            
+            if not order.partner_id or not order.partner_id.phone:
+                return {'success': False, 'error': 'Customer phone number is missing'}
+            
+            _logger.info(f"[WhatsApp PDF] Starting for order {order.name}")
+            
+            try:
+                # Use the same PDF report as print button
+                report = request.env.ref('pos_perfume_custom.action_report_pos_perfume_order_pdf')
+                pdf_content, _ = report._render_qweb_pdf(report.report_name, res_ids=order.ids)
+                _logger.info(f"[WhatsApp PDF] PDF generated ({len(pdf_content)} bytes)")
+                
+                # Convert to base64
+                import base64
+                pdf_base64 = base64.b64encode(pdf_content).decode('utf-8')
+                
+                # Create attachment
+                attachment = request.env['ir.attachment'].create({
+                    'name': f'Invoice_{order.name}.pdf',
+                    'type': 'binary',
+                    'datas': base64.b64encode(pdf_content),
+                    'res_model': 'pos.perfume.order',
+                    'res_id': order.id,
+                    'public': True,
+                    'mimetype': 'application/pdf'
+                })
+                _logger.info(f"[WhatsApp PDF] Attachment created (ID: {attachment.id})")
+                
+            except Exception as pdf_error:
+                _logger.error(f"PDF generation error: {pdf_error}", exc_info=True)
+                return {'success': False, 'error': f'Failed to generate PDF: {str(pdf_error)}'}
+            
+            # Get ULTRAMSG config
+            config = request.env['ultramsg.config'].search([('active', '=', True)], limit=1)
+            if not config:
+                return {'success': False, 'error': 'ULTRAMSG not configured'}
+            
+            # Prepare message
+            exchange_rate = order.exchange_rate or float(
+                request.env['ir.config_parameter'].sudo().get_param(
+                    'pos_perfume.default_exchange_rate_usd_iqd', '1470.0'
+                )
+            )
+            iqd_amount = order.amount_total * exchange_rate
+            iqd_rounded = round(iqd_amount / 1000) * 1000
+            
+            message_body = f"""مرحباً {order.partner_id.name}،
+
+📄 فاتورة رقم: {order.name}
+💰 المجموع: ${order.amount_total:.2f}
+💵 بالدينار: {int(iqd_rounded):,} د.ع
+
+شكراً لتعاملك معنا! 🌟"""
+            
+            # Create message log
+            message = request.env['ultramsg.message'].create({
+                'phone': order.partner_id.phone,
+                'message_type': 'document',
+                'message_body': message_body,
+                'res_model': 'pos.perfume.order',
+                'res_id': order.id,
+                'state': 'sending',
+            })
+            
+            # Send PDF via ULTRAMSG
+            _logger.info("[WhatsApp PDF] Sending to ULTRAMSG...")
+            
+            try:
+                result = config.send_message(
+                    phone=order.partner_id.phone,
+                    message_type='document',
+                    message_body=message_body,
+                    document_url=pdf_base64,
+                    document_name=f'Invoice_{order.name}.pdf',
+                )
+                
+                if not isinstance(result, dict):
+                    _logger.error(f"Unexpected result type: {type(result)}")
+                    result = {'success': False, 'error': f'Unexpected response: {type(result)}'}
+                
+                _logger.info(f"[WhatsApp PDF] ULTRAMSG result: {result}")
+                
+            except Exception as send_error:
+                _logger.error(f"Send error: {send_error}", exc_info=True)
+                result = {'success': False, 'error': str(send_error)}
+            
+            # Process result
+            if result.get('success'):
+                message.write({
+                    'state': 'sent',
+                    'sent_date': fields.Datetime.now(),
+                    'ultramsg_id': result.get('ultramsg_id'),
+                    'ultramsg_response': str(result.get('response')),
+                })
+                _logger.info(f"✅ [WhatsApp PDF] Sent to {order.partner_id.phone}")
+                return {
+                    'success': True,
+                    'message': f'✅ تم إرسال الفاتورة PDF إلى {order.partner_id.phone}',
+                    'message_id': message.id
+                }
+            else:
+                message.write({
+                    'state': 'failed',
+                    'error_message': result.get('error'),
+                    'ultramsg_response': str(result.get('response')),
+                })
+                _logger.error(f"❌ [WhatsApp PDF] Failed: {result.get('error')}")
+                return {
+                    'success': False,
+                    'error': result.get('error') or 'Failed to send PDF',
+                    'message_id': message.id
+                }
+                
+        except Exception as e:
+            _logger.error(f"[WhatsApp PDF] Error: {e}", exc_info=True)
+            return {'success': False, 'error': str(e)}
+
+    def send_whatsapp(self, order_id):
         """
         Send POS Order as PDF via WhatsApp using ULTRAMSG
         FAST VERSION: Generate PDF in background, return immediately

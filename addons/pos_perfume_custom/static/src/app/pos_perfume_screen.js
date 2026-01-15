@@ -3077,12 +3077,12 @@ export class PosPerfumeScreen extends Component {
             
             // Show loading notification
             this.notification.add(
-                _t("📸 Generating image and sending via WhatsApp..."),
+                _t("📄 Generating PDF and sending via WhatsApp..."),
                 { type: "info" }
             );
             
-            // Call backend to send WhatsApp IMAGE
-            const result = await rpc('/pos_perfume/send_whatsapp_image', {
+            // Call backend to send WhatsApp PDF
+            const result = await rpc('/pos_perfume/send_whatsapp', {
                 order_id: this.state.currentOrder.order_id,
             });
             
