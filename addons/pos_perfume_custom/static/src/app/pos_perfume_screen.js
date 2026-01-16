@@ -3077,11 +3077,11 @@ export class PosPerfumeScreen extends Component {
             
             // Show loading notification
             this.notification.add(
-                _t("📄 Generating PDF and sending via WhatsApp..."),
+                _t("📱 إرسال رسالة واتساب فورية..."),
                 { type: "info" }
             );
             
-            // Call backend to send WhatsApp PDF
+            // Call backend to send WhatsApp TEXT
             const result = await rpc('/pos_perfume/send_whatsapp', {
                 order_id: this.state.currentOrder.order_id,
             });
