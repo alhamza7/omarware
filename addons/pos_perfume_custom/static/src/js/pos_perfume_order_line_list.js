@@ -124,12 +124,7 @@ export class PosPerfumeOrderLineController extends ListController {
         }
         
         // Get ALL visible cells (excluding hidden columns)
-        const allCells = Array.from(row.querySelectorAll('.o_data_cell:not(.o_list_record_remove):not(.o_list_button)'));
-        const cells = allCells.filter(cell => {
-            // Exclude hidden cells (display: none or column_invisible)
-            const isVisible = cell.offsetParent !== null;
-            return isVisible;
-        });
+        const cells = this._getVisibleCells(row);
         const currentIndex = cells.indexOf(currentCell);
         
         // Check if a dropdown is currently open
@@ -169,8 +164,7 @@ export class PosPerfumeOrderLineController extends ListController {
             
             const prevRow = row.previousElementSibling;
             if (prevRow && prevRow.classList.contains('o_data_row')) {
-                const allPrevCells = Array.from(prevRow.querySelectorAll('.o_data_cell:not(.o_list_record_remove):not(.o_list_button)'));
-                const prevCells = allPrevCells.filter(cell => cell.offsetParent !== null);
+                const prevCells = this._getVisibleCells(prevRow);
                 const targetCell = prevCells[currentIndex];
                 if (targetCell) {
                     this._focusCell(targetCell);
@@ -185,8 +179,7 @@ export class PosPerfumeOrderLineController extends ListController {
             
             const nextRow = row.nextElementSibling;
             if (nextRow && nextRow.classList.contains('o_data_row')) {
-                const allNextCells = Array.from(nextRow.querySelectorAll('.o_data_cell:not(.o_list_record_remove):not(.o_list_button)'));
-                const nextCells = allNextCells.filter(cell => cell.offsetParent !== null);
+                const nextCells = this._getVisibleCells(nextRow);
                 const targetCell = nextCells[currentIndex];
                 if (targetCell) {
                     this._focusCell(targetCell);
@@ -238,8 +231,7 @@ export class PosPerfumeOrderLineController extends ListController {
             ev.preventDefault();
             const nextRow = row.nextElementSibling;
             if (nextRow && nextRow.classList.contains('o_data_row')) {
-                const allNextCells = Array.from(nextRow.querySelectorAll('.o_data_cell:not(.o_list_record_remove):not(.o_list_button)'));
-                const nextCells = allNextCells.filter(cell => cell.offsetParent !== null);
+                const nextCells = this._getVisibleCells(nextRow);
                 const targetCell = nextCells[currentIndex];
                 if (targetCell) {
                     this._focusCell(targetCell);
@@ -259,8 +251,7 @@ export class PosPerfumeOrderLineController extends ListController {
                 // Move to first cell of next row
                 const nextRow = row.nextElementSibling;
                 if (nextRow && nextRow.classList.contains('o_data_row')) {
-                    const allNextCells = Array.from(nextRow.querySelectorAll('.o_data_cell:not(.o_list_record_remove):not(.o_list_button)'));
-                    const nextCells = allNextCells.filter(cell => cell.offsetParent !== null);
+                    const nextCells = this._getVisibleCells(nextRow);
                     if (nextCells[0]) {
                         this._focusCell(nextCells[0]);
                     }
@@ -280,8 +271,7 @@ export class PosPerfumeOrderLineController extends ListController {
                 // Move to last cell of previous row
                 const prevRow = row.previousElementSibling;
                 if (prevRow && prevRow.classList.contains('o_data_row')) {
-                    const allPrevCells = Array.from(prevRow.querySelectorAll('.o_data_cell:not(.o_list_record_remove):not(.o_list_button)'));
-                    const prevCells = allPrevCells.filter(cell => cell.offsetParent !== null);
+                    const prevCells = this._getVisibleCells(prevRow);
                     if (prevCells.length > 0) {
                         this._focusCell(prevCells[prevCells.length - 1]);
                     }
@@ -291,6 +281,22 @@ export class PosPerfumeOrderLineController extends ListController {
         }
         
         return super.onKeydown(ev);
+    }
+    
+    /**
+     * Helper: Filter visible cells only
+     */
+    _getVisibleCells(row) {
+        const allCells = Array.from(row.querySelectorAll('.o_data_cell:not(.o_list_record_remove):not(.o_list_button)'));
+        return allCells.filter(cell => {
+            // Exclude hidden cells (multiple checks for different hiding methods)
+            if (cell.offsetParent === null) return false; // display: none or parent hidden
+            if (cell.offsetWidth === 0 || cell.offsetHeight === 0) return false; // width/height = 0
+            const style = window.getComputedStyle(cell);
+            if (style.visibility === 'hidden' || style.opacity === '0') return false; // visibility or opacity
+            if (cell.classList.contains('o_column_invisible') || cell.classList.contains('o_invisible_modifier')) return false; // Odoo invisible classes
+            return true;
+        });
     }
     
     /**
