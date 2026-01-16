@@ -18,6 +18,6 @@ access_product_category_pos_user,product.category.pos.user,product.model_product
 access_sap_product_extended_pos_user,sap.product.extended.pos.user,sap_integration.model_sap_product_extended,point_of_sale.group_pos_user,1,0,0,0
 access_sap_product_warehouse_info_pos_user,sap.product.warehouse.info.pos.user,sap_integration.model_sap_product_warehouse_info,point_of_sale.group_pos_user,1,0,0,0
 access_sap_product_pricelist_sync_pos_user,sap.product.pricelist.sync.pos.user,sap_integration.model_sap_product_pricelist_sync,point_of_sale.group_pos_user,1,0,0,0
-access_product_packaging_pos_user,product.packaging.pos.user,product.model_product_packaging,point_of_sale.group_pos_user,1,0,0,0
+
 
 
