@@ -29,6 +29,7 @@
         # 'invoice_designer',          # ⭐ معطل: استخدام الفاتورة الأصلية من Odoo
     ],
     'data': [
+        'security/pos_perfume_security.xml',  # ✅ Record rules (must be first!)
         'security/ir.model.access.csv',
         'data/pos_perfume_sequence.xml',
         'data/default_exchange_rate.xml',  # ✅ Default exchange rate configuration
