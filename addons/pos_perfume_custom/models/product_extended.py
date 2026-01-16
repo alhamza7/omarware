@@ -191,6 +191,9 @@ class ProductProductExtended(models.Model):
         1. Priority (R, ADF, G, N1 first)
         2. Name, Foreign Name, Code
         """
+        # Use sudo() to bypass record rules for POS search
+        ProductSudo = self.sudo()
+        
         # Normalize search term
         search_term = (search_term or '').strip()
         if not search_term:
@@ -202,14 +205,14 @@ class ProductProductExtended(models.Model):
         
         # RULE 1: "-" → Products with code starting with "S"
         if search_term == '-':
-            products = self.search([
+            products = ProductSudo.search([
                 ('sale_ok', '=', True),
                 ('default_code', '=like', 'S%')
             ], limit=limit)
         
         # RULE 2: Pure number (e.g., "200") - exact numeric match logic
         elif search_term.isdigit():
-            products = self.search([
+            products = ProductSudo.search([
                 ('sale_ok', '=', True),
                 '|', '|',
                 ('name', 'ilike', search_term),
@@ -240,13 +243,13 @@ class ProductProductExtended(models.Model):
                 if code_match or name_match:
                     filtered_products.append(p)
             
-            products = self.browse([p.id for p in filtered_products[:limit]])
+            products = ProductSudo.browse([p.id for p in filtered_products[:limit]])
         
         # RULE 3: "-<number>" → رقم مسبوق بعلامة "-" في الكود أو الاسم (مثل S-200)
         elif search_term.startswith('-') and search_term[1:].isdigit():
             num = search_term[1:]
             like_pattern = f"-%{num}%"
-            products = self.search([
+            products = ProductSudo.search([
                 ('sale_ok', '=', True),
                 '|',
                 ('default_code', 'ilike', like_pattern),
@@ -260,12 +263,12 @@ class ProductProductExtended(models.Model):
                 hay = f"{p.default_code or ''} {p.name or ''}".upper()
                 if pattern.upper() in hay:
                     filtered_products.append(p)
-            products = self.browse([p.id for p in filtered_products[:limit]])
+            products = ProductSudo.browse([p.id for p in filtered_products[:limit]])
         
         # RULE 4: Text / complex query – multi-token AND search across fields
         else:
             # أولاً نستخدم ilike عام للحصول على مجموعة مرشّحة أوسع
-            products = self.search([
+            products = ProductSudo.search([
                 ('sale_ok', '=', True),
                 '|', '|', '|',
                 ('name', 'ilike', search_term),
@@ -289,33 +292,33 @@ class ProductProductExtended(models.Model):
                     if all(tok in haystack for tok in tokens):
                         filtered_products.append(p)
                 
-                products = self.browse([p.id for p in filtered_products[:limit]])
+                products = ProductSudo.browse([p.id for p in filtered_products[:limit]])
         
         # Get pricelist - default to "Price list 1"
         if not pricelist_id:
             # Try to find "Price list 1" - case insensitive search
-            pricelist = self.env['product.pricelist'].search([
+            pricelist = self.env['product.pricelist'].sudo().search([
                 ('name', 'ilike', 'Price list 1'),
                 ('active', '=', True)
             ], limit=1)
             
             # If not found, try "list 1"
             if not pricelist:
-                pricelist = self.env['product.pricelist'].search([
+                pricelist = self.env['product.pricelist'].sudo().search([
                     ('name', 'ilike', 'list 1'),
                     ('active', '=', True)
                 ], limit=1)
             
             # If not found, try "Public Pricelist"
             if not pricelist:
-                pricelist = self.env['product.pricelist'].search([
+                pricelist = self.env['product.pricelist'].sudo().search([
                     ('name', 'ilike', 'Public Pricelist'),
                     ('active', '=', True)
                 ], limit=1)
             
             # If still not found, use first active pricelist
             if not pricelist:
-                pricelist = self.env['product.pricelist'].search([('active', '=', True)], limit=1)
+                pricelist = self.env['product.pricelist'].sudo().search([('active', '=', True)], limit=1)
             
             pricelist_id = pricelist.id if pricelist else None
         
@@ -327,7 +330,7 @@ class ProductProductExtended(models.Model):
                 total_stock = 0
                 
                 if 'sap.product.warehouse.info' in self.env:
-                    sap_infos = self.env['sap.product.warehouse.info'].search([
+                    sap_infos = self.env['sap.product.warehouse.info'].sudo().search([
                         ('product_id', '=', product.id),
                     ])
                     
@@ -345,7 +348,7 @@ class ProductProductExtended(models.Model):
                 list_price_usd = 0.0
                 if pricelist_id:
                     try:
-                        pricelist = self.env['product.pricelist'].browse(pricelist_id)
+                        pricelist = self.env['product.pricelist'].sudo().browse(pricelist_id)
                         if pricelist.exists():
                             # Use BASE UoM (product.uom_id) to get price
                             list_price_usd = pricelist._get_product_price(product, 1.0, uom=product.uom_id)
