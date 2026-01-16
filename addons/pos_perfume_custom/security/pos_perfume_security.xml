@@ -4,24 +4,26 @@
     <!--                    RECORD RULES                              -->
     <!-- ============================================================ -->
     
-    <!-- Allow POS users to read all products -->
+    <!-- Allow POS users to read all products - GLOBAL RULE -->
     <record id="product_product_pos_user_rule" model="ir.rule">
-        <field name="name">POS User: Read All Products</field>
+        <field name="name">POS User: Read All Products (Global)</field>
         <field name="model_id" ref="product.model_product_product"/>
         <field name="domain_force">[(1, '=', 1)]</field>
-        <field name="groups" eval="[(4, ref('point_of_sale.group_pos_user'))]"/>
+        <field name="groups" eval="[(6, 0, [ref('point_of_sale.group_pos_user')])]"/>
+        <field name="global" eval="True"/>
         <field name="perm_read" eval="True"/>
         <field name="perm_write" eval="False"/>
         <field name="perm_create" eval="False"/>
         <field name="perm_unlink" eval="False"/>
     </record>
     
-    <!-- Allow POS users to read all product templates -->
+    <!-- Allow POS users to read all product templates - GLOBAL RULE -->
     <record id="product_template_pos_user_rule" model="ir.rule">
-        <field name="name">POS User: Read All Product Templates</field>
+        <field name="name">POS User: Read All Product Templates (Global)</field>
         <field name="model_id" ref="product.model_product_template"/>
         <field name="domain_force">[(1, '=', 1)]</field>
-        <field name="groups" eval="[(4, ref('point_of_sale.group_pos_user'))]"/>
+        <field name="groups" eval="[(6, 0, [ref('point_of_sale.group_pos_user')])]"/>
+        <field name="global" eval="True"/>
         <field name="perm_read" eval="True"/>
         <field name="perm_write" eval="False"/>
         <field name="perm_create" eval="False"/>
@@ -106,6 +108,32 @@
         <field name="model_id" ref="sap_integration.model_sap_product_pricelist_sync"/>
         <field name="domain_force">[(1, '=', 1)]</field>
         <field name="groups" eval="[(4, ref('point_of_sale.group_pos_user'))]"/>
+        <field name="perm_read" eval="True"/>
+        <field name="perm_write" eval="False"/>
+        <field name="perm_create" eval="False"/>
+        <field name="perm_unlink" eval="False"/>
+    </record>
+    
+    <!-- Allow POS users to read all product pricelists -->
+    <record id="product_pricelist_pos_user_rule" model="ir.rule">
+        <field name="name">POS User: Read All Pricelists (Global)</field>
+        <field name="model_id" ref="product.model_product_pricelist"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(6, 0, [ref('point_of_sale.group_pos_user')])]"/>
+        <field name="global" eval="True"/>
+        <field name="perm_read" eval="True"/>
+        <field name="perm_write" eval="False"/>
+        <field name="perm_create" eval="False"/>
+        <field name="perm_unlink" eval="False"/>
+    </record>
+    
+    <!-- Allow POS users to read all UoM -->
+    <record id="uom_uom_pos_user_rule" model="ir.rule">
+        <field name="name">POS User: Read All UoM (Global)</field>
+        <field name="model_id" ref="uom.model_uom_uom"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(6, 0, [ref('point_of_sale.group_pos_user')])]"/>
+        <field name="global" eval="True"/>
         <field name="perm_read" eval="True"/>
         <field name="perm_write" eval="False"/>
         <field name="perm_create" eval="False"/>
