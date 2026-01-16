@@ -42,13 +42,35 @@ export class PosPerfumeOrderLineController extends ListController {
             return;
         }
         
-        // Focus the input/select in the cell WITHOUT opening dropdown
-        const input = cell.querySelector('input:not([type="checkbox"]), textarea, .o_field_integer input, .o_field_float input, .o_field_monetary input');
+        // Try to find any input in the cell (including readonly fields)
+        let input = cell.querySelector('input:not([type="checkbox"]):not([type="radio"])');
+        
+        // Check for monetary/float/integer widgets
+        if (!input) {
+            input = cell.querySelector('.o_field_monetary input, .o_field_float input, .o_field_integer input, .o_field_percentage input');
+        }
+        
+        // Check for many2one
+        if (!input) {
+            input = cell.querySelector('.o_field_many2one input');
+        }
+        
+        // Check for textarea
+        if (!input) {
+            input = cell.querySelector('textarea');
+        }
+        
         if (input) {
             input.focus();
-            if (input.type === 'text' || input.type === 'number') {
+            if ((input.type === 'text' || input.type === 'number') && !input.readOnly) {
                 input.select();
             }
+        } else {
+            // For readonly cells without input, make cell focusable
+            if (cell.tabIndex === -1) {
+                cell.tabIndex = 0;
+            }
+            cell.focus();
         }
     }
     
@@ -101,7 +123,8 @@ export class PosPerfumeOrderLineController extends ListController {
             return super.onKeydown(ev);
         }
         
-        const cells = Array.from(row.querySelectorAll('.o_data_cell:not(.o_list_record_remove)'));
+        // Get ALL cells including readonly ones
+        const cells = Array.from(row.querySelectorAll('.o_data_cell:not(.o_list_record_remove):not(.o_list_button)'));
         const currentIndex = cells.indexOf(currentCell);
         
         // Check if a dropdown is currently open
@@ -112,7 +135,7 @@ export class PosPerfumeOrderLineController extends ListController {
             return; // Let Odoo handle dropdown navigation
         }
         
-        // Arrow key navigation - Move between cells WITHOUT opening dropdowns
+        // Arrow key navigation - Move between ALL cells (including readonly)
         if (ev.key === 'ArrowRight') {
             ev.preventDefault();
             ev.stopPropagation();
@@ -141,7 +164,7 @@ export class PosPerfumeOrderLineController extends ListController {
             
             const prevRow = row.previousElementSibling;
             if (prevRow && prevRow.classList.contains('o_data_row')) {
-                const prevCells = Array.from(prevRow.querySelectorAll('.o_data_cell:not(.o_list_record_remove)'));
+                const prevCells = Array.from(prevRow.querySelectorAll('.o_data_cell:not(.o_list_record_remove):not(.o_list_button)'));
                 const targetCell = prevCells[currentIndex];
                 if (targetCell) {
                     this._focusCell(targetCell);
@@ -156,7 +179,7 @@ export class PosPerfumeOrderLineController extends ListController {
             
             const nextRow = row.nextElementSibling;
             if (nextRow && nextRow.classList.contains('o_data_row')) {
-                const nextCells = Array.from(nextRow.querySelectorAll('.o_data_cell:not(.o_list_record_remove)'));
+                const nextCells = Array.from(nextRow.querySelectorAll('.o_data_cell:not(.o_list_record_remove):not(.o_list_button)'));
                 const targetCell = nextCells[currentIndex];
                 if (targetCell) {
                     this._focusCell(targetCell);
@@ -208,7 +231,7 @@ export class PosPerfumeOrderLineController extends ListController {
             ev.preventDefault();
             const nextRow = row.nextElementSibling;
             if (nextRow && nextRow.classList.contains('o_data_row')) {
-                const nextCells = Array.from(nextRow.querySelectorAll('.o_data_cell:not(.o_list_record_remove)'));
+                const nextCells = Array.from(nextRow.querySelectorAll('.o_data_cell:not(.o_list_record_remove):not(.o_list_button)'));
                 const targetCell = nextCells[currentIndex];
                 if (targetCell) {
                     this._focusCell(targetCell);
@@ -217,7 +240,7 @@ export class PosPerfumeOrderLineController extends ListController {
             return;
         }
         
-        // Tab key - Move to next cell
+        // Tab key - Move to next cell (including readonly)
         if (ev.key === 'Tab' && !ev.shiftKey) {
             ev.preventDefault();
             
@@ -228,7 +251,7 @@ export class PosPerfumeOrderLineController extends ListController {
                 // Move to first cell of next row
                 const nextRow = row.nextElementSibling;
                 if (nextRow && nextRow.classList.contains('o_data_row')) {
-                    const nextCells = Array.from(nextRow.querySelectorAll('.o_data_cell:not(.o_list_record_remove)'));
+                    const nextCells = Array.from(nextRow.querySelectorAll('.o_data_cell:not(.o_list_record_remove):not(.o_list_button)'));
                     if (nextCells[0]) {
                         this._focusCell(nextCells[0]);
                     }
@@ -237,7 +260,7 @@ export class PosPerfumeOrderLineController extends ListController {
             return;
         }
         
-        // Shift+Tab - Move to previous cell
+        // Shift+Tab - Move to previous cell (including readonly)
         if (ev.key === 'Tab' && ev.shiftKey) {
             ev.preventDefault();
             
@@ -248,7 +271,7 @@ export class PosPerfumeOrderLineController extends ListController {
                 // Move to last cell of previous row
                 const prevRow = row.previousElementSibling;
                 if (prevRow && prevRow.classList.contains('o_data_row')) {
-                    const prevCells = Array.from(prevRow.querySelectorAll('.o_data_cell:not(.o_list_record_remove)'));
+                    const prevCells = Array.from(prevRow.querySelectorAll('.o_data_cell:not(.o_list_record_remove):not(.o_list_button)'));
                     if (prevCells.length > 0) {
                         this._focusCell(prevCells[prevCells.length - 1]);
                     }
@@ -264,12 +287,40 @@ export class PosPerfumeOrderLineController extends ListController {
      * Helper: Focus a cell's input
      */
     _focusCell(cell) {
-        const input = cell.querySelector('input:not([type="checkbox"]), textarea, .o_field_integer input, .o_field_float input, .o_field_monetary input');
-        if (input) {
-            input.focus();
-            if (input.type === 'text' || input.type === 'number') {
-                input.select();
+        // Try to find ANY input, including readonly cells and monetary/float widgets
+        let input = cell.querySelector('input:not([type="checkbox"]):not([type="radio"])');
+        
+        // If no direct input, check for monetary/float/integer field inputs
+        if (!input) {
+            input = cell.querySelector('.o_field_monetary input, .o_field_float input, .o_field_integer input');
+        }
+        
+        // If still no input, check for many2one
+        if (!input) {
+            input = cell.querySelector('.o_field_many2one input');
+        }
+        
+        // If still no input, try textarea
+        if (!input) {
+            input = cell.querySelector('textarea');
+        }
+        
+        // If still no input (readonly cell), try to make the cell focusable
+        if (!input) {
+            // For readonly cells, we can at least focus the cell itself
+            if (cell.tabIndex === -1) {
+                cell.tabIndex = 0;
             }
+            cell.focus();
+            return;
+        }
+        
+        // Focus the input
+        input.focus();
+        
+        // Select text if it's a text/number input
+        if ((input.type === 'text' || input.type === 'number') && !input.readOnly) {
+            input.select();
         }
     }
 }
