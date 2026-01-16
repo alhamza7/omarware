@@ -3,20 +3,33 @@
 import { registry } from "@web/core/registry";
 import { ListController } from "@web/views/list/list_controller";
 import { listView } from "@web/views/list/list_view";
+import { onMounted } from "@odoo/owl";
 
 export class PosPerfumeOrderLineController extends ListController {
     setup() {
         super.setup();
         
-        // Enable mouse click on all cells
-        this.cellClickHandler = this._onCellClick.bind(this);
-        
-        // Enable mouse click on dropdown items
-        this.dropdownItemClickHandler = this._onDropdownItemClick.bind(this);
+        onMounted(() => {
+            this._setupEventListeners();
+        });
     }
     
     /**
-     * Handle cell click - make table cells clickable like Excel
+     * Setup event listeners for mouse clicks
+     */
+    _setupEventListeners() {
+        const tbody = this.root.el?.querySelector('.o_list_table tbody');
+        if (!tbody) return;
+        
+        // Cell click handler - enable mouse click on cells
+        tbody.addEventListener('click', this._onCellClick.bind(this));
+        
+        // Dropdown item click handler - enable mouse selection from dropdowns
+        tbody.addEventListener('click', this._onDropdownItemClick.bind(this), true);
+    }
+    
+    /**
+     * Handle cell click - Focus input without opening dropdown
      */
     _onCellClick(ev) {
         const cell = ev.target.closest('.o_data_cell');
@@ -24,61 +37,58 @@ export class PosPerfumeOrderLineController extends ListController {
             return;
         }
         
-        // Get the field name from the cell
-        const fieldName = cell.getAttribute('name');
-        if (!fieldName) {
+        // Don't trigger if clicking on a dropdown item
+        if (ev.target.closest('.dropdown-item, .o-autocomplete--dropdown-item')) {
             return;
         }
         
-        // Focus the input/select in the cell
-        const input = cell.querySelector('input, select, textarea');
+        // Focus the input/select in the cell WITHOUT opening dropdown
+        const input = cell.querySelector('input:not([type="checkbox"]), textarea, .o_field_integer input, .o_field_float input, .o_field_monetary input');
         if (input) {
             input.focus();
-            
-            // For select fields, open dropdown automatically
-            if (input.tagName === 'SELECT') {
-                input.click();
-            }
-            
-            // For many2one fields, trigger autocomplete
-            if (cell.querySelector('.o_field_many2one input')) {
-                const many2oneInput = cell.querySelector('.o_field_many2one input');
-                many2oneInput.focus();
-                // Trigger dropdown by simulating click
-                const dropdown = cell.querySelector('.o_field_many2one .dropdown-toggle');
-                if (dropdown) {
-                    dropdown.click();
-                }
+            if (input.type === 'text' || input.type === 'number') {
+                input.select();
             }
         }
     }
     
     /**
-     * Handle dropdown item click - ensure selection works
+     * Handle dropdown item click - Ensure mouse selection works
      */
     _onDropdownItemClick(ev) {
-        const dropdownItem = ev.target.closest('.dropdown-item, .o-autocomplete--dropdown-item');
+        const dropdownItem = ev.target.closest('.dropdown-item, .o-autocomplete--dropdown-item, .ui-menu-item');
         if (!dropdownItem) {
             return;
         }
         
-        // Let the click propagate normally to select the item
-        // This ensures Odoo's default behavior works
-        
-        // After selection, focus back on the cell for keyboard navigation
+        // Let the click propagate to select the item
+        // After selection, move focus for continued keyboard navigation
         setTimeout(() => {
-            const cell = ev.target.closest('.o_data_cell');
-            if (cell) {
-                const input = cell.querySelector('input, select, textarea');
-                if (input) {
-                    input.focus();
+            const activeCell = document.activeElement?.closest('.o_data_cell');
+            if (activeCell) {
+                const row = activeCell.closest('.o_data_row');
+                if (row) {
+                    const cells = Array.from(row.querySelectorAll('.o_data_cell:not(.o_list_record_remove)'));
+                    const currentIndex = cells.indexOf(activeCell);
+                    
+                    // Move to next cell or next row
+                    if (currentIndex < cells.length - 1) {
+                        const nextCell = cells[currentIndex + 1];
+                        const nextInput = nextCell.querySelector('input, textarea');
+                        if (nextInput) {
+                            nextInput.focus();
+                            if (nextInput.type === 'text' || nextInput.type === 'number') {
+                                nextInput.select();
+                            }
+                        }
+                    }
                 }
             }
-        }, 100);
+        }, 150);
     }
     
     /**
-     * Enhanced keyboard navigation
+     * Enhanced keyboard navigation - Complete rewrite
      */
     onKeydown(ev) {
         const currentCell = ev.target.closest('.o_data_cell');
@@ -91,134 +101,176 @@ export class PosPerfumeOrderLineController extends ListController {
             return super.onKeydown(ev);
         }
         
-        // Arrow key navigation - NO auto-dropdown
-        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(ev.key)) {
+        const cells = Array.from(row.querySelectorAll('.o_data_cell:not(.o_list_record_remove)'));
+        const currentIndex = cells.indexOf(currentCell);
+        
+        // Check if a dropdown is currently open
+        const isDropdownOpen = currentCell.querySelector('.dropdown-menu.show, .o-autocomplete--dropdown-menu.show, .ui-autocomplete.ui-menu[style*="display: block"]');
+        
+        // Arrow Up/Down inside open dropdown - Let dropdown handle it
+        if (isDropdownOpen && (ev.key === 'ArrowUp' || ev.key === 'ArrowDown')) {
+            return; // Let Odoo handle dropdown navigation
+        }
+        
+        // Arrow key navigation - Move between cells WITHOUT opening dropdowns
+        if (ev.key === 'ArrowRight') {
             ev.preventDefault();
+            ev.stopPropagation();
             
-            const cells = Array.from(row.querySelectorAll('.o_data_cell:not(.o_list_record_remove)'));
-            const currentIndex = cells.indexOf(currentCell);
-            
-            let targetCell = null;
-            
-            if (ev.key === 'ArrowRight' && currentIndex < cells.length - 1) {
-                targetCell = cells[currentIndex + 1];
-            } else if (ev.key === 'ArrowLeft' && currentIndex > 0) {
-                targetCell = cells[currentIndex - 1];
-            } else if (ev.key === 'ArrowUp') {
-                const prevRow = row.previousElementSibling;
-                if (prevRow && prevRow.classList.contains('o_data_row')) {
-                    const prevCells = Array.from(prevRow.querySelectorAll('.o_data_cell'));
-                    targetCell = prevCells[currentIndex];
-                }
-            } else if (ev.key === 'ArrowDown') {
-                const nextRow = row.nextElementSibling;
-                if (nextRow && nextRow.classList.contains('o_data_row')) {
-                    const nextCells = Array.from(nextRow.querySelectorAll('.o_data_cell'));
-                    targetCell = nextCells[currentIndex];
-                }
+            if (currentIndex < cells.length - 1) {
+                const targetCell = cells[currentIndex + 1];
+                this._focusCell(targetCell);
             }
-            
-            if (targetCell) {
-                // Just focus the input - NO auto-dropdown
-                const input = targetCell.querySelector('input, select, textarea');
-                if (input) {
-                    input.focus();
-                    // Select text in input for easy editing
-                    if (input.tagName === 'INPUT' && input.type === 'text') {
-                        input.select();
-                    }
-                }
-            }
-            
             return;
         }
         
-        // Arrow Up/Down in dropdown - navigate items
-        if ((ev.key === 'ArrowUp' || ev.key === 'ArrowDown') && 
-            (currentCell.querySelector('.dropdown-menu.show') || 
-             currentCell.querySelector('.o-autocomplete--dropdown-menu.show'))) {
-            // Let the dropdown handle navigation
-            return super.onKeydown(ev);
+        if (ev.key === 'ArrowLeft') {
+            ev.preventDefault();
+            ev.stopPropagation();
+            
+            if (currentIndex > 0) {
+                const targetCell = cells[currentIndex - 1];
+                this._focusCell(targetCell);
+            }
+            return;
+        }
+        
+        if (ev.key === 'ArrowUp') {
+            ev.preventDefault();
+            ev.stopPropagation();
+            
+            const prevRow = row.previousElementSibling;
+            if (prevRow && prevRow.classList.contains('o_data_row')) {
+                const prevCells = Array.from(prevRow.querySelectorAll('.o_data_cell:not(.o_list_record_remove)'));
+                const targetCell = prevCells[currentIndex];
+                if (targetCell) {
+                    this._focusCell(targetCell);
+                }
+            }
+            return;
+        }
+        
+        if (ev.key === 'ArrowDown') {
+            ev.preventDefault();
+            ev.stopPropagation();
+            
+            const nextRow = row.nextElementSibling;
+            if (nextRow && nextRow.classList.contains('o_data_row')) {
+                const nextCells = Array.from(nextRow.querySelectorAll('.o_data_cell:not(.o_list_record_remove)'));
+                const targetCell = nextCells[currentIndex];
+                if (targetCell) {
+                    this._focusCell(targetCell);
+                }
+            }
+            return;
         }
         
         // Enter key - Open dropdown OR select item OR move to next row
         if (ev.key === 'Enter') {
-            const input = currentCell.querySelector('input, select, textarea');
-            
-            // Check if this is a many2one or selection field
+            const input = currentCell.querySelector('input, textarea');
             const isMany2one = currentCell.querySelector('.o_field_many2one');
             const isSelection = input && input.tagName === 'SELECT';
             
             if (isMany2one) {
-                // Check if dropdown is already open
-                const dropdownMenu = currentCell.querySelector('.o_input_dropdown .dropdown-menu, .o-autocomplete--dropdown-menu');
-                const isDropdownOpen = dropdownMenu && dropdownMenu.classList.contains('show');
-                
                 if (isDropdownOpen) {
-                    // Dropdown is open - select the highlighted item
-                    const highlightedItem = dropdownMenu.querySelector('.dropdown-item.active, .dropdown-item:focus, .o-autocomplete--dropdown-item.ui-menu-item-wrapper.ui-state-active');
-                    if (highlightedItem) {
-                        ev.preventDefault();
-                        highlightedItem.click();
-                        return;
-                    }
+                    // Dropdown is open - let Enter select the highlighted item
+                    return; // Let Odoo handle selection
                 } else {
                     // Dropdown is closed - open it
                     ev.preventDefault();
-                    const dropdown = currentCell.querySelector('.o_input_dropdown, .dropdown-toggle');
-                    if (dropdown) {
-                        dropdown.click();
+                    ev.stopPropagation();
+                    
+                    const many2oneInput = currentCell.querySelector('.o_field_many2one input');
+                    if (many2oneInput) {
+                        many2oneInput.focus();
+                        // Trigger dropdown
+                        const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true });
+                        many2oneInput.dispatchEvent(clickEvent);
                     }
                     return;
                 }
             } else if (isSelection) {
-                // For select fields
+                // For select fields - open/close
                 const isOpen = input.size > 1;
                 
                 if (isOpen) {
-                    // Select is open - accept selection and move on
                     input.size = 1;
-                    // Move to next row
-                    ev.preventDefault();
                 } else {
-                    // Select is closed - open it
                     ev.preventDefault();
                     input.click();
                     input.size = Math.min(input.options.length, 10);
-                    
-                    // Close on blur
-                    input.addEventListener('blur', () => {
-                        input.size = 1;
-                    }, { once: true });
-                    
+                    input.addEventListener('blur', () => { input.size = 1; }, { once: true });
                     return;
                 }
             }
             
             // For other fields OR after selection, move to next row (same column)
-            const cells = Array.from(row.querySelectorAll('.o_data_cell:not(.o_list_record_remove)'));
-            const currentIndex = cells.indexOf(currentCell);
-            
+            ev.preventDefault();
             const nextRow = row.nextElementSibling;
             if (nextRow && nextRow.classList.contains('o_data_row')) {
-                const nextCells = Array.from(nextRow.querySelectorAll('.o_data_cell'));
+                const nextCells = Array.from(nextRow.querySelectorAll('.o_data_cell:not(.o_list_record_remove)'));
                 const targetCell = nextCells[currentIndex];
-                
                 if (targetCell) {
-                    const nextInput = targetCell.querySelector('input, select, textarea');
-                    if (nextInput) {
-                        nextInput.focus();
-                        if (nextInput.tagName === 'INPUT' && nextInput.type === 'text') {
-                            nextInput.select();
-                        }
+                    this._focusCell(targetCell);
+                }
+            }
+            return;
+        }
+        
+        // Tab key - Move to next cell
+        if (ev.key === 'Tab' && !ev.shiftKey) {
+            ev.preventDefault();
+            
+            if (currentIndex < cells.length - 1) {
+                const targetCell = cells[currentIndex + 1];
+                this._focusCell(targetCell);
+            } else {
+                // Move to first cell of next row
+                const nextRow = row.nextElementSibling;
+                if (nextRow && nextRow.classList.contains('o_data_row')) {
+                    const nextCells = Array.from(nextRow.querySelectorAll('.o_data_cell:not(.o_list_record_remove)'));
+                    if (nextCells[0]) {
+                        this._focusCell(nextCells[0]);
                     }
                 }
             }
+            return;
+        }
+        
+        // Shift+Tab - Move to previous cell
+        if (ev.key === 'Tab' && ev.shiftKey) {
+            ev.preventDefault();
             
+            if (currentIndex > 0) {
+                const targetCell = cells[currentIndex - 1];
+                this._focusCell(targetCell);
+            } else {
+                // Move to last cell of previous row
+                const prevRow = row.previousElementSibling;
+                if (prevRow && prevRow.classList.contains('o_data_row')) {
+                    const prevCells = Array.from(prevRow.querySelectorAll('.o_data_cell:not(.o_list_record_remove)'));
+                    if (prevCells.length > 0) {
+                        this._focusCell(prevCells[prevCells.length - 1]);
+                    }
+                }
+            }
             return;
         }
         
         return super.onKeydown(ev);
+    }
+    
+    /**
+     * Helper: Focus a cell's input
+     */
+    _focusCell(cell) {
+        const input = cell.querySelector('input:not([type="checkbox"]), textarea, .o_field_integer input, .o_field_float input, .o_field_monetary input');
+        if (input) {
+            input.focus();
+            if (input.type === 'text' || input.type === 'number') {
+                input.select();
+            }
+        }
     }
 }
 

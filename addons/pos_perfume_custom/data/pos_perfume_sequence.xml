@@ -1,18 +1,15 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0"?>
 <odoo>
     <data noupdate="1">
         <!-- Sequence for POS Perfume Orders -->
-        <record id="sequence_pos_perfume_order" model="ir.sequence">
-            <field name="name">POS Perfume Order</field>
+        <record id="seq_pos_perfume_order" model="ir.sequence">
+            <field name="name">POS Perfume Order Sequence</field>
             <field name="code">pos.perfume.order</field>
-            <field name="prefix">POS/%(range_y)s/</field>
+            <field name="prefix">S</field>
             <field name="padding">5</field>
             <field name="number_increment">1</field>
-            <field name="company_id" eval="False"/>
+            <field name="number_next">1</field>
+            <field name="implementation">standard</field>
         </record>
     </data>
 </odoo>
-
-
-
-

@@ -301,8 +301,14 @@ class PosPerfumeOrder(models.Model):
         pass
     
     @api.model_create_multi
+    @api.model_create_multi
     def create(self, vals_list):
         """Generate sequence number for new orders"""
+        for vals in vals_list:
+            if vals.get('name', 'New') == 'New':
+                # Generate sequence number like S00001, S00002, etc.
+                vals['name'] = self.env['ir.sequence'].next_by_code('pos.perfume.order') or 'New'
+        
         orders = super().create(vals_list)
         
         # Create sale.order for draft orders to send to SAP
