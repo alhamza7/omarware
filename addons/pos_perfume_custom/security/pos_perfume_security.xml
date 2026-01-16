@@ -75,6 +75,54 @@
         <field name="perm_create" eval="False"/>
         <field name="perm_unlink" eval="False"/>
     </record>
+    
+    <!-- Allow POS users to read all SAP product extended info -->
+    <record id="sap_product_extended_pos_user_rule" model="ir.rule">
+        <field name="name">POS User: Read All SAP Product Extended</field>
+        <field name="model_id" ref="sap_integration.model_sap_product_extended"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('point_of_sale.group_pos_user'))]"/>
+        <field name="perm_read" eval="True"/>
+        <field name="perm_write" eval="False"/>
+        <field name="perm_create" eval="False"/>
+        <field name="perm_unlink" eval="False"/>
+    </record>
+    
+    <!-- Allow POS users to read all SAP warehouse info -->
+    <record id="sap_product_warehouse_info_pos_user_rule" model="ir.rule">
+        <field name="name">POS User: Read All SAP Warehouse Info</field>
+        <field name="model_id" ref="sap_integration.model_sap_product_warehouse_info"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('point_of_sale.group_pos_user'))]"/>
+        <field name="perm_read" eval="True"/>
+        <field name="perm_write" eval="False"/>
+        <field name="perm_create" eval="False"/>
+        <field name="perm_unlink" eval="False"/>
+    </record>
+    
+    <!-- Allow POS users to read all SAP pricelist sync -->
+    <record id="sap_product_pricelist_sync_pos_user_rule" model="ir.rule">
+        <field name="name">POS User: Read All SAP Pricelist Sync</field>
+        <field name="model_id" ref="sap_integration.model_sap_product_pricelist_sync"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('point_of_sale.group_pos_user'))]"/>
+        <field name="perm_read" eval="True"/>
+        <field name="perm_write" eval="False"/>
+        <field name="perm_create" eval="False"/>
+        <field name="perm_unlink" eval="False"/>
+    </record>
+    
+    <!-- Allow POS users to read all product packaging -->
+    <record id="product_packaging_pos_user_rule" model="ir.rule">
+        <field name="name">POS User: Read All Product Packaging</field>
+        <field name="model_id" ref="product.model_product_packaging"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('point_of_sale.group_pos_user'))]"/>
+        <field name="perm_read" eval="True"/>
+        <field name="perm_write" eval="False"/>
+        <field name="perm_create" eval="False"/>
+        <field name="perm_unlink" eval="False"/>
+    </record>
 
 </odoo>
 
