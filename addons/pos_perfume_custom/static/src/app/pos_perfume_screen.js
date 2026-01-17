@@ -80,7 +80,7 @@ export class PosPerfumeScreen extends Component {
             csLocFilterActive: false,  // true to show CS/LOC products, false to hide them
             
             // UI state
-            exchangeRate: 1300,
+            exchangeRate: 1470,  // Default, will be loaded from settings on mount
             
             // Navigation state for keyboard controls
             focusedCell: {
@@ -133,6 +133,20 @@ export class PosPerfumeScreen extends Component {
             // Set user name
             if (window.odoo && window.odoo.session_info) {
                 this.state.userName = window.odoo.session_info.name || window.odoo.session_info.username || 'Cashier';
+            }
+            
+            // Load exchange rate from settings
+            try {
+                const exchangeRateParam = await this.orm.call(
+                    'ir.config_parameter',
+                    'get_param',
+                    ['pos_perfume.default_exchange_rate_usd_iqd', '1470.0']
+                );
+                this.state.exchangeRate = parseFloat(exchangeRateParam) || 1470.0;
+                console.log(`[POS Perfume] Loaded exchange rate: ${this.state.exchangeRate}`);
+            } catch (error) {
+                console.warn('[POS Perfume] Failed to load exchange rate, using default 1470:', error);
+                this.state.exchangeRate = 1470.0;
             }
             
             // Update time every minute
