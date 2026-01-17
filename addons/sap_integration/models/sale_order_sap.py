@@ -27,6 +27,16 @@ class SaleOrder(models.Model):
         copy=False,
         help="تم إرسال هذا Quotation إلى SAP"
     )
+    sap_error_message = fields.Text(
+        string='SAP Error Message',
+        copy=False,
+        help="آخر رسالة خطأ من SAP"
+    )
+    sap_last_sync_date = fields.Datetime(
+        string='Last SAP Sync',
+        copy=False,
+        help="آخر محاولة مزامنة مع SAP"
+    )
     
     # Invoice Type (SAP User-Defined Field) - قيم ثابتة
     invoice_type = fields.Selection(
@@ -87,6 +97,9 @@ class SaleOrder(models.Model):
             if not order.partner_id or not order.partner_id.ref or not order.order_line:
                 continue
             
+            # Log للتشخيص
+            _logger.info(f"🔍 [DIAGNOSIS] Order {order.name}: current_state={order.state}, vals={vals}, old_state={old_states.get(order.id)}, sap_doc_entry={order.sap_doc_entry}")
+            
             # التحقق إذا تم تغيير الحالة من draft إلى sale (تأكيد الطلب)
             state_changed_to_sale = (
                 'state' in vals and 
@@ -96,14 +109,21 @@ class SaleOrder(models.Model):
                 order.sap_doc_entry > 0
             )
             
+            _logger.info(f"🔍 [DIAGNOSIS] state_changed_to_sale={state_changed_to_sale} ('state' in vals={('state' in vals)}, vals.get('state')={vals.get('state')}, old={old_states.get(order.id)}, doc_entry={order.sap_doc_entry})")
+            
             if state_changed_to_sale:
                 # تحويل Quotation إلى Sales Order في SAP
-                _logger.info(f"State changed from draft to sale for {order.name}, converting quotation to sales order in SAP (DocEntry: {order.sap_doc_entry})")
+                _logger.info(f"🔄 State changed from draft to sale for {order.name}, converting quotation to sales order in SAP (DocEntry: {order.sap_doc_entry})")
                 try:
                     backend = self.env['sap.backend'].search([('active', '=', True)], limit=1)
                     if backend:
+                        _logger.info(f"✓ Found active backend: {backend.name}")
                         connection = backend.get_connection()
+                        _logger.info(f"✓ Got connection, calling convert_quotation_to_order({order.sap_doc_entry})")
+                        
                         sap_order = connection.convert_quotation_to_order(order.sap_doc_entry)
+                        
+                        _logger.info(f"🔍 convert_quotation_to_order returned: {sap_order}")
                         
                         if sap_order:
                             # تحديث رقم Document من SAP Sales Order
@@ -115,14 +135,41 @@ class SaleOrder(models.Model):
                             
                             if update_vals:
                                 # استخدام sudo().write لتجنب إعادة استدعاء write
+                                _logger.info(f"✓ Updating order with new SAP data: {update_vals}")
+                                update_vals['sap_synced'] = True
+                                update_vals['sap_error_message'] = False
+                                update_vals['sap_last_sync_date'] = fields.Datetime.now()
                                 order.sudo().write(update_vals)
                                 _logger.info(f"✅ Successfully converted quotation {order.name} to sales order in SAP. New DocNum: {update_vals.get('sap_doc_num')}, DocEntry: {update_vals.get('sap_doc_entry')}")
+                            else:
+                                _logger.warning(f"⚠️ sap_order returned but no DocNum/DocEntry found: {sap_order}")
+                                order.sudo().write({
+                                    'sap_synced': False,
+                                    'sap_error_message': 'التحويل نجح لكن SAP لم يرجع DocNum/DocEntry',
+                                    'sap_last_sync_date': fields.Datetime.now()
+                                })
                         else:
-                            _logger.warning(f"Failed to convert quotation {order.name} to sales order in SAP")
+                            error_msg = f"❌ convert_quotation_to_order returned None/False for {order.name} (DocEntry: {order.sap_doc_entry})"
+                            _logger.error(error_msg)
+                            order.sudo().write({
+                                'sap_synced': False,
+                                'sap_error_message': 'فشل تحويل Quotation إلى Sales Order في SAP',
+                                'sap_last_sync_date': fields.Datetime.now()
+                            })
                     else:
-                        _logger.warning(f"No active SAP backend found to convert quotation {order.name}")
+                        _logger.error(f"❌ No active SAP backend found to convert quotation {order.name}")
+                        order.sudo().write({
+                            'sap_synced': False,
+                            'sap_error_message': 'لا يوجد SAP backend نشط',
+                            'sap_last_sync_date': fields.Datetime.now()
+                        })
                 except Exception as e:
-                    _logger.error(f"Error converting quotation {order.name} to sales order in SAP: {str(e)}", exc_info=True)
+                    _logger.error(f"❌ Exception converting quotation {order.name} to sales order in SAP: {str(e)}", exc_info=True)
+                    order.sudo().write({
+                        'sap_synced': False,
+                        'sap_error_message': f'خطأ في التحويل: {str(e)}',
+                        'sap_last_sync_date': fields.Datetime.now()
+                    })
                 
                 # بعد التحويل، لا نحتاج لتحديث إضافي
                 continue
@@ -196,7 +243,11 @@ class SaleOrder(models.Model):
                 if not backend:
                     error_msg = f"❌ No active SAP backend found for quotation {quotation.name}"
                     _logger.error(error_msg)
-                    quotation.sudo().write({'sap_synced': False})
+                    quotation.sudo().write({
+                        'sap_synced': False,
+                        'sap_error_message': 'لا يوجد SAP backend نشط',
+                        'sap_last_sync_date': fields.Datetime.now()
+                    })
                     return
                 
                 _logger.info(f"Found active SAP backend: {backend.name} (id={backend.id})")
@@ -205,7 +256,11 @@ class SaleOrder(models.Model):
                 if not quotation.partner_id or not quotation.partner_id.ref:
                     error_msg = f"❌ Quotation {quotation.name} has no partner with CardCode (ref). Partner: {quotation.partner_id.name if quotation.partner_id else 'None'}"
                     _logger.error(error_msg)
-                    quotation.sudo().write({'sap_synced': False})
+                    quotation.sudo().write({
+                        'sap_synced': False,
+                        'sap_error_message': f'العميل ({quotation.partner_id.name if quotation.partner_id else "غير موجود"}) ليس لديه CardCode في SAP',
+                        'sap_last_sync_date': fields.Datetime.now()
+                    })
                     return
                 
                 _logger.info(f"Partner found: {quotation.partner_id.name}, CardCode={quotation.partner_id.ref}")
@@ -214,7 +269,11 @@ class SaleOrder(models.Model):
                 if not quotation.order_line:
                     error_msg = f"❌ Quotation {quotation.name} has no order lines"
                     _logger.error(error_msg)
-                    quotation.sudo().write({'sap_synced': False})
+                    quotation.sudo().write({
+                        'sap_synced': False,
+                        'sap_error_message': 'الفاتورة لا تحتوي على منتجات',
+                        'sap_last_sync_date': fields.Datetime.now()
+                    })
                     return
                 
                 _logger.info(f"Order lines found: {len(quotation.order_line)} line(s)")
@@ -249,11 +308,20 @@ class SaleOrder(models.Model):
                             if response.status_code in [200, 204]:
                                 result = response.json() if response.content else {}
                                 _logger.info(f"Successfully updated sale order {quotation.name} in SAP")
+                                quotation.sudo().write({
+                                    'sap_synced': True,
+                                    'sap_error_message': False,
+                                    'sap_last_sync_date': fields.Datetime.now()
+                                })
                             else:
                                 error_msg = f"❌ Could not update sale order {quotation.name} in SAP: {response.status_code} - {response.text}"
                                 _logger.error(error_msg)
                                 result = None
-                                quotation.sudo().write({'sap_synced': False})
+                                quotation.sudo().write({
+                                    'sap_synced': False,
+                                    'sap_error_message': f"خطأ {response.status_code}: {response.text}",
+                                    'sap_last_sync_date': fields.Datetime.now()
+                                })
                         except Exception as e:
                             error_msg = f"❌ Error updating sale order {quotation.name} in SAP: {e}"
                             _logger.error(error_msg, exc_info=True)

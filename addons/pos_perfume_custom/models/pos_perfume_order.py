@@ -271,6 +271,33 @@ class PosPerfumeOrder(models.Model):
         tracking=True
     )
     
+    sap_synced = fields.Boolean(
+        string='Synced to SAP',
+        readonly=True,
+        copy=False,
+        help='تم المزامنة مع SAP بنجاح',
+        related='sale_order_id.sap_synced',
+        store=False
+    )
+    
+    sap_error_message = fields.Text(
+        string='SAP Error Message',
+        readonly=True,
+        copy=False,
+        help='آخر رسالة خطأ من SAP',
+        related='sale_order_id.sap_error_message',
+        store=False
+    )
+    
+    sap_last_sync_date = fields.Datetime(
+        string='Last SAP Sync',
+        readonly=True,
+        copy=False,
+        help='آخر محاولة مزامنة مع SAP',
+        related='sale_order_id.sap_last_sync_date',
+        store=False
+    )
+    
     # Invoice Type (for SAP) - قيم ثابتة
     invoice_type = fields.Selection(
         string='نوع الفاتورة / Invoice Type',
