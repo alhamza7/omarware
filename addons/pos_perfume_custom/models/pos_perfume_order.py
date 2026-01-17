@@ -231,7 +231,7 @@ class PosPerfumeOrder(models.Model):
     #     help='Custom template for printing this order'
     # )
     
-    # SAP Fields (from related sale order)
+    # SAP Fields (computed from related sale order)
     sap_doc_num = fields.Char(
         string='SAP Document Number',
         related='sale_order_id.sap_doc_num',
@@ -250,19 +250,10 @@ class PosPerfumeOrder(models.Model):
         help="SAP Doc Entry from related Sale Order"
     )
     
-    sap_synced = fields.Boolean(
-        string='Synced to SAP',
-        related='sale_order_id.sap_synced',
-        readonly=True,
-        store=True,
-        copy=False,
-        help="Whether the order is synced to SAP"
-    )
-    
     # Notes
     note = fields.Text(string='Notes')
     
-    # SAP Document Number
+    # SAP Document Number (legacy field for compatibility)
     sap_doc_number = fields.Char(
         string='SAP Document Number',
         readonly=True,
@@ -271,31 +262,32 @@ class PosPerfumeOrder(models.Model):
         tracking=True
     )
     
+    # SAP Integration Fields - Computed safely from sale_order_id
     sap_synced = fields.Boolean(
         string='Synced to SAP',
+        compute='_compute_sap_fields',
         readonly=True,
         copy=False,
-        help='تم المزامنة مع SAP بنجاح',
-        related='sale_order_id.sap_synced',
-        store=False
+        store=False,
+        help='تم المزامنة مع SAP بنجاح'
     )
     
     sap_error_message = fields.Text(
         string='SAP Error Message',
+        compute='_compute_sap_fields',
         readonly=True,
         copy=False,
-        help='آخر رسالة خطأ من SAP',
-        related='sale_order_id.sap_error_message',
-        store=False
+        store=False,
+        help='آخر رسالة خطأ من SAP'
     )
     
     sap_last_sync_date = fields.Datetime(
         string='Last SAP Sync',
+        compute='_compute_sap_fields',
         readonly=True,
         copy=False,
-        help='آخر محاولة مزامنة مع SAP',
-        related='sale_order_id.sap_last_sync_date',
-        store=False
+        store=False,
+        help='آخر محاولة مزامنة مع SAP'
     )
     
     # Invoice Type (for SAP) - قيم ثابتة
@@ -349,6 +341,20 @@ class PosPerfumeOrder(models.Model):
         for order in self:
             order.partner_invoice_id = order.partner_id
             order.partner_shipping_id = order.partner_id
+    
+    @api.depends('sale_order_id', 'sale_order_id.sap_synced', 'sale_order_id.sap_error_message', 'sale_order_id.sap_last_sync_date')
+    def _compute_sap_fields(self):
+        """Safely compute SAP-related fields from sale_order_id"""
+        for order in self:
+            if order.sale_order_id:
+                # Try to get values safely with getattr to avoid database errors
+                order.sap_synced = getattr(order.sale_order_id, 'sap_synced', False)
+                order.sap_error_message = getattr(order.sale_order_id, 'sap_error_message', False)
+                order.sap_last_sync_date = getattr(order.sale_order_id, 'sap_last_sync_date', False)
+            else:
+                order.sap_synced = False
+                order.sap_error_message = False
+                order.sap_last_sync_date = False
     
     @api.onchange('partner_id')
     def _onchange_partner_pricelist(self):
