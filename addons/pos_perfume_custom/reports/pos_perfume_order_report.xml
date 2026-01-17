@@ -147,7 +147,7 @@
                                         الإجمالي: <t t-esc="'{:.2f}'.format(o.amount_total)"/>
                                     </div>
                                     <t t-set="default_rate" t-value="float(o.env['ir.config_parameter'].sudo().get_param('pos_perfume.default_exchange_rate_usd_iqd', '1470.0'))"/>
-                                    <t t-set="iqd_amount" t-value="o.amount_total * (o.exchange_rate or default_rate)"/>
+                                    <t t-set="iqd_amount" t-value="o.amount_total * default_rate"/>
                                     <t t-set="iqd_rounded" t-value="round(iqd_amount / 1000) * 1000"/>
                                     <div style="text-align: center; margin-top: 10px; background: #e8f5e9; padding: 8px; border-radius: 5px;">
                                         <strong style="color: #2e7d32;">المجموع بالدينار: <t t-esc="'{:,.0f}'.format(iqd_rounded)"/> د.ع</strong>

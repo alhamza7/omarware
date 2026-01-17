@@ -184,6 +184,37 @@ class PosPerfumeOrder(models.Model):
         tracking=True
     )
     
+    def action_update_exchange_rate(self):
+        """Update exchange rate to current default value from settings"""
+        default_rate = float(self.env['ir.config_parameter'].sudo().get_param(
+            'pos_perfume.default_exchange_rate_usd_iqd', '1470.0'
+        ))
+        for order in self:
+            order.exchange_rate = default_rate
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'type': 'success',
+                'message': f'تم تحديث سعر الصرف إلى {default_rate}',
+                'sticky': False,
+            }
+        }
+    
+    def action_clear_exchange_rate(self):
+        """Clear exchange rate to use default from settings"""
+        for order in self:
+            order.exchange_rate = False
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'type': 'success',
+                'message': 'تم مسح سعر الصرف - سيتم استخدام السعر الافتراضي من الإعدادات',
+                'sticky': False,
+            }
+        }
+    
     # Related Sale Order
     sale_order_id = fields.Many2one(
         'sale.order',

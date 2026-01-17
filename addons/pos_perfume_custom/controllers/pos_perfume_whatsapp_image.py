@@ -136,7 +136,7 @@ class POSPerfumeWhatsAppImage(http.Controller):
                 return {'success': False, 'error': 'ULTRAMSG not configured'}
             
             # Step 7: Prepare message
-            exchange_rate = order.exchange_rate or float(
+            exchange_rate = float(
                 request.env['ir.config_parameter'].sudo().get_param(
                     'pos_perfume.default_exchange_rate_usd_iqd', '1470.0'
                 )

@@ -322,8 +322,8 @@ class PosPerfumeController(http.Controller):
             if not config:
                 return {'success': False, 'error': 'ULTRAMSG not configured'}
             
-            # Get exchange rate
-            exchange_rate = order.exchange_rate or float(
+            # Get exchange rate from settings (always use current rate)
+            exchange_rate = float(
                 request.env['ir.config_parameter'].sudo().get_param(
                     'pos_perfume.default_exchange_rate_usd_iqd', '1470.0'
                 )
