@@ -342,15 +342,26 @@ class PosPerfumeOrder(models.Model):
             order.partner_invoice_id = order.partner_id
             order.partner_shipping_id = order.partner_id
     
-    @api.depends('sale_order_id', 'sale_order_id.sap_synced', 'sale_order_id.sap_error_message', 'sale_order_id.sap_last_sync_date')
+    @api.depends('sale_order_id')
     def _compute_sap_fields(self):
         """Safely compute SAP-related fields from sale_order_id"""
         for order in self:
             if order.sale_order_id:
-                # Try to get values safely with getattr to avoid database errors
-                order.sap_synced = getattr(order.sale_order_id, 'sap_synced', False)
-                order.sap_error_message = getattr(order.sale_order_id, 'sap_error_message', False)
-                order.sap_last_sync_date = getattr(order.sale_order_id, 'sap_last_sync_date', False)
+                # Try to get values safely, catching any database errors
+                try:
+                    order.sap_synced = order.sale_order_id.sap_synced or False
+                except Exception:
+                    order.sap_synced = False
+                
+                try:
+                    order.sap_error_message = order.sale_order_id.sap_error_message or False
+                except Exception:
+                    order.sap_error_message = False
+                
+                try:
+                    order.sap_last_sync_date = order.sale_order_id.sap_last_sync_date or False
+                except Exception:
+                    order.sap_last_sync_date = False
             else:
                 order.sap_synced = False
                 order.sap_error_message = False
