@@ -21,17 +21,20 @@ def fix_assets_error():
     # تحليل الإعدادات
     odoo.tools.config.parse_config(['--config=odoo.conf'])
     
-    # محاولة الحصول على اسم قاعدة البيانات من dbfilter
-    dbfilter = odoo.tools.config.get('dbfilter', '')
-    if dbfilter:
-        import re
-        match = re.match(r'\^?(\w+).*\$?', dbfilter)
-        if match:
-            db_name = match.group(1)
-        else:
-            db_name = odoo.tools.config.get('db_name') or 'lugal'
-    else:
-        db_name = odoo.tools.config.get('db_name') or 'lugal'
+    # محاولة الحصول على اسم قاعدة البيانات
+    # أولاً من db_name، ثم من dbfilter
+    db_name = odoo.tools.config.get('db_name', '')
+    if not db_name:
+        dbfilter = odoo.tools.config.get('dbfilter', '')
+        if dbfilter:
+            import re
+            match = re.match(r'\^?(\w+).*\$?', dbfilter)
+            if match:
+                db_name = match.group(1)
+    
+    # القيمة الافتراضية
+    if not db_name:
+        db_name = 'lugal'
     
     print(f"\n{'='*60}")
     print(f"حل مشكلة تحميل Assets - قاعدة البيانات: {db_name}")

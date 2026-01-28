@@ -8,9 +8,25 @@ echo "حل مشكلة تحميل Assets (AssetsLoadingError)"
 echo "=========================================="
 echo ""
 
-# الانتقال إلى مجلد المشروع
-cd /home/capo7amzah/Documents/NBS-PROJECT/Lugal-ai || {
+# تحديد مسار المشروع (محاولة عدة مسارات)
+PROJECT_DIR=""
+for dir in "/home/lugalai/Lugal-ai" "/home/capo7amzah/Documents/NBS-PROJECT/Lugal-ai" "$(dirname "$0")" "$PWD"; do
+    if [ -f "$dir/odoo.conf" ] || [ -f "$dir/odoo-bin" ]; then
+        PROJECT_DIR="$dir"
+        break
+    fi
+done
+
+if [ -z "$PROJECT_DIR" ]; then
     echo "❌ خطأ: لم يتم العثور على مجلد المشروع"
+    echo "   حاول البحث في:"
+    echo "   - /home/lugalai/Lugal-ai"
+    echo "   - /home/capo7amzah/Documents/NBS-PROJECT/Lugal-ai"
+    exit 1
+fi
+
+cd "$PROJECT_DIR" || {
+    echo "❌ خطأ: لم يتم الانتقال إلى مجلد المشروع"
     exit 1
 }
 
@@ -18,7 +34,11 @@ echo "✅ تم العثور على مجلد المشروع: $(pwd)"
 echo ""
 
 # قراءة اسم قاعدة البيانات من odoo.conf
-DB_NAME=$(grep "^dbfilter" odoo.conf 2>/dev/null | sed 's/.*= *\^\([^.*]*\).*/\1/' || echo "lugal")
+DB_NAME=$(grep "^db_name" odoo.conf 2>/dev/null | sed 's/.*= *\([^ ]*\).*/\1/' | head -1)
+if [ -z "$DB_NAME" ]; then
+    # محاولة قراءة من dbfilter
+    DB_NAME=$(grep "^dbfilter" odoo.conf 2>/dev/null | sed 's/.*= *\^\([^.*]*\).*/\1/' | head -1)
+fi
 if [ -z "$DB_NAME" ] || [ "$DB_NAME" = "lugal.*" ]; then
     DB_NAME="lugal"
 fi
