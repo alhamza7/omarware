@@ -83,26 +83,62 @@ def check_sale_module():
             else:
                 print("   ❌ لم يتم العثور على قوائم Sale!")
             
-            # 3. التحقق من صلاحيات المستخدم الحالي
-            print("\n3. التحقق من صلاحيات المستخدم...")
+            # 3. التحقق من القائمة الرئيسية Sales
+            print("\n3. البحث عن القائمة الرئيسية Sales...")
+            main_sale_menu = env['ir.ui.menu'].search([
+                ('name', '=', 'Sales'),
+                ('parent_id', '=', False)
+            ], limit=1)
+            
+            if not main_sale_menu:
+                print("   ⚠️  القائمة الرئيسية Sales غير موجودة")
+                print("   إنشاء القائمة الرئيسية...")
+                
+                # البحث عن action
+                sale_action = env['ir.actions.act_window'].search([
+                    ('res_model', '=', 'sale.order'),
+                    ('name', 'ilike', 'quotation')
+                ], limit=1)
+                
+                main_sale_menu = env['ir.ui.menu'].create({
+                    'name': 'Sales',
+                    'sequence': 20,
+                    'parent_id': False,
+                    'action': f'ir.actions.act_window,{sale_action.id}' if sale_action else False,
+                })
+                print(f"   ✅ تم إنشاء القائمة الرئيسية (ID: {main_sale_menu.id})")
+            else:
+                print(f"   ✅ القائمة الرئيسية موجودة (ID: {main_sale_menu.id})")
+                if not main_sale_menu.active:
+                    main_sale_menu.active = True
+                    print("   ✅ تم تفعيل القائمة")
+            
+            # 4. التحقق من صلاحيات المستخدم الحالي
+            print("\n4. التحقق من صلاحيات المستخدم...")
             admin_user = env['res.users'].browse(odoo.SUPERUSER_ID)
-            sale_groups = env['ir.model.data'].search([
-                ('module', '=', 'sale'),
-                ('model', '=', 'res.groups')
-            ])
             
             print(f"   المستخدم: {admin_user.name} (ID: {admin_user.id})")
-            print(f"   المجموعات: {len(admin_user.groups_id)}")
+            print(f"   المجموعات: {len(admin_user.group_ids)}")
             
             # إضافة المستخدم لمجموعات Sale إذا لزم الأمر
             sale_manager_group = env.ref('sales_team.group_sale_manager', raise_if_not_found=False)
-            if sale_manager_group and sale_manager_group not in admin_user.groups_id:
-                print("   إضافة صلاحيات Sale Manager...")
-                admin_user.write({'groups_id': [(4, sale_manager_group.id)]})
-                print("   ✅ تم إضافة صلاحيات Sale Manager")
+            if sale_manager_group:
+                if sale_manager_group not in admin_user.group_ids:
+                    print("   إضافة صلاحيات Sale Manager...")
+                    admin_user.write({'group_ids': [(4, sale_manager_group.id)]})
+                    print("   ✅ تم إضافة صلاحيات Sale Manager")
+                else:
+                    print("   ✅ المستخدم لديه صلاحيات Sale Manager")
             
-            # 4. مسح الكاش
-            print("\n4. مسح الكاش...")
+            # إضافة صلاحيات Sale User أيضاً
+            sale_user_group = env.ref('sales_team.group_sale_salesman', raise_if_not_found=False)
+            if sale_user_group and sale_user_group not in admin_user.group_ids:
+                print("   إضافة صلاحيات Sale User...")
+                admin_user.write({'group_ids': [(4, sale_user_group.id)]})
+                print("   ✅ تم إضافة صلاحيات Sale User")
+            
+            # 5. مسح الكاش
+            print("\n5. مسح الكاش...")
             env['ir.ui.menu'].invalidate_model()
             env['ir.ui.view'].invalidate_model()
             registry.clear_cache()
