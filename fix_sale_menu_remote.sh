@@ -61,8 +61,13 @@ echo "5. إصلاح القوائم الفرعية في Sales..."
 venv/bin/python fix_sale_submenus.py
 echo ""
 
-# 6. إعادة تشغيل Odoo
-echo "6. إعادة تشغيل Odoo..."
+# 6. تفعيل جميع القوائم وجميع التصنيفات
+echo "6. تفعيل جميع قوائم Sale وجميع التصنيفات..."
+venv/bin/python activate_all_sale_menus.py
+echo ""
+
+# 7. إعادة تشغيل Odoo
+echo "7. إعادة تشغيل Odoo..."
 nohup venv/bin/python odoo-bin -c odoo.conf -d "$DB_NAME" --http-port=8069 > odoo.log 2>&1 &
 sleep 5
 
