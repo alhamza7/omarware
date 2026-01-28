@@ -21,6 +21,12 @@ def fix_chartjs_assets():
     
     # الحصول على اسم قاعدة البيانات
     db_name = odoo.tools.config.get('db_name', '')
+    
+    # إذا كان list، خذ أول عنصر
+    if isinstance(db_name, list):
+        db_name = db_name[0] if db_name else ''
+    
+    # إذا لم يكن موجود، جرب dbfilter
     if not db_name:
         dbfilter = odoo.tools.config.get('dbfilter', '')
         if dbfilter:
@@ -29,6 +35,7 @@ def fix_chartjs_assets():
             if match:
                 db_name = match.group(1)
     
+    # القيمة الافتراضية
     if not db_name:
         db_name = 'lugal'
     
