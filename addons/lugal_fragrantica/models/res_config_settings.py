@@ -12,3 +12,13 @@ class ResConfigSettings(models.TransientModel):
         default=False,
         help='Enable automatic scraping of Fragrantica perfumes'
     )
+    
+    fragrantica_scraping_method = fields.Selection([
+        ('manual', 'Manual'),
+        ('auto', 'Automatic'),
+        ('scheduled', 'Scheduled')
+    ], string='Scraping Method',
+        config_parameter='lugal_fragrantica.scraping_method',
+        default='manual',
+        help='Method for scraping Fragrantica perfumes'
+    )

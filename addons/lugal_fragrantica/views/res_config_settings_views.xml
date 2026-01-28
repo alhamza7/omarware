@@ -23,6 +23,17 @@
                                 </div>
                             </div>
                         </div>
+                        <div class="col-12 col-lg-6 o_setting_box">
+                            <div class="o_setting_left_pane">
+                                <field name="fragrantica_scraping_method"/>
+                            </div>
+                            <div class="o_setting_right_pane">
+                                <label for="fragrantica_scraping_method"/>
+                                <div class="text-muted">
+                                    Choose the method for scraping Fragrantica perfumes.
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </xpath>
