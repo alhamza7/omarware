@@ -2,11 +2,6 @@
 # -*- coding: utf-8 -*-
 # سكريبت لإعداد المصادقة مع GitHub والحصول على Token
 
-echo "=========================================="
-echo "إعداد المصادقة مع GitHub"
-echo "=========================================="
-echo ""
-
 # الألوان
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -18,165 +13,7 @@ GITHUB_USERNAME="alhamza7"
 GITHUB_PASSWORD="Promohammed99"
 REPO_URL="https://github.com/alhamza7/Lugal-ai.git"
 
-# التحقق من وجود GitHub CLI
-if command -v gh &> /dev/null; then
-    echo -e "${GREEN}✅ تم العثور على GitHub CLI${NC}"
-    echo ""
-    
-    # التحقق من حالة تسجيل الدخول
-    if gh auth status &> /dev/null; then
-        echo -e "${GREEN}✅ أنت مسجل الدخول بالفعل إلى GitHub${NC}"
-        echo ""
-        gh auth status
-        echo ""
-        
-        # الحصول على Token
-        echo "الحصول على Token..."
-        TOKEN=$(gh auth token 2>/dev/null)
-        if [ -n "$TOKEN" ]; then
-            echo -e "${GREEN}✅ تم الحصول على Token بنجاح${NC}"
-            setup_git_with_token "$TOKEN"
-        else
-            echo -e "${YELLOW}⚠️  لم يتم الحصول على Token، جرب تسجيل الدخول مرة أخرى${NC}"
-            gh auth login
-            TOKEN=$(gh auth token 2>/dev/null)
-            if [ -n "$TOKEN" ]; then
-                setup_git_with_token "$TOKEN"
-            fi
-        fi
-    else
-        echo "تسجيل الدخول إلى GitHub..."
-        echo ""
-        echo "سيتم فتح المتصفح لتسجيل الدخول..."
-        echo "أو يمكنك استخدام:"
-        echo "  - GitHub.com (افتراضي)"
-        echo "  - GitHub Enterprise Server"
-        echo ""
-        
-        # محاولة تسجيل الدخول
-        if gh auth login --web 2>/dev/null; then
-            echo -e "${GREEN}✅ تم تسجيل الدخول بنجاح${NC}"
-            TOKEN=$(gh auth token 2>/dev/null)
-            if [ -n "$TOKEN" ]; then
-                setup_git_with_token "$TOKEN"
-            fi
-        else
-            echo -e "${RED}❌ فشل تسجيل الدخول${NC}"
-            echo ""
-            manual_token_setup
-        fi
-    fi
-else
-    echo -e "${YELLOW}⚠️  GitHub CLI غير مثبت${NC}"
-    echo ""
-    echo "الخيارات المتاحة:"
-    echo "1. تثبيت GitHub CLI (موصى به)"
-    echo "2. إدخال Token يدوياً"
-    echo ""
-    read -p "اختر الخيار (1 أو 2): " choice
-    
-    case $choice in
-        1)
-            install_github_cli
-            ;;
-        2)
-            manual_token_setup
-            ;;
-        *)
-            echo -e "${RED}❌ خيار غير صحيح${NC}"
-            manual_token_setup
-            ;;
-    esac
-fi
-
-function install_github_cli() {
-    echo ""
-    echo "تثبيت GitHub CLI..."
-    
-    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-        # Linux
-        if command -v apt-get &> /dev/null; then
-            echo "تثبيت باستخدام apt..."
-            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-            sudo apt update
-            sudo apt install gh -y
-        elif command -v yum &> /dev/null; then
-            echo "تثبيت باستخدام yum..."
-            sudo dnf install 'dnf-command(config-manager)' -y
-            sudo dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
-            sudo dnf install gh -y
-        else
-            echo -e "${RED}❌ نظام غير مدعوم للتثبيت التلقائي${NC}"
-            echo "يرجى تثبيت GitHub CLI يدوياً من: https://cli.github.com/"
-            manual_token_setup
-            return
-        fi
-        
-        if command -v gh &> /dev/null; then
-            echo -e "${GREEN}✅ تم تثبيت GitHub CLI بنجاح${NC}"
-            echo ""
-            echo "تسجيل الدخول..."
-            gh auth login --web
-            TOKEN=$(gh auth token 2>/dev/null)
-            if [ -n "$TOKEN" ]; then
-                setup_git_with_token "$TOKEN"
-            fi
-        else
-            echo -e "${RED}❌ فشل التثبيت${NC}"
-            manual_token_setup
-        fi
-    else
-        echo -e "${RED}❌ نظام غير مدعوم${NC}"
-        echo "يرجى تثبيت GitHub CLI يدوياً من: https://cli.github.com/"
-        manual_token_setup
-    fi
-}
-
-function manual_token_setup() {
-    echo ""
-    echo "=========================================="
-    echo "إعداد Token يدوياً"
-    echo "=========================================="
-    echo ""
-    echo "اتبع الخطوات التالية:"
-    echo ""
-    echo "1. افتح المتصفح واذهب إلى:"
-    echo -e "   ${GREEN}https://github.com/settings/tokens${NC}"
-    echo ""
-    echo "2. انقر على: ${YELLOW}Generate new token${NC} → ${YELLOW}Generate new token (classic)${NC}"
-    echo ""
-    echo "3. أدخل اسم للـ Token (مثل: Lugal-ai-push)"
-    echo ""
-    echo "4. اختر الصلاحيات:"
-    echo "   ✅ ${GREEN}repo${NC} (Full control of private repositories)"
-    echo ""
-    echo "5. انقر ${YELLOW}Generate token${NC}"
-    echo ""
-    echo "6. ${RED}انسخ الـ Token فوراً${NC} (لن تتمكن من رؤيته مرة أخرى!)"
-    echo ""
-    read -p "الصق الـ Token هنا: " TOKEN
-    
-    if [ -z "$TOKEN" ]; then
-        echo -e "${RED}❌ لم يتم إدخال Token${NC}"
-        exit 1
-    fi
-    
-    # التحقق من صحة الـ Token
-    echo ""
-    echo "التحقق من صحة الـ Token..."
-    response=$(curl -s -H "Authorization: token $TOKEN" https://api.github.com/user)
-    
-    if echo "$response" | grep -q '"login"'; then
-        echo -e "${GREEN}✅ Token صحيح${NC}"
-        setup_git_with_token "$TOKEN"
-    else
-        echo -e "${RED}❌ Token غير صحيح${NC}"
-        echo "يرجى التحقق من الـ Token والمحاولة مرة أخرى"
-        exit 1
-    fi
-}
-
+# تعريف الدوال
 function setup_git_with_token() {
     local TOKEN=$1
     
@@ -237,8 +74,180 @@ function setup_git_with_token() {
     fi
 }
 
-# تشغيل السكريبت
-if [ "${BASH_SOURCE[0]}" == "${0}" ]; then
-    # السكريبت يعمل مباشرة
-    true
+function install_github_cli() {
+    echo ""
+    echo "=========================================="
+    echo "تثبيت GitHub CLI"
+    echo "=========================================="
+    echo ""
+    
+    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        # Linux
+        if command -v apt-get &> /dev/null; then
+            echo "تثبيت باستخدام apt..."
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            sudo apt update
+            sudo apt install gh -y
+        elif command -v yum &> /dev/null; then
+            echo "تثبيت باستخدام yum..."
+            sudo dnf install 'dnf-command(config-manager)' -y
+            sudo dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
+            sudo dnf install gh -y
+        else
+            echo -e "${RED}❌ نظام غير مدعوم للتثبيت التلقائي${NC}"
+            echo "يرجى تثبيت GitHub CLI يدوياً من: https://cli.github.com/"
+            return 1
+        fi
+        
+        if command -v gh &> /dev/null; then
+            echo -e "${GREEN}✅ تم تثبيت GitHub CLI بنجاح${NC}"
+            echo ""
+            echo "تسجيل الدخول..."
+            gh auth login --web
+            TOKEN=$(gh auth token 2>/dev/null)
+            if [ -n "$TOKEN" ]; then
+                setup_git_with_token "$TOKEN"
+                return 0
+            fi
+        else
+            echo -e "${RED}❌ فشل التثبيت${NC}"
+            return 1
+        fi
+    else
+        echo -e "${RED}❌ نظام غير مدعوم${NC}"
+        echo "يرجى تثبيت GitHub CLI يدوياً من: https://cli.github.com/"
+        return 1
+    fi
+}
+
+function manual_token_setup() {
+    echo ""
+    echo "=========================================="
+    echo "إعداد Token يدوياً"
+    echo "=========================================="
+    echo ""
+    echo "اتبع الخطوات التالية:"
+    echo ""
+    echo "1. افتح المتصفح واذهب إلى:"
+    echo -e "   ${GREEN}https://github.com/settings/tokens${NC}"
+    echo ""
+    echo "2. انقر على: ${YELLOW}Generate new token${NC} → ${YELLOW}Generate new token (classic)${NC}"
+    echo ""
+    echo "3. أدخل اسم للـ Token (مثل: Lugal-ai-push)"
+    echo ""
+    echo "4. اختر الصلاحيات:"
+    echo "   ✅ ${GREEN}repo${NC} (Full control of private repositories)"
+    echo ""
+    echo "5. انقر ${YELLOW}Generate token${NC}"
+    echo ""
+    echo "6. ${RED}انسخ الـ Token فوراً${NC} (لن تتمكن من رؤيته مرة أخرى!)"
+    echo ""
+    read -sp "الصق الـ Token هنا: " TOKEN
+    echo ""
+    
+    if [ -z "$TOKEN" ]; then
+        echo -e "${RED}❌ لم يتم إدخال Token${NC}"
+        return 1
+    fi
+    
+    # التحقق من صحة الـ Token
+    echo ""
+    echo "التحقق من صحة الـ Token..."
+    response=$(curl -s -H "Authorization: token $TOKEN" https://api.github.com/user)
+    
+    if echo "$response" | grep -q '"login"'; then
+        echo -e "${GREEN}✅ Token صحيح${NC}"
+        setup_git_with_token "$TOKEN"
+        return 0
+    else
+        echo -e "${RED}❌ Token غير صحيح${NC}"
+        echo "يرجى التحقق من الـ Token والمحاولة مرة أخرى"
+        return 1
+    fi
+}
+
+# بداية السكريبت الرئيسي
+echo "=========================================="
+echo "إعداد المصادقة مع GitHub"
+echo "=========================================="
+echo ""
+
+# التحقق من وجود GitHub CLI
+if command -v gh &> /dev/null; then
+    echo -e "${GREEN}✅ تم العثور على GitHub CLI${NC}"
+    echo ""
+    
+    # التحقق من حالة تسجيل الدخول
+    if gh auth status &> /dev/null; then
+        echo -e "${GREEN}✅ أنت مسجل الدخول بالفعل إلى GitHub${NC}"
+        echo ""
+        gh auth status
+        echo ""
+        
+        # الحصول على Token
+        echo "الحصول على Token..."
+        TOKEN=$(gh auth token 2>/dev/null)
+        if [ -n "$TOKEN" ]; then
+            echo -e "${GREEN}✅ تم الحصول على Token بنجاح${NC}"
+            setup_git_with_token "$TOKEN"
+        else
+            echo -e "${YELLOW}⚠️  لم يتم الحصول على Token، جرب تسجيل الدخول مرة أخرى${NC}"
+            gh auth login --web
+            TOKEN=$(gh auth token 2>/dev/null)
+            if [ -n "$TOKEN" ]; then
+                setup_git_with_token "$TOKEN"
+            else
+                echo -e "${RED}❌ فشل الحصول على Token${NC}"
+                manual_token_setup
+            fi
+        fi
+    else
+        echo "تسجيل الدخول إلى GitHub..."
+        echo ""
+        echo "سيتم فتح المتصفح لتسجيل الدخول..."
+        echo ""
+        
+        # محاولة تسجيل الدخول
+        if gh auth login --web 2>/dev/null; then
+            echo -e "${GREEN}✅ تم تسجيل الدخول بنجاح${NC}"
+            TOKEN=$(gh auth token 2>/dev/null)
+            if [ -n "$TOKEN" ]; then
+                setup_git_with_token "$TOKEN"
+            else
+                echo -e "${RED}❌ فشل الحصول على Token${NC}"
+                manual_token_setup
+            fi
+        else
+            echo -e "${RED}❌ فشل تسجيل الدخول${NC}"
+            echo ""
+            manual_token_setup
+        fi
+    fi
+else
+    echo -e "${YELLOW}⚠️  GitHub CLI غير مثبت${NC}"
+    echo ""
+    echo "الخيارات المتاحة:"
+    echo "1. تثبيت GitHub CLI (موصى به)"
+    echo "2. إدخال Token يدوياً"
+    echo ""
+    read -p "اختر الخيار (1 أو 2): " choice
+    
+    case $choice in
+        1)
+            if install_github_cli; then
+                exit 0
+            else
+                echo -e "${YELLOW}⚠️  فشل التثبيت، الانتقال إلى الإعداد اليدوي...${NC}"
+                manual_token_setup
+            fi
+            ;;
+        2)
+            manual_token_setup
+            ;;
+        *)
+            echo -e "${RED}❌ خيار غير صحيح${NC}"
+            manual_token_setup
+            ;;
+    esac
 fi
