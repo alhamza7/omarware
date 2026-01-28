@@ -94,21 +94,60 @@ def check_sale_module():
                 print("   ⚠️  القائمة الرئيسية Sales غير موجودة")
                 print("   إنشاء القائمة الرئيسية...")
                 
-                # البحث عن action
+                # البحث عن action مناسب (Quotations بدون active_id في context)
                 sale_action = env['ir.actions.act_window'].search([
                     ('res_model', '=', 'sale.order'),
-                    ('name', 'ilike', 'quotation')
+                    ('name', '=', 'Quotations')
                 ], limit=1)
+                
+                # إذا لم نجد، نبحث عن أي sale.order action
+                if not sale_action:
+                    sale_action = env['ir.actions.act_window'].search([
+                        ('res_model', '=', 'sale.order')
+                    ], limit=1)
+                
+                # تنظيف context من active_id إذا كان موجوداً
+                action_ref = False
+                if sale_action:
+                    # نسخ الـ action وتنظيف الـ context
+                    context = eval(sale_action.context or '{}')
+                    # إزالة أي مرجع لـ active_id
+                    context = {k: v for k, v in context.items() 
+                              if 'active_id' not in str(v)}
+                    
+                    # إنشاء action جديد بدون active_id
+                    new_action = env['ir.actions.act_window'].create({
+                        'name': 'Sales Orders',
+                        'res_model': 'sale.order',
+                        'view_mode': 'tree,form',
+                        'context': str(context),
+                        'domain': [],
+                    })
+                    action_ref = f'ir.actions.act_window,{new_action.id}'
                 
                 main_sale_menu = env['ir.ui.menu'].create({
                     'name': 'Sales',
                     'sequence': 20,
                     'parent_id': False,
-                    'action': f'ir.actions.act_window,{sale_action.id}' if sale_action else False,
+                    'action': action_ref,
                 })
                 print(f"   ✅ تم إنشاء القائمة الرئيسية (ID: {main_sale_menu.id})")
             else:
                 print(f"   ✅ القائمة الرئيسية موجودة (ID: {main_sale_menu.id})")
+                
+                # التحقق من أن الـ action لا يحتوي على active_id في context
+                if main_sale_menu.action:
+                    action = main_sale_menu.action
+                    if hasattr(action, 'context') and action.context:
+                        if 'active_id' in action.context:
+                            print("   ⚠️  القائمة تحتوي على active_id في context")
+                            print("   تنظيف context...")
+                            context = eval(action.context or '{}')
+                            context = {k: v for k, v in context.items() 
+                                      if 'active_id' not in str(v)}
+                            action.context = str(context)
+                            print("   ✅ تم تنظيف context")
+                
                 if not main_sale_menu.active:
                     main_sale_menu.active = True
                     print("   ✅ تم تفعيل القائمة")

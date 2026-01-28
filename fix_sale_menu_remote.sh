@@ -46,13 +46,18 @@ else
 fi
 echo ""
 
-# 3. تشغيل سكريبت فحص وإصلاح Sale
-echo "3. تشغيل سكريبت الفحص والإصلاح..."
+# 3. إصلاح active_id error
+echo "3. إصلاح active_id error..."
+venv/bin/python fix_sale_menu_action.py
+echo ""
+
+# 4. تشغيل سكريبت فحص وإصلاح Sale
+echo "4. تشغيل سكريبت الفحص والإصلاح..."
 venv/bin/python check_sale_module.py
 echo ""
 
-# 4. إعادة تشغيل Odoo
-echo "4. إعادة تشغيل Odoo..."
+# 5. إعادة تشغيل Odoo
+echo "5. إعادة تشغيل Odoo..."
 nohup venv/bin/python odoo-bin -c odoo.conf -d "$DB_NAME" --http-port=8069 > odoo.log 2>&1 &
 sleep 5
 
