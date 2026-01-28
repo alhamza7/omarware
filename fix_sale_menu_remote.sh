@@ -66,8 +66,13 @@ echo "6. تفعيل جميع قوائم Sale وجميع التصنيفات..."
 venv/bin/python activate_all_sale_menus.py
 echo ""
 
-# 7. إعادة تشغيل Odoo
-echo "7. إعادة تشغيل Odoo..."
+# 7. إصلاح Action Views
+echo "7. إصلاح Action Views (View types not defined)..."
+venv/bin/python fix_action_views.py
+echo ""
+
+# 8. إعادة تشغيل Odoo
+echo "8. إعادة تشغيل Odoo..."
 nohup venv/bin/python odoo-bin -c odoo.conf -d "$DB_NAME" --http-port=8069 > odoo.log 2>&1 &
 sleep 5
 
