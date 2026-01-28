@@ -5,6 +5,7 @@ from . import fragrantica_note
 from . import fragrantica_accord
 from . import fragrantica_pending_request
 from . import product_template
+from . import res_config_settings
 
 
 
