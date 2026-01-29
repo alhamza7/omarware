@@ -50,7 +50,7 @@ def fix_uom_transaction_error():
             print("1. التحقق من وحدات القياس...")
             
             cr.execute("""
-                SELECT id, name, uom_type, relative_factor, relative_uom_id, factor
+                SELECT id, name, relative_factor, relative_uom_id, factor
                 FROM uom_uom
                 WHERE relative_uom_id IS NOT NULL
                 ORDER BY id
@@ -64,7 +64,7 @@ def fix_uom_transaction_error():
             
             problematic_uoms = []
             
-            for uom_id, name, uom_type, relative_factor, relative_uom_id, factor in uoms:
+            for uom_id, name, relative_factor, relative_uom_id, factor in uoms:
                 # التحقق من أن relative_uom_id موجود
                 cr.execute("SELECT id FROM uom_uom WHERE id = %s", (relative_uom_id,))
                 if not cr.fetchone():
@@ -119,25 +119,43 @@ def fix_uom_transaction_error():
             else:
                 print("\n3. ✅ لا توجد وحدات قياس معطوبة")
             
-            # 4. إعادة حساب العوامل
+            # 4. إعادة حساب العوامل باستخدام SQL مباشرة
             print("\n4. إعادة حساب عوامل وحدات القياس...")
             
             try:
-                uom_obj = env['uom.uom']
-                all_uoms = uom_obj.search([])
+                # تحديث factor لوحدات القياس المرجعية (بدون relative_uom_id)
+                cr.execute("""
+                    UPDATE uom_uom
+                    SET factor = relative_factor
+                    WHERE relative_uom_id IS NULL
+                """)
+                updated_refs = cr.rowcount
+                print(f"   ✅ تم تحديث {updated_refs} وحدة مرجعية")
                 
-                # إعادة حساب factor لكل وحدة
-                for uom in all_uoms:
-                    try:
-                        # هذا سيجبر إعادة حساب _compute_factor
-                        uom._compute_factor()
-                    except Exception as e:
-                        print(f"   ⚠️  تعذر حساب factor لـ {uom.name}: {e}")
+                # تحديث factor لوحدات القياس المشتقة (بطريقة متكررة)
+                # نبدأ من المستوى الأول ونتقدم للأمام
+                max_depth = 10
+                for depth in range(max_depth):
+                    cr.execute("""
+                        UPDATE uom_uom u1
+                        SET factor = u1.relative_factor * u2.factor
+                        FROM uom_uom u2
+                        WHERE u1.relative_uom_id = u2.id
+                          AND u1.relative_uom_id IS NOT NULL
+                          AND u2.factor IS NOT NULL
+                          AND (u1.factor IS NULL OR u1.factor != u1.relative_factor * u2.factor)
+                    """)
+                    updated = cr.rowcount
+                    if updated == 0:
+                        break
+                    print(f"   ✅ المستوى {depth + 1}: تم تحديث {updated} وحدة")
                 
-                print(f"   ✅ تم إعادة حساب {len(all_uoms)} وحدة قياس")
+                cr.commit()
+                print(f"   ✅ تم إعادة حساب جميع وحدات القياس")
                 
             except Exception as e:
                 print(f"   ⚠️  تعذر إعادة الحساب: {e}")
+                cr.rollback()
             
             # 5. التحقق من النتائج
             print("\n5. التحقق من وحدات القياس بعد الإصلاح...")
