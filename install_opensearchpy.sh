@@ -23,13 +23,13 @@ sleep 3
 echo "   ✅ تم إيقاف Odoo"
 echo ""
 
-# تثبيت opensearchpy
-echo "2. تثبيت مكتبة opensearchpy..."
-venv/bin/pip install opensearchpy
+# تثبيت opensearch-py
+echo "2. تثبيت مكتبة opensearch-py..."
+venv/bin/pip install opensearch-py
 if [ $? -eq 0 ]; then
-    echo "   ✅ تم تثبيت opensearchpy بنجاح"
+    echo "   ✅ تم تثبيت opensearch-py بنجاح"
 else
-    echo "   ❌ فشل تثبيت opensearchpy"
+    echo "   ❌ فشل تثبيت opensearch-py"
     exit 1
 fi
 echo ""
