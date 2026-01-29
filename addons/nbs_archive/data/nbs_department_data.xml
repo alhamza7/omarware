@@ -27,5 +27,29 @@
             <field name="active" eval="True"/>
         </record>
         
+        <record id="dept_it" model="nbs.department">
+            <field name="name">Information Technology</field>
+            <field name="code">IT</field>
+            <field name="active" eval="True"/>
+        </record>
+        
+        <record id="dept_sales" model="nbs.department">
+            <field name="name">Sales</field>
+            <field name="code">SALES</field>
+            <field name="active" eval="True"/>
+        </record>
+        
+        <record id="dept_legal" model="nbs.department">
+            <field name="name">Legal</field>
+            <field name="code">LEGAL</field>
+            <field name="active" eval="True"/>
+        </record>
+        
+        <record id="dept_management" model="nbs.department">
+            <field name="name">Management</field>
+            <field name="code">MGT</field>
+            <field name="active" eval="True"/>
+        </record>
+        
     </data>
 </odoo>

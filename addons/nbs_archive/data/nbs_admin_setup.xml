@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <odoo>
     <data noupdate="0">
-        <!-- Ensure the main Odoo administrator has full NBS Archive privileges -->
-        <record id="base.user_admin" model="res.users">
-            <field name="groups_id" eval="[(4, ref('nbs_archive.group_nbs_admin'))]"/>
-        </record>
+        <!-- Give administrator full NBS Archive privileges -->
+        <function model="res.users" name="write">
+            <value eval="[ref('base.user_admin')]"/>
+            <value eval="{'group_ids': [(4, ref('nbs_archive.group_nbs_admin'))]}"/>
+        </function>
     </data>
 </odoo>
 

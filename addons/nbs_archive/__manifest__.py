@@ -39,7 +39,7 @@ Designed for FMCG companies with strict compliance requirements.
         
         # Data
         'data/ir_sequence_data.xml',
-        # 'data/nbs_admin_setup.xml',  # Disabled: causes groups_id error
+        'data/nbs_admin_setup.xml',  # Re-enabled: fixed groups_id error
         'data/nbs_department_data.xml',
         'data/nbs_document_type_data.xml',
     ],
