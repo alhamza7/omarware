@@ -9,7 +9,7 @@ sys.path.append('/home/lugalai/Lugal-ai')
 sys.path.append('/home/lugalai/Lugal-ai/odoo')
 
 import odoo
-from odoo.api import Environment
+from odoo import api, SUPERUSER_ID
 
 def fix_audit_metadata_field():
     """
@@ -19,10 +19,11 @@ def fix_audit_metadata_field():
     # Initialize Odoo
     odoo.tools.config.parse_config(['-c', '/home/lugalai/Lugal-ai/odoo.conf'])
     
-    with odoo.api.Environment.manage():
-        registry = odoo.registry('nbs_lugalai')
-        with registry.cursor() as cr:
-            env = Environment(cr, 1, {})  # UID 1 = admin
+    dbname = 'nbs_lugalai'
+    registry = odoo.registry(dbname)
+    
+    with registry.cursor() as cr:
+        env = api.Environment(cr, SUPERUSER_ID, {})
             
             print("=" * 60)
             print("إصلاح حقل metadata في نموذج nbs.audit.log")
@@ -149,35 +150,35 @@ def fix_audit_metadata_field():
             except Exception as e:
                 print(f"   ❌ خطأ في إنشاء سجل التدقيق: {str(e)}")
                 print(f"   💡 قد يكون الحقل غير موجود بعد - يجب ترقية الوحدة")
-            
-            print()
-            env.cr.commit()
-            
-            print("=" * 60)
-            print("✅ اكتمل الفحص!")
-            print("=" * 60)
-            print()
-            print("🔧 الخطوات المطلوبة لإصلاح المشكلة:")
-            print()
-            print("1. ✅ تم تحديث ملف nbs_audit_log.py لإضافة حقل 'metadata'")
-            print()
-            print("2. ⚙️  يجب ترقية وحدة nbs_archive:")
-            print("   cd /home/lugalai/Lugal-ai")
-            print("   venv/bin/python odoo-bin -c odoo.conf -d nbs_lugalai \\")
-            print("     -u nbs_archive --stop-after-init")
-            print()
-            print("3. 🔄 إعادة تشغيل Odoo:")
-            print("   pkill -9 -f odoo-bin")
-            print("   nohup venv/bin/python odoo-bin -c odoo.conf -d nbs_lugalai \\")
-            print("     --http-port=8069 > odoo.log 2>&1 &")
-            print()
-            print("4. ✅ اختبار النظام")
-            print()
-            print("💡 ملاحظة:")
-            print("   - حقل 'metadata' يستخدم لتخزين معلومات إضافية عن الإجراء")
-            print("   - حقل 'metadata_snapshot' يستخدم لتخزين نسخة من بيانات المستند")
-            print("   - كلا الحقلين مهمان لنظام التدقيق")
-            print()
+        
+        print()
+        env.cr.commit()
+        
+        print("=" * 60)
+        print("✅ اكتمل الفحص!")
+        print("=" * 60)
+        print()
+        print("🔧 الخطوات المطلوبة لإصلاح المشكلة:")
+        print()
+        print("1. ✅ تم تحديث ملف nbs_audit_log.py لإضافة حقل 'metadata'")
+        print()
+        print("2. ⚙️  يجب ترقية وحدة nbs_archive:")
+        print("   cd /home/lugalai/Lugal-ai")
+        print("   venv/bin/python odoo-bin -c odoo.conf -d nbs_lugalai \\")
+        print("     -u nbs_archive --stop-after-init")
+        print()
+        print("3. 🔄 إعادة تشغيل Odoo:")
+        print("   pkill -9 -f odoo-bin")
+        print("   nohup venv/bin/python odoo-bin -c odoo.conf -d nbs_lugalai \\")
+        print("     --http-port=8069 > odoo.log 2>&1 &")
+        print()
+        print("4. ✅ اختبار النظام")
+        print()
+        print("💡 ملاحظة:")
+        print("   - حقل 'metadata' يستخدم لتخزين معلومات إضافية عن الإجراء")
+        print("   - حقل 'metadata_snapshot' يستخدم لتخزين نسخة من بيانات المستند")
+        print("   - كلا الحقلين مهمان لنظام التدقيق")
+        print()
 
 if __name__ == '__main__':
     fix_audit_metadata_field()

@@ -9,7 +9,7 @@ sys.path.append('/home/lugalai/Lugal-ai')
 sys.path.append('/home/lugalai/Lugal-ai/odoo')
 
 import odoo
-from odoo.api import Environment
+from odoo import api, SUPERUSER_ID
 
 def fix_nbs_archive_attachments():
     """
@@ -23,10 +23,11 @@ def fix_nbs_archive_attachments():
     # Initialize Odoo
     odoo.tools.config.parse_config(['-c', '/home/lugalai/Lugal-ai/odoo.conf'])
     
-    with odoo.api.Environment.manage():
-        registry = odoo.registry('nbs_lugalai')
-        with registry.cursor() as cr:
-            env = Environment(cr, 1, {})  # UID 1 = admin
+    dbname = 'nbs_lugalai'
+    registry = odoo.registry(dbname)
+    
+    with registry.cursor() as cr:
+        env = api.Environment(cr, SUPERUSER_ID, {})
             
             print("=" * 60)
             print("تشخيص مشكلة رفع المرفقات في نظام الأرشفة")
@@ -228,36 +229,36 @@ def fix_nbs_archive_attachments():
                 except Exception as e:
                     print(f"   ❌ خطأ في إنشاء المستند: {str(e)}")
                 print()
-            
-            env.cr.commit()
-            
-            print("=" * 60)
-            print("✅ اكتمل التشخيص!")
-            print("=" * 60)
-            print()
-            print("🔍 الأسباب المحتملة لخطأ 'DOCUMENT NOT FOUND':")
-            print()
-            print("1. ❌ document_id المرسل غير صحيح أو المستند غير موجود")
-            print("   💡 تأكد من أن المستند موجود في النظام")
-            print("   💡 استخدم ID صحيح من القائمة أعلاه")
-            print()
-            print("2. ❌ المستخدم لا يملك صلاحيات الوصول")
-            print("   💡 تأكد من أن المستخدم ضمن مجموعة NBS Archive")
-            print("   💡 تحقق من JWT token صالح")
-            print()
-            print("3. ❌ المستند في حالة محذوف أو مؤرشف")
-            print("   💡 تحقق من state المستند (يجب أن تكون: draft/active/approved)")
-            print()
-            print("4. ❌ مشكلة في الاتصال بـ API")
-            print("   💡 تحقق من URL الصحيح: /api/documents/<document_id>/add-attachment")
-            print("   💡 تحقق من إرسال JWT token في الهيدر")
-            print()
-            print("📋 خطوات الحل:")
-            print("1. تأكد من وجود مستند في النظام (انظر القائمة أعلاه)")
-            print("2. استخدم document_id الصحيح عند رفع المرفق")
-            print("3. تأكد من تسجيل الدخول وحصولك على JWT token")
-            print("4. استخدم endpoint الصحيح: POST /api/documents/<document_id>/add-attachment")
-            print()
+        
+        env.cr.commit()
+        
+        print("=" * 60)
+        print("✅ اكتمل التشخيص!")
+        print("=" * 60)
+        print()
+        print("🔍 الأسباب المحتملة لخطأ 'DOCUMENT NOT FOUND':")
+        print()
+        print("1. ❌ document_id المرسل غير صحيح أو المستند غير موجود")
+        print("   💡 تأكد من أن المستند موجود في النظام")
+        print("   💡 استخدم ID صحيح من القائمة أعلاه")
+        print()
+        print("2. ❌ المستخدم لا يملك صلاحيات الوصول")
+        print("   💡 تأكد من أن المستخدم ضمن مجموعة NBS Archive")
+        print("   💡 تحقق من JWT token صالح")
+        print()
+        print("3. ❌ المستند في حالة محذوف أو مؤرشف")
+        print("   💡 تحقق من state المستند (يجب أن تكون: draft/active/approved)")
+        print()
+        print("4. ❌ مشكلة في الاتصال بـ API")
+        print("   💡 تحقق من URL الصحيح: /api/documents/<document_id>/add-attachment")
+        print("   💡 تحقق من إرسال JWT token في الهيدر")
+        print()
+        print("📋 خطوات الحل:")
+        print("1. تأكد من وجود مستند في النظام (انظر القائمة أعلاه)")
+        print("2. استخدم document_id الصحيح عند رفع المرفق")
+        print("3. تأكد من تسجيل الدخول وحصولك على JWT token")
+        print("4. استخدم endpoint الصحيح: POST /api/documents/<document_id>/add-attachment")
+        print()
 
 if __name__ == '__main__':
     fix_nbs_archive_attachments()
