@@ -10,6 +10,7 @@ sys.path.append('/home/lugalai/Lugal-ai/odoo')
 
 import odoo
 from odoo import api, SUPERUSER_ID
+from odoo.modules.registry import Registry
 
 def fix_audit_metadata_field():
     """
@@ -20,7 +21,7 @@ def fix_audit_metadata_field():
     odoo.tools.config.parse_config(['-c', '/home/lugalai/Lugal-ai/odoo.conf'])
     
     dbname = 'nbs_lugalai'
-    registry = odoo.registry(dbname)
+    registry = Registry(dbname)
     
     with registry.cursor() as cr:
         env = api.Environment(cr, SUPERUSER_ID, {})
