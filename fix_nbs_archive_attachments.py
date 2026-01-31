@@ -159,17 +159,23 @@ def fix_nbs_archive_attachments():
             groups = env['res.groups'].search([('name', 'ilike', 'nbs_archive')])
             
             print(f"   👤 المستخدم: {admin.name} (ID: {admin.id})")
-            print(f"   📋 مجموعات NBS Archive:")
             
-            for group in groups:
-                is_member = admin.id in group.users.ids
-                status = "✅" if is_member else "❌"
-                print(f"      {status} {group.name} (ID: {group.id})")
+            if not groups:
+                print(f"   ⚠️  لا توجد مجموعات NBS Archive")
+            else:
+                print(f"   📋 مجموعات NBS Archive ({len(groups)}):")
                 
-                if not is_member:
-                    print(f"         💡 سيتم إضافة المستخدم للمجموعة...")
-                    group.users = [(4, admin.id)]
-                    print(f"         ✅ تمت الإضافة")
+                for group in groups:
+                    # Access users through the many2many field
+                    user_ids = [u.id for u in group.users]
+                    is_member = admin.id in user_ids
+                    status = "✅" if is_member else "❌"
+                    print(f"      {status} {group.name} (ID: {group.id})")
+                    
+                    if not is_member:
+                        print(f"         💡 سيتم إضافة المستخدم للمجموعة...")
+                        group.write({'users': [(4, admin.id)]})
+                        print(f"         ✅ تمت الإضافة")
             
         except Exception as e:
             print(f"   ⚠️  خطأ في التحقق من الصلاحيات: {str(e)}")
