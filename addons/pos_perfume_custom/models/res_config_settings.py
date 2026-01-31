@@ -7,7 +7,7 @@ class ResConfigSettings(models.TransientModel):
 
     pos_perfume_exchange_rate = fields.Float(
         string='سعر الصرف الافتراضي (دولار → دينار)',
-        default=1510.0,
+        default=1500.0,
         digits=(12, 2),
         help='معامل التحويل الافتراضي من الدولار الأمريكي إلى الدينار العراقي. '
              'سيتم استخدام هذه القيمة لجميع الفواتير الجديدة في نظام POS Perfume.',
