@@ -29,9 +29,13 @@ class NBSAuditLog(models.Model):
         ('view', 'View'),
         ('download', 'Download'),
         ('edit_request', 'Edit Request'),
+        ('edit_request_created', 'Edit Request Created'),
+        ('edit_request_approved', 'Edit Request Approved'),
+        ('edit_request_rejected', 'Edit Request Rejected'),
         ('approval', 'Approval'),
         ('rejection', 'Rejection'),
         ('new_version', 'New Version'),
+        ('new_version_uploaded', 'New Version Uploaded'),
         ('archive', 'Archive'),
         ('unarchive', 'Unarchive'),
         ('search', 'Search'),
@@ -39,7 +43,7 @@ class NBSAuditLog(models.Model):
         ('logout', 'Logout'),
         ('attachment_upload', 'Attachment Upload'),
         ('signed_version_uploaded', 'Signed Version Uploaded'),
-        ('new_version_uploaded', 'New Version Uploaded'),
+        ('relation_created', 'Relation Created'),
     ], string='Action', required=True, readonly=True, index=True)
     
     document_id = fields.Many2one(
