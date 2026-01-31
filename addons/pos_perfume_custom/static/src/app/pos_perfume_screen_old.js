@@ -58,7 +58,7 @@ export class PosPerfumeScreen extends Component {
             
             // UI state
             loading: false,
-            exchangeRate: 1470,  // Default, should be loaded from settings
+            exchangeRate: 1510,  // Default, should be loaded from settings
         });
         
         this.searchInputRef = useRef("searchInput");
