@@ -69,6 +69,11 @@ class NBSAuditLog(models.Model):
         readonly=True,
         help='Additional details in JSON format'
     )
+    metadata = fields.Text(
+        string='Metadata',
+        readonly=True,
+        help='Additional metadata information about the action'
+    )
     metadata_snapshot = fields.Text(
         string='Metadata Snapshot',
         readonly=True,
@@ -86,7 +91,7 @@ class NBSAuditLog(models.Model):
     
     @api.model
     def log_action(self, action, user_id=None, document_id=None, department_id=None, 
-                   ip_address=None, user_agent=None, details=None):
+                   ip_address=None, user_agent=None, details=None, metadata=None):
         """
         Helper method to create audit log entries
         
@@ -95,7 +100,8 @@ class NBSAuditLog(models.Model):
                 action='download',
                 document_id=doc.id,
                 department_id=doc.department_id.id,
-                details='Downloaded version 2'
+                details='Downloaded version 2',
+                metadata='Additional info'
             )
         """
         vals = {
@@ -117,6 +123,9 @@ class NBSAuditLog(models.Model):
         
         if details:
             vals['details'] = details
+        
+        if metadata:
+            vals['metadata'] = metadata
         
         return self.sudo().create(vals)
     
