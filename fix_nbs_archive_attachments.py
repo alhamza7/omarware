@@ -166,15 +166,24 @@ def fix_nbs_archive_attachments():
                 print(f"   📋 مجموعات NBS Archive ({len(groups)}):")
                 
                 for group in groups:
-                    # Access users through the many2many field
-                    user_ids = [u.id for u in group.users]
-                    is_member = admin.id in user_ids
+                    # Check membership using SQL query for reliability
+                    env.cr.execute("""
+                        SELECT COUNT(*) 
+                        FROM res_groups_users_rel 
+                        WHERE gid = %s AND uid = %s
+                    """, (group.id, admin.id))
+                    is_member = env.cr.fetchone()[0] > 0
+                    
                     status = "✅" if is_member else "❌"
                     print(f"      {status} {group.name} (ID: {group.id})")
                     
                     if not is_member:
                         print(f"         💡 سيتم إضافة المستخدم للمجموعة...")
-                        group.write({'users': [(4, admin.id)]})
+                        env.cr.execute("""
+                            INSERT INTO res_groups_users_rel (gid, uid)
+                            VALUES (%s, %s)
+                            ON CONFLICT DO NOTHING
+                        """, (group.id, admin.id))
                         print(f"         ✅ تمت الإضافة")
             
         except Exception as e:
