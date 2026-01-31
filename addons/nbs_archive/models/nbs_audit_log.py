@@ -37,6 +37,9 @@ class NBSAuditLog(models.Model):
         ('search', 'Search'),
         ('login', 'Login'),
         ('logout', 'Logout'),
+        ('attachment_upload', 'Attachment Upload'),
+        ('signed_version_uploaded', 'Signed Version Uploaded'),
+        ('new_version_uploaded', 'New Version Uploaded'),
     ], string='Action', required=True, readonly=True, index=True)
     
     document_id = fields.Many2one(
