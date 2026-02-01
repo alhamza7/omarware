@@ -87,7 +87,11 @@ echo "   ✅ تم ترقية pip"
 echo "   ✅ تم تثبيت psycopg2"
 
 echo "   📦 تثبيت جميع المتطلبات (قد يستغرق بضع دقائق)..."
-./venv/bin/pip install -r requirements.txt --quiet
+if [ -f "requirements_local.txt" ]; then
+    ./venv/bin/pip install -r requirements_local.txt
+else
+    ./venv/bin/pip install -r requirements.txt
+fi
 echo -e "${GREEN}✅ تم تثبيت جميع المكتبات${NC}"
 echo ""
 
