@@ -1,0 +1,26 @@
+╔════════════════════════════════════════════════════════════╗
+║         Lugal NBS ERP - النسخة المحلية جاهزة!            ║
+╚════════════════════════════════════════════════════════════╝
+
+🚀 لتشغيل النظام:
+   cd /home/capo7amzah/Documents/NBS-PROJECT/Lugal-ai
+   ./start_local.sh
+
+🌐 الوصول:
+   http://localhost:8070
+
+🔐 تسجيل الدخول:
+   المستخدم: admin
+   كلمة السر: admin
+
+📝 مراقبة اللوغات:
+   tail -f odoo_local.log
+
+🛑 إيقاف النظام:
+   Ctrl+C (أو pkill -f odoo-bin)
+
+📚 التوثيق الكامل:
+   LOCAL_INSTALLATION_COMPLETE.md
+   INSTALL_LOCAL_VERSION.md
+
+═══════════════════════════════════════════════════════════════
