@@ -111,7 +111,7 @@
         # Full menu tree (must be loaded AFTER actions like action_sap_backend are defined)
         'views/sap_menu_structure.xml',
     ],
-    'installable': True,
+    'installable': False,  # Disabled: requires connector module
     'application': True,
     'auto_install': False,
     'license': 'LGPL-3',

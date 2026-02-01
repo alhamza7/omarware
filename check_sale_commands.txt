@@ -1,0 +1,28 @@
+# أوامر للتحقق من وحدة Sale
+# نفذها في odoo-bin shell
+
+# 1. التحقق من وحدة sale
+sale_module = env['ir.module.module'].search([('name', '=', 'sale')])
+print(f"Sale Module State: {sale_module.state if sale_module else 'NOT FOUND'}")
+
+# 2. التحقق من قوائم Sale
+sale_menus = env['ir.ui.menu'].search([('name', 'in', ['Sales', 'Sale', 'sale'])])
+print(f"\nFound {len(sale_menus)} Sale menus:")
+for menu in sale_menus:
+    print(f"  - {menu.name} (ID: {menu.id}, Active: {menu.active}, Parent: {menu.parent_id.name if menu.parent_id else 'Root'})")
+
+# 3. تفعيل القوائم
+for menu in sale_menus:
+    if not menu.active:
+        menu.active = True
+        print(f"  ✅ Activated menu: {menu.name}")
+
+# 4. التحقق من صلاحيات المستخدم
+user = env.user
+print(f"\nCurrent User: {user.name}")
+print(f"Groups: {', '.join([g.name for g in user.groups_id[:5]])}")
+
+# 5. مسح الكاش
+env['ir.ui.menu'].invalidate_model()
+env.cr.commit()
+print("\n✅ Cache cleared and committed")
