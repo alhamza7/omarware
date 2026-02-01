@@ -23,6 +23,8 @@ In this case, it was showing the `sap.product.complete.migration` wizard.
 
 ## Solution
 
+### Step 1: Add action to menu
+
 Added the `action_sap_dashboard` to the main menu item:
 
 ```xml
@@ -32,10 +34,34 @@ Added the `action_sap_dashboard` to the main menu item:
           sequence="10"/>
 ```
 
+### Step 2: Fix loading order (CRITICAL)
+
+The action must be defined BEFORE the menu that uses it!
+
+Changed the loading order in `__manifest__.py`:
+
+```python
+# Before (WRONG - caused error):
+'views/sap_menus_minimal.xml',            # Menu loaded first
+'views/sap_dashboard_action_minimal.xml', # Action loaded second ❌
+
+# After (CORRECT):
+'views/sap_dashboard_action_minimal.xml', # Action loaded first ✅
+'views/sap_menus_minimal.xml',            # Menu loaded second
+```
+
+**Why this matters:**
+- Odoo loads XML files sequentially
+- When menu references `action="action_sap_dashboard"`, the action must already exist
+- Loading menu before action causes: `ValueError: External ID not found: sap_integration.action_sap_dashboard`
+
 ## Files Modified
 
 - `addons/sap_integration/views/sap_menus_minimal.xml`
   - Added `action="action_sap_dashboard"` attribute to menu_sap_integration
+  
+- `addons/sap_integration/__manifest__.py`
+  - Reordered data files: action BEFORE menu
 
 ## Result
 

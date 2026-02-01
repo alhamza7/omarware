@@ -56,8 +56,8 @@
         'data/sap_cron_data.xml',  # ✅ Enabled: Includes SAP Daily Auto-Sync
         
         # Views (Actions & Forms)
+        'views/sap_dashboard_action_minimal.xml', # Minimal dashboard action - MUST load BEFORE menus
         'views/sap_menus_minimal.xml',            # Minimal root menus: menu_sap_integration + menu_sap_tools
-        'views/sap_dashboard_action_minimal.xml', # Minimal dashboard action for menu_sap_dashboard
         # 'views/sap_menu_structure.xml',         # Disabled - requires actions to be defined first
         # 'views/sap_auto_sync_views.xml',        # Disabled - requires menu_sap_configuration
         # 'views/sap_dashboard_views.xml',       # Full dashboard view (still disabled for now)
