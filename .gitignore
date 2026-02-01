@@ -25,6 +25,16 @@ status
 
 # odoo filestore
 odoo/filestore
+filestore_local/
+
+# Python virtual environments
+venv/
+env/
+ENV/
+
+# Local development files
+odoo_local.conf
+odoo_local.log
 
 # maintenance migration scripts
 odoo/addons/base/maintenance
