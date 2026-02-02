@@ -19,17 +19,17 @@ RAM: 62GB
 # Workers: 16 (multiprocessing for CPU utilization)
 workers = 16
 
-# Memory Limits: UNLIMITED
-limit_memory_soft = 0
-limit_memory_hard = 0
+# Memory Limits: VERY HIGH (~50GB per worker)
+limit_memory_soft = 53687091200  # 50GB
+limit_memory_hard = 64424509440  # 60GB
 
-# CPU Time Limits: UNLIMITED
-limit_time_cpu = 0
-limit_time_real = 0
-limit_time_real_cron = 0
+# CPU Time Limits: VERY HIGH (24 hours)
+limit_time_cpu = 86400      # 24 hours
+limit_time_real = 86400     # 24 hours
+limit_time_real_cron = 86400 # 24 hours
 
-# Request Limits: UNLIMITED
-limit_request = 0
+# Request Limits: VERY HIGH (1 million requests)
+limit_request = 1000000
 
 # Database Connections: 128 per worker
 db_maxconn = 128
@@ -105,12 +105,14 @@ limit_time_real_cron = 0 # No cron time limit
   - Database operations
   - Batch processing
 
-**Default limits (when not 0):**
+**Default limits:**
 - CPU time: 60 seconds
 - Real time: 120 seconds
 - Cron time: 300 seconds
 
-**Now: No limits!**
+**Now: 24 hours (effectively unlimited for normal operations)!**
+
+**Note:** We use 86400 seconds (24 hours) instead of 0 because Odoo interprets 0 as "no limit" in documentation but actually enforces it as "0 seconds" causing immediate worker crashes.
 
 ---
 
