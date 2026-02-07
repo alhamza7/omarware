@@ -15,4 +15,5 @@ from . import signature_controller
 from . import workflow_controller
 from . import permissions_controller
 from . import attachments_controller
+from . import department_management_controller
 
