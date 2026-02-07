@@ -1835,8 +1835,12 @@ export class PosPerfumeScreen extends Component {
             }
         } else if (ev.key === 'Enter') {
             ev.preventDefault();
-            if (results[this.state.selectedRightProductIndex || 0]) {
-                this.addProductFromRightPanel(results[this.state.selectedRightProductIndex || 0]);
+            const selected = results[this.state.selectedRightProductIndex || 0];
+            if (selected) {
+                this.addProductFromRightPanel(selected);
+            } else if (this.isBarcodeLike(this.state.rightSearchTerm)) {
+                // Barcode scanner: term entered + Enter → run search now and add if single result
+                this.handleBarcodeScannerEnter();
             }
         } else if (ev.key === 'Escape') {
             ev.target.blur();
@@ -3137,7 +3141,18 @@ export class PosPerfumeScreen extends Component {
     }
     
     /**
+     * Check if term looks like a barcode (for scanner / SAP barcodes)
+     * Barcode-like: 4-20 chars, no spaces (EAN-8, EAN-13, etc.)
+     */
+    isBarcodeLike(term) {
+        if (!term || typeof term !== 'string') return false;
+        const t = term.trim();
+        return t.length >= 4 && t.length <= 20 && !/\s/.test(t);
+    }
+    
+    /**
      * Search products in right panel
+     * Allows 1+ char when term looks like barcode so barcode scanner works
      */
     async searchRightPanel() {
         const searchTerm = this.state.rightSearchTerm;
@@ -3147,7 +3162,8 @@ export class PosPerfumeScreen extends Component {
             clearTimeout(this.rightSearchTimer);
         }
         
-        if (!searchTerm || searchTerm.length < 2) {
+        const minLength = this.isBarcodeLike(searchTerm) ? 4 : 2;
+        if (!searchTerm || searchTerm.length < minLength) {
             this.state.rightSearchResults = [];
             return;
         }
@@ -3212,6 +3228,52 @@ export class PosPerfumeScreen extends Component {
                 this.state.rightSearchLoading = false;
             }
         }, 300);
+    }
+    
+    /**
+     * Handle Enter in right search when no result yet but term looks like barcode
+     * (Barcode scanner sends barcode + Enter → run search now, add product if single result)
+     */
+    async handleBarcodeScannerEnter() {
+        const searchTerm = (this.state.rightSearchTerm || '').trim();
+        if (!searchTerm) return;
+        
+        if (this.rightSearchTimer) {
+            clearTimeout(this.rightSearchTimer);
+            this.rightSearchTimer = null;
+        }
+        
+        this.state.rightSearchLoading = true;
+        try {
+            const pricelistId = this.state.currentOrder.pricelist_id || null;
+            const products = await this.orm.call(
+                'product.product',
+                'search_products_for_pos',
+                [searchTerm, 50, pricelistId]
+            );
+            
+            this.state.rightSearchResultsOriginal = products;
+            this.state.rightSearchResults = products;
+            this.applyFiltersToResults();
+            
+            this.state.selectedRightProductIndex = 0;
+            if (this.state.rightSearchResults.length > 0) {
+                this.state.selectedRightProduct = this.state.rightSearchResults[0].id;
+                if (this.state.rightSearchResults.length === 1) {
+                    this.addProductFromRightPanel(this.state.rightSearchResults[0]);
+                    return;
+                }
+            }
+            
+            if (this.state.rightSearchResults.length === 0) {
+                this.notification.add(_t('No product found for barcode: ') + searchTerm, { type: 'warning' });
+            }
+        } catch (error) {
+            console.error('Error searching by barcode:', error);
+            this.notification.add(_t('Error searching products'), { type: 'danger' });
+        } finally {
+            this.state.rightSearchLoading = false;
+        }
     }
     
     /**
