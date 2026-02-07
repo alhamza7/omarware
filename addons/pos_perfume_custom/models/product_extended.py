@@ -199,12 +199,40 @@ class ProductProductExtended(models.Model):
         if not search_term:
             return []
         
+        # BARCODE EXACT MATCH (SAP main + alternative barcodes) - أولوية للقارئ والباركودات القادمة من ساب
+        # When term looks like a barcode, try exact match first so barcode scanner / SAP barcodes work
+        term_clean = search_term.strip()
+        barcode_matched_product = None
+        if term_clean and 4 <= len(term_clean) <= 20 and not any(c.isspace() for c in term_clean):
+            # 1) Main product barcode (exact)
+            product_by_barcode = ProductSudo.search([
+                ('sale_ok', '=', True),
+                ('barcode', '=', term_clean)
+            ], limit=1)
+            if product_by_barcode:
+                barcode_matched_product = product_by_barcode
+            else:
+                # 2) Alternative barcodes (SAP sub-unit barcodes - باركودات بديلة من ساب)
+                if 'product.barcode.alternative' in self.env:
+                    alt = self.env['product.barcode.alternative'].sudo().search([
+                        ('barcode', '=', term_clean),
+                        ('active', '=', True)
+                    ], limit=1)
+                    if alt and alt.product_id:
+                        p = alt.product_id
+                        if p.sale_ok:
+                            barcode_matched_product = ProductSudo.browse(p.id)
+            if barcode_matched_product:
+                _logger.info(f"[POS] Barcode exact match: '{term_clean}' -> product {barcode_matched_product.display_name}")
+        
         # Prepare helpers
         upper_term = search_term.upper()
         tokens = [t for t in upper_term.split() if t]
         
         # RULE 1: "-" → Products with code starting with "S"
-        if search_term == '-':
+        if barcode_matched_product:
+            products = barcode_matched_product
+        elif search_term == '-':
             products = ProductSudo.search([
                 ('sale_ok', '=', True),
                 ('default_code', '=like', 'S%')

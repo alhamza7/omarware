@@ -642,7 +642,7 @@
                                    t-on-input="searchRightPanel"
                                    t-on-keydown="handleRightSearchKeyDown"
                                    t-att-id="'right-search-input'"
-                                   placeholder="Search by name, code, or barcode"
+                                   placeholder="Search by name, code, or barcode (scan to add)"
                                    style="padding: 10px 40px 10px 15px; font-size: 14px; border: 1px solid #d1d5db; border-radius: 6px; background: white; width: 100%; box-shadow: 0 1px 3px rgba(0,0,0,0.1);"/>
                             <i class="fa fa-search" style="position: absolute; right: 15px; top: 50%; transform: translateY(-50%); color: #6b7280; font-size: 16px; pointer-events: none;"/>
                         </div>
