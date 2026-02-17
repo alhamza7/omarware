@@ -43,10 +43,18 @@ def main():
     registry = Registry(db_name)
     with registry.cursor() as cr:
         env = api.Environment(cr, odoo.SUPERUSER_ID, {})
+        old = env['ir.config_parameter'].get_param('pos_perfume.default_exchange_rate_usd_iqd')
+        print('القيمة الحالية في قاعدة البيانات:', old or '(غير موجود)')
         env['ir.config_parameter'].set_param('pos_perfume.default_exchange_rate_usd_iqd', '1510.0')
         cr.commit()
         value = env['ir.config_parameter'].get_param('pos_perfume.default_exchange_rate_usd_iqd')
-    print('تم التحديث. السعر الحالي:', value)
+    print('تم التحديث. السعر الآن:', value)
+    print('')
+    print('=' * 60)
+    print('مهم: Odoo يخزّن هذه القيمة في الذاكرة (cache).')
+    print('يجب إعادة تشغيل Odoo حتى يرى جميع المستخدمين 1510:')
+    print('  sudo systemctl restart odoo')
+    print('=' * 60)
     return 0
 
 if __name__ == '__main__':

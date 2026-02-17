@@ -6,6 +6,14 @@ import logging
 _logger = logging.getLogger(__name__)
 
 class PosPerfumeController(http.Controller):
+
+    @http.route('/pos_perfume/get_exchange_rate', type='json', auth='user')
+    def get_exchange_rate(self):
+        """إرجاع سعر الصرف لجميع المستخدمين (بدون الاعتماد على صلاحية ir.config_parameter)."""
+        rate = request.env['ir.config_parameter'].sudo().get_param(
+            'pos_perfume.default_exchange_rate_usd_iqd', '1510.0'
+        )
+        return float(rate) if rate else 1510.0
     
     @http.route('/pos_perfume/get_product_data', type='json', auth='user')
     def get_product_data(self, product_id, pricelist_id=None, uom_id=None, warehouse_id=None):

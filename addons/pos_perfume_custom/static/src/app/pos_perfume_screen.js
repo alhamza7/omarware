@@ -135,14 +135,10 @@ export class PosPerfumeScreen extends Component {
                 this.state.userName = window.odoo.session_info.name || window.odoo.session_info.username || 'Cashier';
             }
             
-            // Load exchange rate from settings
+            // Load exchange rate from backend (controller يستخدم sudo فلا يحتاج صلاحية للمستخدم)
             try {
-                const exchangeRateParam = await this.orm.call(
-                    'ir.config_parameter',
-                    'get_param',
-                    ['pos_perfume.default_exchange_rate_usd_iqd', '1510.0']
-                );
-                this.state.exchangeRate = parseFloat(exchangeRateParam) || 1510.0;
+                const rate = await rpc('/pos_perfume/get_exchange_rate', {});
+                this.state.exchangeRate = typeof rate === 'number' ? rate : (parseFloat(rate) || 1510.0);
                 console.log(`[POS Perfume] Loaded exchange rate: ${this.state.exchangeRate}`);
             } catch (error) {
                 console.warn('[POS Perfume] Failed to load exchange rate, using default 1510:', error);
