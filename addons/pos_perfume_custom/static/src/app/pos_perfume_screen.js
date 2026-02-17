@@ -6,6 +6,9 @@ import { _t } from "@web/core/l10n/translation";
 import { rpc } from "@web/core/network/rpc";
 import { CustomerSearch } from "./customer_search";
 
+/** سعر الصرف ثابت في الكود (لا يُجلب من قاعدة البيانات) - 1 USD = هذا المبلغ د.ع */
+const EXCHANGE_RATE_USD_IQD = 1510;
+
 /**
  * Main POS Perfume Screen Component - Enhanced like Sale Order
  * Dynamic product search, UoM selection, real warehouse stock
@@ -79,8 +82,8 @@ export class PosPerfumeScreen extends Component {
             fullPlasticFilterActive: null,  // true/false/null for full plastic filter
             csLocFilterActive: false,  // true to show CS/LOC products, false to hide them
             
-            // UI state
-            exchangeRate: 1510,  // Default, will be loaded from settings on mount
+            // UI state - سعر الصرف ثابت من الكود (EXCHANGE_RATE_USD_IQD)
+            exchangeRate: EXCHANGE_RATE_USD_IQD,
             
             // Navigation state for keyboard controls
             focusedCell: {
@@ -135,15 +138,7 @@ export class PosPerfumeScreen extends Component {
                 this.state.userName = window.odoo.session_info.name || window.odoo.session_info.username || 'Cashier';
             }
             
-            // Load exchange rate from backend - نفس القيمة لجميع المستخدمين (controller يستخدم sudo)
-            try {
-                const rate = await rpc('/pos_perfume/get_exchange_rate', {});
-                this.state.exchangeRate = typeof rate === 'number' ? rate : (parseFloat(rate) || 1510.0);
-                console.log('[POS Perfume] سعر الصرف من الخادم (لجميع المستخدمين):', this.state.exchangeRate);
-            } catch (error) {
-                console.warn('[POS Perfume] خطأ في جلب سعر الصرف، استخدام 1510:', error);
-                this.state.exchangeRate = 1510.0;
-            }
+            // سعر الصرف ثابت في الكود (EXCHANGE_RATE_USD_IQD) - لا جلب من قاعدة البيانات
             
             // Update time every minute
             setInterval(() => {
