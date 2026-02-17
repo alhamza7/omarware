@@ -125,7 +125,7 @@ Subtotal = Σ (Quantity × Unit Price)
 Total Discount = Σ (Quantity × Unit Price × Discount% / 100)
 Tax = 0 (currently)
 Grand Total (USD) = Subtotal - Total Discount + Tax
-Grand Total (IQD) = Grand Total (USD) × 1300
+Grand Total (IQD) = Grand Total (USD) × 1510
 ```
 
 #### مثال على الحسابات / Calculation Example:
@@ -151,7 +151,7 @@ Order Totals:
   Subtotal = (10×45) + (3×125) = $825.00 ✓
   Discount = (450×5%) + (375×0%) = $22.50 ✓
   Grand Total = 825.00 - 22.50 = $802.50 ✓
-  Total IQD = 802.50 × 1300 = 1,043,250 IQD ✓
+  Total IQD = 802.50 × 1510 = 1,211,775 IQD ✓
 ```
 
 ### 4. 🎨 نظام الألوان / Color System

@@ -71,7 +71,7 @@ export class PosPerfumeScreen extends Component {
             selectedRightProductIndex: 0,
             
             // UI state
-            exchangeRate: 1300,
+            exchangeRate: 1510,
             
             // Navigation state for keyboard controls
             focusedCell: {

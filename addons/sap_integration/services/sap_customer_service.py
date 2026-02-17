@@ -92,30 +92,34 @@ class SapCustomerService(SapBaseService):
             # Check if customer already exists in SAP
             existing_customer = self._find_sap_customer(connection, partner.ref)
             
+            returned_card_code = ''
             if existing_customer:
                 # Update existing customer
                 result = connection.update_business_partner(partner.ref, sap_data)
                 operation = 'Update Customer'
+                returned_card_code = partner.ref
             else:
-                # Create new customer
+                # Create new customer (SAP يُنشئ CardCode تلقائياً)
                 result = connection.create_business_partner(sap_data)
                 operation = 'Create Customer'
+                returned_card_code = result.get('CardCode', '') if result else ''
+                if returned_card_code:
+                    partner.sudo().write({'ref': returned_card_code, 'sap_synced': True})
             
             connection.close_session()
             
-            # Log successful sync
             self._log_success(
                 backend_id=backend_id,
                 operation=operation,
                 message=f'Successfully synced customer {partner.name} to SAP',
                 model_name='res.partner',
-                external_id=partner.ref,
+                external_id=returned_card_code,
                 odoo_id=partner.id
             )
             
             return {
                 'status': 'success',
-                'sap_card_code': partner.ref,
+                'sap_card_code': returned_card_code,
                 'message': f'Customer {partner.name} synced to SAP successfully'
             }
             

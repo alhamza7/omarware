@@ -146,7 +146,7 @@ F12 → Console
 **الحل:**
 ```
 1. تحقق من قيم الإدخال (أرقام صحيحة)
-2. تحقق من معدل التحويل IQD (1:1300)
+2. تحقق من معدل التحويل IQD (1:1510)
 3. راجع console للأخطاء
 ```
 
@@ -201,7 +201,7 @@ console.timeEnd('Calculate');
 ```javascript
 // في: static/src/app/perfume_product_screen.js
 formatIQD(amount) {
-    const iqdAmount = amount * 1300; // غير هذا الرقم / Change this number
+    const iqdAmount = amount * 1510; // غير هذا الرقم / Change this number
     return iqdAmount.toLocaleString('en-US') + ' IQD';
 }
 ```
