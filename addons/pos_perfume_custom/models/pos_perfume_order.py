@@ -178,16 +178,16 @@ class PosPerfumeOrder(models.Model):
     
     exchange_rate = fields.Float(
         string='Exchange Rate (USD to IQD)',
-        default=lambda self: float(self.env['ir.config_parameter'].sudo().get_param('pos_perfume.default_exchange_rate_usd_iqd', '1470.0')),
+        default=lambda self: float(self.env['ir.config_parameter'].sudo().get_param('pos_perfume.default_exchange_rate_usd_iqd', '1510.0')),
         digits=(12, 2),
-        help='Conversion rate from USD to IQD (e.g., 1470). Default value can be changed in Sales Settings.',
+        help='Conversion rate from USD to IQD (e.g., 1510). Default value can be changed in Sales Settings.',
         tracking=True
     )
     
     def action_update_exchange_rate(self):
         """Update exchange rate to current default value from settings"""
         default_rate = float(self.env['ir.config_parameter'].sudo().get_param(
-            'pos_perfume.default_exchange_rate_usd_iqd', '1470.0'
+            'pos_perfume.default_exchange_rate_usd_iqd', '1510.0'
         ))
         for order in self:
             order.exchange_rate = default_rate

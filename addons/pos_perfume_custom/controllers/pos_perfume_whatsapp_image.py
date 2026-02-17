@@ -138,7 +138,7 @@ class POSPerfumeWhatsAppImage(http.Controller):
             # Step 7: Prepare message
             exchange_rate = float(
                 request.env['ir.config_parameter'].sudo().get_param(
-                    'pos_perfume.default_exchange_rate_usd_iqd', '1470.0'
+                    'pos_perfume.default_exchange_rate_usd_iqd', '1510.0'
                 )
             )
             iqd_amount = order.amount_total * exchange_rate

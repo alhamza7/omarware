@@ -64,7 +64,7 @@ def update_pos_perfume_rate():
             
             current_rate = env['ir.config_parameter'].get_param(
                 'pos_perfume.default_exchange_rate_usd_iqd',
-                default='1470.0'
+                default='1510.0'
             )
             
             print(f"   📊 السعر الحالي: {current_rate} IQD")
