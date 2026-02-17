@@ -9,11 +9,8 @@ class PosPerfumeController(http.Controller):
 
     @http.route('/pos_perfume/get_exchange_rate', type='json', auth='user')
     def get_exchange_rate(self):
-        """إرجاع سعر الصرف لجميع المستخدمين (بدون الاعتماد على صلاحية ir.config_parameter)."""
-        rate = request.env['ir.config_parameter'].sudo().get_param(
-            'pos_perfume.default_exchange_rate_usd_iqd', '1510.0'
-        )
-        return float(rate) if rate else 1510.0
+        """نفس المصدر المستخدم في الطباعة: قراءة من DB بدون كاش لجميع المستخدمين."""
+        return request.env['pos.perfume.order'].sudo().get_exchange_rate_from_db()
     
     @http.route('/pos_perfume/get_product_data', type='json', auth='user')
     def get_product_data(self, product_id, pricelist_id=None, uom_id=None, warehouse_id=None):
