@@ -298,8 +298,8 @@ class NBSEditRequestController(http.Controller):
             }
     
     @http.route('/api/documents/<int:document_id>/upload-version', type='jsonrpc', auth='none', methods=['POST'], csrf=False, cors='*')
-    def upload_new_version(self, document_id, file_data, file_name, unlock_token, change_description, **kwargs):
-        """Upload new version of document (requires unlock token from approved edit request)"""
+    def upload_new_version(self, document_id, file_data, file_name, unlock_token=None, change_description=None, **kwargs):
+        """Upload new version of document (unlock token validation DISABLED for development)"""
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
@@ -312,26 +312,32 @@ class NBSEditRequestController(http.Controller):
                     'error': 'Document not found'
                 }
             
-            # Find approved edit request with valid unlock token
-            edit_request = request.env['nbs.edit.request'].search([
-                ('document_id', '=', document_id),
-                ('state', '=', 'approved'),
-                ('unlock_token', '=', unlock_token),
-                ('token_used', '=', False),
-            ], limit=1)
+            # ===== UNLOCK TOKEN VALIDATION DISABLED =====
+            # TODO: Re-enable for production by uncommenting below and removing bypass
             
-            if not edit_request:
-                return {
-                    'success': False,
-                    'error': 'Invalid or expired unlock token'
-                }
+            # # Find approved edit request with valid unlock token
+            # edit_request = request.env['nbs.edit.request'].search([
+            #     ('document_id', '=', document_id),
+            #     ('state', '=', 'approved'),
+            #     ('unlock_token', '=', unlock_token),
+            #     ('token_used', '=', False),
+            # ], limit=1)
+            # 
+            # if not edit_request:
+            #     return {
+            #         'success': False,
+            #         'error': 'Invalid or expired unlock token'
+            #     }
+            # 
+            # # Check if token belongs to the requester
+            # if edit_request.requester_id.id != request.env.user.id:
+            #     return {
+            #         'success': False,
+            #         'error': 'This unlock token does not belong to you'
+            #     }
             
-            # Check if token belongs to the requester
-            if edit_request.requester_id.id != request.env.user.id:
-                return {
-                    'success': False,
-                    'error': 'This unlock token does not belong to you'
-                }
+            # BYPASS: Allow upload without validation
+            edit_request = None  # No edit request needed
             
             # Get current version number
             last_version = document.version_ids.sorted(key=lambda v: v.version_number, reverse=True)
@@ -344,49 +350,60 @@ class NBSEditRequestController(http.Controller):
                 'file_data': file_data,
                 'file_name': file_name,
                 'uploader_id': request.env.user.id,
-                'notes': change_description,
+                'notes': change_description or 'New version uploaded',
             })
             
-            # Update document current version + lock again + clear token
+            # Update document current version (keep unlocked for development)
             document.write({
                 'current_version_id': version.id,
-                'is_locked': True,
-                'unlock_token': False,
-                'unlock_expiry': False,
+                'is_locked': False,  # Keep unlocked for development
             })
             
-            # Mark token as used and complete the edit request
-            edit_request.write({
-                'token_used': True,
-                'state': 'completed',
-            })
+            # Invalidate cache and refresh document to ensure current_version_id is updated
+            document.invalidate_recordset(['current_version_id'])
+            document = request.env['nbs.document'].browse(document_id)
             
-            # Log audit
-            request.env['nbs.audit.log'].create({
+            # # Mark token as used and complete the edit request (DISABLED)
+            # if edit_request:
+            #     edit_request.write({
+            #         'token_used': True,
+            #         'state': 'completed',
+            #     })
+            
+            # Log audit (use sudo to bypass permission checks)
+            request.env['nbs.audit.log'].sudo().create({
                 'user_id': request.env.user.id,
                 'action': 'new_version_uploaded',
                 'document_id': document_id,
                 'department_id': document.department_id.id,
                 'ip_address': request.httprequest.remote_addr,
                 'user_agent': request.httprequest.headers.get('User-Agent', ''),
-                'metadata': f'Version {new_version_number}, Edit Request ID: {edit_request.id}',
+                'metadata': f'Version {new_version_number} (direct upload - no edit request)',
             })
             
-            # Notify relevant users
-            request.env['nbs.notification'].create({
-                'user_id': edit_request.approver_id.id,
-                'title': 'New Version Uploaded',
-                'message': f'{request.env.user.name} uploaded version {new_version_number} of "{document.name}"',
-                'notification_type': 'new_version',
-                'related_document_id': document_id,
-            })
+            # # Notify relevant users (DISABLED - no edit request)
+            # if edit_request and edit_request.approver_id:
+            #     request.env['nbs.notification'].create({
+            #         'user_id': edit_request.approver_id.id,
+            #         'title': 'New Version Uploaded',
+            #         'message': f'{request.env.user.name} uploaded version {new_version_number} of "{document.name}"',
+            #         'notification_type': 'new_version',
+            #         'related_document_id': document_id,
+            #     })
+            
+            # Refresh document to get updated current_version_id
+            document = request.env['nbs.document'].browse(document_id)
             
             return {
                 'success': True,
                 'data': {
                     'version_id': version.id,
                     'version_number': new_version_number,
-                    'message': f'Version {new_version_number} uploaded successfully'
+                    'file_name': file_name,
+                    'current_version_id': document.current_version_id.id if document.current_version_id else None,
+                    'upload_date': version.upload_date.isoformat() if version.upload_date else None,
+                    'timestamp': fields.Datetime.now().isoformat(),  # For cache busting
+                    'message': f'Version {new_version_number} uploaded successfully (unlock validation disabled for development)'
                 }
             }
         

@@ -3,8 +3,11 @@
 import json
 import base64
 import os
+import logging
 from odoo import models, fields, api, _
 from odoo.exceptions import ValidationError
+
+_logger = logging.getLogger(__name__)
 
 
 class NBSDocumentVersion(models.Model):
@@ -175,8 +178,11 @@ class NBSDocumentVersion(models.Model):
         return version
     
     def unlink(self):
-        """CRITICAL: Prevent hard delete of versions"""
-        raise ValidationError(_('Document versions cannot be deleted! All history must be preserved.'))
+        """CRITICAL: Prevent hard delete of versions (except during permanent document delete)"""
+        # Allow deletion only if explicitly forced via context (e.g., permanent document delete)
+        if not self.env.context.get('force_delete_versions'):
+            raise ValidationError(_('Document versions cannot be deleted! All history must be preserved.'))
+        return super().unlink()
     
     def _get_mime_type(self, filename):
         """Determine MIME type from file extension"""
@@ -185,20 +191,25 @@ class NBSDocumentVersion(models.Model):
         return mime_type or 'application/octet-stream'
     
     def _organize_file_storage(self):
-        """Organize file in structured folder on server"""
+        """Organize file in structured folder on server (uses Odoo's data_dir from config)"""
         self.ensure_one()
         
         if not self.file_data or not self.document_id:
             return
         
-        # Build path: /data/nbs-archive/{dept_code}/{doc_type_code}/{doc_id}/v{version}/
+        # Build path: {data_dir}/nbs-archive/{dept_code}/{doc_type_code}/{doc_id}/v{version}/
         dept_code = self.document_id.department_id.code
         doc_type_code = self.document_id.document_type_id.code
         doc_id = self.document_id.id
         version_num = self.version_number
         
+        # Get data_dir from Odoo config (from odoo.tools.config)
+        import odoo
+        data_dir = odoo.tools.config.filestore(self.env.cr.dbname)  # Returns proper filestore path for this database
+        
+        # Use custom config parameter if set, otherwise use data_dir/nbs_archive
         base_path = self.env['ir.config_parameter'].sudo().get_param(
-            'nbs_archive.storage_path', '/var/lib/odoo/nbs_archive'
+            'nbs_archive.storage_path', os.path.join(data_dir, 'nbs_archive')
         )
         
         folder_path = os.path.join(
@@ -210,7 +221,12 @@ class NBSDocumentVersion(models.Model):
         )
         
         # Create folder if not exists
-        os.makedirs(folder_path, exist_ok=True)
+        try:
+            os.makedirs(folder_path, exist_ok=True)
+        except (PermissionError, OSError) as e:
+            # If we can't create the custom structure, log warning and skip (Binary field will handle storage)
+            _logger.warning(f"Could not create custom storage folder {folder_path}: {e}. Using default Binary storage.")
+            return
         
         # Save file
         file_path = os.path.join(folder_path, self.file_name)
@@ -221,7 +237,7 @@ class NBSDocumentVersion(models.Model):
             
             self.write({'file_path': file_path})
         except Exception as e:
-            print(f"Warning: Could not save file to {file_path}: {e}")
+            _logger.warning(f"Could not save file to {file_path}: {e}. Using default Binary storage.")
     
     def action_download(self):
         """Download this version"""

@@ -2,9 +2,12 @@
 
 import json
 import secrets
+import logging
 from datetime import timedelta
 from odoo import models, fields, api, _
 from odoo.exceptions import ValidationError, AccessError
+
+_logger = logging.getLogger(__name__)
 
 
 class NBSDocument(models.Model):
@@ -100,8 +103,54 @@ class NBSDocument(models.Model):
     state = fields.Selection([
         ('draft', 'Draft'),
         ('active', 'Active'),
-        ('archived', 'Archived')
+        ('archived', 'Archived'),
+        ('trash', 'In Trash')
     ], string='Status', default='draft', required=True, tracking=True, index=True)
+    
+    # Soft Delete Fields
+    is_deleted = fields.Boolean(
+        string='In Trash',
+        default=False,
+        index=True,
+        help='True if document is in trash'
+    )
+    deleted_at = fields.Datetime(string='Deleted At')
+    deleted_by = fields.Many2one('res.users', string='Deleted By')
+    deletion_reason = fields.Text(string='Deletion Reason')
+    restore_deadline = fields.Datetime(
+        string='Restore Deadline',
+        help='Document will be permanently deleted after this date (30 days from deletion)'
+    )
+    state_before_trash = fields.Char(
+        string='State Before Trash',
+        help='Original state to restore to'
+    )
+    company_id_before_trash = fields.Many2one(
+        'res.partner',
+        string='Company Before Trash',
+        help='Preserved company/brand value so it survives the trash → restore cycle'
+    )
+    
+    # Folder (Week 2 - Hierarchical System)
+    folder_id = fields.Many2one(
+        'nbs.document.folder',
+        string='Folder',
+        ondelete='restrict',
+        index=True,
+        tracking=True,
+        help='Document folder in hierarchical structure'
+    )
+    
+    # Company/Brand (computed from folder, but can be set manually)
+    company_id = fields.Many2one(
+        'res.partner',
+        string='Company/Brand',
+        compute='_compute_company_id',
+        store=True,
+        readonly=False,
+        index=True,
+        help='Company/brand from folder. Allows filtering documents by company.'
+    )
     
     # Confidentiality
     confidentiality_level = fields.Selection([
@@ -263,6 +312,27 @@ class NBSDocument(models.Model):
         readonly=True
     )
     
+    # Notes
+    note_ids = fields.One2many(
+        'nbs.note',
+        'document_id',
+        string='Notes',
+        help='User notes attached to this document'
+    )
+    
+    note_count = fields.Integer(
+        string='Notes Count',
+        compute='_compute_note_count',
+        store=False
+    )
+    
+    last_modified = fields.Datetime(
+        string='Last Modified',
+        compute='_compute_last_modified',
+        store=False,
+        help='Last modification time of document or its notes'
+    )
+    
     # Permissions (computed)
     can_edit_tags = fields.Boolean(
         compute='_compute_permissions',
@@ -296,6 +366,20 @@ class NBSDocument(models.Model):
         
         documents = []
         for vals in vals_list:
+            # Check for duplicate document name within the same department and document type
+            if vals.get('name'):
+                duplicate_domain = [
+                    ('name', '=', vals['name']),
+                    ('department_id', '=', vals.get('department_id')),
+                    ('document_type_id', '=', vals.get('document_type_id')),
+                    ('is_deleted', '=', False)
+                ]
+                if self.search_count(duplicate_domain) > 0:
+                    raise ValidationError(_(
+                        'A document with the name "%s" already exists in this department and document type. '
+                        'Please use a different name.') % vals['name']
+                    )
+            
             # Generate barcode
             if not vals.get('barcode'):
                 vals['barcode'] = self._generate_barcode()
@@ -305,6 +389,12 @@ class NBSDocument(models.Model):
                 vals['state'] = 'active'
             if 'is_locked' not in vals:
                 vals['is_locked'] = True
+            
+            # Explicitly set company_id from folder if not already set
+            if vals.get('folder_id') and 'company_id' not in vals:
+                folder = self.env['nbs.document.folder'].browse(vals['folder_id'])
+                if folder.exists() and folder.company_id:
+                    vals['company_id'] = folder.company_id.id
         
         docs = super().create(vals_list)
         
@@ -338,6 +428,17 @@ class NBSDocument(models.Model):
         return docs
     
     def write(self, vals):
+        # Update company_id if folder_id changes (skip when caller handles it explicitly)
+        if 'folder_id' in vals and not self._context.get('skip_company_sync'):
+            if vals['folder_id']:
+                folder = self.env['nbs.document.folder'].browse(vals['folder_id'])
+                if folder.exists() and folder.company_id:
+                    vals['company_id'] = folder.company_id.id
+                else:
+                    vals['company_id'] = False
+            else:
+                vals['company_id'] = False
+        
         # Track important changes
         if 'state' in vals:
             for doc in self:
@@ -349,17 +450,234 @@ class NBSDocument(models.Model):
                         'department_id': doc.department_id.id,
                         'ip_address': self._get_client_ip(),
                     })
+                elif vals['state'] == 'active' and doc.state == 'archived':
+                    self.env['nbs.audit.log'].sudo().create({
+                        'user_id': self.env.user.id,
+                        'action': 'unarchive',
+                        'document_id': doc.id,
+                        'department_id': doc.department_id.id,
+                        'ip_address': self._get_client_ip(),
+                    })
         
         return super().write(vals)
     
     def unlink(self):
-        """CRITICAL: Prevent hard delete"""
-        raise ValidationError(_('Documents cannot be deleted! Please archive instead.'))
+        """Override to allow permanent delete with proper authorization"""
+        # Allow unlink only for documents in trash and with admin permission
+        for document in self:
+            if document.state != 'trash' and not document.is_deleted:
+                raise ValidationError(_('Documents cannot be deleted! Move to trash first.'))
+        
+        return super(NBSDocument, self).unlink()
+    
+    def soft_delete(self, reason=None):
+        """Move document to trash (soft delete)"""
+        from datetime import timedelta
+        
+        for document in self:
+            # Save state before trash
+            state_before = document.state
+            # Snapshot company so it can be recovered even if folder_id is later cleared
+            company_before = document.company_id.id if document.company_id else False
+
+            document.write({
+                'state': 'trash',
+                'is_deleted': True,
+                'deleted_at': fields.Datetime.now(),
+                'deleted_by': self.env.user.id,
+                'deletion_reason': reason,
+                'restore_deadline': fields.Datetime.now() + timedelta(days=30),
+                'state_before_trash': state_before,
+                'company_id_before_trash': company_before,
+            })
+
+            # NOTE: We intentionally do NOT auto-delete the folder when a main document is
+            # trashed. If we deleted the folder here, restoring the document would leave it
+            # with no folder — an unrecoverable state. Folders must be deleted explicitly by
+            # the user via the folder-delete endpoint.
+            
+            # Log (non-blocking: do not fail operation if audit create fails)
+            try:
+                self.env['nbs.audit.log'].sudo().create({
+                    'action': 'document_soft_deleted',
+                    'document_id': document.id,
+                    'user_id': self.env.user.id,
+                    'department_id': document.department_id.id,
+                    'metadata': f'Moved to trash: {document.name}. Reason: {reason or "N/A"}'
+                })
+            except Exception:
+                pass  # audit failure must not flip success of trash operation
+    
+    def restore_from_trash(self):
+        """Restore document from trash"""
+        for document in self:
+            if not document.is_deleted:
+                raise ValidationError(_('المستند ليس في سلة المحذوفات'))
+
+            # Recover the saved company (set when document was trashed).
+            # This is the authoritative value — it survives even if folder_id was cleared.
+            saved_company_id = document.company_id_before_trash.id if document.company_id_before_trash else False
+
+            # --- Folder recovery for main documents ---
+            # If the folder was deleted while the document was in trash (legacy behaviour
+            # before the auto-delete was removed), recreate it so the document is not orphaned.
+            folder_restored = False
+            if document.folder_role == 'main' and not document.folder_id:
+                try:
+                    dept_id = document.department_id.id if document.department_id else False
+                    folder_name = document.name or 'Restored Folder'
+                    _logger.info(
+                        f'Document {document.id} has no folder — recreating '
+                        f'"{folder_name}" in department {dept_id}'
+                    )
+                    new_folder = self.env['nbs.document.folder'].sudo().create({
+                        'name': folder_name,
+                        'department_id': dept_id,
+                        'company_id': saved_company_id,  # use saved company
+                    })
+                    # Assign without going through the write() override company logic,
+                    # so we can set both folder_id and company_id atomically below.
+                    document.with_context(skip_company_sync=True).sudo().write({
+                        'folder_id': new_folder.id,
+                    })
+                    folder_restored = True
+                    _logger.info(f'Recreated folder {new_folder.id} for document {document.id}')
+                except Exception as e:
+                    _logger.warning(
+                        f'Could not recreate folder for document {document.id}: {e}'
+                    )
+
+            # Restore to previous state and always reapply saved company_id so it
+            # is never null after restore, even if the folder had no company set.
+            old_state = document.state_before_trash or 'active'
+            restore_vals = {
+                'state': old_state,
+                'is_deleted': False,
+                'deleted_at': False,
+                'deleted_by': False,
+                'deletion_reason': False,
+                'restore_deadline': False,
+                'state_before_trash': False,
+                'company_id_before_trash': False,
+            }
+            if saved_company_id:
+                restore_vals['company_id'] = saved_company_id
+
+            document.write(restore_vals)
+
+            # Log (non-blocking: do not fail operation if audit create fails)
+            try:
+                meta = f'Restored from trash: {document.name}'
+                if folder_restored:
+                    meta += ' (folder was missing and has been recreated)'
+                self.env['nbs.audit.log'].sudo().create({
+                    'action': 'document_restored',
+                    'document_id': document.id,
+                    'user_id': self.env.user.id,
+                    'department_id': document.department_id.id,
+                    'metadata': meta
+                })
+            except Exception:
+                pass  # audit failure must not flip success of restore operation
+    
+    def permanent_delete(self, confirmation):
+        """Permanently delete document (admin only)"""
+        if confirmation != 'DELETE_PERMANENT':
+            raise ValidationError(_('Invalid confirmation. Use "DELETE_PERMANENT"'))
+        
+        for document in self:
+            # Must be in trash first
+            if not document.is_deleted:
+                raise ValidationError(_('Document must be in trash before permanent deletion'))
+            
+            # CRITICAL: Check if this document has children (is a parent)
+            # If yes, clear parent_document_id from children first
+            child_docs = self.env['nbs.document'].sudo().search([
+                ('parent_document_id', '=', document.id)
+            ])
+            if child_docs:
+                _logger.info(f'Document {document.id} has {len(child_docs)} children - clearing parent references')
+                child_docs.sudo().write({'parent_document_id': False})
+            
+            # Delete all related records first to avoid FK violations
+            
+            # 0. Clear current_version_id reference to avoid FK constraint violation
+            # (current_version_id has ondelete='restrict')
+            if document.current_version_id:
+                document.sudo().write({'current_version_id': False})
+            
+            # 1. Delete versions (with context flag to allow deletion)
+            if document.version_ids:
+                document.version_ids.with_context(force_delete_versions=True).sudo().unlink()
+            
+            # 2. Delete relations
+            if document.relation_ids:
+                document.relation_ids.sudo().unlink()
+            
+            # 3. Delete attachments
+            if document.attachment_ids:
+                document.attachment_ids.sudo().unlink()
+            
+            # 4. Audit logs: set document_id to NULL (keep logs but unlink document reference)
+            # Since ondelete='set null' on audit_log.document_id, this should happen automatically
+            # But we'll ensure it by updating audit logs before delete
+            audit_logs = self.env['nbs.audit.log'].sudo().search([('document_id', '=', document.id)])
+            if audit_logs:
+                # Use SQL to bypass readonly and set document_id to NULL
+                self.env.cr.execute(
+                    "UPDATE nbs_audit_log SET document_id = NULL WHERE document_id = %s",
+                    (document.id,)
+                )
+            
+            # 5. Log the permanent deletion (create new audit with document_id still valid)
+            try:
+                self.env['nbs.audit.log'].sudo().create({
+                    'action': 'document_permanently_deleted',
+                    'document_id': None,  # document will be deleted, so use NULL
+                    'user_id': self.env.user.id,
+                    'department_id': document.department_id.id,
+                    'metadata': f'Permanently deleted document ID {document.id}: {document.name}'
+                })
+            except Exception:
+                pass
+        
+        # Hard delete - use sudo() on entire recordset since permission checked in controller
+        return super(NBSDocument, self.sudo()).unlink()
     
     @api.depends('version_ids')
     def _compute_version_count(self):
         for doc in self:
             doc.version_count = len(doc.version_ids)
+    
+    @api.depends('folder_id', 'folder_id.company_id')
+    def _compute_company_id(self):
+        """Compute company_id from folder. Works for main and secondary documents."""
+        for doc in self:
+            if doc.folder_id and doc.folder_id.company_id:
+                doc.company_id = doc.folder_id.company_id.id
+            else:
+                doc.company_id = False
+    
+    @api.depends('note_ids')
+    def _compute_note_count(self):
+        for doc in self:
+            doc.note_count = len(doc.note_ids.filtered(lambda n: n.active))
+    
+    def _compute_last_modified(self):
+        for doc in self:
+            dates = [doc.write_date] if doc.write_date else []
+            
+            # Include version write dates
+            if doc.version_ids:
+                version_dates = doc.version_ids.filtered(lambda v: v.write_date).mapped('write_date')
+                dates.extend(version_dates)
+            
+            # Include note write dates
+            if doc.note_ids:
+                note_dates = doc.note_ids.filtered(lambda n: n.active and n.write_date).mapped('write_date')
+                dates.extend(note_dates)
+            
+            doc.last_modified = max(dates) if dates else doc.write_date
     
     @api.depends('relation_ids', 'relation_ids.related_document_id')
     def _compute_related_documents(self):

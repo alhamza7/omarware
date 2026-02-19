@@ -38,4 +38,10 @@ access_nbs_document_attachment_admin,nbs.document.attachment.admin,model_nbs_doc
 access_nbs_folder_workflow_admin,nbs.folder.workflow.admin,model_nbs_folder_workflow,group_nbs_admin,1,1,1,0
 access_nbs_folder_workflow_state_admin,nbs.folder.workflow.state.admin,model_nbs_folder_workflow_state,group_nbs_admin,1,1,1,0
 access_nbs_folder_workflow_transition_admin,nbs.folder.workflow.transition.admin,model_nbs_folder_workflow_transition,group_nbs_admin,1,1,1,0
+access_nbs_note_user,nbs.note.user,model_nbs_note,group_nbs_user,1,1,1,1
+access_nbs_note_manager,nbs.note.manager,model_nbs_note,group_nbs_manager,1,1,1,1
+access_nbs_note_admin,nbs.note.admin,model_nbs_note,group_nbs_admin,1,1,1,1
+access_nbs_bulk_upload_job_user,nbs.bulk.upload.job.user,model_nbs_bulk_upload_job,group_nbs_user,1,1,1,0
+access_nbs_bulk_upload_job_manager,nbs.bulk.upload.job.manager,model_nbs_bulk_upload_job,group_nbs_manager,1,1,1,0
+access_nbs_bulk_upload_job_admin,nbs.bulk.upload.job.admin,model_nbs_bulk_upload_job,group_nbs_admin,1,1,1,1
 
