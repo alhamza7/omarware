@@ -116,8 +116,9 @@ class NBSRelationsController(http.Controller):
     #   GET  /api/documents/<document_id>/attachments/<id>/download (type='http')
     
     @http.route('/api/folders', type='jsonrpc', auth='none', methods=['POST'], csrf=False, cors='*')
-    def get_folders(self, department_id=None, folder_type=None, state='active', company_id=None, **kwargs):
-        """Get list of folders. Supports filtering by department, company/brand, and state."""
+    def get_folders(self, department_id=None, folder_type=None, state='active',
+                    company_id=None, from_date=None, to_date=None, **kwargs):
+        """Get list of folders. Supports filtering by department, company/brand, state, and date range."""
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized', 'data': []}
@@ -127,7 +128,13 @@ class NBSRelationsController(http.Controller):
                 domain.append(('department_id', '=', department_id))
             if company_id:
                 domain.append(('company_id', '=', company_id))
-            # folder_type not on nbs.document.folder; filter ignored
+            if folder_type:
+                domain.append(('folder_type', '=', folder_type))
+            # Date range filter on create_date
+            if from_date:
+                domain.append(('create_date', '>=', from_date))
+            if to_date:
+                domain.append(('create_date', '<=', to_date))
 
             folders = request.env['nbs.document.folder'].search(domain, order='create_date desc')
 
@@ -159,7 +166,7 @@ class NBSRelationsController(http.Controller):
             }
     
     @http.route('/api/folders/<int:folder_id>/documents', type='jsonrpc', auth='none', methods=['POST'], csrf=False, cors='*')
-    def get_folder_documents(self, folder_id, **kwargs):
+    def get_folder_documents(self, folder_id, from_date=None, to_date=None, **kwargs):
         """Get all documents in a folder"""
         try:
             if not ensure_jwt_user_id():
@@ -173,26 +180,29 @@ class NBSRelationsController(http.Controller):
                     'error': 'Folder not found'
                 }
             
-            # Get documents using folder_id (Many2one) to ensure we get documents that have this as their primary folder
-            # Also check Many2many (folder_ids) for documents linked to this folder
+            # Get documents via folder_id (Many2one) and folder_ids (Many2many), excluding deleted
             docs_via_folder_id = request.env['nbs.document'].search([
                 ('folder_id', '=', folder_id),
                 ('is_deleted', '=', False)
             ])
-            
-            # Union with Many2many (folder.document_ids) but filter out deleted
             docs_via_many2many = folder.document_ids.filtered(lambda d: not d.is_deleted)
-            
-            # Combine both (use recordset union to avoid duplicates)
-            all_docs = docs_via_folder_id | docs_via_many2many
-            
+            all_doc_ids = list(set(docs_via_folder_id.ids + docs_via_many2many.ids))
+
+            # Apply date filters via ORM for proper type handling
+            doc_domain = [('id', 'in', all_doc_ids)]
+            if from_date:
+                doc_domain.append(('upload_date', '>=', from_date))
+            if to_date:
+                doc_domain.append(('upload_date', '<=', to_date))
+            all_docs = request.env['nbs.document'].search(doc_domain)
+
             # Calculate updated_at
             updated_at = None
             if all_docs:
                 write_dates = [doc.write_date for doc in all_docs if doc.write_date]
                 if write_dates:
                     updated_at = max(write_dates).isoformat()
-            
+
             return {
                 'success': True,
                 'folder': {

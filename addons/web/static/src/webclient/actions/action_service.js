@@ -422,7 +422,12 @@ export function makeActionManager(env, router = _router) {
         } catch {
             // do nothing, the action might simply not be serializable
         }
-        action.context = makeContext([context, action.context], user.context);
+        // Provide safe defaults for active_id, active_ids, active_model so that
+        // action context expressions referencing these names (e.g. from kanban
+        // dashboard buttons) do not throw when triggered via menu navigation where
+        // no active record is present.
+        const evalDefaults = { active_id: false, active_ids: [], active_model: null };
+        action.context = makeContext([context, action.context], Object.assign(evalDefaults, user.context));
         const domain = action.domain || [];
         action.domain =
             typeof domain === "string"
