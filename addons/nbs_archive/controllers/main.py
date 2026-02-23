@@ -12,24 +12,25 @@ class NBSMainController(http.Controller):
     """Main controller for CORS and common utilities"""
     
     def _get_allowed_origins(self):
-        """Get allowed CORS origins from config"""
+        """Get allowed CORS origins from config (works with or without request.env / nodb)"""
         try:
-            config = request.env['ir.config_parameter'].sudo()
-            origins_str = config.get_param(
-                'nbs_archive.allowed_origins',
-                'http://localhost:5173,http://localhost:3000'
-            )
-            return [origin.strip() for origin in origins_str.split(',')]
-        except:
-            # Fallback if config not available
-            return ['http://localhost:5173', 'http://localhost:3000']
+            if getattr(request, 'env', None):
+                config = request.env['ir.config_parameter'].sudo()
+                origins_str = config.get_param(
+                    'nbs_archive.allowed_origins',
+                    'http://localhost:5173,http://localhost:3000'
+                )
+                return [origin.strip() for origin in origins_str.split(',')]
+        except Exception:
+            pass
+        return ['http://localhost:5173', 'http://localhost:3000', '*']
     
     def _set_cors_headers(self):
         """Set CORS headers for cross-origin requests"""
         origin = request.httprequest.headers.get('Origin')
         
-        # In development, allow all origins from localhost
-        if origin and 'localhost' in origin:
+        # In development or nodb, allow localhost and any origin
+        if origin and ('localhost' in origin or '127.0.0.1' in origin):
             headers = {
                 'Access-Control-Allow-Origin': origin,
                 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS, PATCH',
@@ -40,7 +41,8 @@ class NBSMainController(http.Controller):
         else:
             allowed_origins = self._get_allowed_origins()
             headers = {}
-            
+            if not origin:
+                origin = '*'
             if origin in allowed_origins or '*' in allowed_origins:
                 headers.update({
                     'Access-Control-Allow-Origin': origin or '*',

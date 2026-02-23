@@ -38,12 +38,34 @@ class NBSAuditLog(models.Model):
         ('new_version_uploaded', 'New Version Uploaded'),
         ('archive', 'Archive'),
         ('unarchive', 'Unarchive'),
+        ('document_updated', 'Document Updated'),
+        ('document_soft_deleted', 'Document Moved to Trash'),
+        ('document_restored', 'Document Restored from Trash'),
+        ('document_permanently_deleted', 'Document Permanently Deleted'),
         ('search', 'Search'),
         ('login', 'Login'),
         ('logout', 'Logout'),
         ('attachment_upload', 'Attachment Upload'),
+        ('attachment_updated', 'Attachment Updated'),
+        ('attachment_deleted', 'Attachment Deleted'),
+        ('attachment_restored', 'Attachment Restored'),
+        ('attachment_permanently_deleted', 'Attachment Permanently Deleted'),
+        ('multiple_attachments_upload', 'Multiple Attachments Upload'),
         ('signed_version_uploaded', 'Signed Version Uploaded'),
         ('relation_created', 'Relation Created'),
+        ('folder_created', 'Folder Created'),
+        ('folder_updated', 'Folder Updated'),
+        ('folder_deleted', 'Folder Deleted'),
+        ('folder_moved', 'Folder Moved'),
+        ('department_created', 'Department Created'),
+        ('department_updated', 'Department Updated'),
+        ('department_archived', 'Department Archived'),
+        ('document_type_created', 'Document Type Created'),
+        ('document_type_updated', 'Document Type Updated'),
+        ('document_type_archived', 'Document Type Archived'),
+        ('company_created', 'Company Created'),
+        ('company_updated', 'Company Updated'),
+        ('company_deleted', 'Company Deleted'),
     ], string='Action', required=True, readonly=True, index=True)
     
     document_id = fields.Many2one(
@@ -51,7 +73,15 @@ class NBSAuditLog(models.Model):
         string='Document',
         readonly=True,
         index=True,
-        ondelete='restrict'
+        ondelete='set null'
+    )
+    folder_id = fields.Many2one(
+        'nbs.document.folder',
+        string='Folder',
+        readonly=True,
+        index=True,
+        ondelete='set null',
+        help='Folder related to this audit log'
     )
     department_id = fields.Many2one(
         'nbs.department',

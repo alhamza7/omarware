@@ -103,13 +103,17 @@ class NBSAdminController(http.Controller):
 
             user = request.env.user
             
-            # Total documents (accessible by user)
-            total_documents = request.env['nbs.document'].search_count([('state', '=', 'active')])
+            # Total documents (accessible by user, excluding deleted)
+            total_documents = request.env['nbs.document'].search_count([
+                ('state', '=', 'active'),
+                ('is_deleted', '=', False)
+            ])
             
             # My uploaded documents
             my_documents = request.env['nbs.document'].search_count([
                 ('uploader_id', '=', user.id),
-                ('state', '=', 'active')
+                ('state', '=', 'active'),
+                ('is_deleted', '=', False)
             ])
             
             # Pending approvals (if manager)
@@ -125,7 +129,8 @@ class NBSAdminController(http.Controller):
             week_ago = datetime.now() - timedelta(days=7)
             recent_uploads = request.env['nbs.document'].search_count([
                 ('upload_date', '>=', week_ago),
-                ('state', '=', 'active')
+                ('state', '=', 'active'),
+                ('is_deleted', '=', False)
             ])
             
             # Unread notifications
@@ -134,18 +139,20 @@ class NBSAdminController(http.Controller):
                 ('is_read', '=', False)
             ])
             
-            # Documents by department
+            # Documents by department (excluding deleted)
             departments = request.env['nbs.department'].search([('active', '=', True)])
             by_department = []
             for dept in departments:
                 count = request.env['nbs.document'].search_count([
                     ('department_id', '=', dept.id),
-                    ('state', '=', 'active')
+                    ('state', '=', 'active'),
+                    ('is_deleted', '=', False)
                 ])
-                by_department.append({
-                    'department': dept.name,
-                    'count': count
-                })
+                if count > 0:  # Only include departments with documents
+                    by_department.append({
+                        'department': dept.name,
+                        'count': count
+                    })
             
             return {
                 'success': True,
@@ -204,8 +211,17 @@ class NBSAdminController(http.Controller):
             return {'success': False, 'error': str(e)}
     
     @http.route('/api/audit-logs', type='jsonrpc', auth='none', methods=['POST'], csrf=False, cors='*')
-    def get_audit_logs(self, document_id=None, action=None, date_from=None, date_to=None, page=1, per_page=50, **kwargs):
-        """Get audit logs (Admin only)"""
+    def get_audit_logs(self, document_id=None, folder_id=None, action=None, date_from=None, date_to=None, page=1, per_page=50, **kwargs):
+        """
+        Get audit logs (Admin only)
+        
+        Args:
+            document_id: Filter by specific document
+            folder_id: Filter by folder (includes folder logs + all document logs in that folder)
+            action: Filter by action type
+            date_from: Start date
+            date_to: End date
+        """
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
@@ -218,8 +234,37 @@ class NBSAdminController(http.Controller):
                 }
             
             domain = []
-            
-            if document_id:
+
+            # --- Filter by folder_id and/or document_id ---
+            # When both are provided we treat them as independent constraints joined
+            # with AND (the caller wants logs for that document AND for that folder).
+            # When only folder_id is given we return all logs that touch the folder
+            # (folder-level actions + every document inside it).
+            if folder_id and document_id:
+                # Specific document inside (or related to) a specific folder.
+                # Return logs that match the document OR the folder-level actions,
+                # i.e.  (document_id = Y  OR  folder_id = X)
+                domain += ['|',
+                           ('document_id', '=', document_id),
+                           ('folder_id', '=', folder_id)]
+
+            elif folder_id:
+                # All logs for the folder: folder-level entries plus every
+                # document that lives in it.
+                folder_docs = request.env['nbs.document'].search([
+                    ('folder_id', '=', folder_id)
+                ])
+                doc_ids_in_folder = folder_docs.ids
+
+                if doc_ids_in_folder:
+                    domain += ['|',
+                               ('folder_id', '=', folder_id),
+                               ('document_id', 'in', doc_ids_in_folder)]
+                else:
+                    # No documents in folder yet — only folder-level logs
+                    domain.append(('folder_id', '=', folder_id))
+
+            elif document_id:
                 domain.append(('document_id', '=', document_id))
             
             if action:
@@ -244,6 +289,8 @@ class NBSAdminController(http.Controller):
                     'action': log.action,
                     'document_id': log.document_id.id if log.document_id else None,
                     'document_title': log.document_id.name if log.document_id else None,
+                    'folder_id': log.folder_id.id if log.folder_id else None,
+                    'folder_name': log.folder_id.name if log.folder_id else None,
                     'department_id': log.department_id.id if log.department_id else None,
                     'department_name': log.department_id.name if log.department_id else None,
                     'timestamp': log.timestamp.isoformat() if log.timestamp else None,

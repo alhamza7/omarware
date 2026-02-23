@@ -116,36 +116,38 @@ class NBSRelationsController(http.Controller):
     #   GET  /api/documents/<document_id>/attachments/<id>/download (type='http')
     
     @http.route('/api/folders', type='jsonrpc', auth='none', methods=['POST'], csrf=False, cors='*')
-    def get_folders(self, department_id=None, folder_type=None, state='active', **kwargs):
-        """Get list of folders"""
+    def get_folders(self, department_id=None, folder_type=None, state='active', company_id=None, **kwargs):
+        """Get list of folders. Supports filtering by department, company/brand, and state."""
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized', 'data': []}
 
-            domain = [('state', '=', state)]
-            
+            domain = [('active', '=', (state == 'active'))]
             if department_id:
                 domain.append(('department_id', '=', department_id))
-            
-            if folder_type:
-                domain.append(('folder_type', '=', folder_type))
-            
+            if company_id:
+                domain.append(('company_id', '=', company_id))
+            # folder_type not on nbs.document.folder; filter ignored
+
             folders = request.env['nbs.document.folder'].search(domain, order='create_date desc')
-            
+
             return {
                 'success': True,
                 'data': [{
                     'id': folder.id,
                     'name': folder.name,
                     'code': folder.code,
-                    'folder_type': folder.folder_type,
+                    'folder_type': getattr(folder, 'folder_type', None),
                     'department_id': folder.department_id.id,
                     'department_name': folder.department_id.name,
+                    'company_id': folder.company_id.id if folder.company_id else None,
+                    'company_name': folder.company_id.name if folder.company_id else None,
                     'description': folder.description,
                     'document_count': folder.document_count,
-                    'owner_name': folder.owner_id.name,
+                    'owner_name': folder.created_by.name if folder.created_by else None,
                     'create_date': folder.create_date.isoformat() if folder.create_date else None,
-                    'state': folder.state,
+                    'last_modified': folder.last_modified.isoformat() if folder.last_modified else None,
+                    'state': 'active' if folder.active else 'archived',
                 } for folder in folders]
             }
         
@@ -171,6 +173,26 @@ class NBSRelationsController(http.Controller):
                     'error': 'Folder not found'
                 }
             
+            # Get documents using folder_id (Many2one) to ensure we get documents that have this as their primary folder
+            # Also check Many2many (folder_ids) for documents linked to this folder
+            docs_via_folder_id = request.env['nbs.document'].search([
+                ('folder_id', '=', folder_id),
+                ('is_deleted', '=', False)
+            ])
+            
+            # Union with Many2many (folder.document_ids) but filter out deleted
+            docs_via_many2many = folder.document_ids.filtered(lambda d: not d.is_deleted)
+            
+            # Combine both (use recordset union to avoid duplicates)
+            all_docs = docs_via_folder_id | docs_via_many2many
+            
+            # Calculate updated_at
+            updated_at = None
+            if all_docs:
+                write_dates = [doc.write_date for doc in all_docs if doc.write_date]
+                if write_dates:
+                    updated_at = max(write_dates).isoformat()
+            
             return {
                 'success': True,
                 'folder': {
@@ -180,7 +202,11 @@ class NBSRelationsController(http.Controller):
                     'description': folder.description,
                     'department_id': folder.department_id.id if folder.department_id else None,
                     'department_name': folder.department_id.name if folder.department_id else None,
-                    'main_document_id': folder.main_document_id.id if folder.main_document_id else None,
+                    'document_count': len(all_docs),
+                    'note_count': folder.note_count,
+                    'user_note': folder.user_note,
+                    'last_modified': folder.last_modified.isoformat() if folder.last_modified else None,
+                    'updated_at': updated_at,
                 },
                 'data': [{
                     'id': doc.id,
@@ -191,9 +217,10 @@ class NBSRelationsController(http.Controller):
                     'status': doc.state,
                     'parent_document_id': doc.parent_document_id.id if doc.parent_document_id else None,
                     'parent_title': doc.parent_document_id.name if doc.parent_document_id else None,
+                    'relation_type': 'attachment' if doc.parent_document_id and getattr(doc, 'is_attachment', False) else ('secondary_document' if doc.parent_document_id else None),
                     'folder_role': getattr(doc, 'folder_role', None),
                     'is_attachment': getattr(doc, 'is_attachment', False),
-                } for doc in folder.document_ids]
+                } for doc in all_docs]
             }
         
         except Exception as e:
@@ -204,24 +231,36 @@ class NBSRelationsController(http.Controller):
             }
     
     @http.route('/api/folders/create', type='jsonrpc', auth='none', methods=['POST'], csrf=False, cors='*')
-    def create_folder(self, name, code, department_id, folder_type='other', description=None, document_ids=None, **kwargs):
-        """Create new folder"""
+    def create_folder(self, name, code, department_id, folder_type='other', description=None, document_ids=None, company_id=None, **kwargs):
+        """Create new folder. Accepts named args or a single dict as first arg (params: [{"name":"...", "code":"...", "department_id": 1, "company_id": 1}])."""
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
 
-            vals = {
-                'name': name,
-                'code': code,
-                'department_id': department_id,
-                'folder_type': folder_type,
-                'description': description,
-                'state': 'active',
-            }
-            
+            if isinstance(name, dict):
+                payload = name
+                vals = {
+                    'name': payload.get('name') or 'New Folder',
+                    'code': payload.get('code') or payload.get('name') or 'F',
+                    'department_id': payload.get('department_id'),
+                    'company_id': payload.get('company_id') or False,
+                    'description': payload.get('description'),
+                    'active': True,
+                    'owner_id': request.env.user.id,
+                }
+                document_ids = payload.get('document_ids') or document_ids
+            else:
+                vals = {
+                    'name': name,
+                    'code': code or name,
+                    'department_id': department_id,
+                    'company_id': company_id if company_id else False,
+                    'description': description,
+                    'active': True,
+                    'owner_id': request.env.user.id,
+                }
             if document_ids:
-                vals['document_ids'] = [(6, 0, document_ids)]
-            
+                vals['document_ids'] = [(6, 0, document_ids)] if isinstance(document_ids, list) else [(6, 0, [document_ids])]
             folder = request.env['nbs.document.folder'].create(vals)
             
             return {

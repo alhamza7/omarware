@@ -55,134 +55,8 @@ class NBSDocumentRelation(models.Model):
                 raise ValidationError(_('لا يمكن ربط المستند بنفسه'))
 
 
-class NBSDocumentFolder(models.Model):
-    _name = 'nbs.document.folder'
-    _description = 'Document Folder (إضبارة)'
-    _inherit = ['mail.thread', 'mail.activity.mixin']
-    _order = 'create_date desc'
-    
-    name = fields.Char(
-        string='اسم الإضبارة',
-        required=True,
-        tracking=True
-    )
-    code = fields.Char(
-        string='الرمز',
-        required=True,
-        index=True,
-        tracking=True
-    )
-    department_id = fields.Many2one(
-        'nbs.department',
-        string='القسم',
-        required=True,
-        index=True
-    )
-    folder_type = fields.Selection([
-        ('project', 'مشروع'),
-        ('client', 'عميل'),
-        ('shipment', 'شحنة'),
-        ('case', 'قضية'),
-        ('contract', 'عقد'),
-        ('employee', 'موظف'),
-        ('other', 'أخرى'),
-    ], string='نوع الإضبارة', required=True, default='other')
-    
-    description = fields.Text(string='الوصف')
-    
-    document_ids = fields.Many2many(
-        'nbs.document',
-        'folder_document_rel',
-        'folder_id',
-        'document_id',
-        string='المستندات'
-    )
-    main_document_id = fields.Many2one(
-        'nbs.document',
-        string='الوثيقة الرئيسية',
-        ondelete='restrict',
-        index=True,
-        tracking=True,
-        help='Main (root) document for this folder.'
-    )
-
-    workflow_id = fields.Many2one(
-        'nbs.folder.workflow',
-        string='Workflow',
-        ondelete='restrict',
-        index=True,
-        help='Workflow configuration for this folder.'
-    )
-    workflow_state_id = fields.Many2one(
-        'nbs.folder.workflow.state',
-        string='Current Workflow State',
-        ondelete='restrict',
-        index=True,
-        tracking=True,
-        help='Current state of this folder in its workflow.'
-    )
-    document_count = fields.Integer(
-        string='عدد المستندات',
-        compute='_compute_document_count',
-        store=True
-    )
-    
-    parent_folder_id = fields.Many2one(
-        'nbs.document.folder',
-        string='الإضبارة الأم',
-        ondelete='restrict'
-    )
-    child_folder_ids = fields.One2many(
-        'nbs.document.folder',
-        'parent_folder_id',
-        string='الإضبارات الفرعية'
-    )
-    
-    owner_id = fields.Many2one(
-        'res.users',
-        string='المسؤول',
-        default=lambda self: self.env.user,
-        required=True
-    )
-    
-    state = fields.Selection([
-        ('draft', 'مسودة'),
-        ('active', 'نشط'),
-        ('completed', 'مكتمل'),
-        ('archived', 'مؤرشف'),
-    ], string='الحالة', default='draft', required=True, tracking=True)
-    
-    # Metadata fields
-    reference_number = fields.Char(string='رقم المرجع', index=True)
-    start_date = fields.Date(string='تاريخ البداية')
-    end_date = fields.Date(string='تاريخ الانتهاء')
-    
-    tags = fields.Many2many(
-        'nbs.document.tag',
-        string='الوسوم'
-    )
-    
-    color = fields.Integer(string='Color Index', default=0)
-    
-    active = fields.Boolean(default=True)
-    
-    @api.depends('document_ids')
-    def _compute_document_count(self):
-        for folder in self:
-            folder.document_count = len(folder.document_ids)
-    
-    @api.constrains('parent_folder_id')
-    def _check_parent_folder(self):
-        for folder in self:
-            if folder.parent_folder_id:
-                # Check for circular reference
-                parent = folder.parent_folder_id
-                visited = set()
-                while parent:
-                    if parent.id in visited:
-                        raise ValidationError(_('لا يمكن إنشاء علاقة دائرية بين الإضبارات'))
-                    visited.add(parent.id)
-                    parent = parent.parent_folder_id
+# NOTE: nbs.document.folder is now defined in nbs_folder.py (Week 2 - Hierarchical system)
+# Old "Dossier/Case File" concept has been replaced with modern folder hierarchy
 
 
 class NBSDocumentAttachment(models.Model):
@@ -232,6 +106,21 @@ class NBSDocumentAttachment(models.Model):
         ('other', 'أخرى'),
     ], string='نوع المرفق', default='supporting')
     
+    # Soft Delete Fields
+    is_deleted = fields.Boolean(
+        string='محذوف',
+        default=False,
+        index=True,
+        help='True if attachment is in trash'
+    )
+    deleted_at = fields.Datetime(string='تاريخ الحذف')
+    deleted_by = fields.Many2one('res.users', string='حذف بواسطة')
+    deletion_reason = fields.Text(string='سبب الحذف')
+    restore_deadline = fields.Datetime(
+        string='موعد الحذف النهائي',
+        help='Permanent deletion after this date (30 days from deletion)'
+    )
+    
     @api.depends('file_name')
     def _compute_file_type(self):
         for attachment in self:
@@ -245,15 +134,88 @@ class NBSDocumentAttachment(models.Model):
     def create(self, vals):
         attachment = super().create(vals)
         
-        # Log attachment upload
-        self.env['nbs.audit.log'].sudo().create({
-            'user_id': self.env.user.id,
-            'action': 'attachment_upload',
-            'document_id': attachment.document_id.id,
-            'department_id': attachment.document_id.department_id.id,
-            'metadata': f'Attachment: {attachment.name}',
-        })
+        # Log attachment upload (non-blocking)
+        try:
+            self.env['nbs.audit.log'].sudo().create({
+                'user_id': self.env.user.id,
+                'action': 'attachment_upload',
+                'document_id': attachment.document_id.id,
+                'department_id': attachment.document_id.department_id.id,
+                'metadata': f'Attachment: {attachment.name}',
+            })
+        except Exception:
+            pass  # non-blocking
         
         return attachment
+    
+    def soft_delete(self, reason=None):
+        """Soft delete attachment - move to trash"""
+        from datetime import timedelta
+        
+        for attachment in self:
+            attachment.write({
+                'is_deleted': True,
+                'deleted_at': fields.Datetime.now(),
+                'deleted_by': self.env.user.id,
+                'deletion_reason': reason,
+                'restore_deadline': fields.Datetime.now() + timedelta(days=30)
+            })
+            
+            # Log (non-blocking)
+            try:
+                self.env['nbs.audit.log'].sudo().create({
+                    'user_id': self.env.user.id,
+                    'action': 'attachment_deleted',
+                    'document_id': attachment.document_id.id,
+                    'department_id': attachment.document_id.department_id.id,
+                    'metadata': f'Deleted attachment: {attachment.name}. Reason: {reason or "N/A"}'
+                })
+            except Exception:
+                pass  # non-blocking
+    
+    def restore(self):
+        """Restore attachment from trash"""
+        for attachment in self:
+            attachment.write({
+                'is_deleted': False,
+                'deleted_at': False,
+                'deleted_by': False,
+                'deletion_reason': False,
+                'restore_deadline': False
+            })
+            
+            # Log (non-blocking)
+            try:
+                self.env['nbs.audit.log'].sudo().create({
+                    'user_id': self.env.user.id,
+                    'action': 'attachment_restored',
+                    'document_id': attachment.document_id.id,
+                    'department_id': attachment.document_id.department_id.id,
+                    'metadata': f'Restored attachment: {attachment.name}'
+                })
+            except Exception:
+                pass  # non-blocking
+    
+    def permanent_delete(self):
+        """Permanently delete attachment"""
+        for attachment in self:
+            doc_id = attachment.document_id.id
+            dept_id = attachment.document_id.department_id.id
+            att_name = attachment.name
+            
+            # Log before deletion (non-blocking)
+            try:
+                self.env['nbs.audit.log'].sudo().create({
+                    'user_id': self.env.user.id,
+                    'action': 'attachment_permanently_deleted',
+                    'document_id': doc_id,
+                    'department_id': dept_id,
+                    'metadata': f'Permanently deleted attachment: {att_name}'
+                })
+            except Exception:
+                pass  # non-blocking
+            
+            # Delete
+            attachment.unlink()
 
 

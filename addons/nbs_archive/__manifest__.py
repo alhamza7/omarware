@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'NBS Archive System',
-    'version': '1.0.0',
+    'version': '2.0.0',
     'category': 'Document Management',
     'summary': 'Enterprise Document Archiving System for Noor Al Nibras (NBS)',
     'description': """

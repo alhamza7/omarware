@@ -94,6 +94,8 @@ class NBSSearchController(http.Controller):
                     'barcode': doc.barcode,
                     'file_name': doc.file_name,
                     'highlights': [],  # Will be populated by OpenSearch
+                    'parent_document_id': doc.parent_document_id.id if doc.parent_document_id else None,
+                    'relation_type': 'attachment' if doc.parent_document_id and doc.is_attachment else ('secondary_document' if doc.parent_document_id else None),
                 } for doc in documents],
                 'content_matches': content_results,
                 'pagination': {
@@ -118,6 +120,7 @@ class NBSSearchController(http.Controller):
         - folders (name/code/description)
         - documents (name/barcode/reference numbers)
         - attachments (name/file_name/description)
+        - notes (title/content)
         - OCR/content (if OpenSearch available)
         Returns a unified list with `entity_type`.
         """
@@ -134,7 +137,7 @@ class NBSSearchController(http.Controller):
             # Folders
             Folder = request.env['nbs.document.folder'].sudo()
             folder_domain = [
-                ('state', '=', 'active'),
+                ('active', '=', True),
                 '|', '|',
                 ('name', 'ilike', q),
                 ('code', 'ilike', q),
@@ -157,6 +160,7 @@ class NBSSearchController(http.Controller):
             Document = request.env['nbs.document'].sudo()
             doc_domain = [
                 ('state', '=', 'active'),
+                ('is_deleted', '=', False),
                 '|', '|', '|', '|', '|',
                 ('name', 'ilike', q),
                 ('barcode', 'ilike', q),
@@ -177,6 +181,8 @@ class NBSSearchController(http.Controller):
                     'document_type_name': doc.document_type_id.name if doc.document_type_id else None,
                     'uploader_name': doc.uploader_id.name if doc.uploader_id else None,
                     'upload_date': doc.upload_date.isoformat() if doc.upload_date else None,
+                    'parent_document_id': doc.parent_document_id.id if doc.parent_document_id else None,
+                    'relation_type': 'attachment' if doc.parent_document_id and doc.is_attachment else ('secondary_document' if doc.parent_document_id else None),
                 })
 
             # Attachments
@@ -199,6 +205,36 @@ class NBSSearchController(http.Controller):
                     'uploader_name': a.uploader_id.name if a.uploader_id else None,
                     'upload_date': a.upload_date.isoformat() if a.upload_date else None,
                 })
+
+            # Notes
+            Note = request.env['nbs.note'].sudo()
+            note_domain = [
+                ('active', '=', True),
+                '|',
+                ('title', 'ilike', q),
+                ('content', 'ilike', q),
+            ]
+            notes = Note.search(note_domain, limit=per_page, order='write_date desc')
+            for note in notes:
+                # Check access for current user
+                if note.can_user_access():
+                    results.append({
+                        'entity_type': 'note',
+                        'id': note.id,
+                        'title': note.title or (note.content[:50] + '...' if len(note.content) > 50 else note.content),
+                        'content': note.content[:200] if len(note.content) > 200 else note.content,
+                        'user_name': note.user_id.name if note.user_id else None,
+                        'document_id': note.document_id.id if note.document_id else None,
+                        'document_title': note.document_id.name if note.document_id else None,
+                        'folder_id': note.folder_id.id if note.folder_id else None,
+                        'folder_name': note.folder_id.name if note.folder_id else None,
+                        'department_name': note.department_id.name if note.department_id else None,
+                        'has_image': bool(note.image),
+                        'is_pinned': note.is_pinned,
+                        'color': note.color,
+                        'created_at': note.create_date.isoformat() if note.create_date else None,
+                        'updated_at': note.write_date.isoformat() if note.write_date else None,
+                    })
 
             # OCR/content (optional)
             ocr_matches = []

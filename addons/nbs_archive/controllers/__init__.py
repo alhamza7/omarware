@@ -15,4 +15,13 @@ from . import signature_controller
 from . import workflow_controller
 from . import permissions_controller
 from . import attachments_controller
+from . import department_management_controller
+from . import bulk_upload_controller
+from . import folder_controller
+from . import advanced_search_controller
+from . import template_controller
+from . import batch_operations_controller
+from . import mobile_api_controller
+from . import notes_controller
+from . import companies_controller
 
