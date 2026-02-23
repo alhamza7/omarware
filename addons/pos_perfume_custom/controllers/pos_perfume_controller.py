@@ -17,7 +17,8 @@ class PosPerfumeController(http.Controller):
     @http.route('/pos_perfume/get_product_data', type='json', auth='user')
     def get_product_data(self, product_id, pricelist_id=None, uom_id=None, warehouse_id=None):
         """
-        Get product data - EXACTLY like sale.order.line
+        Get product data - prices come directly from pricelist items (via product_packaging_id mapping)
+        to avoid Odoo's standard price logic which ignores the custom UoM-packaging mapping.
         """
         try:
             _logger.info(f"[POS] Getting product {product_id}, pricelist {pricelist_id}")
@@ -30,19 +31,22 @@ class PosPerfumeController(http.Controller):
             pricelist = None
             if pricelist_id:
                 if isinstance(pricelist_id, list):
-                    pricelist_id = pricelist_id[0]  # Take first one
+                    pricelist_id = pricelist_id[0]
                 pricelist = request.env['product.pricelist'].browse(int(pricelist_id))
                 if not pricelist.exists():
                     pricelist = None
             
-            # Get all UoMs with prices from pricelist items
+            # Get all UoMs with prices from pricelist items (uses product_packaging_id mapping)
             available_uoms = self._get_uoms_from_pricelist(product, pricelist)
             
             _logger.info(f"[POS] Found {len(available_uoms)} UoMs")
             
-            # Get default price for base UoM
-            default_uom = uom_id or product.uom_id.id
-            default_price = self._get_price_for_uom(product, pricelist, default_uom)
+            # Default price on initial load = highest price (= كغم, the most expensive pack).
+            # When uom_id is explicitly passed, use exact match for that UoM instead.
+            if uom_id:
+                default_price = self._get_default_price_from_uoms(available_uoms, uom_id)
+            else:
+                default_price = self._get_default_price_from_uoms(available_uoms)
             
             _logger.info(f"[POS] Default price: {default_price}")
             
@@ -83,139 +87,157 @@ class PosPerfumeController(http.Controller):
     
     def _get_uoms_from_pricelist(self, product, pricelist):
         """
-        Get all UoMs with prices - Using SAP UoM Group!
+        Get all UoMs with prices for a product using its SAP UoM Group + pricelist items.
+
+        Special handling for items where product_uom_id = Units (id=1):
+        SAP sometimes exports prices with UoM = Units regardless of the actual unit.
+        These items are treated as generic prices and mapped to the product's actual UoM group.
+        
+        Fallback strategy: if UoM group filtering produces no results, retry without the filter
+        to avoid showing price = 0 when the pricelist item's UoM doesn't match the group.
         """
-        uoms_with_prices = {}  # {uom_id: price}
-        
         if not pricelist:
-            return [{
-                'id': product.uom_id.id,
-                'name': product.uom_id.name,
-                'price': product.list_price,
-            }]
-        
+            return [{'id': product.uom_id.id, 'name': product.uom_id.name, 'price': product.list_price}]
+
         # Step 1: Get available UoMs from SAP UoM Group
         available_uom_ids = []
-        
-        # Check if product has SAP UoM Group
-        extended_info = request.env['sap.product.extended'].search([
-            ('product_id', '=', product.id)
-        ], limit=1)
-        
+        extended_info = request.env['sap.product.extended'].search(
+            [('product_id', '=', product.id)], limit=1
+        )
         if extended_info and extended_info.sap_uom_group_id:
-            # Get UoMs from SAP UoM Group
             uom_syncs = extended_info.sap_uom_group_id.uom_ids
             available_uom_ids = uom_syncs.mapped('odoo_uom_id').ids
-            _logger.info(f"[POS] Product has UoM Group: {extended_info.sap_uom_group_id.name}, {len(available_uom_ids)} UoMs")
-        
-        # If no group or no UoMs in group, use all UoMs from pricelist items
-        if not available_uom_ids:
-            _logger.info(f"[POS] No UoM Group, searching all pricelist items")
-        
-        # Step 2: Get pricelist items
+            _logger.info(f"[POS] UoM Group: {extended_info.sap_uom_group_id.name}, UoMs: {available_uom_ids}")
+
+        # Step 2: Get pricelist items for this product
         items = request.env['product.pricelist.item'].search([
             ('pricelist_id', '=', pricelist.id),
             ('product_tmpl_id', '=', product.product_tmpl_id.id),
-            '|',
-            ('product_id', '=', False),
-            ('product_id', '=', product.id),
+            '|', ('product_id', '=', False), ('product_id', '=', product.id),
         ])
-        
         _logger.info(f"[POS] Found {len(items)} pricelist items")
-        
-        # Step 3: Process each item
+
+        # Step 3: Process items with group filter
+        uoms_with_prices = self._process_pricelist_items(items, product, available_uom_ids)
+
+        # Step 4: Fallback - if group filter produced nothing, retry without filter
+        # This handles products where SAP uses 'Units' as UoM code even though actual
+        # unit is '0.25 كغم' or similar - the UoM id doesn't match the group
+        if not uoms_with_prices and items:
+            _logger.info(f"[POS] Group filter yielded no results - retrying without UoM filter")
+            uoms_with_prices = self._process_pricelist_items(items, product, [])
+
+        # Step 5: Build result list
+        result = [
+            {'id': data['uom'].id, 'name': data['uom'].name, 'price': data['price']}
+            for data in uoms_with_prices.values()
+        ]
+
+        # Step 6: Ensure product base UoM is always visible
+        if product.uom_id.id not in uoms_with_prices:
+            best_price = max((v['price'] for v in uoms_with_prices.values()), default=product.list_price)
+            result.insert(0, {'id': product.uom_id.id, 'name': product.uom_id.name, 'price': best_price})
+
+        _logger.info(f"[POS] Returning {len(result)} UoMs")
+        return result or [{'id': product.uom_id.id, 'name': product.uom_id.name, 'price': product.list_price}]
+
+    # SAP exports the base-unit price with product_uom_id = Units (id=1) regardless
+    # of the product's actual UoM. We must remap it to the product's real base UoM.
+    SAP_GENERIC_UOM_ID = 1  # "Units" - SAP's catch-all UoM code
+
+    def _process_pricelist_items(self, items, product, available_uom_ids):
+        """
+        Process pricelist items and return {uom_id: {uom, price, has_packaging}} dict.
+        When available_uom_ids is empty, no UoM group filtering is applied.
+
+        Key behaviour:
+        - Items with product_uom_id = Units (SAP_GENERIC_UOM_ID) and no packaging are
+          treated as the product's actual base UoM price (product.uom_id), since SAP
+          uses 'Units' as a placeholder regardless of the real unit.
+        """
+        uoms_with_prices = {}
+
         for item in items:
-            # IMPORTANT: Each pricelist item represents ONE price point
-            # - If NO packaging → price applies to product_uom_id
-            # - If HAS packaging → price applies to packaging (which IS a UoM in your system)
-            
+            price = item.fixed_price if item.compute_price == 'fixed' else product.list_price
+
             if not item.product_packaging_id:
-                # Case 1: No packaging → this is base UoM price
-                uom = item.product_uom_id or product.uom_id
-                
-                # Filter by UoM Group
+                # No packaging: resolve target UoM
+                raw_uom = item.product_uom_id or product.uom_id
+
+                # SAP stores the base-unit price with UoM = Units (id=1).
+                # Remap it to the product's actual base UoM so it passes the group filter.
+                if raw_uom.id == self.SAP_GENERIC_UOM_ID:
+                    uom = product.uom_id
+                    _logger.info(f"[POS]   Remapping Units→{uom.name} (SAP generic uom)")
+                else:
+                    uom = raw_uom
+
+                # Skip if UoM not in group (unless no group filter active)
                 if available_uom_ids and uom.id not in available_uom_ids:
-                    _logger.info(f"[POS]   Skipping {uom.name} - not in UoM Group")
+                    _logger.info(f"[POS]   Skip (no pkg) {uom.name} - not in group")
                     continue
-                
-                # Use fixed price
-                price = item.fixed_price if item.compute_price == 'fixed' else product.list_price
-                
-                # Priority: base item (no packaging) always replaces
+
+                # Base item (no packaging) always takes priority over packaging items
                 uoms_with_prices[uom.id] = {'uom': uom, 'price': price, 'has_packaging': False}
-                _logger.info(f"[POS]   UoM {uom.name}: ${price} (BASE - no packaging)")
-                
+                _logger.info(f"[POS]   UoM {uom.name}: {price} (base)")
+
             else:
-                # Case 2: Has packaging → packaging IS the UoM in your system
+                # Has packaging: the packaging field IS the target UoM
                 packaging_uom = item.product_packaging_id
-                
-                # Filter by UoM Group
+
                 if available_uom_ids and packaging_uom.id not in available_uom_ids:
-                    _logger.info(f"[POS]   Skipping {packaging_uom.name} - not in UoM Group")
+                    _logger.info(f"[POS]   Skip (pkg) {packaging_uom.name} - not in group")
                     continue
-                
-                # Use fixed price
-                price = item.fixed_price if item.compute_price == 'fixed' else product.list_price
-                
-                # Only add if not already have base price for this UoM
+
+                # Packaging item only added when no base item already claims this UoM
                 if packaging_uom.id not in uoms_with_prices or uoms_with_prices[packaging_uom.id]['has_packaging']:
                     uoms_with_prices[packaging_uom.id] = {'uom': packaging_uom, 'price': price, 'has_packaging': True}
-                    _logger.info(f"[POS]   UoM {packaging_uom.name}: ${price} (from packaging)")
-                else:
-                    _logger.info(f"[POS]   Skipping {packaging_uom.name} packaging - already have base price")
-        
-        # Step 4: Convert to list
-        result = []
-        for uom_id, data in uoms_with_prices.items():
-            result.append({
-                'id': data['uom'].id,
-                'name': data['uom'].name,
-                'price': data['price'],
-            })
-        
-        # Step 5: Always include base UoM if not present
-        if product.uom_id.id not in uoms_with_prices:
-            price = self._get_price_for_uom(product, pricelist, product.uom_id.id)
-            result.insert(0, {
-                'id': product.uom_id.id,
-                'name': product.uom_id.name,
-                'price': price,
-            })
-        
-        _logger.info(f"[POS] Returning {len(result)} UoMs total")
-        
-        return result if result else [{
-            'id': product.uom_id.id,
-            'name': product.uom_id.name,
-            'price': product.list_price,
-        }]
-    
+                    _logger.info(f"[POS]   UoM {packaging_uom.name}: {price} (packaging)")
+
+        return uoms_with_prices
+
+    def _get_default_price_from_uoms(self, available_uoms, default_uom_id=None):
+        """
+        Resolve the price from available_uoms list.
+        - When default_uom_id is given (UoM change): return exact match for that UoM.
+        - When default_uom_id is None (initial product load): return highest price (= كغم / largest pack).
+        Always returns highest price as ultimate fallback to avoid showing 0.
+        """
+        if not available_uoms:
+            return 0.0
+
+        # Filter out zero-priced entries for comparisons
+        non_zero = [u for u in available_uoms if u['price'] > 0]
+        if not non_zero:
+            return 0.0
+
+        highest_price = max(u['price'] for u in non_zero)
+
+        # Exact UoM match requested (e.g. from onchange_uom)
+        if default_uom_id:
+            for uom in available_uoms:
+                if uom['id'] == default_uom_id and uom['price'] > 0:
+                    return uom['price']
+            # UoM found but price is 0 or not in list → fall through to highest
+
+        # Default: always show highest price (كغم = most expensive pack)
+        return highest_price
+
     def _get_price_for_uom(self, product, pricelist, uom_id):
-        """Get price for specific UoM using pricelist"""
+        """
+        Legacy helper - kept for backward compatibility with onchange_uom endpoint.
+        New code should use _get_default_price_from_uoms instead.
+        """
         if not pricelist:
             return product.list_price
-        
+
         uom = request.env['uom.uom'].browse(uom_id)
-        
         try:
-            # Use pricelist _get_product_price (same as sale.order.line)
-            price = pricelist._get_product_price(
-                product=product,
-                quantity=1.0,
-                uom=uom,
-            )
+            price = pricelist._get_product_price(product=product, quantity=1.0, uom=uom)
             return price
         except Exception as e:
             _logger.warning(f"[POS] Error getting price: {e}")
-            # Fallback: convert base price to target UoM
-            base_price = product.list_price
-            if uom != product.uom_id:
-                try:
-                    price = product.uom_id._compute_price(base_price, uom)
-                    return price
-                except:
-                    pass
-            return base_price
+            return product.list_price
     
     def _get_warehouses_simple(self, product_id):
         """Get warehouses with available stock from SAP integration or stock.quant"""
@@ -285,11 +307,13 @@ class PosPerfumeController(http.Controller):
     
     @http.route('/pos_perfume/onchange_uom', type='json', auth='user')
     def onchange_uom(self, product_id, pricelist_id, uom_id):
-        """Get price for changed UoM"""
+        """
+        Get price when user changes UoM. Uses pricelist item mapping (product_packaging_id)
+        directly instead of Odoo's standard price logic to ensure correct price is returned.
+        """
         try:
             product = request.env['product.product'].browse(product_id)
-            
-            # Ensure pricelist is a single record
+
             pricelist = None
             if pricelist_id:
                 if isinstance(pricelist_id, list):
@@ -297,19 +321,15 @@ class PosPerfumeController(http.Controller):
                 pricelist = request.env['product.pricelist'].browse(int(pricelist_id))
                 if not pricelist.exists():
                     pricelist = None
-            
-            price = self._get_price_for_uom(product, pricelist, uom_id)
-            
-            return {
-                'success': True,
-                'price_unit': price,
-            }
+
+            # Use pricelist items mapping for reliable price lookup
+            available_uoms = self._get_uoms_from_pricelist(product, pricelist)
+            price = self._get_default_price_from_uoms(available_uoms, uom_id)
+
+            return {'success': True, 'price_unit': price}
         except Exception as e:
             _logger.error(f"[POS] Error in onchange_uom: {e}")
-            return {
-                'success': False,
-                'error': str(e)
-            }
+            return {'success': False, 'error': str(e)}
     
     @http.route('/pos_perfume/send_whatsapp', type='json', auth='user', methods=['POST'], csrf=False)
     def send_whatsapp(self, order_id):
