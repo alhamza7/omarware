@@ -2230,6 +2230,35 @@ export class PosPerfumeScreen extends Component {
     }
     
     /**
+     * Export the saved invoice as an Excel (.xlsx) file and trigger browser download.
+     */
+    async exportToExcel() {
+        if (!this.state.currentOrder.order_id) {
+            this.notification.add(_t("Please save the order first before exporting to Excel"), { type: "warning" });
+            return;
+        }
+
+        try {
+            const orderId = this.state.currentOrder.order_id;
+            const exportUrl = `/pos_perfume/export_excel/${orderId}`;
+
+            // Open the URL so the browser handles the file download
+            window.open(exportUrl, '_blank');
+
+            this.notification.add(_t("Excel file is being downloaded..."), {
+                type: "success",
+                title: _t("Export Excel"),
+            });
+        } catch (error) {
+            console.error('[POS Perfume] Export Excel error:', error);
+            this.notification.add(
+                _t("Error exporting Excel: ") + (error.message || String(error)),
+                { type: "danger", sticky: true, title: _t("Export Error") }
+            );
+        }
+    }
+
+    /**
      * Create quotation (old method - kept for reference)
      */
     async createQuotationOld() {

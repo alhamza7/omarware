@@ -952,6 +952,15 @@
                             onmouseout="this.style.background='#4b5563'">
                         🖨️ Print
                     </button>
+                    <!-- Excel Export button -->
+                    <button t-if="state.currentOrder.order_id"
+                            class="action-btn btn-excel"
+                            t-on-click="exportToExcel"
+                            style="padding: 8px 16px; background: #166534; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; white-space: nowrap; height: 40px; transition: all 0.2s;"
+                            onmouseover="this.style.background='#14532d'"
+                            onmouseout="this.style.background='#166534'">
+                        📊 Excel
+                    </button>
                 </div>
             </div>
             

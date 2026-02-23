@@ -2,6 +2,8 @@
 from odoo import http, fields
 from odoo.http import request
 import logging
+import io
+import base64
 
 _logger = logging.getLogger(__name__)
 
@@ -425,3 +427,216 @@ class PosPerfumeController(http.Controller):
         except Exception as e:
             _logger.error(f"[WhatsApp Text] Error: {e}", exc_info=True)
             return {'success': False, 'error': str(e)}
+
+    @http.route('/pos_perfume/export_excel/<int:order_id>', type='http', auth='user', methods=['GET'])
+    def export_excel(self, order_id, **kwargs):
+        """
+        Generate and return an Excel file with all invoice details for the given order_id.
+        """
+        try:
+            import openpyxl
+            from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+            from openpyxl.utils import get_column_letter
+        except ImportError:
+            return request.make_response(
+                'openpyxl library is not installed. Run: pip install openpyxl',
+                headers=[('Content-Type', 'text/plain')]
+            )
+
+        order = request.env['pos.perfume.order'].browse(order_id)
+        if not order.exists():
+            return request.make_response('Order not found', headers=[('Content-Type', 'text/plain')])
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Invoice"
+
+        # ─── Styles ────────────────────────────────────────────────────────────
+        header_fill   = PatternFill("solid", fgColor="2563EB")
+        section_fill  = PatternFill("solid", fgColor="EFF6FF")
+        title_fill    = PatternFill("solid", fgColor="1E3A5F")
+        white_font    = Font(color="FFFFFF", bold=True, size=12)
+        bold_font     = Font(bold=True, size=11)
+        title_font    = Font(color="FFFFFF", bold=True, size=14)
+        normal_font   = Font(size=11)
+        center        = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        left          = Alignment(horizontal="left",   vertical="center", wrap_text=True)
+        right         = Alignment(horizontal="right",  vertical="center")
+        thin          = Side(style="thin", color="BFDBFE")
+        thin_border   = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+        def style_cell(cell, font=None, fill=None, alignment=None, border=None, number_format=None):
+            if font:        cell.font        = font
+            if fill:        cell.fill        = fill
+            if alignment:   cell.alignment   = alignment
+            if border:      cell.border      = border
+            if number_format: cell.number_format = number_format
+
+        # ─── Column widths ─────────────────────────────────────────────────────
+        # Col: #, Internal Ref, Product, UoM, Warehouse, Qty, Unit Price, Disc%, Total
+        col_widths = [5, 18, 35, 14, 16, 12, 14, 10, 14]
+        for i, w in enumerate(col_widths, 1):
+            ws.column_dimensions[get_column_letter(i)].width = w
+
+        row = 1
+
+        # ─── Title row ─────────────────────────────────────────────────────────
+        ws.merge_cells(f"A{row}:I{row}")
+        title_cell = ws.cell(row=row, column=1, value="INVOICE / فاتورة")
+        style_cell(title_cell, font=title_font, fill=title_fill, alignment=center)
+        ws.row_dimensions[row].height = 32
+        row += 1
+
+        # ─── Invoice header info ───────────────────────────────────────────────
+        exchange_rate = float(
+            request.env['ir.config_parameter'].sudo().get_param(
+                'pos_perfume.default_exchange_rate_usd_iqd', '1520.0'
+            )
+        )
+        partner_name = order.partner_id.name if order.partner_id else ''
+        partner_phone = order.partner_id.phone or order.partner_id.mobile or ''
+        order_date = order.date.strftime('%Y-%m-%d %H:%M') if order.date else ''
+        salesperson = order.user_id.name if order.user_id else ''
+        pricelist = order.pricelist_id.name if order.pricelist_id else ''
+        state_label = dict(order._fields['state'].selection).get(order.state, order.state)
+        sale_order_name = order.sale_order_id.name if order.sale_order_id else ''
+        sap_doc = order.sap_doc_num or ''
+        note = order.note or ''
+
+        header_pairs = [
+            ("Invoice No. / رقم الفاتورة", order.name,       "Date / التاريخ",       order_date),
+            ("Customer / العميل",           partner_name,      "Phone / الهاتف",       partner_phone),
+            ("Status / الحالة",             state_label,       "Pricelist / قائمة الأسعار", pricelist),
+            ("Salesperson / المندوب",       salesperson,       "Sale Order / أمر البيع",     sale_order_name),
+            ("SAP Doc / مستند SAP",         sap_doc,           "Exchange Rate / سعر الصرف",  f"{exchange_rate:,.0f} IQD/USD"),
+        ]
+        if note:
+            header_pairs.append(("Note / ملاحظة", note, "", ""))
+
+        for label1, val1, label2, val2 in header_pairs:
+            ws.merge_cells(f"A{row}:B{row}")
+            ws.merge_cells(f"C{row}:E{row}")
+            ws.merge_cells(f"F{row}:G{row}")
+            ws.merge_cells(f"H{row}:I{row}")
+
+            c1 = ws.cell(row=row, column=1, value=label1)
+            c2 = ws.cell(row=row, column=3, value=val1)
+            c3 = ws.cell(row=row, column=6, value=label2)
+            c4 = ws.cell(row=row, column=8, value=val2)
+
+            style_cell(c1, font=bold_font, fill=section_fill, alignment=left, border=thin_border)
+            style_cell(c2, font=normal_font, alignment=left, border=thin_border)
+            style_cell(c3, font=bold_font, fill=section_fill, alignment=left, border=thin_border)
+            style_cell(c4, font=normal_font, alignment=left, border=thin_border)
+            ws.row_dimensions[row].height = 18
+            row += 1
+
+        row += 1  # blank row
+
+        # ─── Order lines header ────────────────────────────────────────────────
+        line_headers = [
+            "#",
+            "Internal Ref / الكود",
+            "Product / المنتج",
+            "UoM / الوحدة",
+            "Warehouse / المستودع",
+            "Qty / الكمية",
+            "Unit Price $",
+            "Disc %",
+            "Total $",
+        ]
+        for col_idx, header in enumerate(line_headers, 1):
+            cell = ws.cell(row=row, column=col_idx, value=header)
+            style_cell(cell, font=white_font, fill=header_fill, alignment=center, border=thin_border)
+        ws.row_dimensions[row].height = 22
+        row += 1
+
+        # ─── Order lines data ──────────────────────────────────────────────────
+        alt_fill = PatternFill("solid", fgColor="F0F7FF")
+        total_usd = 0.0
+        for idx, line in enumerate(order.order_line_ids, 1):
+            line_fill    = alt_fill if idx % 2 == 0 else None
+            internal_ref = line.product_id.default_code or ''
+            product_name = line.product_id.name or ''
+            uom_name     = line.product_uom_id.name if line.product_uom_id else ''
+            warehouse    = line.warehouse_id.name if hasattr(line, 'warehouse_id') and line.warehouse_id else ''
+            qty          = line.quantity
+            unit_price   = line.price_unit
+            disc         = line.discount if hasattr(line, 'discount') else 0.0
+            subtotal     = line.price_subtotal
+            total_usd   += subtotal
+
+            # Col indices: 1=#, 2=ref, 3=product, 4=uom, 5=warehouse, 6=qty, 7=price, 8=disc, 9=total
+            row_data = [idx, internal_ref, product_name, uom_name, warehouse, qty, unit_price, disc, subtotal]
+            for col_idx, val in enumerate(row_data, 1):
+                cell = ws.cell(row=row, column=col_idx, value=val)
+                num_fmt = None
+                if col_idx in (6, 7, 8, 9):
+                    num_fmt = '#,##0.00'
+                style_cell(cell,
+                           font=normal_font,
+                           fill=line_fill,
+                           alignment=center if col_idx not in (2, 3) else left,
+                           border=thin_border,
+                           number_format=num_fmt)
+            ws.row_dimensions[row].height = 18
+            row += 1
+
+        row += 1  # blank row
+
+        # ─── Totals section ────────────────────────────────────────────────────
+        total_iqd          = total_usd * exchange_rate
+        total_iqd_rounded  = round(total_iqd / 1000) * 1000
+        amount_subtotal    = order.amount_subtotal or total_usd
+        amount_discount    = order.amount_discount or 0.0
+        amount_tax         = order.amount_tax or 0.0
+
+        totals = [
+            ("Subtotal / المجموع الجزئي",              f"${amount_subtotal:,.2f}"),
+            ("Discount / الخصم",                       f"-${amount_discount:,.2f}"),
+            ("Tax / الضريبة",                          f"${amount_tax:,.2f}"),
+            ("TOTAL (USD) / المجموع بالدولار",         f"${order.amount_total:,.2f}"),
+            ("TOTAL (IQD) / المجموع بالدينار",         f"{int(total_iqd_rounded):,} IQD"),
+        ]
+
+        for label, value in totals:
+            ws.merge_cells(f"A{row}:G{row}")
+            ws.merge_cells(f"H{row}:I{row}")
+            lc = ws.cell(row=row, column=1, value=label)
+            vc = ws.cell(row=row, column=8, value=value)
+            is_total = "TOTAL" in label
+            lbl_font = Font(bold=True, size=12 if is_total else 11,
+                            color="FFFFFF" if is_total else "1E3A5F")
+            val_font = Font(bold=True, size=12 if is_total else 11,
+                            color="FFFFFF" if is_total else "1E3A5F")
+            lbl_fill = header_fill if is_total else section_fill
+            val_fill = header_fill if is_total else section_fill
+            style_cell(lc, font=lbl_font, fill=lbl_fill, alignment=left,   border=thin_border)
+            style_cell(vc, font=val_font, fill=val_fill, alignment=center,  border=thin_border)
+            ws.row_dimensions[row].height = 20 if is_total else 18
+            row += 1
+
+        # ─── Footer ────────────────────────────────────────────────────────────
+        row += 1
+        ws.merge_cells(f"A{row}:I{row}")
+        footer = ws.cell(row=row, column=1,
+                         value="Generated by POS Perfume System | نظام نقاط البيع")
+        style_cell(footer, font=Font(size=9, italic=True, color="6B7280"), alignment=center)
+
+        # ─── Save & stream ─────────────────────────────────────────────────────
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        excel_data = output.read()
+
+        safe_name = (order.name or f'order_{order_id}').replace('/', '-')
+        filename = f"Invoice_{safe_name}.xlsx"
+
+        return request.make_response(
+            excel_data,
+            headers=[
+                ('Content-Type',        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
+                ('Content-Disposition', f'attachment; filename="{filename}"'),
+                ('Content-Length',      str(len(excel_data))),
+            ]
+        )
