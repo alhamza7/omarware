@@ -167,7 +167,24 @@ class PosPerfumeController(http.Controller):
                 # SAP stores the base-unit price with UoM = Units (id=1).
                 # Remap it to the product's actual base UoM so it passes the group filter.
                 if raw_uom.id == self.SAP_GENERIC_UOM_ID:
-                    uom = product.uom_id
+                    if product.uom_id.id != self.SAP_GENERIC_UOM_ID:
+                        # Normal case: product has a real base UoM (e.g. كغم)
+                        uom = product.uom_id
+                    elif available_uom_ids:
+                        # Edge case: product.uom_id is ALSO Units (SAP never updated it).
+                        # Find the "base" UoM of the group: the one NOT used as packaging
+                        # in any other item, with factor closest to 1.0. Tiebreak: lowest id.
+                        used_as_packaging = {
+                            it.product_packaging_id.id
+                            for it in items
+                            if it.product_packaging_id
+                        }
+                        group_uoms = request.env['uom.uom'].browse(available_uom_ids)
+                        not_packaging = [u for u in group_uoms if u.id not in used_as_packaging]
+                        pool = not_packaging if not_packaging else list(group_uoms)
+                        uom = min(pool, key=lambda u: (abs(u.factor - 1.0), u.id))
+                    else:
+                        uom = product.uom_id
                     _logger.info(f"[POS]   Remapping Units→{uom.name} (SAP generic uom)")
                 else:
                     uom = raw_uom
