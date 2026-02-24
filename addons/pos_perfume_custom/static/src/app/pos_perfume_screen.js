@@ -7,7 +7,7 @@ import { rpc } from "@web/core/network/rpc";
 import { CustomerSearch } from "./customer_search";
 
 /** سعر الصرف ثابت في الكود (لا يُجلب من قاعدة البيانات) - 1 USD = هذا المبلغ د.ع */
-const EXCHANGE_RATE_USD_IQD = 1510;
+const EXCHANGE_RATE_USD_IQD = 1530;
 
 /**
  * Main POS Perfume Screen Component - Enhanced like Sale Order
