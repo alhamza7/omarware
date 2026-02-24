@@ -118,28 +118,39 @@ class SapProductSync(models.Model):
             _logger.error(f"Error syncing product to SAP: {str(e)}")
             raise
     
+    # Fields that must NOT be updated on existing products because Odoo blocks
+    # changing them once the product has been used in transactions (stock moves,
+    # sale/purchase order lines, POS lines, etc.).
+    _SAP_READONLY_ON_UPDATE = frozenset({'uom_id', 'uom_po_id'})
+
     def _process_product_data(self, product_data):
-        """Process product data from SAP and create/update Odoo product"""
+        """Process product data from SAP and create/update Odoo product.
+
+        On creation: all mapped fields including uom_id are applied.
+        On update: uom_id is intentionally skipped to avoid Odoo's
+        'Invalid Operation' error when the product already has transactions
+        with a different unit of measure.
+        """
         try:
-            # Map SAP data to Odoo format
             product_vals = self._map_sap_to_odoo(product_data)
-            
-            # Check if product already exists
+
             product = self.env['product.product'].search([
                 ('default_code', '=', product_data['ItemCode'])
             ], limit=1)
-            
+
             if product:
-                # Update existing product
-                product.write(product_vals)
-                _logger.info(f"Updated existing product: {product.name}")
+                # Strip UoM fields - changing them on an existing product that
+                # already has stock moves / order lines raises a hard Odoo error.
+                safe_vals = {k: v for k, v in product_vals.items()
+                             if k not in self._SAP_READONLY_ON_UPDATE}
+                product.write(safe_vals)
+                _logger.info(f"Updated existing product: {product.name} (uom_id preserved)")
             else:
-                # Create new product
                 product = self.env['product.product'].create(product_vals)
-                _logger.info(f"Created new product: {product.name}")
-            
+                _logger.info(f"Created new product: {product.name} (uom_id={product_vals.get('uom_id')})")
+
             return product
-            
+
         except Exception as e:
             _logger.error(f"Error processing product data: {str(e)}")
             raise
