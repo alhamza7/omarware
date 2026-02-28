@@ -45,7 +45,7 @@ export class PosPerfumeScreen extends Component {
             },
             
             // UI state
-            exchangeRate: 1510,
+            exchangeRate: 1530,
         });
         
         // Debounce timer for search

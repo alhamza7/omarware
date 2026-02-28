@@ -1,10 +1,10 @@
 <?xml version="1.0"?>
 <odoo>
-    <!-- noupdate="0" = عند ترقية الموديول تُحدَّث القيمة في قاعدة البيانات إلى 1540 -->
+    <!-- noupdate="0" = عند ترقية الموديول تُحدَّث القيمة في قاعدة البيانات إلى 1530 -->
     <data noupdate="0">
         <record id="default_exchange_rate_usd_iqd" model="ir.config_parameter">
             <field name="key">pos_perfume.default_exchange_rate_usd_iqd</field>
-            <field name="value">1540.0</field>
+            <field name="value">1530.0</field>
         </record>
     </data>
 </odoo>
