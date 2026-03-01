@@ -58,9 +58,8 @@
         # Views (Actions & Forms)
         'views/sap_dashboard_action_minimal.xml', # Minimal dashboard action - MUST load BEFORE menus
         'views/sap_menus_minimal.xml',            # Minimal root menus: menu_sap_integration + menu_sap_tools
-        # 'views/sap_menu_structure.xml',         # Disabled - requires actions to be defined first
-        # 'views/sap_auto_sync_views.xml',        # Disabled - requires menu_sap_configuration
-        # 'views/sap_dashboard_views.xml',       # Full dashboard view (still disabled for now)
+        # 'views/sap_menu_structure.xml',         # Disabled - duplicate of sap_dashboard_views.xml
+        # 'views/sap_auto_sync_views.xml',        # Disabled - no model registered yet
         
         # Wizards - Load AFTER menus so they can reference menu items
         'wizard/sap_import_wizard_views.xml',  # Main import wizard (used by other views)
@@ -109,7 +108,8 @@
         'views/sap_product_warehouse_info_views.xml',  # Warehouse information
         'views/product_uom_group_views.xml',           # UoM Group restriction in products/sales
 
-        # Full menu tree already loaded above (before auto_sync_views)
+        # Full menu tree - loaded LAST so all actions are available
+        'views/sap_full_menus.xml',                    # Complete menu structure with all parent menus
     ],
     'installable': True,  # OCA Connector modules are available in addons/
     'application': True,

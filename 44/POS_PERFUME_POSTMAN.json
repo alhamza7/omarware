@@ -1,0 +1,623 @@
+{
+  "info": {
+    "name": "POS Perfume API",
+    "description": "Complete test collection for POS Perfume External API v1.\nAll IDs (customer, order, line) are captured dynamically — no hardcoded IDs.\nInfrastructure-optional tests (WhatsApp, PDF, SAP) are skipped gracefully.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url",     "value": "http://localhost:8070/api/pos_perfume/v1", "type": "string" },
+    { "key": "api_key",      "value": "YOUR_API_KEY_HERE",                         "type": "string" },
+    { "key": "customer_id",  "value": "",                                           "type": "string" },
+    { "key": "order_id",     "value": "",                                           "type": "string" },
+    { "key": "line_id",      "value": "",                                           "type": "string" },
+    { "key": "product_id",   "value": "1",                                          "type": "string" },
+    { "key": "warehouse_id", "value": "1",                                          "type": "string" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{api_key}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "01 – Auth & Session",
+      "item": [
+        {
+          "name": "GET /session",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/session", "host": ["{{base_url}}"], "path": ["session"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "const j = pm.response.json();",
+              "pm.test('success true', () => pm.expect(j.success).to.be.true);"
+            ]}
+          }]
+        },
+        {
+          "name": "GET /setup",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/setup", "host": ["{{base_url}}"], "path": ["setup"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "const j = pm.response.json();",
+              "pm.test('success true', () => pm.expect(j.success).to.be.true);",
+              "if (j.data?.pricelists?.length) {",
+              "  pm.collectionVariables.set('pricelist_id', j.data.pricelists[0].id);",
+              "}"
+            ]}
+          }]
+        }
+      ]
+    },
+    {
+      "name": "02 – Settings",
+      "item": [
+        {
+          "name": "GET /settings",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/settings", "host": ["{{base_url}}"], "path": ["settings"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('success true', () => pm.expect(pm.response.json().success).to.be.true);"
+            ]}
+          }]
+        },
+        {
+          "name": "PUT /settings",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{ \"exchange_rate\": 1500 }" },
+            "url": { "raw": "{{base_url}}/settings", "host": ["{{base_url}}"], "path": ["settings"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('success true', () => pm.expect(pm.response.json().success).to.be.true);"
+            ]}
+          }]
+        }
+      ]
+    },
+    {
+      "name": "03 – Customers",
+      "item": [
+        {
+          "name": "GET /customers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/customers?limit=10",
+              "host": ["{{base_url}}"], "path": ["customers"],
+              "query": [{ "key": "limit", "value": "10" }]
+            }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('success true', () => pm.expect(pm.response.json().success).to.be.true);"
+            ]}
+          }]
+        },
+        {
+          "name": "POST /customers  [saves customer_id]",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{ \"name\": \"API Test Customer\", \"phone\": \"07700000000\" }" },
+            "url": { "raw": "{{base_url}}/customers", "host": ["{{base_url}}"], "path": ["customers"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "const j = pm.response.json();",
+              "pm.test('success true', () => pm.expect(j.success).to.be.true);",
+              "if (j.data?.id) {",
+              "  pm.collectionVariables.set('customer_id', j.data.id);",
+              "  console.log('customer_id =', j.data.id);",
+              "}"
+            ]}
+          }]
+        },
+        {
+          "name": "GET /customers/:id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/customers/{{customer_id}}", "host": ["{{base_url}}"], "path": ["customers", "{{customer_id}}"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('success true', () => pm.expect(pm.response.json().success).to.be.true);"
+            ]}
+          }]
+        },
+        {
+          "name": "PUT /customers/:id",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{ \"name\": \"API Test Customer Updated\" }" },
+            "url": { "raw": "{{base_url}}/customers/{{customer_id}}", "host": ["{{base_url}}"], "path": ["customers", "{{customer_id}}"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('success true', () => pm.expect(pm.response.json().success).to.be.true);"
+            ]}
+          }]
+        }
+      ]
+    },
+    {
+      "name": "04 – Products",
+      "item": [
+        {
+          "name": "GET /products  [saves product_id]",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/products?limit=10",
+              "host": ["{{base_url}}"], "path": ["products"],
+              "query": [{ "key": "limit", "value": "10" }]
+            }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "const j = pm.response.json();",
+              "pm.test('success true', () => pm.expect(j.success).to.be.true);",
+              "if (j.data?.items?.length) {",
+              "  pm.collectionVariables.set('product_id', j.data.items[0].id);",
+              "  console.log('product_id =', j.data.items[0].id);",
+              "}"
+            ]}
+          }]
+        },
+        {
+          "name": "GET /products/:id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/products/{{product_id}}", "host": ["{{base_url}}"], "path": ["products", "{{product_id}}"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('success true', () => pm.expect(pm.response.json().success).to.be.true);"
+            ]}
+          }]
+        },
+        {
+          "name": "POST /products/data",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{ \"product_id\": {{product_id}} }" },
+            "url": { "raw": "{{base_url}}/products/data", "host": ["{{base_url}}"], "path": ["products", "data"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('success true', () => pm.expect(pm.response.json().success).to.be.true);"
+            ]}
+          }]
+        },
+        {
+          "name": "POST /products/uom_price",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{ \"product_id\": {{product_id}}, \"pricelist_id\": 1, \"uom_id\": 1 }" },
+            "url": { "raw": "{{base_url}}/products/uom_price", "host": ["{{base_url}}"], "path": ["products", "uom_price"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('success true', () => pm.expect(pm.response.json().success).to.be.true);"
+            ]}
+          }]
+        }
+      ]
+    },
+    {
+      "name": "05 – Warehouses & Pricelists",
+      "item": [
+        {
+          "name": "GET /warehouses  [saves warehouse_id]",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/warehouses", "host": ["{{base_url}}"], "path": ["warehouses"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "const j = pm.response.json();",
+              "pm.test('success true', () => pm.expect(j.success).to.be.true);",
+              "if (j.data?.items?.length) {",
+              "  pm.collectionVariables.set('warehouse_id', j.data.items[0].id);",
+              "  console.log('warehouse_id =', j.data.items[0].id);",
+              "}"
+            ]}
+          }]
+        },
+        {
+          "name": "GET /pricelists",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/pricelists", "host": ["{{base_url}}"], "path": ["pricelists"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('success true', () => pm.expect(pm.response.json().success).to.be.true);"
+            ]}
+          }]
+        }
+      ]
+    },
+    {
+      "name": "06 – Orders",
+      "item": [
+        {
+          "name": "GET /orders",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/orders?limit=10",
+              "host": ["{{base_url}}"], "path": ["orders"],
+              "query": [{ "key": "limit", "value": "10" }]
+            }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('success true', () => pm.expect(pm.response.json().success).to.be.true);"
+            ]}
+          }]
+        },
+        {
+          "name": "POST /orders  [saves order_id — DRAFT]",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{ \"partner_id\": {{customer_id}} }" },
+            "url": { "raw": "{{base_url}}/orders", "host": ["{{base_url}}"], "path": ["orders"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "const j = pm.response.json();",
+              "pm.test('success true', () => pm.expect(j.success).to.be.true);",
+              "pm.test('state is draft', () => pm.expect(j.data.state).to.equal('draft'));",
+              "pm.collectionVariables.set('order_id', j.data.id);",
+              "console.log('order_id =', j.data.id, '(state:', j.data.state, ')');"
+            ]}
+          }]
+        },
+        {
+          "name": "GET /orders/:id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/orders/{{order_id}}", "host": ["{{base_url}}"], "path": ["orders", "{{order_id}}"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('success true', () => pm.expect(pm.response.json().success).to.be.true);"
+            ]}
+          }]
+        },
+        {
+          "name": "PUT /orders/:id  [order in DRAFT]",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{ \"note\": \"API test update\" }" },
+            "url": { "raw": "{{base_url}}/orders/{{order_id}}", "host": ["{{base_url}}"], "path": ["orders", "{{order_id}}"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('success true', () => pm.expect(pm.response.json().success).to.be.true);"
+            ]}
+          }]
+        }
+      ]
+    },
+    {
+      "name": "07 – Order Lines",
+      "item": [
+        {
+          "name": "POST /orders/:id/lines  [saves line_id — order DRAFT]",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{ \"product_id\": {{product_id}}, \"warehouse_id\": {{warehouse_id}}, \"quantity\": 1 }" },
+            "url": { "raw": "{{base_url}}/orders/{{order_id}}/lines", "host": ["{{base_url}}"], "path": ["orders", "{{order_id}}", "lines"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "const j = pm.response.json();",
+              "pm.test('success true', () => pm.expect(j.success).to.be.true);",
+              "pm.collectionVariables.set('line_id', j.data.id);",
+              "console.log('line_id =', j.data.id);"
+            ]}
+          }]
+        },
+        {
+          "name": "PUT /orders/:id/lines/:lid  [order DRAFT]",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{ \"quantity\": 2 }" },
+            "url": { "raw": "{{base_url}}/orders/{{order_id}}/lines/{{line_id}}", "host": ["{{base_url}}"], "path": ["orders", "{{order_id}}", "lines", "{{line_id}}"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('success true', () => pm.expect(pm.response.json().success).to.be.true);"
+            ]}
+          }]
+        },
+        {
+          "name": "DELETE /orders/:id/lines/:lid  [order DRAFT]",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": { "raw": "{{base_url}}/orders/{{order_id}}/lines/{{line_id}}", "host": ["{{base_url}}"], "path": ["orders", "{{order_id}}", "lines", "{{line_id}}"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('success true', () => pm.expect(pm.response.json().success).to.be.true);"
+            ]}
+          }]
+        }
+      ]
+    },
+    {
+      "name": "08 – Order Actions",
+      "item": [
+        {
+          "name": "PUT /orders/:id/exchange_rate",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{ \"exchange_rate\": 1500 }" },
+            "url": { "raw": "{{base_url}}/orders/{{order_id}}/exchange_rate", "host": ["{{base_url}}"], "path": ["orders", "{{order_id}}", "exchange_rate"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('success true', () => pm.expect(pm.response.json().success).to.be.true);"
+            ]}
+          }]
+        },
+        {
+          "name": "POST /orders/:id/quotation  [draft → quotation]",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{base_url}}/orders/{{order_id}}/quotation", "host": ["{{base_url}}"], "path": ["orders", "{{order_id}}", "quotation"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('success true', () => pm.expect(pm.response.json().success).to.be.true);"
+            ]}
+          }]
+        },
+        {
+          "name": "POST /orders/:id/cancel  [quotation → cancel]",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{base_url}}/orders/{{order_id}}/cancel", "host": ["{{base_url}}"], "path": ["orders", "{{order_id}}", "cancel"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('state is cancel', () => pm.expect(pm.response.json().data.state).to.equal('cancel'));"
+            ]}
+          }]
+        },
+        {
+          "name": "POST /orders/:id/draft  [cancel → draft]",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{base_url}}/orders/{{order_id}}/draft", "host": ["{{base_url}}"], "path": ["orders", "{{order_id}}", "draft"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('state is draft', () => pm.expect(pm.response.json().data.state).to.equal('draft'));"
+            ]}
+          }]
+        }
+      ]
+    },
+    {
+      "name": "09 – Confirm  (re-add line first)",
+      "item": [
+        {
+          "name": "POST /orders/:id/lines  [re-add for confirm]",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{ \"product_id\": {{product_id}}, \"warehouse_id\": {{warehouse_id}}, \"quantity\": 1 }" },
+            "url": { "raw": "{{base_url}}/orders/{{order_id}}/lines", "host": ["{{base_url}}"], "path": ["orders", "{{order_id}}", "lines"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('success true', () => pm.expect(pm.response.json().success).to.be.true);"
+            ]}
+          }]
+        },
+        {
+          "name": "POST /orders/:id/confirm",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{base_url}}/orders/{{order_id}}/confirm", "host": ["{{base_url}}"], "path": ["orders", "{{order_id}}", "confirm"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('success true', () => pm.expect(pm.response.json().success).to.be.true);"
+            ]}
+          }]
+        }
+      ]
+    },
+    {
+      "name": "10 – Infrastructure-optional  (WhatsApp / PDF / SAP)",
+      "description": "These tests require external setup:\n• WhatsApp → configure ULTRAMSG in Odoo Settings\n• PDF report → sudo apt-get install wkhtmltopdf\n• SAP sync → SAP connection + customer CardCode\n\nExpected failures here do NOT indicate a broken API.",
+      "item": [
+        {
+          "name": "POST /orders/:id/send_whatsapp  [requires ULTRAMSG]",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{base_url}}/orders/{{order_id}}/send_whatsapp", "host": ["{{base_url}}"], "path": ["orders", "{{order_id}}", "send_whatsapp"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "// Optional — skip if ULTRAMSG not configured",
+              "const j = pm.response.json();",
+              "if (!j.success && j.error && j.error.includes('ULTRAMSG')) {",
+              "  console.warn('⚠ ULTRAMSG not configured — skipping');",
+              "} else {",
+              "  pm.test('WhatsApp sent', () => pm.expect(j.success).to.be.true);",
+              "}"
+            ]}
+          }]
+        },
+        {
+          "name": "POST /orders/:id/send_whatsapp_image  [requires wkhtmltopdf]",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{base_url}}/orders/{{order_id}}/send_whatsapp_image", "host": ["{{base_url}}"], "path": ["orders", "{{order_id}}", "send_whatsapp_image"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "// Optional — skip if wkhtmltopdf not installed",
+              "const j = pm.response.json();",
+              "if (!j.success && j.error && (j.error.includes('wkhtml') || j.error.includes('ULTRAMSG'))) {",
+              "  console.warn('⚠ Dependency not installed — skipping');",
+              "} else {",
+              "  pm.test('Image sent', () => pm.expect(j.success).to.be.true);",
+              "}"
+            ]}
+          }]
+        },
+        {
+          "name": "GET /orders/:id/report  [requires wkhtmltopdf]",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/orders/{{order_id}}/report", "host": ["{{base_url}}"], "path": ["orders", "{{order_id}}", "report"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "// Optional — skip if wkhtmltopdf not installed (returns 503)",
+              "if (pm.response.code === 503 || pm.response.code === 400) {",
+              "  console.warn('⚠ wkhtmltopdf not installed — skipping');",
+              "} else {",
+              "  pm.test('PDF downloaded', () => pm.response.to.have.status(200));",
+              "}"
+            ]}
+          }]
+        },
+        {
+          "name": "POST /orders/:id/sync_sap  [requires SAP connection]",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{base_url}}/orders/{{order_id}}/sync_sap", "host": ["{{base_url}}"], "path": ["orders", "{{order_id}}", "sync_sap"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "// Optional — SAP sync result depends on SAP config and customer CardCode",
+              "pm.test('Status 200 (SAP result may vary)', () => pm.response.to.have.status(200));",
+              "pm.test('success true', () => pm.expect(pm.response.json().success).to.be.true);"
+            ]}
+          }]
+        }
+      ]
+    },
+    {
+      "name": "11 – Cleanup",
+      "item": [
+        {
+          "name": "DELETE /orders/:id  [cancel order]",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": { "raw": "{{base_url}}/orders/{{order_id}}", "host": ["{{base_url}}"], "path": ["orders", "{{order_id}}"] }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('state is cancel', () => pm.expect(pm.response.json().data.state).to.equal('cancel'));"
+            ]}
+          }]
+        }
+      ]
+    }
+  ]
+}

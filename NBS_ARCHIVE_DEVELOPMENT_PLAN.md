@@ -53,6 +53,81 @@
 
 ## 🎯 Phase 1: الميزات الحرجة (Week 1-2)
 
+### 1.0 إدارة الأقسام وأنواع المستندات ✅✅
+
+**API Endpoints للأقسام:**
+
+```python
+# Get Departments
+POST /api/departments
+
+# Get Single Department
+POST /api/departments/{department_id}
+
+# Create Department
+POST /api/departments/create
+Request:
+{
+    "name": "المشتريات",
+    "code": "PUR",
+    "description": "قسم المشتريات",
+    "manager_ids": [5, 6],
+    "sequence": 10
+}
+
+# Update Department
+POST /api/departments/{department_id}/update
+Request:
+{
+    "name": "المشتريات المركزي",
+    "manager_ids": [5, 6, 7]
+}
+
+# Delete (Archive) Department
+DELETE /api/departments/{department_id}
+```
+
+**API Endpoints لأنواع المستندات:**
+
+```python
+# Get Document Types
+POST /api/document-types
+
+# Get Single Document Type
+POST /api/document-types/{doc_type_id}
+
+# Create Document Type
+POST /api/document-types/create
+Request:
+{
+    "name": "فاتورة شراء",
+    "code": "PINV",
+    "department_id": 1,
+    "description": "فواتير الشراء",
+    "sequence": 10
+}
+
+# Update Document Type
+POST /api/document-types/{doc_type_id}/update
+Request:
+{
+    "name": "فاتورة شراء محلي",
+    "description": "فواتير الشراء من الموردين المحليين"
+}
+
+# Delete (Archive) Document Type
+DELETE /api/document-types/{doc_type_id}
+```
+
+**الميزات:**
+- ✅ CRUD كامل للأقسام وأنواع المستندات
+- ✅ حماية من الحذف إذا كان يحتوي مستندات
+- ✅ Audit logging لكل عملية
+- ✅ التحقق من تكرار الرموز (codes)
+- ✅ صلاحيات محددة (Admin/Manager)
+
+---
+
 ### 1.1 تعديل/حذف المرفقات ✅
 
 **API Endpoints:**

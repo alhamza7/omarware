@@ -2321,6 +2321,57 @@ export class PosPerfumeScreen extends Component {
     }
     
     /**
+     * Build sale.order.line vals from a POS line.
+     * Conditionally includes product_warehouse_id only when a warehouse is set,
+     * so the call is safe whether or not sale_order_line_multi_warehouse is installed.
+     */
+    _buildSaleOrderLineVals(line, includeProductId = false) {
+        const vals = {
+            product_uom_qty: line.quantity,
+            product_uom_id: line.uom_id,
+            price_unit: line.unitPrice,
+            discount: line.discountPercent,
+        };
+        if (includeProductId) {
+            vals.product_id = line.product_id;
+        }
+        if (line.warehouse_id) {
+            vals.product_warehouse_id = line.warehouse_id;
+        }
+        if (line.custom_product_name) {
+            vals.custom_product_name = line.custom_product_name;
+        }
+        return vals;
+    }
+
+    /**
+     * Write sale.order lines via ORM with automatic fallback.
+     * If the server rejects product_warehouse_id (module not installed),
+     * strips that field from all line commands and retries once.
+     */
+    async _writeSaleOrderLines(saleOrderId, orderLines) {
+        try {
+            await this.orm.write('sale.order', [saleOrderId], { order_line: orderLines });
+        } catch (writeError) {
+            const errMsg = (writeError.message || '') + (writeError.data?.message || '');
+            if (errMsg.includes('product_warehouse_id')) {
+                console.warn('[SaleOrder] product_warehouse_id field not available, retrying without it...');
+                const fallbackLines = orderLines.map(cmd => {
+                    if ((cmd[0] === 0 || cmd[0] === 1) && cmd[2]) {
+                        const vals = { ...cmd[2] };
+                        delete vals.product_warehouse_id;
+                        return [cmd[0], cmd[1], vals];
+                    }
+                    return cmd;
+                });
+                await this.orm.write('sale.order', [saleOrderId], { order_line: fallbackLines });
+            } else {
+                throw writeError;
+            }
+        }
+    }
+
+    /**
      * Save order with SAP sync - Save and sync to SAP if there are changes
      */
     async saveOrderWithSync() {
@@ -2373,61 +2424,32 @@ export class PosPerfumeScreen extends Component {
                         // Instead, we'll update existing lines or add new ones
                         const existingLineIds = saleOrder.order_line || [];
                         const orderLines = [];
-                        
+
                         // Update existing lines or add new ones
                         lines.forEach((line, index) => {
                             if (index < existingLineIds.length) {
-                                // Update existing line
-                                const lineId = Array.isArray(existingLineIds[index]) 
-                                    ? existingLineIds[index][0] 
+                                const lineId = Array.isArray(existingLineIds[index])
+                                    ? existingLineIds[index][0]
                                     : existingLineIds[index];
-                                orderLines.push([1, lineId, {
-                                    product_uom_qty: line.quantity,
-                                    product_uom_id: line.uom_id,
-                                    price_unit: line.unitPrice,
-                                    discount: line.discountPercent,
-                                    product_warehouse_id: line.warehouse_id,
-                                }]);
+                                orderLines.push([1, lineId, this._buildSaleOrderLineVals(line)]);
                             } else {
-                                // Add new line
-                                orderLines.push([0, 0, {
-                                    product_id: line.product_id,
-                                    product_uom_qty: line.quantity,
-                                    product_uom_id: line.uom_id,
-                                    price_unit: line.unitPrice,
-                                    discount: line.discountPercent,
-                                    product_warehouse_id: line.warehouse_id,
-                                }]);
+                                orderLines.push([0, 0, this._buildSaleOrderLineVals(line, true)]);
                             }
                         });
-                        
-                        // Set quantity to 0 for lines that are no longer in the POS order
+
+                        // Zero-out lines removed from the POS order
                         for (let i = lines.length; i < existingLineIds.length; i++) {
-                            const lineId = Array.isArray(existingLineIds[i]) 
-                                ? existingLineIds[i][0] 
+                            const lineId = Array.isArray(existingLineIds[i])
+                                ? existingLineIds[i][0]
                                 : existingLineIds[i];
-                            orderLines.push([1, lineId, {
-                                product_uom_qty: 0,
-                            }]);
+                            orderLines.push([1, lineId, { product_uom_qty: 0 }]);
                         }
-                        
-                        await this.orm.write('sale.order', [saleOrderId], {
-                            order_line: orderLines,
-                        });
+
+                        await this._writeSaleOrderLines(saleOrderId, orderLines);
                     } else {
-                        // For draft/quotation orders, we can clear and add new lines
-                        const orderLines = lines.map((line, index) => [0, 0, {
-                            product_id: line.product_id,
-                            product_uom_qty: line.quantity,
-                            product_uom_id: line.uom_id,
-                            price_unit: line.unitPrice,
-                            discount: line.discountPercent,
-                            product_warehouse_id: line.warehouse_id,
-                        }]);
-                        
-                        await this.orm.write('sale.order', [saleOrderId], {
-                            order_line: [[5, 0, 0], ...orderLines], // Clear and add new lines
-                        });
+                        // For draft/quotation orders, clear existing lines and add fresh ones
+                        const orderLines = lines.map(line => [0, 0, this._buildSaleOrderLineVals(line, true)]);
+                        await this._writeSaleOrderLines(saleOrderId, [[5, 0, 0], ...orderLines]);
                     }
                     
                     // Trigger SAP sync by calling action_manual_sync_to_sap

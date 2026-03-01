@@ -479,9 +479,8 @@ class PosPerfumeOrder(models.Model):
                 if not sale_order.sap_synced:
                     _logger.warning(f"[POS Draft] Sale order {sale_order.name} was not auto-synced to SAP, attempting manual sync...")
                     sale_order._send_to_sap()
-                    # Refresh to get updated SAP sync status
+                    # Invalidate cache so next field access re-reads from DB
                     sale_order.invalidate_recordset(['sap_synced', 'sap_doc_num', 'sap_doc_entry'])
-                    sale_order.refresh()
                     if sale_order.sap_synced:
                         _logger.info(f"[POS Draft] Manual SAP sync successful for {sale_order.name}")
                     else:
@@ -757,9 +756,8 @@ class PosPerfumeOrder(models.Model):
                         if not sale_order.sap_synced:
                             _logger.warning(f"[POS Confirm] Sale order {sale_order.name} was not auto-synced to SAP, attempting manual sync...")
                             sale_order._send_to_sap()
-                            # Refresh to get updated SAP sync status
+                            # Invalidate cache so next field access re-reads from DB
                             sale_order.invalidate_recordset(['sap_synced', 'sap_doc_num', 'sap_doc_entry'])
-                            sale_order.refresh()
                             if sale_order.sap_synced:
                                 _logger.info(f"[POS Confirm] Manual SAP sync successful for {sale_order.name}")
                             else:
@@ -861,6 +859,54 @@ class PosPerfumeOrder(models.Model):
         # إرجاع action للطباعة
         return report.report_action(self)
     
+    def action_retry_sap_sync(self):
+        """إعادة محاولة إرسال الطلب إلى SAP يدوياً من واجهة POS"""
+        import logging
+        _logger = logging.getLogger(__name__)
+
+        self.ensure_one()
+
+        if not self.sale_order_id:
+            raise UserError(_('لا يوجد Sale Order مرتبط. يرجى تأكيد الطلب أولاً.'))
+
+        if not self.sale_order_id.partner_id or not self.sale_order_id.partner_id.ref:
+            raise UserError(_(
+                'العميل "%s" ليس لديه CardCode (حقل المرجع) في SAP.\n'
+                'يرجى فتح سجل العميل وإضافة CardCode في حقل "المرجع" ثم المحاولة مجدداً.'
+            ) % (self.partner_id.name or ''))
+
+        try:
+            self.sale_order_id._send_to_sap()
+            self.sale_order_id.invalidate_recordset(['sap_synced', 'sap_doc_num', 'sap_doc_entry', 'sap_error_message'])
+        except Exception as e:
+            _logger.error(f"[POS Retry SAP] Error: {e}", exc_info=True)
+            raise UserError(_('فشل الإرسال إلى SAP: %s') % str(e))
+
+        if self.sale_order_id.sap_synced:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': _('تم الإرسال بنجاح'),
+                    'message': _('تم إرسال الطلب %s إلى SAP. رقم SAP: %s') % (
+                        self.name, self.sale_order_id.sap_doc_num or ''
+                    ),
+                    'type': 'success',
+                    'sticky': False,
+                },
+            }
+        else:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': _('فشل الإرسال إلى SAP'),
+                    'message': self.sale_order_id.sap_error_message or _('خطأ غير معروف'),
+                    'type': 'danger',
+                    'sticky': True,
+                },
+            }
+
     def action_print_to_sap(self):
         """إرسال طلب طباعة إلى SAP على DEFAULT LAYOUT"""
         import logging

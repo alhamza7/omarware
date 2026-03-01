@@ -78,7 +78,22 @@ class SaleOrder(models.Model):
                 except Exception as e:
                     _logger.warning(f"Could not send order {order.name} to SAP on create: {e}")
             else:
-                _logger.info(f"Conditions not met for order {order.name}: partner_id={order.partner_id is not None}, partner_ref={order.partner_id.ref if order.partner_id else None}, order_lines={len(order.order_line) if order.order_line else 0}")
+                # كتابة رسالة خطأ واضحة بدلاً من تجاهل صامت حتى يتمكن المستخدم من رؤية السبب
+                missing_parts = []
+                if not order.partner_id:
+                    missing_parts.append("لا يوجد عميل")
+                elif not order.partner_id.ref:
+                    missing_parts.append(f"العميل ({order.partner_id.name}) ليس لديه CardCode في SAP (حقل ref فارغ)")
+                if not order.order_line:
+                    missing_parts.append("لا توجد منتجات في الطلب")
+                
+                error_msg = " | ".join(missing_parts) if missing_parts else "شروط الإرسال غير مكتملة"
+                _logger.warning(f"[SAP] Conditions not met for order {order.name}: {error_msg}")
+                order.sudo().write({
+                    'sap_synced': False,
+                    'sap_error_message': error_msg,
+                    'sap_last_sync_date': fields.Datetime.now(),
+                })
         else:
             _logger.info(f"Order {order.name} already synced to SAP, skipping")
         
@@ -101,6 +116,7 @@ class SaleOrder(models.Model):
             _logger.info(f"🔍 [DIAGNOSIS] Order {order.name}: current_state={order.state}, vals={vals}, old_state={old_states.get(order.id)}, sap_doc_entry={order.sap_doc_entry}")
             
             # التحقق إذا تم تغيير الحالة من draft إلى sale (تأكيد الطلب)
+            # Case A: تم إرسال الطلب كـ Quotation لـ SAP من قبل → تحويل Quotation إلى Order
             state_changed_to_sale = (
                 'state' in vals and 
                 vals['state'] == 'sale' and 
@@ -108,8 +124,18 @@ class SaleOrder(models.Model):
                 order.sap_doc_entry and 
                 order.sap_doc_entry > 0
             )
+
+            # Case B: تم تأكيد الطلب لكنه لم يُرسل لـ SAP من قبل (sap_doc_entry فارغ)
+            # يحدث عند انقطاع الاتصال بـ SAP أثناء إنشاء الطلب
+            state_confirmed_without_sap = (
+                'state' in vals and
+                vals['state'] == 'sale' and
+                old_states.get(order.id) == 'draft' and
+                not (order.sap_doc_entry and order.sap_doc_entry > 0) and
+                not order.sap_synced
+            )
             
-            _logger.info(f"🔍 [DIAGNOSIS] state_changed_to_sale={state_changed_to_sale} ('state' in vals={('state' in vals)}, vals.get('state')={vals.get('state')}, old={old_states.get(order.id)}, doc_entry={order.sap_doc_entry})")
+            _logger.info(f"🔍 [DIAGNOSIS] state_changed_to_sale={state_changed_to_sale}, state_confirmed_without_sap={state_confirmed_without_sap} ('state' in vals={('state' in vals)}, vals.get('state')={vals.get('state')}, old={old_states.get(order.id)}, doc_entry={order.sap_doc_entry})")
             
             if state_changed_to_sale:
                 # تحويل Quotation إلى Sales Order في SAP
@@ -172,6 +198,16 @@ class SaleOrder(models.Model):
                     })
                 
                 # بعد التحويل، لا نحتاج لتحديث إضافي
+                continue
+
+            # Case B: تم تأكيد الطلب لكنه لم يُرسل لـ SAP قط (مثلاً كان SAP منقطعاً أثناء الإنشاء)
+            # → إرسال مباشرةً كـ Sales Order جديد في SAP
+            if state_confirmed_without_sap:
+                _logger.info(f"🔄 [Case B] Order {order.name} confirmed but was never sent to SAP. Sending directly as new sale order.")
+                try:
+                    order._send_to_sap()
+                except Exception as e:
+                    _logger.warning(f"Could not send confirmed order {order.name} to SAP: {e}")
                 continue
             
             # إذا تم تحديث بيانات مهمة (وليس فقط تغيير الحالة)

@@ -54,16 +54,13 @@ class ProductPricelist(models.Model):
             suitable_rule = self.env['product.pricelist.item']
             target_uom = uom or product.uom_id
             
-            # Convert quantity to product's base UoM
-            qty_in_product_uom = quantity
-            if uom and uom != product.uom_id:
-                try:
-                    qty_in_product_uom = uom._compute_quantity(
-                        quantity, product.uom_id, raise_if_failure=False
-                    ) or quantity
-                except:
-                    qty_in_product_uom = quantity
-            
+            # Use the raw quantity (not converted) for _is_applicable_for.
+            # Conversion would cause sub-unit rules to fail the min_quantity check:
+            # e.g., 1 "100 غم" → 0.1 kg which is < min_quantity=1 (kg), wrongly rejecting the rule.
+            # Since all rules here have min_quantity=1 (meaning "at least 1 of this unit"),
+            # we pass the original quantity to avoid false rejections.
+            qty_for_applicability = quantity
+
             _logger.info(f"[Price Rule] Looking for rules for {product.display_name} with UoM {uom.name if uom else 'None'} (ID: {uom.id if uom else None})")
             
             # Search for the best matching rule
@@ -72,8 +69,8 @@ class ProductPricelist(models.Model):
             base_rule = None
             
             for rule in rules:
-                # Check basic rule applicability
-                if not rule._is_applicable_for(product, qty_in_product_uom):
+                # Check basic rule applicability using raw quantity to avoid UoM conversion issues
+                if not rule._is_applicable_for(product, qty_for_applicability):
                     continue
                 
                 # Check UoM match - PRIORITY SYSTEM:
@@ -83,34 +80,37 @@ class ProductPricelist(models.Model):
                 
                 rule_uom = None
                 has_packaging = False
-                
-                if rule.product_uom_id:
-                    # Direct UoM specified
-                    rule_uom = rule.product_uom_id
-                    has_packaging = bool(rule.product_packaging_id)
-                elif rule.product_packaging_id and rule.product_packaging_id.product_uom_id:
-                    # UoM from packaging
-                    rule_uom = rule.product_packaging_id.product_uom_id
+
+                # PRIORITY: product_packaging_id stores the specific sub-unit UoM in this
+                # system (it is a Many2one to uom.uom, not product.packaging).
+                # A rule that has product_packaging_id set is a sub-unit price rule;
+                # its effective UoM IS product_packaging_id itself.
+                # A rule without product_packaging_id is the base-UoM price rule,
+                # matched via product_uom_id.
+                if rule.product_packaging_id:
+                    # Sub-unit rule — product_packaging_id is the specific UoM
+                    rule_uom = rule.product_packaging_id  # uom.uom record
                     has_packaging = True
-                
+                elif rule.product_uom_id:
+                    # Base-UoM rule
+                    rule_uom = rule.product_uom_id
+                    has_packaging = False
+
                 if rule_uom:
-                    # Rule has a specific UoM
+                    # Rule has a specific UoM — check if it matches the requested UoM
                     if uom and rule_uom.id == uom.id:
-                        # Exact UoM match!
-                        # Prefer item WITHOUT packaging (base price)
                         if not has_packaging:
                             _logger.info(f"[Price Rule] Found EXACT UoM match (NO packaging - BASE PRICE): Rule {rule.id}, Price {rule.fixed_price}")
                             exact_match_rule = rule
-                            break  # Perfect match - base price, stop searching
+                            break  # Perfect match — stop searching
                         elif not exact_match_rule or (exact_match_rule and exact_match_rule.product_packaging_id):
-                            # Keep this but continue searching for better match (without packaging)
                             _logger.info(f"[Price Rule] Found UoM match (WITH packaging): Rule {rule.id}, Price {rule.fixed_price}")
                             exact_match_rule = rule
                     else:
-                        # UoM doesn't match - skip this rule
+                        # UoM doesn't match — skip
                         continue
                 else:
-                    # Rule has no specific UoM - use as fallback
+                    # Rule has no specific UoM — use as fallback
                     if not base_rule:
                         base_rule = rule
                         _logger.info(f"[Price Rule] Found base rule: Rule {rule.id}, Price {rule.fixed_price}")

@@ -124,19 +124,52 @@ addons/
 │   └── data/
 │       └── default_exchange_rate.xml  # Exchange rate config
 │
-├── nbs_archive/                   # Document Archive System
+├── nbs_archive/                   # Document Archive System ★ v1.1.0
 │   ├── models/
-│   │   ├── nbs_department.py     # Departments
-│   │   ├── nbs_document.py       # Documents
-│   │   ├── nbs_document_type.py  # Document types
-│   │   ├── opensearch_service.py # OpenSearch integration
-│   │   └── nbs_audit_log.py      # Audit trail
+│   │   ├── nbs_department.py          # Departments
+│   │   ├── nbs_document_type.py       # Document types
+│   │   ├── nbs_document.py            # Documents (with soft delete)
+│   │   ├── nbs_document_relation.py   # Relations & Attachments (with soft delete)
+│   │   ├── nbs_document_version.py    # Version control
+│   │   ├── nbs_document_tag.py        # Tags
+│   │   ├── nbs_folder.py              # Folder hierarchy
+│   │   ├── nbs_bulk_upload.py         # Bulk upload jobs ★ NEW
+│   │   ├── nbs_workflow.py            # Workflow management
+│   │   ├── nbs_edit_request.py        # Edit requests
+│   │   ├── nbs_signature_request.py   # Digital signatures
+│   │   ├── nbs_audit_log.py           # Audit trail
+│   │   ├── nbs_notification.py        # Notifications
+│   │   ├── opensearch_service.py      # OpenSearch integration
+│   │   └── res_users.py               # User extensions
+│   ├── controllers/
+│   │   ├── auth_controller.py              # JWT authentication
+│   │   ├── document_controller.py          # Document CRUD + Soft Delete ★
+│   │   ├── attachments_controller.py       # Attachment CRUD + Edit/Delete ★
+│   │   ├── bulk_upload_controller.py       # Bulk upload APIs ★ NEW
+│   │   ├── department_management_controller.py  # Dept/Type CRUD ★
+│   │   ├── search_controller.py            # Advanced search
+│   │   ├── workflow_controller.py          # Workflow management
+│   │   ├── admin_controller.py             # Admin operations
+│   │   ├── permissions_controller.py       # Permissions
+│   │   ├── signature_controller.py         # Signatures
+│   │   ├── relations_controller.py         # Document relations
+│   │   ├── edit_request_controller.py      # Edit requests
+│   │   ├── notification_controller.py      # Notifications
+│   │   ├── document_hierarchy_controller.py # Folder hierarchy
+│   │   ├── websocket_controller.py         # Real-time updates
+│   │   └── ocr_controller.py               # OCR processing
 │   ├── data/
 │   │   ├── nbs_department_data.xml
-│   │   └── nbs_document_type_data.xml
-│   └── security/
-│       ├── nbs_security.xml
-│       └── nbs_record_rules.xml
+│   │   ├── nbs_document_type_data.xml
+│   │   └── nbs_security_groups.xml
+│   ├── security/
+│   │   ├── nbs_security.xml
+│   │   ├── nbs_record_rules.xml
+│   │   └── ir.model.access.csv
+│   └── static/
+│       └── description/
+│           ├── icon.png
+│           └── index.html
 │
 ├── product_label_designer/        # Barcode Label Designer
 │   ├── models/
@@ -253,6 +286,105 @@ addons/
 └─────────────────────────────┘
 ```
 
+### 4. NBS Archive Workflow ★ (Document Lifecycle)
+```
+┌─────────────────────┐
+│   User (Employee)   │
+│  via API/Frontend   │
+└──────┬──────────────┘
+       │ Upload Document
+       ↓
+┌──────────────────────────────────┐
+│ Create Document (draft)          │
+│ ├── nbs_document                 │
+│ ├── nbs_document_attachment      │
+│ └── Audit Log: document_created  │
+└──────┬───────────────────────────┘
+       │ Activate
+       ↓
+┌──────────────────────────────────┐
+│ Active Document                  │
+│ ├── Edit/Update Allowed          │
+│ ├── Add Multiple Attachments ★   │
+│ ├── Edit Attachments ★           │
+│ └── Version Control               │
+└──────┬───────────────────────────┘
+       │ Soft Delete
+       ↓
+┌──────────────────────────────────┐
+│ Trash (30 days)                  │
+│ ├── is_deleted = true ★          │
+│ ├── restore_deadline set ★       │
+│ ├── Can be Restored ★            │
+│ └── Audit: document_soft_deleted │
+└──────┬───────────────────────────┘
+       │
+       ├──→ Restore ──────┐
+       │                  │
+       ↓                  ↓
+┌──────────────────┐  Back to Active
+│ Permanent Delete │
+│ (Admin Only) ★   │
+└──────────────────┘
+```
+
+### 5. Bulk Upload Workflow ★ (Week 1 Feature)
+```
+┌─────────────────────────┐
+│   User (API Client)     │
+│ Needs to upload 100 docs│
+└──────┬──────────────────┘
+       │ POST /api/documents/bulk-upload/start
+       ↓
+┌──────────────────────────────────────┐
+│ Create Bulk Upload Job               │
+│ ├── nbs_bulk_upload_job             │
+│ ├── job_id: UUID                     │
+│ ├── status: pending                  │
+│ └── department_id, document_type_id  │
+└──────┬───────────────────────────────┘
+       │ Returns job_id
+       ↓
+┌──────────────────────────────────────┐
+│ Upload Files (100 files)             │
+│ POST /bulk-upload/<job_id>/upload   │
+│ ├── files: [file1, file2, ...]      │
+│ └── Base64 encoded data              │
+└──────┬───────────────────────────────┘
+       │ Process files one by one
+       ↓
+┌──────────────────────────────────────┐
+│ Processing Loop                      │
+│ For each file:                       │
+│ ├── Create nbs_document              │
+│ ├── Create nbs_document_attachment   │
+│ ├── Update progress (commit)         │
+│ ├── processed_files++                │
+│ └── Log errors if any                │
+└──────┬───────────────────────────────┘
+       │ Real-time Progress Tracking
+       ↓
+┌──────────────────────────────────────┐
+│ GET /bulk-upload/<job_id>/progress  │
+│ Returns:                             │
+│ ├── status: processing               │
+│ ├── progress_percentage: 45%         │
+│ ├── successful_files: 43/100         │
+│ ├── failed_files: 2                  │
+│ └── error_log: "File 12: Invalid..." │
+└──────┬───────────────────────────────┘
+       │ All files processed
+       ↓
+┌──────────────────────────────────────┐
+│ Job Complete                         │
+│ ├── status: completed/partial        │
+│ ├── total_files: 100                 │
+│ ├── successful_files: 98             │
+│ ├── failed_files: 2                  │
+│ └── created_document_ids: [1,2,...]  │
+└──────────────────────────────────────┘
+```
+
 ---
 
 ## 🗄️ Database Schema - هيكل قاعدة البيانات
@@ -304,6 +436,62 @@ addons/
 └── sap_stock_info                # Stock information
 ```
 
+### Custom Tables (NBS Archive System) ★ v1.1.0
+```sql
+-- Core Archive Tables
+├── nbs_department                     # Departments/divisions
+├── nbs_document_type                  # Document types/categories
+├── nbs_folder                         # Folder hierarchy
+├── nbs_document                       # Main documents table
+│   ├── state: draft/active/archived/trash  # Document lifecycle
+│   ├── is_deleted: Boolean            # Soft delete flag ★
+│   ├── deleted_at: DateTime           # Deletion timestamp ★
+│   ├── restore_deadline: DateTime     # 30-day restore window ★
+│   └── state_before_trash: Char       # Original state ★
+
+-- Document Relations
+├── nbs_document_relation              # Document relationships
+├── nbs_document_attachment            # File attachments
+│   ├── file_data: Binary              # Actual file (in filestore)
+│   ├── is_deleted: Boolean            # Soft delete flag ★
+│   ├── deleted_at: DateTime           # Deletion timestamp ★
+│   └── restore_deadline: DateTime     # 30-day restore window ★
+├── nbs_document_version               # Version history
+└── nbs_document_tag                   # Tags/labels
+
+-- Workflow & Permissions
+├── nbs_workflow                       # Workflow definitions
+├── nbs_edit_request                   # Document edit requests
+├── nbs_signature_request              # Digital signature requests
+└── res_groups (extended)              # Access groups
+    ├── group_nbs_user                 # Basic user
+    ├── group_nbs_manager              # Manager
+    └── group_nbs_admin                # Administrator
+
+-- Bulk Operations ★ NEW (Week 1 Implementation)
+├── nbs_bulk_upload_job                # Bulk upload tracking
+│   ├── job_id: UUID                   # Unique job identifier
+│   ├── status: pending/processing/completed/failed/partial
+│   ├── total_files: Integer           # Total files to upload
+│   ├── processed_files: Integer       # Files processed
+│   ├── successful_files: Integer      # Successfully uploaded
+│   ├── failed_files: Integer          # Failed uploads
+│   ├── progress_percentage: Float     # Computed progress
+│   └── error_log: Text                # Error details
+└── bulk_upload_document_rel           # Job ↔ Document mapping
+
+-- Audit & Notifications
+├── nbs_audit_log                      # Complete audit trail
+│   ├── action: attachment_updated, attachment_deleted, ★
+│   │          document_soft_deleted, document_restored, ★
+│   │          multiple_attachments_upload, etc. ★
+│   ├── user_id: Many2one              # Who performed action
+│   ├── document_id: Many2one          # Related document
+│   ├── metadata: Text                 # Additional details
+│   └── ip_address: Char               # User IP
+└── nbs_notification                   # User notifications
+```
+
 ### Custom Tables (POS Perfume)
 ```sql
 -- POS Orders
@@ -324,6 +512,141 @@ addons/
 ├── nbs_document                  # Documents
 ├── nbs_document_version          # Document versions
 └── nbs_audit_log                 # Audit trail
+```
+
+---
+
+## 🌐 API Endpoints - نقاط الوصول للـ API
+
+### NBS Archive REST APIs ★ v1.1.0
+
+#### Document Management
+```http
+# List documents (with filters)
+POST /api/documents
+Body: { department_id, document_type_id, status, search, page, per_page }
+
+# Get document by ID
+POST /api/documents/<id>
+
+# Create document
+POST /api/documents/create
+Body: { name, department_id, document_type_id, description, ... }
+
+# Update document
+POST /api/documents/<id>/update
+
+# ★ Soft Delete - Move to trash (30 days)
+POST /api/documents/<id>/trash
+Body: { reason: "optional deletion reason" }
+
+# ★ Restore from trash
+POST /api/documents/<id>/restore
+
+# ★ Permanent delete (Admin only, requires confirmation)
+DELETE /api/documents/<id>/permanent?confirmation=DELETE_PERMANENT
+
+# ★ List trash
+POST /api/documents/trash
+```
+
+#### Attachment Management ★ (Week 1)
+```http
+# List attachments
+POST /api/documents/<document_id>/attachments
+
+# Add single attachment
+POST /api/documents/<document_id>/add-attachment
+Body: { name, file_name, file_data, description }
+
+# ★ Add multiple attachments at once (NEW)
+POST /api/documents/<document_id>/attachments/multiple
+Body: { 
+    attachments: [
+        { name, file_name, file_data, description },
+        { name, file_name, file_data, description },
+        ...
+    ]
+}
+
+# ★ Update/Edit attachment (NEW)
+POST /api/documents/<document_id>/attachments/<attachment_id>/update
+Body: { name, description, file_data, file_name }
+
+# ★ Soft delete attachment (NEW)
+DELETE /api/documents/<document_id>/attachments/<attachment_id>
+
+# ★ Restore attachment (NEW)
+POST /api/documents/<document_id>/attachments/<attachment_id>/restore
+
+# ★ Permanent delete (Admin only, NEW)
+DELETE /api/documents/<document_id>/attachments/<attachment_id>/permanent
+
+# Download attachment
+GET /api/documents/<document_id>/attachments/<attachment_id>/download
+```
+
+#### Bulk Upload ★ (Week 1 - NEW Feature)
+```http
+# Step 1: Start bulk upload job
+POST /api/documents/bulk-upload/start
+Body: { department_id, document_type_id, folder_id, confidentiality_level }
+Returns: { job_id, id }
+
+# Step 2: Upload files
+POST /api/documents/bulk-upload/<job_id>/upload
+Body: { 
+    files: [
+        { file_name, file_data, name, description },
+        ...
+    ]
+}
+
+# Step 3: Track progress (Real-time)
+POST /api/documents/bulk-upload/<job_id>/progress
+Returns: { 
+    status, 
+    progress_percentage, 
+    processed_files, 
+    successful_files,
+    failed_files,
+    error_log 
+}
+
+# Cancel job
+POST /api/documents/bulk-upload/<job_id>/cancel
+
+# List jobs
+POST /api/documents/bulk-upload/jobs
+Body: { status, limit, offset }
+```
+
+#### Department & Document Type Management ★ (NEW)
+```http
+# Departments
+POST /api/departments/create
+POST /api/departments
+POST /api/departments/<id>
+POST /api/departments/<id>/update
+DELETE /api/departments/<id>
+
+# Document Types
+POST /api/document-types/create
+POST /api/document-types
+POST /api/document-types/<id>
+POST /api/document-types/<id>/update
+DELETE /api/document-types/<id>
+```
+
+### Authentication
+```http
+# JWT Login
+POST /api/auth/login
+Body: { username, password }
+Returns: { token, user_id }
+
+# All requests require JWT token in header
+Authorization: Bearer <token>
 ```
 
 ---
@@ -935,9 +1258,38 @@ Development:
 
 ---
 
-**Last Updated:** January 29, 2026  
-**Version:** 1.0  
+**Last Updated:** February 7, 2026  
+**Version:** 1.1 (NBS Archive v1.1.0 - Week 1 Implementation Complete ★)  
 **Maintained By:** Lugal-AI Development Team
+
+---
+
+## 📋 Recent Updates
+
+### v1.1.0 - NBS Archive Week 1 Implementation (Feb 7, 2026) ★
+
+**New Features:**
+- ✅ Soft Delete system for Documents & Attachments (30-day trash)
+- ✅ Edit/Update Attachments (name, description, file replacement)
+- ✅ Bulk Upload with real-time progress tracking
+- ✅ Multiple Attachments upload (single API call)
+- ✅ Department & Document Type CRUD APIs
+- ✅ Enhanced Audit Logging (8 new action types)
+- ✅ Trash management (List, Restore, Permanent Delete)
+
+**New Models:**
+- `nbs_bulk_upload_job` - Track bulk upload operations
+
+**New API Endpoints:** 14 endpoints
+- 4 Soft Delete APIs (trash, restore, permanent delete, list trash)
+- 4 Attachment management APIs (update, delete, restore, permanent delete)
+- 5 Bulk upload APIs (start, upload, progress, cancel, list)
+- 1 Multiple attachments upload API
+
+**Documentation:**
+- `NBS_ARCHIVE_WEEK1_IMPLEMENTATION_COMPLETE.md` - Full documentation
+- `NBS_ARCHIVE_QUICK_TEST_GUIDE.md` - Testing guide
+- `NBS_DEPARTMENT_DOCTYPE_MANAGEMENT.md` - Management guide
 
 ---
 

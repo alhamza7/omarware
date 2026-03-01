@@ -86,7 +86,7 @@
                         <group>
                             <field name="user_id"/>
                             <field name="sale_order_id" readonly="1"/>
-                            <field name="sap_doc_number" readonly="1" invisible="not sap_doc_number"/>
+                            <field name="sap_doc_num" readonly="1" invisible="not sap_doc_num" string="SAP Document Number"/>
                             <field name="exchange_rate" 
                                    string="سعر الصرف (دولار → دينار)"
                                    widget="float"
@@ -95,11 +95,11 @@
                         </group>
                     </group>
                     
-                    <!-- SAP Sync Status -->
-                    <group string="حالة المزامنة مع SAP" invisible="not sap_doc_number and not sap_error_message">
+                    <!-- SAP Sync Status — always visible when sale_order_id exists -->
+                    <group string="حالة المزامنة مع SAP" invisible="not sale_order_id">
                         <group>
                             <field name="sap_synced" readonly="1"/>
-                            <field name="sap_last_sync_date" readonly="1"/>
+                            <field name="sap_last_sync_date" readonly="1" invisible="not sap_last_sync_date"/>
                         </group>
                         <group>
                             <field name="sap_error_message" 
@@ -109,6 +109,13 @@
                                    class="text-danger"
                                    style="color: red; font-weight: bold;"/>
                         </group>
+                        <div colspan="2" invisible="sap_synced">
+                            <button name="action_retry_sap_sync" 
+                                    string="إعادة المحاولة - إرسال إلى SAP" 
+                                    type="object" 
+                                    class="btn-warning"
+                                    icon="fa-refresh"/>
+                        </div>
                     </group>
                     
                     <group>

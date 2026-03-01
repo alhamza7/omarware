@@ -19,7 +19,9 @@ echo "Starting Odoo..."
 echo "════════════════════════════════════════════════════════════"
 echo ""
 
-cd /home/capo7amzah/Documents/NBS-PROJECT/Lugal-ai
+# Always cd to project root (script directory) so data_dir ./filestore_local works on any machine
+cd "$(dirname "$0")"
+mkdir -p filestore_local
 ./venv/bin/python odoo-bin -c odoo_local.conf --dev=all
 
 echo ""
