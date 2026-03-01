@@ -105,32 +105,29 @@ class SapDataMapper(models.AbstractModel):
             raise SapValidationError(f"Failed to map SAP partner: {str(e)}")
     
     def map_odoo_partner_to_sap(self, odoo_partner):
-        """Map Odoo Partner to SAP Business Partner"""
+        """Map Odoo Partner to SAP Business Partner (الطريقة الموصى بها: لا CardCode عند الإنشاء، Notes+Address إلزاميان كنص)"""
         try:
             if not odoo_partner:
                 raise SapValidationError("Odoo partner is required")
             
-            # Basic mapping
+            # Notes و Address إلزاميان معاً كنص غير فارغ (حل validation في SAP)
+            _notes = (odoo_partner.city or odoo_partner.street or odoo_partner.name or "—").strip() or "—"
+            _address = (odoo_partner.street or odoo_partner.city or odoo_partner.name or "—").strip() or "—"
+            
+            # Basic mapping - لا نرسل CardCode (SAP ينشئه عند الإنشاء؛ وعند التحديث يُستخدم في URL فقط)
             sap_data = {
                 'CardName': odoo_partner.name,
-                'CardCode': odoo_partner.ref or '',
                 'EmailAddress': odoo_partner.email or '',
                 'Phone1': odoo_partner.phone or '',
                 'Cellular': odoo_partner.mobile or '',
                 'Website': odoo_partner.website or '',
                 'CardType': 'cCustomer' if odoo_partner.customer_rank > 0 else 'cSupplier',
+                'Notes': _notes,
+                'Address': _address,
+                'Series': 72,
+                'GroupCode': 100,
+                'Country': (odoo_partner.country_id and odoo_partner.country_id.code) or 'IQ',
             }
-            
-            # Address mapping
-            if odoo_partner.street or odoo_partner.city:
-                sap_data['Address'] = {
-                    'Address': odoo_partner.street or '',
-                    'Address2': odoo_partner.street2 or '',
-                    'City': odoo_partner.city or '',
-                    'ZipCode': odoo_partner.zip or '',
-                    'State': odoo_partner.state_id.name if odoo_partner.state_id else '',
-                    'Country': odoo_partner.country_id.code if odoo_partner.country_id else '',
-                }
             
             # Contact person mapping
             if odoo_partner.contact_name:

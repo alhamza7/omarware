@@ -136,7 +136,7 @@ font-family: 'MCS Taybah S_U normal.', 'Arial', 'Tahoma', sans-serif;
 amount_iqd = amount_usd * exchange_rate
 ```
 
-القيمة الافتراضية: **1300 IQD/USD**
+القيمة الافتراضية: **1510 IQD/USD**
 
 ## التنسيق الرقمي
 

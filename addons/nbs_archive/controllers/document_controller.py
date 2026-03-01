@@ -168,6 +168,82 @@ class NBSDocumentController(http.Controller):
                 }
             }
     
+    @http.route('/api/documents/trash', type='jsonrpc', auth='none', methods=['POST'], csrf=False, cors='*')
+    def get_trash_documents(self, department_id=None, document_type_id=None, search=None,
+                            from_date=None, to_date=None, page=1, per_page=20, **kwargs):
+        """Get archived (trashed) documents with optional date filters"""
+        try:
+            if not ensure_jwt_user_id():
+                return {
+                    'success': False,
+                    'error': 'Unauthorized',
+                    'data': [],
+                    'pagination': {
+                        'total': 0,
+                        'page': page,
+                        'per_page': per_page,
+                        'total_pages': 0,
+                    }
+                }
+
+            domain = [('state', '=', 'archived')]
+
+            if department_id:
+                domain.append(('department_id', '=', department_id))
+
+            if document_type_id:
+                domain.append(('document_type_id', '=', document_type_id))
+
+            if search:
+                domain.append(('name', 'ilike', search))
+
+            # Date range filter on upload_date
+            if from_date:
+                domain.append(('upload_date', '>=', from_date))
+            if to_date:
+                domain.append(('upload_date', '<=', to_date))
+
+            Document = request.env['nbs.document']
+            documents = Document.search(domain, limit=per_page, offset=(page - 1) * per_page, order='upload_date desc')
+            total = Document.search_count(domain)
+
+            return {
+                'success': True,
+                'data': [{
+                    'id': doc.id,
+                    'title': doc.name,
+                    'department_id': doc.department_id.id,
+                    'department_name': doc.department_id.name,
+                    'document_type_id': doc.document_type_id.id,
+                    'document_type_name': doc.document_type_id.name,
+                    'uploader_id': doc.uploader_id.id,
+                    'uploader_name': doc.uploader_id.name,
+                    'upload_date': doc.upload_date.isoformat() if doc.upload_date else None,
+                    'status': doc.state,
+                    'confidentiality_level': doc.confidentiality_level,
+                    'barcode': doc.barcode,
+                    'file_name': doc.current_version_id.file_name if doc.current_version_id else None,
+                    'file_size': doc.current_version_id.file_size if doc.current_version_id else 0,
+                } for doc in documents],
+                'pagination': {
+                    'total': total,
+                    'page': page,
+                    'per_page': per_page,
+                    'total_pages': (total + per_page - 1) // per_page,
+                }
+            }
+        except AccessError as e:
+            _logger.error(f'Access denied: {str(e)}')
+            return {'success': False, 'error': 'Access denied'}
+        except Exception as e:
+            _logger.error(f'Get trash documents error: {str(e)}')
+            return {
+                'success': False,
+                'error': str(e),
+                'data': [],
+                'pagination': {'total': 0, 'page': 1, 'per_page': 20, 'total_pages': 0}
+            }
+
     @http.route('/api/documents/<int:document_id>', type='jsonrpc', auth='none', methods=['POST'], csrf=False, cors='*')
     def get_document(self, document_id, **kwargs):
         """Get single document details with versions"""

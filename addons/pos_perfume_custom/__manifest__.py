@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'POS Perfume Design - Custom Interface',
-    'version': '19.0.1.0.0',
+    'version': '19.0.1.0.1',
     'category': 'Point of Sale',
     'summary': 'تصميم واجهة POS مخصصة لمتجر العطور مع جدول طلبات Excel-like',
     'description': """

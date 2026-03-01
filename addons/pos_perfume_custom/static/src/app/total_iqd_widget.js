@@ -15,7 +15,7 @@ export class TotalIQDWidget extends Component {
 
     get totalIQD() {
         if (!this.currentOrder) return 0;
-        return Math.floor(this.currentOrder.get_total_with_tax() * 1300);
+        return Math.floor(this.currentOrder.get_total_with_tax() * 1600);
     }
 
     get formattedTotalIQD() {

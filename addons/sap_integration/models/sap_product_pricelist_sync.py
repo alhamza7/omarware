@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 # Copyright 2024 Your Company
 # License LGPL-3.0 or later (http://www.gnu.org/licenses/lgpl.html)
 
@@ -328,35 +328,48 @@ class SapProductPricelistSync(models.Model):
         }
     
     def _get_or_create_pricelist(self, backend, pricelist_num, currency_code):
-        """Get or create Odoo pricelist"""
-        # Search for existing pricelist with this number
+        """Get or create Odoo pricelist - always returns the one with the most items to avoid duplicates."""
         pricelist_name = f"SAP Price List {pricelist_num}"
-        
-        # Get currency
-        currency = self.env['res.currency'].search([
-            ('name', '=', currency_code)
-        ], limit=1)
-        
+
+        currency = self.env['res.currency'].search([('name', '=', currency_code)], limit=1)
         if not currency:
             currency = self.env.company.currency_id
-        
-        # Search for pricelist
-        pricelist = self.env['product.pricelist'].search([
+
+        # Search ALL active matches (not just limit=1) to handle duplicates
+        pricelists = self.env['product.pricelist'].search([
             ('name', '=', pricelist_name),
-            ('currency_id', '=', currency.id)
-        ], limit=1)
-        
-        if not pricelist:
-            # Create new pricelist
+            ('currency_id', '=', currency.id),
+            ('active', '=', True),
+        ], order='id asc')
+
+        if not pricelists:
             pricelist = self.env['product.pricelist'].create({
                 'name': pricelist_name,
                 'currency_id': currency.id,
                 'active': True,
                 'company_id': self.env.company.id,
             })
-            _logger.info(f"Created new pricelist: {pricelist_name}")
-        
-        return pricelist
+            _logger.info(f"Created new pricelist: {pricelist_name} (id={pricelist.id})")
+            return pricelist
+
+        if len(pricelists) == 1:
+            return pricelists
+
+        # Multiple pricelists with same name → pick the one with the most non-zero priced items
+        best = pricelists[0]
+        best_count = self.env['product.pricelist.item'].search_count([
+            ('pricelist_id', '=', best.id), ('fixed_price', '>', 0)
+        ])
+        for pl in pricelists[1:]:
+            count = self.env['product.pricelist.item'].search_count([
+                ('pricelist_id', '=', pl.id), ('fixed_price', '>', 0)
+            ])
+            if count > best_count:
+                best = pl
+                best_count = count
+
+        _logger.info(f"Multiple pricelists found for '{pricelist_name}', using id={best.id} with {best_count} non-zero items")
+        return best
     
     def _get_uom_by_code(self, uom_code):
         """Get UoM by SAP code"""

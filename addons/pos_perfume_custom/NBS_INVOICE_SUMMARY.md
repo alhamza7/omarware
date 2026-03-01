@@ -132,7 +132,7 @@ font-family: 'MCS Taybah S_U normal.', 'Arial', 'Tahoma', sans-serif;
 ✅ date               # التاريخ والوقت
 ✅ partner_id         # العميل
 ✅ invoice_type       # نوع الفاتورة (1-8)
-✅ exchange_rate      # سعر الصرف (افتراضي 1300)
+✅ exchange_rate      # سعر الصرف (افتراضي 1510)
 ✅ amount_total       # المجموع $
 ✅ amount_discount    # الخصم $
 ✅ note               # الملاحظات
@@ -174,7 +174,7 @@ font-family: 'MCS Taybah S_U normal.', 'Arial', 'Tahoma', sans-serif;
 عدل في نموذج `pos.perfume.order`:
 ```python
 exchange_rate = fields.Float(
-    default=1300.0,  # غير هذا الرقم
+    default=1510.0,  # غير هذا الرقم
 )
 ```
 

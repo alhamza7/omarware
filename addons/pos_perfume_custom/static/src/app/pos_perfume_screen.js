@@ -6,6 +6,9 @@ import { _t } from "@web/core/l10n/translation";
 import { rpc } from "@web/core/network/rpc";
 import { CustomerSearch } from "./customer_search";
 
+/** سعر الصرف ثابت في الكود (لا يُجلب من قاعدة البيانات) - 1 USD = هذا المبلغ د.ع */
+const EXCHANGE_RATE_USD_IQD = 1600;
+
 /**
  * Main POS Perfume Screen Component - Enhanced like Sale Order
  * Dynamic product search, UoM selection, real warehouse stock
@@ -79,8 +82,8 @@ export class PosPerfumeScreen extends Component {
             fullPlasticFilterActive: null,  // true/false/null for full plastic filter
             csLocFilterActive: false,  // true to show CS/LOC products, false to hide them
             
-            // UI state
-            exchangeRate: 1500,  // Default, will be loaded from settings on mount
+            // UI state - سعر الصرف ثابت من الكود (EXCHANGE_RATE_USD_IQD)
+            exchangeRate: EXCHANGE_RATE_USD_IQD,
             
             // Navigation state for keyboard controls
             focusedCell: {
@@ -135,19 +138,7 @@ export class PosPerfumeScreen extends Component {
                 this.state.userName = window.odoo.session_info.name || window.odoo.session_info.username || 'Cashier';
             }
             
-            // Load exchange rate from settings
-            try {
-                const exchangeRateParam = await this.orm.call(
-                    'ir.config_parameter',
-                    'get_param',
-                    ['pos_perfume.default_exchange_rate_usd_iqd', '1500.0']
-                );
-                this.state.exchangeRate = parseFloat(exchangeRateParam) || 1500.0;
-                console.log(`[POS Perfume] Loaded exchange rate: ${this.state.exchangeRate}`);
-            } catch (error) {
-                console.warn('[POS Perfume] Failed to load exchange rate, using default 1500:', error);
-                this.state.exchangeRate = 1500.0;
-            }
+            // سعر الصرف ثابت في الكود (EXCHANGE_RATE_USD_IQD) - لا جلب من قاعدة البيانات
             
             // Update time every minute
             setInterval(() => {
@@ -161,53 +152,58 @@ export class PosPerfumeScreen extends Component {
     }
     
     /**
-     * Load available pricelists
+     * Load available pricelists and select the one with the most non-zero priced items
      */
     async loadPricelists() {
         try {
+            // Fetch only active pricelists ordered by id to get consistent results
             const pricelists = await this.orm.searchRead(
                 'product.pricelist',
-                [],
+                [['active', '=', true]],
                 ['id', 'name', 'currency_id'],
-                { limit: 100, order: 'name' }
+                { limit: 100, order: 'id asc' }
             );
             
             this.state.pricelists = pricelists;
             
-            // Set default pricelist to "Price list 1" (fixed)
             if (pricelists.length > 0 && !this.state.currentOrder.pricelist_id) {
-                // Try to find "Price list 1" - case insensitive and flexible search
-                let defaultPricelist = pricelists.find(p => 
-                    p.name && (
-                        p.name.toLowerCase() === 'price list 1' ||
-                        p.name.toLowerCase().includes('price list 1') ||
-                        p.name.toLowerCase() === 'list 1' ||
-                        p.name.toLowerCase().includes('list 1')
-                    )
+                // Find all candidates named "SAP Price List 1" or "Price List 1"
+                const pl1Candidates = pricelists.filter(p =>
+                    p.name && p.name.toLowerCase().includes('list 1')
                 );
-                
-                // If not found, try "Public Pricelist" or "Default"
-                if (!defaultPricelist) {
-                    defaultPricelist = pricelists.find(p => 
-                        p.name && (
-                            p.name.toLowerCase() === 'public pricelist' ||
-                            p.name.toLowerCase().includes('public') ||
-                            p.name.toLowerCase() === 'default'
-                        )
+
+                let defaultPricelist = null;
+
+                if (pl1Candidates.length === 1) {
+                    // Only one match - use it directly
+                    defaultPricelist = pl1Candidates[0];
+                } else if (pl1Candidates.length > 1) {
+                    // Multiple matches with same name - pick the one with most items
+                    // by fetching item counts for each candidate
+                    const itemCounts = await this.orm.readGroup(
+                        'product.pricelist.item',
+                        [['pricelist_id', 'in', pl1Candidates.map(p => p.id)], ['fixed_price', '>', 0]],
+                        ['pricelist_id'],
+                        ['pricelist_id']
                     );
+                    const countMap = {};
+                    itemCounts.forEach(r => {
+                        const pid = Array.isArray(r.pricelist_id) ? r.pricelist_id[0] : r.pricelist_id;
+                        countMap[pid] = r.pricelist_id_count;
+                    });
+                    // Pick the candidate with the most non-zero priced items
+                    defaultPricelist = pl1Candidates.reduce((best, p) =>
+                        (countMap[p.id] || 0) > (countMap[best.id] || 0) ? p : best
+                    , pl1Candidates[0]);
                 }
-                
-                // If still not found, use first one
+
+                // Fallback: first active pricelist (lowest id = oldest/most stable)
                 if (!defaultPricelist) {
                     defaultPricelist = pricelists[0];
                 }
-                
+
                 this.state.currentOrder.pricelist_id = defaultPricelist.id;
-                
-                console.log(`Default pricelist fixed to: ${defaultPricelist.name} (ID: ${defaultPricelist.id})`);
-                
-                // Log all available pricelists for debugging
-                console.log('Available pricelists:', pricelists.map(p => `${p.name} (ID: ${p.id})`));
+                console.log(`[POS] Default pricelist: ${defaultPricelist.name} (ID: ${defaultPricelist.id})`);
             }
         } catch (error) {
             console.error('Error loading pricelists:', error);
@@ -954,19 +950,14 @@ export class PosPerfumeScreen extends Component {
     }
     
     /**
-     * Handle pricelist change - DISABLED: Keep fixed to "Price list 1"
+     * Handle pricelist change - DISABLED: Keep fixed to the loaded default pricelist
      */
     async onPricelistChange() {
-        // DISABLED: Keep pricelist fixed to "Price list 1"
-        // Reset to "Price list 1" if user tries to change it
-        const priceList1 = this.state.pricelists.find(p => 
-            p.name && (
-                p.name.toLowerCase() === 'price list 1' ||
-                p.name.toLowerCase().includes('price list 1') ||
-                p.name.toLowerCase() === 'list 1' ||
-                p.name.toLowerCase().includes('list 1')
-            )
-        );
+        // DISABLED: Keep pricelist fixed to the default loaded on startup
+        // Reset back to the default pricelist if user tries to change it
+        const defaultPricelistId = this.state.currentOrder.pricelist_id;
+        const priceList1 = this.state.pricelists.find(p => p.id === defaultPricelistId)
+            || this.state.pricelists.find(p => p.name && p.name.toLowerCase().includes('list 1'));
         if (priceList1 && this.state.currentOrder.pricelist_id !== priceList1.id) {
             this.state.currentOrder.pricelist_id = priceList1.id;
             this.notification.add(
@@ -2238,6 +2229,35 @@ export class PosPerfumeScreen extends Component {
         }
     }
     
+    /**
+     * Export the saved invoice as an Excel (.xlsx) file and trigger browser download.
+     */
+    async exportToExcel() {
+        if (!this.state.currentOrder.order_id) {
+            this.notification.add(_t("Please save the order first before exporting to Excel"), { type: "warning" });
+            return;
+        }
+
+        try {
+            const orderId = this.state.currentOrder.order_id;
+            const exportUrl = `/pos_perfume/export_excel/${orderId}`;
+
+            // Open the URL so the browser handles the file download
+            window.open(exportUrl, '_blank');
+
+            this.notification.add(_t("Excel file is being downloaded..."), {
+                type: "success",
+                title: _t("Export Excel"),
+            });
+        } catch (error) {
+            console.error('[POS Perfume] Export Excel error:', error);
+            this.notification.add(
+                _t("Error exporting Excel: ") + (error.message || String(error)),
+                { type: "danger", sticky: true, title: _t("Export Error") }
+            );
+        }
+    }
+
     /**
      * Create quotation (old method - kept for reference)
      */
