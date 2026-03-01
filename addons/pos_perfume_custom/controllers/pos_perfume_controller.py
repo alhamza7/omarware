@@ -369,7 +369,7 @@ class PosPerfumeController(http.Controller):
             # Get exchange rate from settings (always use current rate)
             exchange_rate = float(
                 request.env['ir.config_parameter'].sudo().get_param(
-                    'pos_perfume.default_exchange_rate_usd_iqd', '1530.0'
+                    'pos_perfume.default_exchange_rate_usd_iqd', '1600.0'
                 )
             )
             iqd_amount = order.amount_total * exchange_rate
@@ -527,7 +527,7 @@ class PosPerfumeController(http.Controller):
         # ─── Invoice header info ───────────────────────────────────────────────
         exchange_rate = float(
             request.env['ir.config_parameter'].sudo().get_param(
-                'pos_perfume.default_exchange_rate_usd_iqd', '1530.0'
+                'pos_perfume.default_exchange_rate_usd_iqd', '1600.0'
             )
         )
         partner_name = order.partner_id.name if order.partner_id else ''

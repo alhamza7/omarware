@@ -30,7 +30,7 @@ class ProductTemplate(models.Model):
     @api.depends('list_price')
     def _compute_price_iqd(self):
         """Convert USD price to IQD using fixed exchange rate"""
-        exchange_rate = 1530.0  # 1 USD = 1,530 IQD
+        exchange_rate = 1600.0  # 1 USD = 1,530 IQD
         for product in self:
             product.price_iqd = product.list_price * exchange_rate
     
