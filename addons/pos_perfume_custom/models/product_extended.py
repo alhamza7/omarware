@@ -150,7 +150,7 @@ class ProductProductExtended(models.Model):
         except:
             pass
         
-        return usd_amount * 1600
+        return usd_amount * 1550
     
     def _get_product_priority_and_color(self, default_code):
         """
@@ -400,7 +400,7 @@ class ProductProductExtended(models.Model):
                     list_price_usd = product.list_price
                 
                 # Convert to IQD
-                list_price_iqd = list_price_usd * 1600  # Simple conversion
+                list_price_iqd = list_price_usd * 1550  # Simple conversion
                 
                 # Try to use Odoo currency conversion
                 try:
