@@ -108,6 +108,8 @@
         'views/sap_product_pricelist_sync_views.xml',  # Pricelist synchronization
         'views/sap_product_warehouse_info_views.xml',  # Warehouse information
         'views/product_uom_group_views.xml',           # UoM Group restriction in products/sales
+        'views/sap_realtime_sync_views.xml',           # Realtime fast-poll delta sync
+        'views/sap_exchange_rate_sync_views.xml',      # IQD/USD exchange rate sync from SAP
 
         # Full menu tree already loaded above (before auto_sync_views)
     ],

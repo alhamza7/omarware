@@ -6,8 +6,9 @@ import { _t } from "@web/core/l10n/translation";
 import { rpc } from "@web/core/network/rpc";
 import { CustomerSearch } from "./customer_search";
 
-/** سعر الصرف ثابت في الكود (لا يُجلب من قاعدة البيانات) - 1 USD = هذا المبلغ د.ع */
-const EXCHANGE_RATE_USD_IQD = 1550;
+/** Default fallback rate — only used if the server call fails on first load */
+/** Fallback until server returns rate; server value = SAP-synced pos_perfume.default_exchange_rate_usd_iqd */
+const EXCHANGE_RATE_FALLBACK = 1560;
 
 /**
  * Main POS Perfume Screen Component - Enhanced like Sale Order
@@ -82,8 +83,8 @@ export class PosPerfumeScreen extends Component {
             fullPlasticFilterActive: null,  // true/false/null for full plastic filter
             csLocFilterActive: false,  // true to show CS/LOC products, false to hide them
             
-            // UI state - سعر الصرف ثابت من الكود (EXCHANGE_RATE_USD_IQD)
-            exchangeRate: EXCHANGE_RATE_USD_IQD,
+            // UI state - سعر الصرف يُجلب من قاعدة البيانات عند التحميل
+            exchangeRate: EXCHANGE_RATE_FALLBACK,
             
             // Navigation state for keyboard controls
             focusedCell: {
@@ -138,7 +139,10 @@ export class PosPerfumeScreen extends Component {
                 this.state.userName = window.odoo.session_info.name || window.odoo.session_info.username || 'Cashier';
             }
             
-            // سعر الصرف ثابت في الكود (EXCHANGE_RATE_USD_IQD) - لا جلب من قاعدة البيانات
+            // Fetch live exchange rate from DB (set by SAP sync cron)
+            await this.loadExchangeRate();
+            // Refresh rate every 30 minutes to stay in sync with SAP
+            setInterval(() => this.loadExchangeRate(), 30 * 60 * 1000);
             
             // Update time every minute
             setInterval(() => {
@@ -151,6 +155,25 @@ export class PosPerfumeScreen extends Component {
         });
     }
     
+    /**
+     * Fetch the current IQD/USD exchange rate from the server.
+     * The rate is synced automatically from SAP every 30 minutes by the cron job.
+     * Falls back to the current state value if the call fails.
+     */
+    async loadExchangeRate() {
+        try {
+            const rate = await rpc('/pos_perfume/get_exchange_rate', {});
+            if (rate && typeof rate === 'number' && rate > 100) {
+                if (this.state.exchangeRate !== rate) {
+                    this.state.exchangeRate = rate;
+                    console.log(`[POS] Exchange rate updated from server: ${rate}`);
+                }
+            }
+        } catch (err) {
+            console.warn('[POS] Could not fetch exchange rate from server, using current value:', this.state.exchangeRate, err);
+        }
+    }
+
     /**
      * Load available pricelists and select the one with the most non-zero priced items
      */

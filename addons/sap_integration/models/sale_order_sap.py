@@ -630,14 +630,28 @@ class SaleOrder(models.Model):
         _logger.info("=== End of DocumentLines ===")
         
         # إعداد بيانات الوثيقة
-        # ملاحظة: لا نرسل DocDate إلى SAP حتى لا نصطدم برسالة
-        # "Series period does not match current period" عند تحديث مستندات
-        # قديمة ضمن Series مرتبط بفترة مختلفة. SAP سيستخدم التاريخ
-        # الافتراضي أو تاريخ المستند الأصلي في النظام.
+        doc_date = (quotation.date_order or quotation.create_date or self.env.context.get('date')).strftime('%Y-%m-%d') if (quotation.date_order or quotation.create_date) else fields.Date.today().strftime('%Y-%m-%d')
         quotation_data = {
             'CardCode': quotation.partner_id.ref or '',
             'DocumentLines': document_lines,
         }
+        # العملة وتاريخ المستند حتى يستخدم SAP سعر الصرف لليوم نفسه (Exchange Rates and Indexes)
+        currency = (quotation.currency_id and quotation.currency_id.name) or ''
+        if currency:
+            quotation_data['DocCurrency'] = currency
+        quotation_data['DocDate'] = doc_date
+        # عند العملة IQD: إرسال DocRate من SAP حتى يكون سعر الفاتورة في SAP = سعر SAP (بنفس تاريخ اليوم)
+        if currency and currency.upper() == 'IQD':
+            sap_backend = backend or self.env['sap.backend'].search([('active', '=', True)], limit=1)
+            if sap_backend:
+                try:
+                    conn = sap_backend.get_connection()
+                    iqd_rate = conn.get_iqd_exchange_rate()
+                    if iqd_rate and 100 <= iqd_rate <= 10000:
+                        quotation_data['DocRate'] = iqd_rate
+                        _logger.info(f"[SAP] DocRate={iqd_rate} (from SAP for date {doc_date}) for IQD quotation {quotation.name}")
+                except Exception as e:
+                    _logger.warning(f"[SAP] Could not set DocRate from SAP for IQD: {e}")
         
         # إعداد Comments (الملاحظات) - بدون إضافة نوع الفاتورة
         comments_parts = []
