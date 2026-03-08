@@ -5,6 +5,7 @@ from odoo import http
 from odoo.http import request
 from ._auth import ensure_jwt_user_id
 from ._audit import crm_audit
+from ._error import crm_error
 
 _logger = logging.getLogger(__name__)
 
@@ -79,8 +80,7 @@ class CallController(http.Controller):
                 },
             }
         except Exception as e:
-            _logger.exception('list_calls error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'list_calls')
 
     @http.route('/api/crm/calls/<int:call_id>', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def get_call(self, call_id, **kwargs):
@@ -93,8 +93,7 @@ class CallController(http.Controller):
                 return {'success': False, 'error': 'Call not found'}
             return {'success': True, 'data': _call_to_dict(call)}
         except Exception as e:
-            _logger.exception('get_call error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'get_call')
 
     @http.route('/api/crm/calls/create', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def create_call(self, customer_id, call_type='inbound', channel=None, caller_number=None, branch_id=None, **kwargs):
@@ -131,8 +130,7 @@ class CallController(http.Controller):
                       details={'call_type': call_type, 'channel': channel, 'caller_number': caller_number})
             return {'success': True, 'data': _call_to_dict(call)}
         except Exception as e:
-            _logger.exception('create_call error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'create_call')
 
     @http.route('/api/crm/calls/<int:call_id>/end', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def end_call(self, call_id, duration_seconds=None, outcome=None, notes=None,
@@ -164,8 +162,7 @@ class CallController(http.Controller):
                       details={'outcome': outcome, 'duration_seconds': duration_seconds})
             return {'success': True, 'data': _call_to_dict(call)}
         except Exception as e:
-            _logger.exception('end_call error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'end_call')
 
     @http.route('/api/crm/calls/<int:call_id>/update', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def update_call(self, call_id, **kwargs):
@@ -187,8 +184,7 @@ class CallController(http.Controller):
                 call.write(vals)
             return {'success': True, 'data': _call_to_dict(call)}
         except Exception as e:
-            _logger.exception('update_call error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'update_call')
 
     @http.route('/api/crm/calls/<int:call_id>/delete', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def delete_call(self, call_id, **kwargs):
@@ -204,8 +200,7 @@ class CallController(http.Controller):
                       record_model='lugal.crm.call', record_id=call_id)
             return {'success': True}
         except Exception as e:
-            _logger.exception('delete_call error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'delete_call')
 
     @http.route('/api/crm/calls/<int:call_id>/attach_recording', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def attach_recording(self, call_id, recording_url, **kwargs):
@@ -222,8 +217,7 @@ class CallController(http.Controller):
                       details={'recording_url': recording_url})
             return {'success': True, 'data': {'id': call.id, 'recording_url': call.recording_url}}
         except Exception as e:
-            _logger.exception('attach_recording error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'attach_recording')
 
     # ─── Queue ────────────────────────────────────────────────────────────
 
@@ -248,8 +242,7 @@ class CallController(http.Controller):
             } for q in items]
             return {'success': True, 'data': {'items': data}}
         except Exception as e:
-            _logger.exception('queue_list error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'queue_list')
 
     @http.route('/api/crm/calls/queue/<int:queue_id>/assign', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def queue_assign(self, queue_id, **kwargs):
@@ -263,8 +256,7 @@ class CallController(http.Controller):
             q.write({'assigned_to_id': request.env.uid, 'status': 'assigned'})
             return {'success': True}
         except Exception as e:
-            _logger.exception('queue_assign error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'queue_assign')
 
     @http.route('/api/crm/calls/queue/add', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def queue_add(self, customer_id=None, channel=None, caller_number=None, **kwargs):
@@ -287,5 +279,4 @@ class CallController(http.Controller):
             })
             return {'success': True, 'data': {'id': q.id, 'queue_position': q.queue_position}}
         except Exception as e:
-            _logger.exception('queue_add error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'queue_add')

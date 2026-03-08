@@ -5,6 +5,7 @@ from odoo import http
 from odoo.http import request
 from ._auth import ensure_jwt_user_id
 from ._audit import crm_audit
+from ._error import crm_error
 
 _logger = logging.getLogger(__name__)
 
@@ -130,8 +131,7 @@ class SupplyController(http.Controller):
                 'data': {'items': [_container_to_dict(c) for c in containers], 'total': total, 'page': page, 'per_page': per_page},
             }
         except Exception as e:
-            _logger.exception('container_list error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'container_list')
 
     @http.route('/api/crm/supply/containers/<int:container_id>', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def container_get(self, container_id, **kwargs):
@@ -144,8 +144,7 @@ class SupplyController(http.Controller):
                 return {'success': False, 'error': 'Container not found'}
             return {'success': True, 'data': _container_to_dict(c)}
         except Exception as e:
-            _logger.exception('container_get error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'container_get')
 
     @http.route('/api/crm/supply/containers/create', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def container_create(self, name, container_number=None, bl_number=None, status='waiting', division=None, **kwargs):
@@ -159,8 +158,7 @@ class SupplyController(http.Controller):
                       details={'name': name, 'container_number': container_number})
             return {'success': True, 'data': _container_to_dict(c)}
         except Exception as e:
-            _logger.exception('container_create error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'container_create')
 
     @http.route('/api/crm/supply/po/list', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def po_list(self, page=1, per_page=50, status=None, vendor_id=None, **kwargs):
@@ -179,8 +177,7 @@ class SupplyController(http.Controller):
             pos = PO.search(domain, limit=per_page, offset=offset, order='write_date desc')
             return {'success': True, 'data': {'items': [_po_to_dict(p) for p in pos], 'total': total, 'page': page, 'per_page': per_page}}
         except Exception as e:
-            _logger.exception('po_list error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'po_list')
 
     @http.route('/api/crm/supply/po/<int:po_id>', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def po_get(self, po_id, **kwargs):
@@ -193,8 +190,7 @@ class SupplyController(http.Controller):
                 return {'success': False, 'error': 'PO not found'}
             return {'success': True, 'data': _po_to_dict(po, include_lines=True)}
         except Exception as e:
-            _logger.exception('po_get error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'po_get')
 
     @http.route('/api/crm/supply/po/create', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def po_create(self, name, vendor_id, division=None, container_id=None, branch_id=None, currency_id=None, **kwargs):
@@ -215,8 +211,7 @@ class SupplyController(http.Controller):
                       details={'name': name, 'vendor_id': vendor_id, 'division': division})
             return {'success': True, 'data': _po_to_dict(po, include_lines=True)}
         except Exception as e:
-            _logger.exception('po_create error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'po_create')
 
     @http.route('/api/crm/supply/po/<int:po_id>/update', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def po_update(self, po_id, **kwargs):
@@ -233,8 +228,7 @@ class SupplyController(http.Controller):
                 po.write(vals)
             return {'success': True, 'data': _po_to_dict(po, include_lines=True)}
         except Exception as e:
-            _logger.exception('po_update error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'po_update')
 
     @http.route('/api/crm/supply/po/<int:po_id>/delete', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def po_delete(self, po_id, **kwargs):
@@ -250,8 +244,7 @@ class SupplyController(http.Controller):
                       details={'name': po.name})
             return {'success': True}
         except Exception as e:
-            _logger.exception('po_delete error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'po_delete')
 
     # ─── PO Lines CRUD ────────────────────────────────────────────────────
 
@@ -266,8 +259,7 @@ class SupplyController(http.Controller):
                 return {'success': False, 'error': 'PO not found'}
             return {'success': True, 'data': {'items': [_line_to_dict(ln) for ln in po.line_ids]}}
         except Exception as e:
-            _logger.exception('po_lines_list error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'po_lines_list')
 
     @http.route('/api/crm/supply/po/<int:po_id>/lines/add', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def po_line_add(self, po_id, product_name=None, item_code=None, uom=None, quantity=1.0, unit_price=0.0, currency_id=None, min_qty=0.0, max_qty=0.0, **kwargs):
@@ -293,8 +285,7 @@ class SupplyController(http.Controller):
             line = request.env['lugal.crm.supply.po.line'].create({k: v for k, v in vals.items() if v is not None})
             return {'success': True, 'data': _line_to_dict(line)}
         except Exception as e:
-            _logger.exception('po_line_add error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'po_line_add')
 
     @http.route('/api/crm/supply/po/<int:po_id>/lines/<int:line_id>/update', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def po_line_update(self, po_id, line_id, **kwargs):
@@ -312,8 +303,7 @@ class SupplyController(http.Controller):
                 line.write(vals)
             return {'success': True, 'data': _line_to_dict(line)}
         except Exception as e:
-            _logger.exception('po_line_update error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'po_line_update')
 
     @http.route('/api/crm/supply/po/<int:po_id>/lines/<int:line_id>/delete', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def po_line_delete(self, po_id, line_id, **kwargs):
@@ -327,8 +317,7 @@ class SupplyController(http.Controller):
             line.unlink()
             return {'success': True}
         except Exception as e:
-            _logger.exception('po_line_delete error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'po_line_delete')
 
     @http.route('/api/crm/supply/po/suggested', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def suggested_po(self, **kwargs):
@@ -340,8 +329,7 @@ class SupplyController(http.Controller):
             pos = request.env['lugal.crm.supply.po'].search(domain, limit=50)
             return {'success': True, 'data': {'items': [_po_to_dict(p) for p in pos]}}
         except Exception as e:
-            _logger.exception('suggested_po error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'suggested_po')
 
     # ─── Vendor CRUD ─────────────────────────────────────────────────────
 
@@ -361,8 +349,7 @@ class SupplyController(http.Controller):
             vendors = Vendor.search(domain, limit=per_page, offset=(page - 1) * per_page, order='name asc')
             return {'success': True, 'data': {'items': [_vendor_to_dict(v) for v in vendors], 'total': total, 'page': page, 'per_page': per_page}}
         except Exception as e:
-            _logger.exception('vendor_list error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'vendor_list')
 
     @http.route('/api/crm/supply/vendors/<int:vendor_id>', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def vendor_get(self, vendor_id, **kwargs):
@@ -375,8 +362,7 @@ class SupplyController(http.Controller):
                 return {'success': False, 'error': 'Vendor not found'}
             return {'success': True, 'data': _vendor_to_dict(v)}
         except Exception as e:
-            _logger.exception('vendor_get error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'vendor_get')
 
     @http.route('/api/crm/supply/vendors/create', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def vendor_create(self, name, division=None, contact_name=None, phone=None, email=None,
@@ -406,8 +392,7 @@ class SupplyController(http.Controller):
                       details={'name': v.name, 'division': v.division})
             return {'success': True, 'data': _vendor_to_dict(v)}
         except Exception as e:
-            _logger.exception('vendor_create error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'vendor_create')
 
     @http.route('/api/crm/supply/vendors/<int:vendor_id>/update', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def vendor_update(self, vendor_id, **kwargs):
@@ -429,8 +414,7 @@ class SupplyController(http.Controller):
                 v.write(vals)
             return {'success': True, 'data': _vendor_to_dict(v)}
         except Exception as e:
-            _logger.exception('vendor_update error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'vendor_update')
 
     @http.route('/api/crm/supply/vendors/<int:vendor_id>/delete', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def vendor_delete(self, vendor_id, **kwargs):
@@ -446,8 +430,7 @@ class SupplyController(http.Controller):
                       details={'name': v.name})
             return {'success': True}
         except Exception as e:
-            _logger.exception('vendor_delete error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'vendor_delete')
 
     @http.route('/api/crm/supply/containers/<int:container_id>/update', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def container_update(self, container_id, **kwargs):
@@ -464,8 +447,7 @@ class SupplyController(http.Controller):
                 c.write(vals)
             return {'success': True, 'data': _container_to_dict(c)}
         except Exception as e:
-            _logger.exception('container_update error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'container_update')
 
     @http.route('/api/crm/supply/containers/<int:container_id>/delete', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def container_delete(self, container_id, **kwargs):
@@ -479,8 +461,7 @@ class SupplyController(http.Controller):
             c.write({'is_deleted': True, 'active': False})
             return {'success': True}
         except Exception as e:
-            _logger.exception('container_delete error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'container_delete')
 
     @http.route('/api/crm/supply/containers/<int:container_id>/clearance_delivered', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def container_mark_clearance_delivered(self, container_id, **kwargs):
@@ -494,5 +475,4 @@ class SupplyController(http.Controller):
             c.action_mark_clearance_delivered()
             return {'success': True, 'data': _container_to_dict(c)}
         except Exception as e:
-            _logger.exception('container_mark_clearance_delivered error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'container_mark_clearance_delivered')

@@ -11,6 +11,7 @@ from odoo import http
 from odoo.http import request
 from ._auth import ensure_jwt_user_id
 from ._permissions import is_supervisor_or_above, forbidden
+from ._error import crm_error
 
 _logger = logging.getLogger(__name__)
 
@@ -71,8 +72,7 @@ class ConfigController(http.Controller):
             tags = request.env['lugal.crm.tag'].search(domain, order='sequence asc, name asc')
             return {'success': True, 'data': [_tag_to_dict(t) for t in tags]}
         except Exception as e:
-            _logger.exception('tag_list error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'tag_list')
 
     @http.route('/api/crm/config/tags/create', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def tag_create(self, name, name_ar=None, tag_type='custom', color=0, sequence=10, **kwargs):
@@ -93,8 +93,7 @@ class ConfigController(http.Controller):
             })
             return {'success': True, 'data': _tag_to_dict(tag)}
         except Exception as e:
-            _logger.exception('tag_create error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'tag_create')
 
     @http.route('/api/crm/config/tags/<int:tag_id>/update', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def tag_update(self, tag_id, **kwargs):
@@ -113,8 +112,7 @@ class ConfigController(http.Controller):
                 tag.write(vals)
             return {'success': True, 'data': _tag_to_dict(tag)}
         except Exception as e:
-            _logger.exception('tag_update error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'tag_update')
 
     @http.route('/api/crm/config/tags/<int:tag_id>/delete', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def tag_delete(self, tag_id, **kwargs):
@@ -130,8 +128,7 @@ class ConfigController(http.Controller):
             tag.write({'is_deleted': True, 'active': False})
             return {'success': True}
         except Exception as e:
-            _logger.exception('tag_delete error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'tag_delete')
 
     # ── Customer Stages ───────────────────────────────────────────────────────
 
@@ -147,8 +144,7 @@ class ConfigController(http.Controller):
             )
             return {'success': True, 'data': [_stage_to_dict(s) for s in stages]}
         except Exception as e:
-            _logger.exception('stage_list error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'stage_list')
 
     @http.route('/api/crm/config/stages/create', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def stage_create(self, name, stage_type='lead', name_ar=None, sequence=10, **kwargs):
@@ -168,8 +164,7 @@ class ConfigController(http.Controller):
             })
             return {'success': True, 'data': _stage_to_dict(stage)}
         except Exception as e:
-            _logger.exception('stage_create error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'stage_create')
 
     @http.route('/api/crm/config/stages/<int:stage_id>/update', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def stage_update(self, stage_id, **kwargs):
@@ -188,8 +183,7 @@ class ConfigController(http.Controller):
                 stage.write(vals)
             return {'success': True, 'data': _stage_to_dict(stage)}
         except Exception as e:
-            _logger.exception('stage_update error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'stage_update')
 
     @http.route('/api/crm/config/stages/<int:stage_id>/delete', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def stage_delete(self, stage_id, **kwargs):
@@ -205,8 +199,7 @@ class ConfigController(http.Controller):
             stage.write({'is_deleted': True, 'active': False})
             return {'success': True}
         except Exception as e:
-            _logger.exception('stage_delete error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'stage_delete')
 
     # ── Call Scripts ──────────────────────────────────────────────────────────
 
@@ -226,8 +219,7 @@ class ConfigController(http.Controller):
             scripts = request.env['lugal.crm.call.script'].search(domain, order='sequence asc')
             return {'success': True, 'data': [_script_to_dict(s) for s in scripts]}
         except Exception as e:
-            _logger.exception('script_list error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'script_list')
 
     @http.route('/api/crm/config/scripts/<int:script_id>', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def script_get(self, script_id, **kwargs):
@@ -240,8 +232,7 @@ class ConfigController(http.Controller):
                 return {'success': False, 'error': 'Script not found'}
             return {'success': True, 'data': _script_to_dict(script)}
         except Exception as e:
-            _logger.exception('script_get error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'script_get')
 
     @http.route('/api/crm/config/scripts/create', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def script_create(self, title, category='faq', question=None, answer=None,
@@ -264,8 +255,7 @@ class ConfigController(http.Controller):
             script = request.env['lugal.crm.call.script'].create(vals)
             return {'success': True, 'data': _script_to_dict(script)}
         except Exception as e:
-            _logger.exception('script_create error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'script_create')
 
     @http.route('/api/crm/config/scripts/<int:script_id>/update', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def script_update(self, script_id, **kwargs):
@@ -284,8 +274,7 @@ class ConfigController(http.Controller):
                 script.write(vals)
             return {'success': True, 'data': _script_to_dict(script)}
         except Exception as e:
-            _logger.exception('script_update error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'script_update')
 
     @http.route('/api/crm/config/scripts/<int:script_id>/delete', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def script_delete(self, script_id, **kwargs):
@@ -301,5 +290,4 @@ class ConfigController(http.Controller):
             script.write({'is_deleted': True, 'is_active': False})
             return {'success': True}
         except Exception as e:
-            _logger.exception('script_delete error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'script_delete')

@@ -8,6 +8,7 @@ from odoo import http
 from odoo.http import request, Response
 from ._auth import ensure_jwt_user_id
 from ._permissions import is_supervisor_or_above, is_manager_or_above, forbidden
+from ._error import crm_error
 
 _logger = logging.getLogger(__name__)
 
@@ -115,8 +116,7 @@ class AnalyticsController(http.Controller):
                 },
             }
         except Exception as e:
-            _logger.exception('dashboard_stats error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'dashboard_stats')
 
     @http.route('/api/crm/analytics/channel_report', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def channel_report(self, branch_id=None, date_from=None, date_to=None, **kwargs):
@@ -172,8 +172,7 @@ class AnalyticsController(http.Controller):
                 },
             }
         except Exception as e:
-            _logger.exception('channel_report error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'channel_report')
 
     @http.route('/api/crm/analytics/employee_kpi', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def employee_kpi(self, employee_id=None, branch_id=None, period_start=None, period_end=None, live=False, **kwargs):
@@ -204,8 +203,7 @@ class AnalyticsController(http.Controller):
                 return {'success': True, 'data': None}
             return {'success': True, 'data': self._kpi_to_dict(kpi[0])}
         except Exception as e:
-            _logger.exception('employee_kpi error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'employee_kpi')
 
     def _compute_live_kpi(self, employee_id, branch_id, period_start, period_end):
         """Compute KPI metrics directly from calls and messages for the period."""
@@ -338,8 +336,7 @@ class AnalyticsController(http.Controller):
 
             return {'success': True, 'data': {'branches': result}}
         except Exception as e:
-            _logger.exception('branch_report error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'branch_report')
 
     @http.route('/api/crm/analytics/all_employees_kpi', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def all_employees_kpi(self, branch_id=None, period_start=None, period_end=None, **kwargs):
@@ -369,8 +366,7 @@ class AnalyticsController(http.Controller):
 
             return {'success': True, 'data': {'items': result}}
         except Exception as e:
-            _logger.exception('all_employees_kpi error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'all_employees_kpi')
 
     @http.route('/api/crm/analytics/supervisor_dashboard', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def supervisor_dashboard(self, branch_id=None, **kwargs):
@@ -480,8 +476,7 @@ class AnalyticsController(http.Controller):
                 },
             }
         except Exception as e:
-            _logger.exception('supervisor_dashboard error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'supervisor_dashboard')
 
     @http.route('/api/crm/analytics/ai_vs_human', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def ai_vs_human(self, branch_id=None, date_from=None, date_to=None, **kwargs):
@@ -526,8 +521,7 @@ class AnalyticsController(http.Controller):
                 },
             }
         except Exception as e:
-            _logger.exception('ai_vs_human error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'ai_vs_human')
 
     @http.route('/api/crm/analytics/export_kpi', type='http', auth='none', csrf=False, methods=['POST'])
     def export_kpi_csv(self, **kwargs):
@@ -639,5 +633,4 @@ class AnalyticsController(http.Controller):
                 },
             }
         except Exception as e:
-            _logger.exception('audit_log_list error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'audit_log_list')

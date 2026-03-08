@@ -5,6 +5,7 @@ from odoo import http
 from odoo.http import request
 from ._auth import ensure_jwt_user_id
 from ._audit import crm_audit
+from ._error import crm_error
 
 _logger = logging.getLogger(__name__)
 
@@ -69,8 +70,7 @@ class KnowledgeController(http.Controller):
                 },
             }
         except Exception as e:
-            _logger.exception('article_list error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'article_list')
 
     @http.route('/api/crm/kb/articles/search', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def article_search(self, query, branch_id=None, limit=30, **kwargs):
@@ -93,8 +93,7 @@ class KnowledgeController(http.Controller):
             articles = request.env['lugal.crm.kb.article'].search(domain, limit=limit, order='write_date desc')
             return {'success': True, 'data': {'items': [_article_to_dict(a) for a in articles], 'total': len(articles)}}
         except Exception as e:
-            _logger.exception('article_search error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'article_search')
 
     @http.route('/api/crm/kb/articles/<int:article_id>', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def article_get(self, article_id, **kwargs):
@@ -107,8 +106,7 @@ class KnowledgeController(http.Controller):
                 return {'success': False, 'error': 'Article not found'}
             return {'success': True, 'data': _article_to_dict(article)}
         except Exception as e:
-            _logger.exception('article_get error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'article_get')
 
     @http.route('/api/crm/kb/articles/create', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def article_create(self, title, category='document', content=None, title_ar=None,
@@ -131,8 +129,7 @@ class KnowledgeController(http.Controller):
                       details={'title': title, 'category': category})
             return {'success': True, 'data': _article_to_dict(article)}
         except Exception as e:
-            _logger.exception('article_create error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'article_create')
 
     @http.route('/api/crm/kb/articles/<int:article_id>/update', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def article_update(self, article_id, **kwargs):
@@ -152,8 +149,7 @@ class KnowledgeController(http.Controller):
                 article.write(vals)
             return {'success': True, 'data': _article_to_dict(article)}
         except Exception as e:
-            _logger.exception('article_update error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'article_update')
 
     @http.route('/api/crm/kb/articles/<int:article_id>/delete', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def article_delete(self, article_id, **kwargs):
@@ -169,8 +165,7 @@ class KnowledgeController(http.Controller):
                       details={'title': article.title})
             return {'success': True}
         except Exception as e:
-            _logger.exception('article_delete error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'article_delete')
 
     # ─── Notifications ────────────────────────────────────────────────────
 
@@ -196,8 +191,7 @@ class KnowledgeController(http.Controller):
                 },
             }
         except Exception as e:
-            _logger.exception('notification_list error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'notification_list')
 
     @http.route('/api/crm/kb/notifications/push', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def notification_push(self, title, body=None, branch_ids=None, notification_type='announcement', **kwargs):
@@ -213,5 +207,4 @@ class KnowledgeController(http.Controller):
                       details={'title': title, 'branch_ids': branch_ids})
             return {'success': True, 'data': _notification_to_dict(notif)}
         except Exception as e:
-            _logger.exception('notification_push error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'notification_push')

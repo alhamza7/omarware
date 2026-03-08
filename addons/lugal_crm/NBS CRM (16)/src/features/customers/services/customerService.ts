@@ -1,11 +1,16 @@
-import { apiPost } from '../../../shared/services/apiClient';
+import { apiPost, apiUpload } from '../../../shared/services/apiClient';
 import type { ApiResult } from '../../../shared/services/apiClient';
 import type {
   Customer,
   CustomerListParams,
   CustomerListResponse,
   CreateCustomerPayload,
+  UpdateCustomerPayload,
   Customer360,
+  DeleteCustomerResponse,
+  UploadImageResponse,
+  UploadDocumentResponse,
+  CustomerDocType,
 } from '../types';
 
 /** POST /api/crm/customers/list */
@@ -42,16 +47,16 @@ async function createCustomer(
   return apiPost('/api/crm/customers/create', payload as Record<string, unknown>);
 }
 
-/** POST /api/crm/customers/:id/update */
+/** POST /api/crm/customers/:id/update — partial update, accepts same fields as create */
 async function updateCustomer(
   id: number,
-  payload: Partial<CreateCustomerPayload>,
+  payload: UpdateCustomerPayload,
 ): Promise<ApiResult<Customer>> {
   return apiPost(`/api/crm/customers/${id}/update`, payload as Record<string, unknown>);
 }
 
-/** POST /api/crm/customers/:id/delete */
-async function deleteCustomer(id: number): Promise<ApiResult<void>> {
+/** POST /api/crm/customers/:id/delete — soft-delete (sets is_deleted=true, active=false) */
+async function deleteCustomer(id: number): Promise<ApiResult<DeleteCustomerResponse>> {
   return apiPost(`/api/crm/customers/${id}/delete`, {});
 }
 
@@ -118,6 +123,50 @@ async function syncFromOdoo(): Promise<ApiResult<{ imported: number; total: numb
   return apiPost('/api/crm/customers/sync_from_odoo', {});
 }
 
+/**
+ * POST /api/crm/upload/image  (multipart/form-data)
+ * Upload one or more shop images.
+ *
+ * @param files      – FileList or array of File objects
+ * @param customerId – optional, links uploaded images to a specific customer
+ *
+ * Returns { files: [{ id, url, filename }] }
+ */
+async function uploadImages(
+  files: File[],
+  customerId?: number,
+): Promise<ApiResult<UploadImageResponse['data']>> {
+  const form = new FormData();
+  for (const file of files) form.append('files[]', file);
+  if (customerId != null) form.append('customer_id', String(customerId));
+  return apiUpload<UploadImageResponse['data']>('/api/crm/upload/image', form);
+}
+
+/**
+ * POST /api/crm/upload/document  (multipart/form-data)
+ * Upload a single customer document with type metadata.
+ *
+ * @param file       – the document File
+ * @param type       – document type (national_id | shop_license | tax_certificate | …)
+ * @param name       – human-readable name (optional, defaults to filename)
+ * @param customerId – optional, links document to a specific customer
+ *
+ * Returns { id, url, type, name, filename }
+ */
+async function uploadDocument(
+  file: File,
+  type: CustomerDocType,
+  name?: string,
+  customerId?: number,
+): Promise<ApiResult<UploadDocumentResponse['data']>> {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('type', type);
+  if (name) form.append('name', name);
+  if (customerId != null) form.append('customer_id', String(customerId));
+  return apiUpload<UploadDocumentResponse['data']>('/api/crm/upload/document', form);
+}
+
 export const customerService = {
   listCustomers,
   getCustomer,
@@ -134,4 +183,6 @@ export const customerService = {
   addChannelIdentity,
   setupStages,
   syncFromOdoo,
+  uploadImages,
+  uploadDocument,
 };

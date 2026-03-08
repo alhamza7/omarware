@@ -5,6 +5,7 @@ from odoo import http
 from odoo.http import request
 from ._auth import ensure_jwt_user_id
 from ._audit import crm_audit
+from ._error import crm_error
 
 _logger = logging.getLogger(__name__)
 
@@ -71,8 +72,7 @@ class ChannelController(http.Controller):
             configs = request.env['lugal.crm.channel.config'].search(domain, order='channel asc')
             return {'success': True, 'data': {'items': [_channel_config_to_dict(c) for c in configs]}}
         except Exception as e:
-            _logger.exception('config_list error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'config_list')
 
     @http.route('/api/crm/channels/config/create', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def config_create(self, channel, branch_id=None, display_name=None, color_hex=None,
@@ -94,8 +94,7 @@ class ChannelController(http.Controller):
             })
             return {'success': True, 'data': _channel_config_to_dict(config)}
         except Exception as e:
-            _logger.exception('config_create error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'config_create')
 
     @http.route('/api/crm/channels/config/<int:config_id>/update', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def config_update(self, config_id, **kwargs):
@@ -118,8 +117,7 @@ class ChannelController(http.Controller):
                 config.write(vals)
             return {'success': True, 'data': _channel_config_to_dict(config)}
         except Exception as e:
-            _logger.exception('config_update error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'config_update')
 
     @http.route('/api/crm/channels/config/<int:config_id>/delete', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def config_delete(self, config_id, **kwargs):
@@ -133,8 +131,7 @@ class ChannelController(http.Controller):
             config.write({'is_deleted': True, 'active': False, 'is_active': False})
             return {'success': True}
         except Exception as e:
-            _logger.exception('config_delete error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'config_delete')
 
     # ─── Messages ─────────────────────────────────────────────────────────
 
@@ -172,8 +169,7 @@ class ChannelController(http.Controller):
                 },
             }
         except Exception as e:
-            _logger.exception('message_list error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'message_list')
 
     @http.route('/api/crm/channels/messages/conversation', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def conversation(self, conversation_id, **kwargs):
@@ -189,8 +185,7 @@ class ChannelController(http.Controller):
             ], order='sent_at asc')
             return {'success': True, 'data': {'items': [_message_to_dict(m) for m in messages]}}
         except Exception as e:
-            _logger.exception('conversation error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'conversation')
 
     @http.route('/api/crm/channels/messages/create', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def message_create(self, customer_id, channel, content, direction='inbound',
@@ -227,8 +222,7 @@ class ChannelController(http.Controller):
                       details={'channel': channel, 'direction': direction})
             return {'success': True, 'data': _message_to_dict(msg)}
         except Exception as e:
-            _logger.exception('message_create error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'message_create')
 
     @http.route('/api/crm/channels/messages/<int:message_id>/assign', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def message_assign(self, message_id, assigned_to_id=None, **kwargs):
@@ -243,8 +237,7 @@ class ChannelController(http.Controller):
             msg.write({'assigned_to_id': uid, 'status': 'assigned'})
             return {'success': True, 'data': _message_to_dict(msg)}
         except Exception as e:
-            _logger.exception('message_assign error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'message_assign')
 
     @http.route('/api/crm/channels/messages/<int:message_id>/reply', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def message_reply(self, message_id, content, media_url=None, **kwargs):
@@ -297,8 +290,7 @@ class ChannelController(http.Controller):
                       details={'channel': original.channel, 'conversation_id': original.conversation_id})
             return {'success': True, 'data': _message_to_dict(reply)}
         except Exception as e:
-            _logger.exception('message_reply error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'message_reply')
 
     @http.route('/api/crm/channels/messages/<int:message_id>/resolve', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def message_resolve(self, message_id, **kwargs):
@@ -323,8 +315,7 @@ class ChannelController(http.Controller):
                       details={'conversation_id': msg.conversation_id})
             return {'success': True}
         except Exception as e:
-            _logger.exception('message_resolve error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'message_resolve')
 
     @http.route('/api/crm/channels/messages/<int:message_id>/transfer', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def message_transfer(self, message_id, new_owner_id, **kwargs):
@@ -349,5 +340,4 @@ class ChannelController(http.Controller):
                       details={'new_owner_id': new_owner_id, 'conversation_id': msg.conversation_id})
             return {'success': True}
         except Exception as e:
-            _logger.exception('message_transfer error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'message_transfer')

@@ -29,6 +29,8 @@ class CrmChannelIdentity(models.Model):
         ('telegram', 'Telegram'),
         ('x', 'X (Twitter)'),
         ('snapchat', 'Snapchat'),
+        ('pinterest', 'Pinterest'),
+        ('youtube', 'YouTube'),
         ('email', 'Email'),
         ('store', 'Store / فرع'),
         ('website', 'Website'),

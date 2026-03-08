@@ -5,6 +5,7 @@ from odoo import http
 from odoo.http import request
 from ._auth import ensure_jwt_user_id
 from ._audit import crm_audit
+from ._error import crm_error
 
 _logger = logging.getLogger(__name__)
 
@@ -73,8 +74,7 @@ class TaskController(http.Controller):
                 },
             }
         except Exception as e:
-            _logger.exception('list_tasks error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'list_tasks')
 
     @http.route('/api/crm/tasks/<int:task_id>', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def get_task(self, task_id, **kwargs):
@@ -87,8 +87,7 @@ class TaskController(http.Controller):
                 return {'success': False, 'error': 'Task not found'}
             return {'success': True, 'data': _task_to_dict(task)}
         except Exception as e:
-            _logger.exception('get_task error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'get_task')
 
     @http.route('/api/crm/tasks/create', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def create_task(self, title, customer_id=None, assigned_to_id=None, branch_id=None,
@@ -119,8 +118,7 @@ class TaskController(http.Controller):
                       details={'title': title, 'priority': priority, 'assigned_to_id': assigned_to_id})
             return {'success': True, 'data': _task_to_dict(task)}
         except Exception as e:
-            _logger.exception('create_task error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'create_task')
 
     @http.route('/api/crm/tasks/<int:task_id>/update', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def update_task(self, task_id, **kwargs):
@@ -138,8 +136,7 @@ class TaskController(http.Controller):
                 task.write(vals)
             return {'success': True, 'data': _task_to_dict(task)}
         except Exception as e:
-            _logger.exception('update_task error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'update_task')
 
     @http.route('/api/crm/tasks/<int:task_id>/update_status', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def update_status(self, task_id, status, **kwargs):
@@ -157,8 +154,7 @@ class TaskController(http.Controller):
                       details={'new_status': status})
             return {'success': True, 'data': _task_to_dict(task)}
         except Exception as e:
-            _logger.exception('update_status error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'update_status')
 
     @http.route('/api/crm/tasks/<int:task_id>/assign', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def assign_task(self, task_id, assigned_to_id, **kwargs):
@@ -176,8 +172,7 @@ class TaskController(http.Controller):
                       details={'assigned_to_id': assigned_to_id})
             return {'success': True, 'data': _task_to_dict(task)}
         except Exception as e:
-            _logger.exception('assign_task error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'assign_task')
 
     @http.route('/api/crm/tasks/<int:task_id>/delete', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def delete_task(self, task_id, **kwargs):
@@ -194,8 +189,7 @@ class TaskController(http.Controller):
                       record_model='lugal.crm.task', record_id=task_id)
             return {'success': True}
         except Exception as e:
-            _logger.exception('delete_task error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'delete_task')
 
     @http.route('/api/crm/tasks/my', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def my_tasks(self, page=1, per_page=30, status=None, **kwargs):
@@ -224,5 +218,4 @@ class TaskController(http.Controller):
                 },
             }
         except Exception as e:
-            _logger.exception('my_tasks error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'my_tasks')

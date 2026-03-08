@@ -76,6 +76,7 @@ class CrmCustomer(models.Model):
     )
 
     # --- Location / Shop ---
+    shop_name = fields.Char(string='Shop Name / اسم المحل', tracking=True)
     shop_location = fields.Char(string='Shop Location / موقع المحل', tracking=True)
     favorite_shipping_address = fields.Text(string='Favorite Shipping Address / عنوان الشحن المفضل', tracking=True)
     billing_address = fields.Text(string='Billing Address / عنوان الفوترة', tracking=True)
@@ -119,6 +120,26 @@ class CrmCustomer(models.Model):
     active = fields.Boolean(string='Active', default=True)
     is_deleted = fields.Boolean(string='Soft Deleted', default=False, index=True)
 
+    # --- Extended Classification ---
+    activity_type = fields.Char(string='Activity Type / نوع النشاط', tracking=True)
+    customer_strength = fields.Char(string='Customer Strength / قوة العميل', tracking=True)
+    dealing_method = fields.Char(string='Dealing Method / طريقة التعامل', tracking=True)
+    customer_rating = fields.Integer(string='Customer Rating / تقييم العميل', default=0, tracking=True)
+    assigned_agent = fields.Char(string='Assigned Agent / الوكيل المعين', tracking=True)
+    notes = fields.Text(string='Notes / الملاحظات', tracking=True)
+
+    # --- Media (stored as JSON arrays) ---
+    shop_images = fields.Text(string='Shop Images / صور المحل', help='JSON array of image URLs')
+    customer_docs = fields.Text(string='Customer Docs / وثائق العميل', help='JSON array of {type, name, url}')
+
+    # --- Reverse relations ---
+    channel_identity_ids = fields.One2many(
+        'lugal.crm.channel.identity',
+        'customer_id',
+        string='Channel Identities',
+        domain=[('is_deleted', '=', False)],
+    )
+
     @api.depends('last_purchase_date')
     def _compute_days_since_purchase(self):
         """Compute days since last purchase from today."""
@@ -137,26 +158,62 @@ class CrmCustomer(models.Model):
     def create(self, vals_list):
         """
         When creating a CRM customer:
-        - If no partner_id, create a new res.partner automatically.
+        - If no partner_id, look for an existing active res.partner with the same
+          name + phone before creating a new one (prevents duplicates).
         - If partner_id provided, ensure customer_rank >= 1.
         Always keeps the two records in sync.
         """
         Partner = self.env['res.partner'].sudo()
+        Customer = self.env['lugal.crm.customer'].sudo()
         for vals in vals_list:
             if vals.get('_skip_partner_sync'):
                 vals.pop('_skip_partner_sync', None)
                 continue
             if not vals.get('partner_id'):
-                partner = Partner.create({
-                    'name':          vals.get('name', 'Unnamed'),
-                    'email':         vals.get('email', ''),
-                    'phone':         vals.get('phone_1', ''),
-                    'city':          vals.get('city', ''),
-                    'country_id':    vals.get('country_id', False),
-                    'customer_rank': 1,
-                    'is_company':    False,
-                })
-                vals['partner_id'] = partner.id
+                name  = vals.get('name', '').strip()
+                phone = (vals.get('phone_1') or vals.get('phone') or '').strip()
+
+                # Prevent duplicate CRM entries: reuse partner if name+phone match
+                existing_partner = None
+                if name and phone:
+                    existing_partner = Partner.search([
+                        ('name', '=', name),
+                        ('phone', '=', phone),
+                        ('active', '=', True),
+                    ], limit=1)
+                elif name:
+                    existing_partner = Partner.search([
+                        ('name', '=', name),
+                        ('phone', '=', False),
+                        ('active', '=', True),
+                    ], limit=1)
+
+                # If a partner already has an active (non-deleted) CRM record, block creation
+                if existing_partner:
+                    crm_exists = Customer.with_context(active_test=False).search([
+                        ('partner_id', '=', existing_partner.id),
+                        ('is_deleted', '=', False),
+                        ('active', '=', True),
+                    ], limit=1)
+                    if crm_exists:
+                        raise ValueError(
+                            f"Customer '{name}' with phone '{phone}' already exists (id={crm_exists.id})"
+                        )
+                    else:
+                        # Partner exists but CRM record was deleted — reuse partner
+                        existing_partner.write({'customer_rank': 1, 'active': True})
+                        vals['partner_id'] = existing_partner.id
+                else:
+                    partner = Partner.create({
+                        'name':          vals.get('name', 'Unnamed'),
+                        'email':         vals.get('email', ''),
+                        'phone':         vals.get('phone_1', ''),
+                        'city':          vals.get('city', ''),
+                        'country_id':    vals.get('country_id', False),
+                        'customer_rank': 1,
+                        'is_company':    False,
+                    })
+                    vals['partner_id'] = partner.id
             else:
                 partner = Partner.browse(vals['partner_id'])
                 if partner.exists() and partner.customer_rank == 0:

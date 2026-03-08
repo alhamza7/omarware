@@ -8,6 +8,7 @@ import logging
 from odoo import http
 from odoo.http import request
 from ._auth import ensure_jwt_user_id
+from ._error import crm_error
 
 _logger = logging.getLogger(__name__)
 
@@ -132,8 +133,7 @@ class PosBridgeController(http.Controller):
             data['last_order'] = last_order
             return {'success': True, 'data': data}
         except Exception as e:
-            _logger.exception('invoice_context error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'invoice_context')
 
     @http.route('/api/crm/pos/products', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def products(self, query='', pricelist_id=None, limit=80, offset=0, **kwargs):
@@ -163,8 +163,7 @@ class PosBridgeController(http.Controller):
                 })
             return {'success': True, 'data': {'total': total, 'offset': offset, 'limit': limit, 'items': items}}
         except Exception as e:
-            _logger.exception('products error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'products')
 
     @http.route('/api/crm/pos/product_detail', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def product_detail(self, product_id, pricelist_id=None, **kwargs):
@@ -215,8 +214,7 @@ class PosBridgeController(http.Controller):
                 },
             }
         except Exception as e:
-            _logger.exception('product_detail error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'product_detail')
 
     @http.route('/api/crm/pos/uom_price', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def uom_price(self, product_id, pricelist_id, uom_id, **kwargs):
@@ -239,8 +237,7 @@ class PosBridgeController(http.Controller):
                 price = product.list_price
             return {'success': True, 'data': {'price_unit': price}}
         except Exception as e:
-            _logger.exception('uom_price error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'uom_price')
 
     @http.route('/api/crm/pos/orders/create', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def orders_create(self, call_id=None, partner_id=None, pricelist_id=None, invoice_type='1', order_lines=None, exchange_rate=None, **kwargs):
@@ -307,8 +304,7 @@ class PosBridgeController(http.Controller):
                 },
             }
         except Exception as e:
-            _logger.exception('orders_create error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'orders_create')
 
     @http.route('/api/crm/pos/orders/<int:order_id>', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def order_get(self, order_id, **kwargs):
@@ -334,8 +330,7 @@ class PosBridgeController(http.Controller):
             }
             return {'success': True, 'data': data}
         except Exception as e:
-            _logger.exception('order_get error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'order_get')
 
     @http.route('/api/crm/pos/customer_orders', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def customer_orders(self, partner_id, limit=20, **kwargs):
@@ -356,5 +351,4 @@ class PosBridgeController(http.Controller):
             } for o in orders]
             return {'success': True, 'data': {'items': items}}
         except Exception as e:
-            _logger.exception('customer_orders error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'customer_orders')

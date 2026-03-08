@@ -10,6 +10,7 @@ from odoo.http import request
 from ._auth import ensure_jwt_user_id
 from ._audit import crm_audit
 from ._permissions import is_qa_auditor_or_above, is_qa_supervisor, is_supervisor_or_above, forbidden
+from ._error import crm_error
 
 _logger = logging.getLogger(__name__)
 
@@ -51,8 +52,7 @@ class QaController(http.Controller):
                 },
             }
         except Exception as e:
-            _logger.exception('qa list_reviews error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'qa list_reviews')
 
     @http.route('/api/crm/qa/reviews/<int:review_id>', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def get_review(self, review_id, **kwargs):
@@ -67,8 +67,7 @@ class QaController(http.Controller):
                 return {'success': False, 'error': 'Review not found'}
             return {'success': True, 'data': self._review_to_dict(review)}
         except Exception as e:
-            _logger.exception('qa get_review error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'qa get_review')
 
     @http.route('/api/crm/qa/reviews/create', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def create_review(self, review_type, call_id=None, conversation_id=None,
@@ -118,8 +117,7 @@ class QaController(http.Controller):
                       record_id=review.id, details={'review_number': review.review_number, 'score': score})
             return {'success': True, 'data': self._review_to_dict(review)}
         except Exception as e:
-            _logger.exception('qa create_review error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'qa create_review')
 
     @http.route('/api/crm/qa/reviews/<int:review_id>/update', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def update_review(self, review_id, **kwargs):
@@ -142,8 +140,7 @@ class QaController(http.Controller):
                 review.write(vals)
             return {'success': True, 'data': self._review_to_dict(review)}
         except Exception as e:
-            _logger.exception('qa update_review error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'qa update_review')
 
     @http.route('/api/crm/qa/reviews/<int:review_id>/submit', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def submit_review(self, review_id, **kwargs):
@@ -161,8 +158,7 @@ class QaController(http.Controller):
                       record_id=review.id, details={'review_number': review.review_number})
             return {'success': True, 'data': self._review_to_dict(review)}
         except Exception as e:
-            _logger.exception('qa submit_review error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'qa submit_review')
 
     @http.route('/api/crm/qa/stats', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def qa_stats(self, reviewer_id=None, agent_id=None, branch_id=None,
@@ -201,8 +197,7 @@ class QaController(http.Controller):
                 },
             }
         except Exception as e:
-            _logger.exception('qa stats error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'qa stats')
 
     def _review_to_dict(self, review):
         """Serialize a QA review record to a JSON-safe dict."""

@@ -4,6 +4,7 @@ import logging
 from odoo import http
 from odoo.http import request
 from ._auth import ensure_jwt_user_id
+from ._error import crm_error
 
 _logger = logging.getLogger(__name__)
 
@@ -80,8 +81,7 @@ class WorkforceController(http.Controller):
             shifts = request.env['lugal.crm.shift'].search(domain, order='branch_id asc, start_time asc')
             return {'success': True, 'data': {'items': [_shift_to_dict(s) for s in shifts]}}
         except Exception as e:
-            _logger.exception('shift_list error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'shift_list')
 
     @http.route('/api/crm/shifts/create', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def shift_create(self, name, branch_id, shift_type='morning', start_time=8.0, end_time=17.0,
@@ -103,8 +103,7 @@ class WorkforceController(http.Controller):
             shift = request.env['lugal.crm.shift'].create(vals)
             return {'success': True, 'data': _shift_to_dict(shift)}
         except Exception as e:
-            _logger.exception('shift_create error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'shift_create')
 
     @http.route('/api/crm/shifts/<int:shift_id>/update', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def shift_update(self, shift_id, **kwargs):
@@ -123,8 +122,7 @@ class WorkforceController(http.Controller):
                 shift.write(vals)
             return {'success': True, 'data': _shift_to_dict(shift)}
         except Exception as e:
-            _logger.exception('shift_update error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'shift_update')
 
     @http.route('/api/crm/shifts/<int:shift_id>/delete', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def shift_delete(self, shift_id, **kwargs):
@@ -138,8 +136,7 @@ class WorkforceController(http.Controller):
             shift.write({'is_deleted': True, 'active': False})
             return {'success': True}
         except Exception as e:
-            _logger.exception('shift_delete error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'shift_delete')
 
     # ─── Attendance ───────────────────────────────────────────────────────
 
@@ -188,8 +185,7 @@ class WorkforceController(http.Controller):
             })
             return {'success': True, 'data': _attendance_to_dict(record)}
         except Exception as e:
-            _logger.exception('check_in error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'check_in')
 
     @http.route('/api/crm/attendance/check_out', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def check_out(self, notes=None, **kwargs):
@@ -217,8 +213,7 @@ class WorkforceController(http.Controller):
             })
             return {'success': True, 'data': _attendance_to_dict(record)}
         except Exception as e:
-            _logger.exception('check_out error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'check_out')
 
     @http.route('/api/crm/attendance/list', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def attendance_list(self, page=1, per_page=50, branch_id=None, employee_id=None,
@@ -251,8 +246,7 @@ class WorkforceController(http.Controller):
                 },
             }
         except Exception as e:
-            _logger.exception('attendance_list error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'attendance_list')
 
     @http.route('/api/crm/attendance/live_status', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def live_status(self, branch_id=None, **kwargs):
@@ -274,8 +268,7 @@ class WorkforceController(http.Controller):
             } for r in online]
             return {'success': True, 'data': {'online': items, 'count': len(items)}}
         except Exception as e:
-            _logger.exception('live_status error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'live_status')
 
     # ─── Message Templates ────────────────────────────────────────────────
 
@@ -295,8 +288,7 @@ class WorkforceController(http.Controller):
             templates = request.env['lugal.crm.message.template'].search(domain, order='category asc, name asc')
             return {'success': True, 'data': {'items': [_template_to_dict(t) for t in templates]}}
         except Exception as e:
-            _logger.exception('template_list error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'template_list')
 
     @http.route('/api/crm/templates/create', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def template_create(self, name, channel, body, category='other', body_ar=None,
@@ -316,8 +308,7 @@ class WorkforceController(http.Controller):
             })
             return {'success': True, 'data': _template_to_dict(tmpl)}
         except Exception as e:
-            _logger.exception('template_create error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'template_create')
 
     @http.route('/api/crm/templates/<int:template_id>/update', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def template_update(self, template_id, **kwargs):
@@ -335,8 +326,7 @@ class WorkforceController(http.Controller):
                 tmpl.write(vals)
             return {'success': True, 'data': _template_to_dict(tmpl)}
         except Exception as e:
-            _logger.exception('template_update error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'template_update')
 
     @http.route('/api/crm/templates/<int:template_id>/delete', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def template_delete(self, template_id, **kwargs):
@@ -350,8 +340,7 @@ class WorkforceController(http.Controller):
             tmpl.write({'is_deleted': True, 'active': False})
             return {'success': True}
         except Exception as e:
-            _logger.exception('template_delete error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'template_delete')
 
     @http.route('/api/crm/templates/<int:template_id>/render', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def template_render(self, template_id, customer_id=None, **kwargs):
@@ -387,5 +376,4 @@ class WorkforceController(http.Controller):
 
             return {'success': True, 'data': {'rendered': rendered, 'rendered_ar': rendered_ar}}
         except Exception as e:
-            _logger.exception('template_render error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'template_render')

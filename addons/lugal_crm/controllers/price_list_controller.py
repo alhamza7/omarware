@@ -4,6 +4,7 @@ import logging
 from odoo import http
 from odoo.http import request
 from ._auth import ensure_jwt_user_id
+from ._error import crm_error
 
 _logger = logging.getLogger(__name__)
 
@@ -98,8 +99,7 @@ class PriceListController(http.Controller):
                      for c in categ_ids.sorted('name')]
             return {'success': True, 'data': {'items': items}}
         except Exception as e:
-            _logger.exception('list_categories error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'list_categories')
 
     @http.route('/api/crm/pricelist/products', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def list_products(self, page=1, per_page=50, search=None, category_id=None,
@@ -152,8 +152,7 @@ class PriceListController(http.Controller):
                 'data': {'items': items, 'total': total, 'page': page, 'per_page': per_page},
             }
         except Exception as e:
-            _logger.exception('list_products error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'list_products')
 
     @http.route('/api/crm/pricelist/products/<int:product_id>', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def get_product(self, product_id, pricelist_id=None, **kwargs):
@@ -180,8 +179,7 @@ class PriceListController(http.Controller):
 
             return {'success': True, 'data': data}
         except Exception as e:
-            _logger.exception('get_product error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'get_product')
 
     @http.route('/api/crm/pricelist/pricelists', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def list_pricelists(self, **kwargs):
@@ -193,8 +191,7 @@ class PriceListController(http.Controller):
             items = [{'id': p.id, 'name': p.name, 'currency': p.currency_id.name} for p in pricelists]
             return {'success': True, 'data': {'items': items}}
         except Exception as e:
-            _logger.exception('list_pricelists error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'list_pricelists')
 
     @http.route('/api/crm/pricelist/requested_items/create', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def create_requested_item(self, customer_id, product_name, notes=None, **kwargs):
@@ -215,8 +212,7 @@ class PriceListController(http.Controller):
             })
             return {'success': True, 'data': {'id': item.id, 'product_name': item.product_name}}
         except Exception as e:
-            _logger.exception('create_requested_item error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'create_requested_item')
 
     @http.route('/api/crm/pricelist/requested_items', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def list_requested_items(self, page=1, per_page=50, customer_id=None, status=None, **kwargs):
@@ -243,8 +239,7 @@ class PriceListController(http.Controller):
             } for r in items_rec]
             return {'success': True, 'data': {'items': items, 'total': total}}
         except Exception as e:
-            _logger.exception('list_requested_items error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'list_requested_items')
 
     @http.route('/api/crm/pricelist/requested_items/<int:item_id>/update_status', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def update_requested_item_status(self, item_id, status, **kwargs):
@@ -258,8 +253,7 @@ class PriceListController(http.Controller):
             item.write({'status': status})
             return {'success': True, 'data': {'id': item.id, 'status': item.status}}
         except Exception as e:
-            _logger.exception('update_requested_item_status error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'update_requested_item_status')
 
     @http.route('/api/crm/pricelist/requested_items/<int:item_id>/delete', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def delete_requested_item(self, item_id, **kwargs):
@@ -273,5 +267,4 @@ class PriceListController(http.Controller):
             item.write({'is_deleted': True})
             return {'success': True}
         except Exception as e:
-            _logger.exception('delete_requested_item error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'delete_requested_item')

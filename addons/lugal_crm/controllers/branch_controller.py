@@ -5,6 +5,7 @@ from odoo import http
 from odoo.http import request
 from ._auth import ensure_jwt_user_id
 from ._permissions import is_manager_or_above, is_supervisor_or_above, forbidden
+from ._error import crm_error
 
 _logger = logging.getLogger(__name__)
 
@@ -38,8 +39,7 @@ class BranchController(http.Controller):
             branches = request.env['lugal.crm.branch'].search(domain, order='name asc')
             return {'success': True, 'data': {'items': [_branch_to_dict(b) for b in branches]}}
         except Exception as e:
-            _logger.exception('list_branches error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'list_branches')
 
     @http.route('/api/crm/branches/<int:branch_id>', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def get_branch(self, branch_id, **kwargs):
@@ -52,8 +52,7 @@ class BranchController(http.Controller):
                 return {'success': False, 'error': 'Branch not found'}
             return {'success': True, 'data': _branch_to_dict(branch)}
         except Exception as e:
-            _logger.exception('get_branch error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'get_branch')
 
     @http.route('/api/crm/branches/create', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def create_branch(self, name, name_ar=None, code=None, city=None, address=None, phone=None, email=None, manager_id=None, **kwargs):
@@ -76,8 +75,7 @@ class BranchController(http.Controller):
             branch = request.env['lugal.crm.branch'].create(vals)
             return {'success': True, 'data': _branch_to_dict(branch)}
         except Exception as e:
-            _logger.exception('create_branch error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'create_branch')
 
     @http.route('/api/crm/branches/<int:branch_id>/update', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def update_branch(self, branch_id, **kwargs):
@@ -96,8 +94,7 @@ class BranchController(http.Controller):
                 branch.write(vals)
             return {'success': True, 'data': _branch_to_dict(branch)}
         except Exception as e:
-            _logger.exception('update_branch error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'update_branch')
 
     @http.route('/api/crm/branches/<int:branch_id>/user_assign', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def user_assign(self, branch_id, user_ids, **kwargs):
@@ -113,8 +110,7 @@ class BranchController(http.Controller):
             branch.write({'user_ids': [(6, 0, user_ids or [])]})
             return {'success': True, 'data': _branch_to_dict(branch)}
         except Exception as e:
-            _logger.exception('user_assign error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'user_assign')
 
     @http.route('/api/crm/branches/<int:branch_id>/delete', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def delete_branch(self, branch_id, **kwargs):
@@ -130,5 +126,4 @@ class BranchController(http.Controller):
             branch.write({'is_deleted': True, 'active': False})
             return {'success': True}
         except Exception as e:
-            _logger.exception('delete_branch error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'delete_branch')

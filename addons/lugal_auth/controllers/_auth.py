@@ -39,8 +39,11 @@ def _verify_jwt_token():
 
 def ensure_jwt_user_id():
     """
-    Validate the Bearer JWT token and bind the authenticated user to the
-    current request environment.
+    Authenticate the request via Bearer JWT token OR active session cookie.
+
+    Priority:
+      1. Bearer JWT token in ``Authorization`` header (stateless, for mobile/API clients)
+      2. Active Odoo session cookie (for browser-based clients)
 
     Returns the Odoo ``uid`` (int) on success or ``None`` on failure.
     Safe to call from ``auth='none'`` routes.
@@ -76,12 +79,23 @@ def ensure_jwt_user_id():
                         pass
                 return None
 
-        uid = _verify_jwt_token()
-        if not uid:
-            return None
+        # 1. Bearer JWT — preferred for external/mobile clients
+        auth_header = request.httprequest.headers.get('Authorization', '')
+        if auth_header.lower().startswith('bearer '):
+            uid = _verify_jwt_token()
+            if not uid:
+                return None
+            request.update_env(user=uid)
+            return uid
 
-        request.update_env(user=uid)
-        return uid
+        # 2. Session cookie fallback — for browser clients (Odoo web/CRM frontend)
+        session_uid = getattr(request.session, 'uid', None)
+        if session_uid and session_uid not in (False, 0, 1):
+            request.update_env(user=session_uid)
+            return session_uid
+
+        _logger.warning('lugal_auth._auth: no valid auth found (no Bearer token, no active session)')
+        return None
 
     except Exception as exc:
         _logger.error('lugal_auth._auth: ensure_jwt_user_id error — %s', exc, exc_info=True)

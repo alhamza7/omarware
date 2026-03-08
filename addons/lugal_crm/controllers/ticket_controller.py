@@ -5,6 +5,7 @@ from odoo import http
 from odoo.http import request
 from ._auth import ensure_jwt_user_id
 from ._audit import crm_audit
+from ._error import crm_error
 
 _logger = logging.getLogger(__name__)
 
@@ -81,8 +82,7 @@ class TicketController(http.Controller):
                 },
             }
         except Exception as e:
-            _logger.exception('list_tickets error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'list_tickets')
 
     @http.route('/api/crm/tickets/<int:ticket_id>', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def get_ticket(self, ticket_id, include_notes=False, **kwargs):
@@ -95,8 +95,7 @@ class TicketController(http.Controller):
                 return {'success': False, 'error': 'Ticket not found'}
             return {'success': True, 'data': _ticket_to_dict(ticket, include_notes=include_notes)}
         except Exception as e:
-            _logger.exception('get_ticket error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'get_ticket')
 
     @http.route('/api/crm/tickets/search', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def search_tickets(self, query, branch_id=None, limit=30, **kwargs):
@@ -117,8 +116,7 @@ class TicketController(http.Controller):
             tickets = request.env['lugal.crm.ticket'].search(domain, limit=limit, order='create_date desc')
             return {'success': True, 'data': {'items': [_ticket_to_dict(t) for t in tickets], 'total': len(tickets)}}
         except Exception as e:
-            _logger.exception('search_tickets error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'search_tickets')
 
     @http.route('/api/crm/tickets/create', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def create_ticket(self, customer_id, title, description=None, branch_id=None,
@@ -147,8 +145,7 @@ class TicketController(http.Controller):
                       details={'title': title, 'priority': priority, 'ticket_type': ticket_type})
             return {'success': True, 'data': _ticket_to_dict(ticket)}
         except Exception as e:
-            _logger.exception('create_ticket error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'create_ticket')
 
     @http.route('/api/crm/tickets/<int:ticket_id>/update', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def update_ticket(self, ticket_id, **kwargs):
@@ -165,8 +162,7 @@ class TicketController(http.Controller):
                 ticket.write(vals)
             return {'success': True, 'data': _ticket_to_dict(ticket)}
         except Exception as e:
-            _logger.exception('update_ticket error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'update_ticket')
 
     @http.route('/api/crm/tickets/<int:ticket_id>/update_status', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def update_status(self, ticket_id, status, **kwargs):
@@ -188,8 +184,7 @@ class TicketController(http.Controller):
                       details={'new_status': status})
             return {'success': True, 'data': _ticket_to_dict(ticket)}
         except Exception as e:
-            _logger.exception('update_status error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'update_status')
 
     @http.route('/api/crm/tickets/<int:ticket_id>/assign', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def assign_ticket(self, ticket_id, assigned_to_id, **kwargs):
@@ -211,8 +206,7 @@ class TicketController(http.Controller):
                       details={'assigned_to_id': assigned_to_id})
             return {'success': True, 'data': _ticket_to_dict(ticket)}
         except Exception as e:
-            _logger.exception('assign_ticket error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'assign_ticket')
 
     @http.route('/api/crm/tickets/<int:ticket_id>/escalate', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def escalate_ticket(self, ticket_id, escalated_to_id, **kwargs):
@@ -230,8 +224,7 @@ class TicketController(http.Controller):
                       details={'escalated_to_id': escalated_to_id})
             return {'success': True, 'data': _ticket_to_dict(ticket)}
         except Exception as e:
-            _logger.exception('escalate_ticket error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'escalate_ticket')
 
     @http.route('/api/crm/tickets/<int:ticket_id>/delete', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def delete_ticket(self, ticket_id, **kwargs):
@@ -248,8 +241,7 @@ class TicketController(http.Controller):
                       record_model='lugal.crm.ticket', record_id=ticket_id)
             return {'success': True}
         except Exception as e:
-            _logger.exception('delete_ticket error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'delete_ticket')
 
     @http.route('/api/crm/tickets/<int:ticket_id>/note/add', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def add_note(self, ticket_id, body, **kwargs):
@@ -277,8 +269,7 @@ class TicketController(http.Controller):
                 'date': note.interaction_date.isoformat() if note.interaction_date else None,
             }}
         except Exception as e:
-            _logger.exception('add_note error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'add_note')
 
     @http.route('/api/crm/tickets/<int:ticket_id>/notes', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def get_notes(self, ticket_id, **kwargs):
@@ -302,5 +293,4 @@ class TicketController(http.Controller):
             } for n in notes]
             return {'success': True, 'data': {'items': items}}
         except Exception as e:
-            _logger.exception('get_notes error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'get_notes')

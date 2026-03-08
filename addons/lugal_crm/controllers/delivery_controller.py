@@ -4,6 +4,7 @@ import logging
 from odoo import http
 from odoo.http import request
 from ._auth import ensure_jwt_user_id
+from ._error import crm_error
 
 _logger = logging.getLogger(__name__)
 
@@ -78,8 +79,7 @@ class DeliveryController(http.Controller):
                 },
             }
         except Exception as e:
-            _logger.exception('customer_orders error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'customer_orders')
 
     @http.route('/api/crm/delivery/order/<int:order_id>', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def get_order(self, order_id, **kwargs):
@@ -113,8 +113,7 @@ class DeliveryController(http.Controller):
 
             return {'success': True, 'data': data}
         except Exception as e:
-            _logger.exception('get_order error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'get_order')
 
     @http.route('/api/crm/delivery/orders/search', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def search_orders(self, query, limit=20, branch_id=None, **kwargs):
@@ -134,5 +133,4 @@ class DeliveryController(http.Controller):
             orders = request.env['pos.perfume.order'].search(domain, limit=limit, order='date_order desc')
             return {'success': True, 'data': {'items': [_order_to_dict(o) for o in orders]}}
         except Exception as e:
-            _logger.exception('search_orders error')
-            return {'success': False, 'error': str(e)}
+            return crm_error(e, 'search_orders')
