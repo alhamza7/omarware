@@ -33,13 +33,15 @@ export function CustomerListContainer({
     error,
     setSelected,
     createCustomer,
+    deleteCustomer,
     changeStage,
     setSearchQuery,
     fetchCustomers,
   } = useCustomers();
 
-  const handleCreate = async (data: CreateCustomerPayload) => {
-    await createCustomer(data);
+  /** Receives a fully mapped CreateCustomerPayload from CustomerForm and persists it */
+  const handleCreate = async (payload: CreateCustomerPayload) => {
+    await createCustomer(payload);
     onCloseForm();
   };
 
@@ -145,6 +147,7 @@ export function CustomerListContainer({
         open={!!selectedCustomer}
         onClose={() => setSelected(null)}
         profileImage=""
+        onDelete={async (id: number) => { await deleteCustomer(id); }}
       />
     </>
   );
