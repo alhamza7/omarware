@@ -6,8 +6,9 @@ import { _t } from "@web/core/l10n/translation";
 import { rpc } from "@web/core/network/rpc";
 import { CustomerSearch } from "./customer_search";
 
-/** سعر الصرف ثابت في الكود (لا يُجلب من قاعدة البيانات) - 1 USD = هذا المبلغ د.ع */
-const EXCHANGE_RATE_USD_IQD = 1600;
+/** Default fallback rate — only used if the server call fails on first load */
+/** Fallback until server returns rate; server value = SAP-synced pos_perfume.default_exchange_rate_usd_iqd */
+const EXCHANGE_RATE_FALLBACK = 1560;
 
 /**
  * Main POS Perfume Screen Component - Enhanced like Sale Order
@@ -82,8 +83,8 @@ export class PosPerfumeScreen extends Component {
             fullPlasticFilterActive: null,  // true/false/null for full plastic filter
             csLocFilterActive: false,  // true to show CS/LOC products, false to hide them
             
-            // UI state - سعر الصرف ثابت من الكود (EXCHANGE_RATE_USD_IQD)
-            exchangeRate: EXCHANGE_RATE_USD_IQD,
+            // UI state - سعر الصرف يُجلب من قاعدة البيانات عند التحميل
+            exchangeRate: EXCHANGE_RATE_FALLBACK,
             
             // Navigation state for keyboard controls
             focusedCell: {
@@ -138,7 +139,10 @@ export class PosPerfumeScreen extends Component {
                 this.state.userName = window.odoo.session_info.name || window.odoo.session_info.username || 'Cashier';
             }
             
-            // سعر الصرف ثابت في الكود (EXCHANGE_RATE_USD_IQD) - لا جلب من قاعدة البيانات
+            // Fetch live exchange rate from DB (set by SAP sync cron)
+            await this.loadExchangeRate();
+            // Refresh rate every 30 minutes to stay in sync with SAP
+            setInterval(() => this.loadExchangeRate(), 30 * 60 * 1000);
             
             // Update time every minute
             setInterval(() => {
@@ -151,6 +155,25 @@ export class PosPerfumeScreen extends Component {
         });
     }
     
+    /**
+     * Fetch the current IQD/USD exchange rate from the server.
+     * The rate is synced automatically from SAP every 30 minutes by the cron job.
+     * Falls back to the current state value if the call fails.
+     */
+    async loadExchangeRate() {
+        try {
+            const rate = await rpc('/pos_perfume/get_exchange_rate', {});
+            if (rate && typeof rate === 'number' && rate > 100) {
+                if (this.state.exchangeRate !== rate) {
+                    this.state.exchangeRate = rate;
+                    console.log(`[POS] Exchange rate updated from server: ${rate}`);
+                }
+            }
+        } catch (err) {
+            console.warn('[POS] Could not fetch exchange rate from server, using current value:', this.state.exchangeRate, err);
+        }
+    }
+
     /**
      * Load available pricelists and select the one with the most non-zero priced items
      */
@@ -288,24 +311,18 @@ export class PosPerfumeScreen extends Component {
             line.showProductDropdown = true;
             
             try {
-                const products = await this.orm.searchRead(
+                // Use server-side search to include alternative barcodes
+                const products = await this.orm.call(
                     'product.product',
-                    [
-                        ['sale_ok', '=', true],
-                        '|', '|',
-                        ['name', 'ilike', searchTerm],
-                        ['default_code', 'ilike', searchTerm],
-                        ['barcode', 'ilike', searchTerm],
-                    ],
-                    ['id', 'name', 'default_code', 'list_price', 'uom_id'],
-                    { limit: 20 }
+                    'search_products_simple_for_pos',
+                    [searchTerm, 20]
                 );
-                
+
                 // Add uom_name for display
                 products.forEach(p => {
                     p.uom_name = p.uom_id ? p.uom_id[1] : '-';
                 });
-                
+
                 line.searchResults = products;
                 line.selectedProductIndex = 0;
             } catch (error) {
@@ -2059,112 +2076,69 @@ export class PosPerfumeScreen extends Component {
     /**
      * Create quotation - Save as quotation, create sale.order, send to SAP, and reload
      */
+    /**
+     * Create/update Quotation in SAP — always sends as Quotation regardless of state.
+     * Used by the "📋 Quotation" button.
+     */
     async createQuotation() {
-        // Save order as quotation first
+        // 1. Save the POS order as 'quotation' state
         const saved = await this.saveOrder('quotation');
-        if (!saved) {
-            return;
-        }
-        
-        // Ensure orderId is a number, not array
+        if (!saved) return;
+
         let orderId = this.state.currentOrder.order_id;
-        if (Array.isArray(orderId)) {
-            orderId = orderId[0];
-        }
-        
+        if (Array.isArray(orderId)) orderId = orderId[0];
         if (!orderId) {
-            this.notification.add(_t("Failed to get order ID"), { type: "danger" });
+            this.notification.add(_t("تعذّر الحصول على رقم الطلب"), { type: "danger" });
             return;
         }
-        
+
         try {
-            // Call action_confirm to create sale.order (which will send to SAP automatically)
-            console.log('[Quotation] Calling action_confirm for order:', orderId);
-            let result;
-            try {
-                result = await this.orm.call('pos.perfume.order', 'action_confirm', [[orderId]]);
-                console.log('[Quotation] action_confirm result:', result);
-            } catch (rpcError) {
-                console.error('[Quotation] RPC Error in action_confirm:', rpcError);
-                // Extract error message
-                let errorMessage = 'Unknown error';
-                if (rpcError.data && rpcError.data.message) {
-                    errorMessage = rpcError.data.message;
-                } else if (rpcError.data && rpcError.data.debug) {
-                    errorMessage = rpcError.data.debug;
-                } else if (rpcError.message) {
-                    errorMessage = rpcError.message;
-                } else if (rpcError.args && rpcError.args[0]) {
-                    errorMessage = rpcError.args[0];
-                }
-                throw new Error(errorMessage);
-            }
-            
-            if (result && result.res_id) {
-                // Reload the order to get SAP document numbers
-                await this.loadOrder(orderId);
-                
-                // Wait for SAP sync to complete with retry logic (max 5 attempts, 2 seconds each)
-                let sapSynced = false;
-                let sapDocNum = null;
-                let attempts = 0;
-                const maxAttempts = 5;
-                
-                while (attempts < maxAttempts && !sapSynced) {
-                    // Wait before checking
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-                    
-                    // Reload order to check SAP sync status
-                    await this.loadOrder(orderId);
-                    
-                    // Check if actually synced to SAP
-                    const order = await this.orm.read(
-                        'pos.perfume.order',
-                        [orderId],
-                        ['sale_order_id', 'sap_doc_num', 'sap_doc_entry', 'sap_synced']
-                    );
-                    
-                    if (order && order[0] && order[0].sale_order_id) {
-                        // Get sale.order to check SAP sync status
-                        const saleOrderId = Array.isArray(order[0].sale_order_id) ? order[0].sale_order_id[0] : order[0].sale_order_id;
-                        const saleOrder = await this.orm.read(
-                            'sale.order',
-                            [saleOrderId],
-                            ['sap_doc_num', 'sap_doc_entry', 'sap_synced']
-                        );
-                        
-                        if (saleOrder && saleOrder[0]) {
-                            sapSynced = saleOrder[0].sap_synced || false;
-                            sapDocNum = saleOrder[0].sap_doc_num || null;
-                            
-                            if (sapSynced) {
-                                // Success! Break the loop
-                                break;
-                            }
-                        }
-                    }
-                    
-                    attempts++;
-                }
-                
-                // Show appropriate message based on SAP sync status
-                if (sapSynced && sapDocNum) {
-                    this.notification.add(_t("Quotation created and sent to SAP successfully! DocNum: ") + sapDocNum, { type: "success" });
-                } else if (sapSynced) {
-                    this.notification.add(_t("Quotation created and sent to SAP successfully!"), { type: "success" });
-                } else {
-                    this.notification.add(_t("Quotation created, but SAP sync may have failed. Please check the logs."), { type: "warning" });
-                }
+            // 2. Ensure a sale.order record exists (creates one if not already)
+            let saleOrderId = null;
+            const posOrders = await this.orm.read('pos.perfume.order', [orderId], ['sale_order_id']);
+            if (posOrders[0]?.sale_order_id) {
+                saleOrderId = Array.isArray(posOrders[0].sale_order_id)
+                    ? posOrders[0].sale_order_id[0]
+                    : posOrders[0].sale_order_id;
             } else {
-                // Still reload even if no result
-                await this.loadOrder(orderId);
-                this.notification.add(_t("Quotation saved successfully!"), { type: "success" });
+                // Create sale.order from POS order
+                const result = await this.orm.call('pos.perfume.order', 'action_confirm', [[orderId]]);
+                saleOrderId = result?.res_id || null;
             }
-        } catch (error) {
-            console.error('[Quotation] Error in action_confirm:', error);
-            // Still reload the order
+
+            if (!saleOrderId) {
+                this.notification.add(_t("تعذّر إنشاء سجل الطلب. حاول مرة أخرى."), { type: "danger" });
+                return;
+            }
+
+            // 3. Sync to SAP as Quotation (never as Sales Order)
+            try {
+                await this.orm.call('sale.order', 'action_sync_as_quotation', [[saleOrderId]]);
+            } catch (sapError) {
+                await this.loadOrder(orderId);
+                const errMsg = sapError.data?.message || sapError.message || 'خطأ غير معروف';
+                this.notification.add(_t("تم الحفظ، لكن فشل الإرسال إلى SAP كـ Quotation:\n") + errMsg, {
+                    type: "danger",
+                    sticky: true,
+                });
+                return;
+            }
+
+            // 4. Reload and show success
             await this.loadOrder(orderId);
-            this.notification.add(_t("Quotation saved, but error creating sale order: ") + error.message, { type: "warning" });
+            const saleOrderData = await this.orm.read('sale.order', [saleOrderId], ['sap_doc_num', 'sap_synced']);
+            const docNum = saleOrderData[0]?.sap_doc_num;
+            this.notification.add(
+                docNum
+                    ? _t("✅ تم إرسال Quotation إلى SAP بنجاح! DocNum: ") + docNum
+                    : _t("✅ تم إرسال Quotation إلى SAP بنجاح!"),
+                { type: "success" }
+            );
+        } catch (error) {
+            console.error('[Quotation] Unexpected error:', error);
+            await this.loadOrder(orderId);
+            const errMsg = error.data?.message || error.message || 'خطأ غير معروف';
+            this.notification.add(_t("خطأ غير متوقع: ") + errMsg, { type: "danger", sticky: true });
         }
     }
     
@@ -2453,20 +2427,25 @@ export class PosPerfumeScreen extends Component {
                     }
                     
                     // Trigger SAP sync by calling action_manual_sync_to_sap
-                    // This ensures sync happens even if write() doesn't trigger it
                     try {
                         await this.orm.call('sale.order', 'action_manual_sync_to_sap', [[saleOrderId]]);
                         console.log('SAP sync successful for order:', saleOrderId);
-                        this.notification.add(_t("Order saved and synced to SAP!"), { type: "success" });
+                        this.notification.add(_t("تم الحفظ والمزامنة مع SAP بنجاح!"), { type: "success" });
                     } catch (syncError) {
                         console.error('SAP sync error:', syncError);
-                        // The write() method should trigger automatic sync, but log the error
-                        let syncErrorMsg = syncError.message || 'Unknown error';
-                        if (syncError.data && syncError.data.message) {
-                            syncErrorMsg = syncError.data.message;
-                        }
-                        console.warn('SAP sync failed, but order was saved. Error:', syncErrorMsg);
-                        this.notification.add(_t("Order saved! SAP sync attempted but may have failed. Check logs."), { type: "warning" });
+                        // Extract real SAP error message from Odoo UserError
+                        let syncErrorMsg = syncError.data?.message
+                            || syncError.data?.debug
+                            || syncError.message
+                            || 'خطأ غير معروف';
+                        // Strip Odoo internal traceback — keep only the human-readable part
+                        const userMsgMatch = syncErrorMsg.match(/^([\s\S]*?)(\n\nTraceback|Error\(|raise UserError)/);
+                        if (userMsgMatch) syncErrorMsg = userMsgMatch[1].trim();
+                        console.warn('SAP sync failed, order was saved. Error:', syncErrorMsg);
+                        this.notification.add(_t("تم الحفظ، لكن فشلت المزامنة مع SAP:\n") + syncErrorMsg, {
+                            type: "danger",
+                            sticky: true,
+                        });
                     }
                     
                     // Reload order to get updated SAP info
@@ -2494,144 +2473,76 @@ export class PosPerfumeScreen extends Component {
     }
     
     /**
-     * Confirm sale order - Creates and confirms sale.order, or converts quotation to sale order
+     * Confirm sale order - converts Quotation → Sales Order in SAP, or creates new Sales Order.
+     * Used by the "✅ Sale Order" button.
      */
     async confirmSaleOrder() {
-        // If order is already a quotation, convert it to sale order
-        if (this.state.currentOrder.order_id) {
-            const orderIds = Array.isArray(this.state.currentOrder.order_id) 
-                ? [this.state.currentOrder.order_id[0]] 
-                : [this.state.currentOrder.order_id];
-            const orders = await this.orm.read('pos.perfume.order', orderIds, ['state', 'sale_order_id']);
-            
-            if (orders.length > 0 && orders[0].state === 'quotation' && orders[0].sale_order_id) {
-                // Convert quotation to sale order
-                const saleOrderId = Array.isArray(orders[0].sale_order_id) 
-                    ? orders[0].sale_order_id[0] 
-                    : orders[0].sale_order_id;
-                
-                try {
-                    // First save any changes
-                    await this.saveOrderWithSync();
-                    
-                    // Read sale order to check its state
-                    const saleOrders = await this.orm.read('sale.order', [saleOrderId], ['state', 'name']);
-                    if (saleOrders.length === 0) {
-                        throw new Error('Sale order not found');
-                    }
-                    
-                    const saleOrder = saleOrders[0];
-                    console.log('[ConfirmSaleOrder] Sale order state:', saleOrder.state, 'Name:', saleOrder.name);
-                    
-                    // Confirm the sale order (this will change state from quotation to sale)
-                    try {
-                        await this.orm.call('sale.order', 'action_confirm', [[saleOrderId]]);
-                    } catch (confirmError) {
-                        console.error('[ConfirmSaleOrder] Error confirming sale order:', confirmError);
-                        // Try to get more details about the error
-                        let errorMsg = confirmError.message || 'Unknown error';
-                        if (confirmError.data && confirmError.data.message) {
-                            errorMsg = confirmError.data.message;
-                        } else if (confirmError.args && confirmError.args[0]) {
-                            errorMsg = confirmError.args[0];
-                        }
-                        throw new Error(`Cannot confirm sale order: ${errorMsg}`);
-                    }
-                    
-                    // Update POS order state to 'sale'
-                    await this.orm.write('pos.perfume.order', orderIds, { state: 'sale' });
-                    
-                    // Reload order to get updated state and SAP info
-                    await this.loadOrder(orderIds[0]);
-                    
-                    this.notification.add(_t("Quotation converted to Sale Order and synced to SAP!"), { type: "success" });
-                    return;
-                } catch (error) {
-                    console.error('Error converting quotation to sale order:', error);
-                    let errorMessage = error.message || 'Unknown error';
-                    if (error.data && error.data.message) {
-                        errorMessage = error.data.message;
-                    } else if (error.args && error.args[0]) {
-                        errorMessage = error.args[0];
-                    }
-                    this.notification.add(_t("Failed to convert quotation: ") + errorMessage, { type: "danger" });
-                    return;
-                }
-            }
+        if (!this.state.currentOrder.partner_id) {
+            this.notification.add(_t("يرجى اختيار عميل أولاً"), { type: "warning" });
+            return;
         }
-        
-        // Otherwise, create new sale order
-        const orderId = await this.saveOrder('draft');
-        if (orderId) {
-            try {
-                // Create or link sale order from POS order
-                const result = await this.orm.call('pos.perfume.order', 'action_confirm', [[orderId]]);
-                
-                if (result && result.res_id) {
-                    const saleOrderId = result.res_id;
+        const lines = this.state.currentOrder.lines.filter(l => l.product_id);
+        if (!lines.length) {
+            this.notification.add(_t("يرجى إضافة منتج واحد على الأقل"), { type: "warning" });
+            return;
+        }
 
-                    // Read sale order state before trying to confirm
-                    const saleOrders = await this.orm.read('sale.order', [saleOrderId], ['state', 'name']);
-                    if (!saleOrders.length) {
-                        throw new Error('Sale order not found');
-                    }
+        try {
+            // Step 1: Save the POS order as 'sale' state
+            const orderId = await this.saveOrder('sale');
+            if (!orderId) return;
+            const posOrderId = Array.isArray(orderId) ? orderId[0] : orderId;
 
-                    const saleOrder = saleOrders[0];
-                    console.log('[ConfirmSaleOrder] New/linked sale order state:', saleOrder.state, 'Name:', saleOrder.name);
-
-                    // Only call action_confirm if the sale order is in a confirmable state
-                    if (saleOrder.state === 'draft' || saleOrder.state === 'sent') {
-                        try {
-                            await this.orm.call('sale.order', 'action_confirm', [[saleOrderId]]);
-                        } catch (confirmError) {
-                            console.error('[ConfirmSaleOrder] Error confirming sale order:', confirmError);
-                            // Try to get more details about the error
-                            let errorMsg = confirmError.message || 'Unknown error';
-                            if (confirmError.data && confirmError.data.message) {
-                                errorMsg = confirmError.data.message;
-                            } else if (confirmError.args && confirmError.args[0]) {
-                                errorMsg = confirmError.args[0];
-                            }
-                            throw new Error(`Cannot confirm sale order: ${errorMsg}`);
-                        }
-                    } else {
-                        console.log('[ConfirmSaleOrder] Sale order already confirmed, skipping action_confirm');
-                    }
-                    
-                    // Update POS order state to 'sale'
-                    const orderIds = Array.isArray(orderId) ? [orderId[0]] : [orderId];
-                    await this.orm.write('pos.perfume.order', orderIds, { state: 'sale' });
-                    
-                    // Reload order to get updated state and SAP info
-                    await this.loadOrder(orderIds[0]);
-                    
-                    this.notification.add(_t("Sale Order created and confirmed!"), { type: "success" });
-                }
-            } catch (error) {
-                console.error('Error confirming sale order:', error);
-                // Extract detailed error message
-                let errorMessage = 'Unknown error';
-                if (error.data && error.data.message) {
-                    errorMessage = error.data.message;
-                } else if (error.data && error.data.debug) {
-                    errorMessage = error.data.debug;
-                } else if (error.message) {
-                    errorMessage = error.message;
-                } else if (error.args && error.args[0]) {
-                    errorMessage = error.args[0];
-                }
-                
-                console.error('Full error details:', {
-                    message: errorMessage,
-                    data: error.data,
-                    stack: error.stack
-                });
-                
-                this.notification.add(_t("Failed to confirm sale order: ") + errorMessage, { 
-                    type: "danger",
-                    sticky: true
-                });
+            // Step 2: Ensure sale.order exists and is confirmed in Odoo
+            let saleOrderId = null;
+            const posOrders = await this.orm.read('pos.perfume.order', [posOrderId], ['sale_order_id']);
+            if (posOrders[0]?.sale_order_id) {
+                saleOrderId = Array.isArray(posOrders[0].sale_order_id)
+                    ? posOrders[0].sale_order_id[0]
+                    : posOrders[0].sale_order_id;
+            } else {
+                const result = await this.orm.call('pos.perfume.order', 'action_confirm', [[posOrderId]]);
+                saleOrderId = result?.res_id || null;
             }
+
+            if (!saleOrderId) {
+                this.notification.add(_t("تعذّر إنشاء Sales Order. حاول مرة أخرى."), { type: "danger" });
+                return;
+            }
+
+            // Confirm in Odoo if still draft/sent
+            const soData = await this.orm.read('sale.order', [saleOrderId], ['state']);
+            if (soData[0]?.state === 'draft' || soData[0]?.state === 'sent') {
+                await this.orm.call('sale.order', 'action_confirm', [[saleOrderId]]);
+            }
+
+            // Step 3: Sync to SAP as Sales Order (action_manual_sync_to_sap sends as sale because state='sale')
+            try {
+                await this.orm.call('sale.order', 'action_manual_sync_to_sap', [[saleOrderId]]);
+            } catch (sapError) {
+                await this.loadOrder(posOrderId);
+                const errMsg = sapError.data?.message || sapError.message || 'خطأ غير معروف';
+                this.notification.add(_t("تم الحفظ كـ Sale Order، لكن فشل الإرسال إلى SAP:\n") + errMsg, {
+                    type: "danger",
+                    sticky: true,
+                });
+                return;
+            }
+
+            // Step 4: Reload and show success
+            await this.loadOrder(posOrderId);
+            const soAfter = await this.orm.read('sale.order', [saleOrderId], ['sap_doc_num', 'sap_synced']);
+            const docNum = soAfter[0]?.sap_doc_num;
+            this.notification.add(
+                docNum
+                    ? _t("✅ تم إنشاء Sales Order في SAP بنجاح! DocNum: ") + docNum
+                    : _t("✅ تم إنشاء Sales Order في SAP بنجاح!"),
+                { type: "success" }
+            );
+        } catch (error) {
+            console.error('[ConfirmSaleOrder] Error:', error);
+            const errMsg = error.data?.message || error.message || 'خطأ غير معروف';
+            this.notification.add(_t("فشل إنشاء Sale Order: ") + errMsg, { type: "danger", sticky: true });
         }
     }
     

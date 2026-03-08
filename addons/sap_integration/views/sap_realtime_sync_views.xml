@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+
+        <!-- List View -->
+        <record id="view_sap_realtime_sync_list" model="ir.ui.view">
+            <field name="name">sap.realtime.sync.list</field>
+            <field name="model">sap.realtime.sync</field>
+            <field name="arch" type="xml">
+                <list string="SAP Realtime Sync Configs" decoration-danger="last_sync_status == 'failed'" decoration-success="last_sync_status == 'success'" decoration-warning="last_sync_status == 'running'">
+                    <field name="name" string="Config"/>
+                    <field name="backend_id" string="SAP Backend"/>
+                    <field name="entity_type" string="Entity"/>
+                    <field name="active" widget="boolean_toggle"/>
+                    <field name="last_sync_at" string="Last Sync"/>
+                    <field name="last_sync_status" string="Status" widget="badge"
+                           decoration-danger="last_sync_status == 'failed'"
+                           decoration-success="last_sync_status == 'success'"
+                           decoration-warning="last_sync_status == 'running'"/>
+                    <field name="last_items_changed" string="Items Changed"/>
+                    <field name="total_runs" string="Runs"/>
+                    <field name="total_errors" string="Errors"/>
+                    <button name="action_run_now" string="Run Now" type="object" icon="fa-play" class="btn-sm btn-primary"/>
+                </list>
+            </field>
+        </record>
+
+        <!-- Form View -->
+        <record id="view_sap_realtime_sync_form" model="ir.ui.view">
+            <field name="name">sap.realtime.sync.form</field>
+            <field name="model">sap.realtime.sync</field>
+            <field name="arch" type="xml">
+                <form string="SAP Realtime Sync Config">
+                    <header>
+                        <button name="action_run_now"
+                                string="Run Delta Sync Now"
+                                type="object"
+                                class="btn-primary"/>
+                        <button name="action_reset_timestamp"
+                                string="Reset Timestamp (re-sync 24h)"
+                                type="object"
+                                class="btn-warning"
+                                confirm="This will re-sync all changes from the last 24 hours on the next run. Continue?"/>
+                        <field name="last_sync_status" widget="statusbar"
+                               statusbar_visible="success,failed,running"/>
+                    </header>
+                    <sheet>
+                        <widget name="web_ribbon" title="Archived" bg_color="bg-danger"
+                                invisible="active"/>
+                        <div class="oe_title">
+                            <h1><field name="name" readonly="1"/></h1>
+                        </div>
+                        <group>
+                            <group string="Configuration">
+                                <field name="backend_id" string="SAP Backend"/>
+                                <field name="entity_type" string="Entity to Sync"/>
+                                <field name="active" string="Active"/>
+                                <field name="auto_create_products" string="Auto-Create New Products"/>
+                                <field name="auto_create_customers" string="Auto-Create New Customers"/>
+                            </group>
+                            <group string="Last Run Statistics">
+                                <field name="last_sync_at" string="Last Sync Time" readonly="1"/>
+                                <field name="last_items_changed" string="Items Changed" readonly="1"/>
+                                <field name="total_runs" string="Total Runs" readonly="1"/>
+                                <field name="total_errors" string="Total Errors" readonly="1"/>
+                            </group>
+                        </group>
+                        <group string="Last Run Log">
+                            <field name="last_sync_log" string="" nolabel="1"
+                                   widget="text" readonly="1"/>
+                        </group>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+
+        <!-- Action -->
+        <record id="action_sap_realtime_sync" model="ir.actions.act_window">
+            <field name="name">SAP Realtime Sync</field>
+            <field name="res_model">sap.realtime.sync</field>
+            <field name="view_mode">list,form</field>
+            <field name="help" type="html">
+                <p class="o_view_nocontent_smiling_face">
+                    No realtime sync configurations yet
+                </p>
+                <p>
+                    Create a configuration to start syncing prices, stock, product,
+                    and customer (BusinessPartners) data from SAP every 2 minutes using delta (UpdateDate) polling.
+                </p>
+            </field>
+        </record>
+
+    </data>
+</odoo>

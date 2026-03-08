@@ -451,6 +451,22 @@ class SapBackend(models.Model):
                 }
             }
     
+    def update_invoice_in_sap(self, doc_entry, payload):
+        """
+        Update an existing invoice in SAP via PATCH Invoices(DocEntry).
+        payload: dict with at least DocumentLines (list of line dicts) and optionally
+        DocDate, DocDueDate, CardCode. Used when Odoo invoice is edited (add/delete lines).
+        """
+        self.ensure_one()
+        connection = self.get_connection()
+        if hasattr(connection, 'update_invoice'):
+            return connection.update_invoice(doc_entry, payload)
+        if hasattr(connection, 'patch'):
+            return connection.patch('Invoices(%s)' % doc_entry, payload)
+        raise UserError(
+            "اتصال SAP لا يدعم تحديث الفواتير (يجب وجود update_invoice أو patch على الاتصال)."
+        )
+
     @api.model
     def get_invoice_types_from_sap(self):
         """Get invoice types from SAP User-Defined Fields

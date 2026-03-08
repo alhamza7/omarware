@@ -11,7 +11,10 @@ class PosPerfumeController(http.Controller):
 
     @http.route('/pos_perfume/get_exchange_rate', type='json', auth='user')
     def get_exchange_rate(self):
-        """نفس المصدر المستخدم في الطباعة: قراءة من DB بدون كاش لجميع المستخدمين."""
+        """
+        Return IQD/USD rate for POS Perfume. Same key as SAP Exchange Rate Sync
+        (pos_perfume.default_exchange_rate_usd_iqd). So POS IQD prices follow SAP when sync runs.
+        """
         return request.env['pos.perfume.order'].sudo().get_exchange_rate_from_db()
     
     @http.route('/pos_perfume/get_product_data', type='json', auth='user')
@@ -369,7 +372,7 @@ class PosPerfumeController(http.Controller):
             # Get exchange rate from settings (always use current rate)
             exchange_rate = float(
                 request.env['ir.config_parameter'].sudo().get_param(
-                    'pos_perfume.default_exchange_rate_usd_iqd', '1600.0'
+                    'pos_perfume.default_exchange_rate_usd_iqd', '1550.0'
                 )
             )
             iqd_amount = order.amount_total * exchange_rate
@@ -527,7 +530,7 @@ class PosPerfumeController(http.Controller):
         # ─── Invoice header info ───────────────────────────────────────────────
         exchange_rate = float(
             request.env['ir.config_parameter'].sudo().get_param(
-                'pos_perfume.default_exchange_rate_usd_iqd', '1600.0'
+                'pos_perfume.default_exchange_rate_usd_iqd', '1550.0'
             )
         )
         partner_name = order.partner_id.name if order.partner_id else ''

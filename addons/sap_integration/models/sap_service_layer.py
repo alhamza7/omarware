@@ -1,12 +1,30 @@
 # -*- coding: utf-8 -*-
 
+import ssl
 import requests
 import json
 import logging
 from datetime import datetime, timedelta
 from odoo import models, fields, api
+from requests.adapters import HTTPAdapter
 
 _logger = logging.getLogger(__name__)
+
+
+class _LegacyTLSAdapter(HTTPAdapter):
+    """
+    Custom HTTP adapter that lowers the TLS security level to SECLEVEL=1.
+    Required for SAP Business One Service Layer which uses older TLS cipher suites
+    that are rejected by OpenSSL 3+ default security policy (SECLEVEL=2).
+    """
+    def init_poolmanager(self, *args, **kwargs):
+        import urllib3
+        from urllib3.util.ssl_ import create_urllib3_context
+        ctx = create_urllib3_context(ciphers='DEFAULT@SECLEVEL=1')
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        kwargs['ssl_context'] = ctx
+        return super().init_poolmanager(*args, **kwargs)
 
 
 class SapServiceLayerConnection:
@@ -24,7 +42,9 @@ class SapServiceLayerConnection:
         self.timeout = timeout
         self.verify_ssl = verify_ssl
         self.session = requests.Session()
-        self.session.verify = verify_ssl  # Disable SSL verification if needed
+        # Mount legacy TLS adapter for SAP B1 SSL compatibility
+        self.session.mount('https://', _LegacyTLSAdapter())
+        self.session.verify = verify_ssl
         self.session_id = None
         self.session_created_at = None
         self.session_expires_at = None
@@ -536,34 +556,74 @@ class SapServiceLayerConnection:
             _logger.error(f"Error creating sales order: {str(e)}")
             raise
     
-    def update_quotation(self, doc_entry, quotation_data):
-        """Update quotation in SAP Service Layer"""
+    def update_quotation(self, doc_entry, quotation_data, existing_odoo_lines=None):
+        """
+        Update quotation in SAP Service Layer.
+        Fetches current SAP lines and closes any that are no longer present in Odoo.
+        existing_odoo_lines: list of dicts with keys 'item_code' and 'sap_line_num'
+          for lines currently in Odoo. Lines in SAP but not in this list get LineStatus=bost_Close.
+        """
         try:
             url = f"{self.base_url}/Quotations({doc_entry})"
             headers = self._get_headers()
-            
+
             _logger.info(f"[SAP Update] Updating quotation {doc_entry} in SAP: {url}")
-            
-            # Log DocumentLines to verify ItemDescription is included
-            doc_lines = quotation_data.get('DocumentLines', [])
-            _logger.info(f"[SAP Update] Sending {len(doc_lines)} DocumentLines")
-            for idx, line in enumerate(doc_lines):
-                item_desc = line.get('ItemDescription', 'NOT_SET')
-                _logger.info(f"[SAP Update] DocumentLine[{idx}]: ItemCode={line.get('ItemCode')}, Quantity={line.get('Quantity')}, ItemDescription='{item_desc}'")
-            
-            # Log full payload
+
+            # Step 1: Fetch current SAP lines to find deleted ones
+            patch_lines = list(quotation_data.get('DocumentLines', []))
+
+            if existing_odoo_lines is not None:
+                try:
+                    current_sap = self.get(
+                        f"Quotations({doc_entry})",
+                        {'$select': 'DocEntry,DocumentLines'},
+                    )
+                    sap_lines = current_sap.get('DocumentLines', [])
+                    odoo_item_codes = {l['item_code'] for l in existing_odoo_lines}
+
+                    for sap_line in sap_lines:
+                        item_code = sap_line.get('ItemCode', '')
+                        line_num = sap_line.get('LineNum')
+                        line_status = sap_line.get('LineStatus', '')
+
+                        # Skip already-closed lines
+                        if line_status == 'bost_Close':
+                            continue
+
+                        # If this item is no longer in Odoo lines → close it in SAP
+                        if item_code not in odoo_item_codes and line_num is not None:
+                            patch_lines.append({
+                                'LineNum': line_num,
+                                'LineStatus': 'bost_Close',
+                            })
+                            _logger.info(f"[SAP Update] Closing deleted line: ItemCode={item_code}, LineNum={line_num}")
+                        else:
+                            # Add LineNum to existing line so SAP matches it correctly
+                            for pl in patch_lines:
+                                if pl.get('ItemCode') == item_code and 'LineNum' not in pl:
+                                    pl['LineNum'] = line_num
+                                    break
+
+                except Exception as fetch_err:
+                    _logger.warning(f"[SAP Update] Could not fetch SAP lines for close check: {fetch_err}")
+
+            send_data = {**quotation_data, 'DocumentLines': patch_lines}
+
+            # Log payload
             import json
-            _logger.info(f"[SAP Update] Full quotation data being sent:\n{json.dumps(quotation_data, indent=2, ensure_ascii=False)}")
-            
-            response = self.session.patch(url, json=quotation_data, headers=headers, timeout=30)
-            
+            _logger.info(f"[SAP Update] Sending {len(patch_lines)} DocumentLines (including any closed)")
+            for idx, line in enumerate(patch_lines):
+                _logger.info(f"[SAP Update] Line[{idx}]: ItemCode={line.get('ItemCode')}, LineNum={line.get('LineNum', 'N/A')}, LineStatus={line.get('LineStatus', 'open')}")
+
+            response = self.session.patch(url, json=send_data, headers=headers, timeout=30)
+
             if response.status_code in [200, 204]:
                 _logger.info(f"[SAP Update] ✅ Successfully updated quotation {doc_entry}")
                 return response.json() if response.content else {}
             else:
                 _logger.error(f"[SAP Update] ❌ Error updating quotation {doc_entry}: {response.status_code} - {response.text}")
                 return None
-                
+
         except Exception as e:
             _logger.error(f"[SAP Update] ❌ Exception updating quotation {doc_entry}: {str(e)}", exc_info=True)
             return None
@@ -1110,4 +1170,194 @@ class SapServiceLayerConnection:
         }
         return object_type_map.get(doc_type, '17')  # Default to Sales Order
 
+    def get_iqd_exchange_rate(self):
+        """
+        Retrieve the current IQD/USD exchange rate from SAP.
 
+        In SAP B1 the daily rate is set in: Administration → System Initialization
+        → Company Details → Currencies / Exchange Rates (table ORTT). New documents
+        use this rate for the selected date.
+
+        Strategy:
+          1. CompanyService_GetCurrencyRate (reads ORTT — official daily rate for date).
+          2. Try ExchangeRates / Currency_Details / Currencies entities if exposed.
+          3. Prefer DocRate from IQD documents dated TODAY.
+          4. Else DocRate from the most recent IQD document (any date).
+        SAP stores rates as "how many IQD per 1 USD".
+
+        Returns:
+            float: IQD per USD rate (e.g. 1560.0), or None if not found.
+        """
+        from datetime import date
+        today_str = date.today().isoformat()  # YYYY-MM-DD
+
+        # 1) CompanyService_GetCurrencyRate — reads ORTT (daily rate for date)
+        try:
+            get_resp = self.get('CompanyService_GetCurrencyRate', params={'Currency': 'IQD', 'Date': today_str})
+            if get_resp and not get_resp.get('error'):
+                rate_val = (
+                    get_resp.get('CurrencyRate')
+                    or (get_resp.get('value') or [None])[0]
+                    or (get_resp.get('d') or {}).get('CurrencyRate')
+                )
+                if rate_val is not None:
+                    rate = float(rate_val)
+                    if 100 <= rate <= 10000:
+                        _logger.info('SAP IQD rate from CompanyService_GetCurrencyRate (GET): %.2f', rate)
+                        return rate
+            payloads = (
+                {'Currency': 'IQD', 'Date': today_str},
+                {'GetCurrencyRateParams': {'Currency': 'IQD', 'Date': today_str}},
+            )
+            for payload in payloads:
+                try:
+                    resp = self.post('CompanyService_GetCurrencyRate', payload)
+                    if not resp:
+                        continue
+                    # Response may be {"CurrencyRate": 1560} or {"d": {"GetCurrencyRateResult": 1560}} or similar
+                    rate_val = (
+                        resp.get('CurrencyRate')
+                        or resp.get('GetCurrencyRateResult')
+                        or (resp.get('d') or {}).get('GetCurrencyRateResult')
+                        or (resp.get('d') or {}).get('CurrencyRate')
+                    )
+                    if rate_val is not None:
+                        rate = float(rate_val)
+                        if 100 <= rate <= 10000:
+                            _logger.info(
+                                'SAP IQD rate from CompanyService_GetCurrencyRate (ORTT): %.2f',
+                                rate,
+                            )
+                            return rate
+                except Exception:
+                    continue
+        except Exception as exc:
+            _logger.debug('get_iqd_exchange_rate: CompanyService_GetCurrencyRate: %s', exc)
+
+        # 2) Currencies entity — master data only (no rate); rate is in ORTT via CompanyService_GetCurrencyRate
+        #    "Exchange Rates and Indexes" in SAP = Administration → Exchange Rates and Indexes (table ORTT)
+        for endpoint in (
+            'Currencies',  # GET Currencies?$top=N — returns Code, Name (no Rate; rate in ORTT)
+            'ExchangeRates', 'Currency_Details',
+            'CurrencyCodes', 'CurrencyCodes_Details',
+        ):
+            try:
+                params = {'$top': 20}
+                response = self.get(endpoint, params=params)
+                if not response or response.get('error'):
+                    continue
+                values = response.get('value', [])
+                for rec in values:
+                    currency = (rec.get('Currency') or rec.get('CurrencyCode') or '').strip().upper()
+                    if currency != 'IQD':
+                        continue
+                    rate_val = rec.get('Rate') or rec.get('CurrencyRate') or rec.get('CurrentRate')
+                    if rate_val is not None:
+                        rate = float(rate_val)
+                        if 100 <= rate <= 10000:
+                            _logger.info(
+                                'SAP IQD rate from %s (official): %.2f',
+                                endpoint, rate,
+                            )
+                            return rate
+            except Exception as exc:
+                _logger.debug('get_iqd_exchange_rate: %s not available: %s', endpoint, exc)
+
+        # 2) Prefer documents from TODAY to get current rate (e.g. 1560)
+        for endpoint in ('Invoices', 'Orders'):
+            try:
+                params = {
+                    '$select': 'DocNum,DocDate,DocCurrency,DocRate',
+                    '$filter': "DocCurrency eq 'IQD' and DocRate gt 1",
+                    '$orderby': 'DocDate desc, DocNum desc',
+                    '$top': 30,
+                }
+                response = self.get(endpoint, params=params)
+                docs = response.get('value', []) if response else []
+                for doc in docs:
+                    doc_date = doc.get('DocDate')
+                    if not doc_date or not doc.get('DocRate'):
+                        continue
+                    # DocDate may be 'YYYY-MM-DD' or 'YYYY-MM-DDTHH:MM:SS' or datetime
+                    doc_date_str = str(doc_date).split('T')[0].strip()
+                    if doc_date_str == today_str:
+                        rate = float(doc['DocRate'])
+                        _logger.info(
+                            'SAP IQD rate from %s (today %s) #%s DocDate=%s: %.2f',
+                            endpoint, today_str, doc.get('DocNum'), doc_date, rate,
+                        )
+                        return rate
+            except Exception as exc:
+                _logger.debug('get_iqd_exchange_rate: today scan for %s: %s', endpoint, exc)
+
+        # 3) Fallback: most recent IQD document (any date) — log which doc we use
+        for endpoint in ('Invoices', 'Orders'):
+            try:
+                params = {
+                    '$select': 'DocNum,DocDate,DocCurrency,DocRate',
+                    '$filter': "DocCurrency eq 'IQD' and DocRate gt 1",
+                    '$orderby': 'DocDate desc, DocNum desc',
+                    '$top': 1,
+                }
+                response = self.get(endpoint, params=params)
+                docs = response.get('value', []) if response else []
+                if docs and docs[0].get('DocRate'):
+                    doc = docs[0]
+                    rate = float(doc['DocRate'])
+                    _logger.info(
+                        'SAP IQD rate from %s (most recent, not today) #%s DocDate=%s: %.2f',
+                        endpoint, doc.get('DocNum'), doc.get('DocDate'), rate,
+                    )
+                    return rate
+            except Exception as exc:
+                _logger.warning('get_iqd_exchange_rate: %s failed: %s', endpoint, exc)
+
+        return None
+
+    def get_currencies_list(self, top=50):
+        """
+        Get list of currencies from SAP (same area as Exchange Rates and Indexes).
+
+        In SAP: Administration → Exchange Rates and Indexes (table ORTT).
+        Service Layer: GET Currencies?$top=N returns master data (Code, Name, etc.; no daily rate).
+        Returns:
+            list: List of dicts with Code, Name, DocumentsCode, Decimals, etc.
+        """
+        try:
+            response = self.get('Currencies', params={'$top': str(top)})
+            if response and not response.get('error'):
+                return response.get('value', [])
+        except Exception as exc:
+            _logger.debug('get_currencies_list: %s', exc)
+        return []
+
+    def get_exchange_rate_for_currency_and_date(self, currency_code, rate_date=None):
+        """
+        Get exchange rate from SAP for a currency and date (ORTT / Exchange Rates and Indexes).
+        Uses CompanyService_GetCurrencyRate when available.
+        Returns float or None.
+        """
+        from datetime import date
+        rate_date = rate_date or date.today().isoformat()
+        try:
+            for payload in (
+                {'Currency': currency_code, 'Date': rate_date},
+                {'GetCurrencyRateParams': {'Currency': currency_code, 'Date': rate_date}},
+            ):
+                try:
+                    resp = self.post('CompanyService_GetCurrencyRate', payload)
+                    if not resp:
+                        continue
+                    rate_val = (
+                        resp.get('CurrencyRate')
+                        or resp.get('GetCurrencyRateResult')
+                        or (resp.get('d') or {}).get('GetCurrencyRateResult')
+                        or (resp.get('d') or {}).get('CurrencyRate')
+                    )
+                    if rate_val is not None:
+                        return float(rate_val)
+                except Exception:
+                    continue
+        except Exception as exc:
+            _logger.debug('get_exchange_rate_for_currency_and_date: %s', exc)
+        return None

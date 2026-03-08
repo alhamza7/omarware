@@ -103,10 +103,13 @@
         'report/sale_report_inherit.xml',  # Add SAP Document Number to sale order PDF
         
         # New: Complete Product Migration Views
+        'views/sap_product_brand_views.xml',           # Brand management
         'views/sap_product_extended_views.xml',  # Extended product information
         'views/sap_product_pricelist_sync_views.xml',  # Pricelist synchronization
         'views/sap_product_warehouse_info_views.xml',  # Warehouse information
         'views/product_uom_group_views.xml',           # UoM Group restriction in products/sales
+        'views/sap_realtime_sync_views.xml',           # Realtime fast-poll delta sync
+        'views/sap_exchange_rate_sync_views.xml',      # IQD/USD exchange rate sync from SAP
 
         # Full menu tree - loaded LAST so all actions are available
         'views/sap_full_menus.xml',                    # Complete menu structure with all parent menus

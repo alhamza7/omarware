@@ -161,9 +161,55 @@ class SapInvoiceSync(models.Model):
             self.sync_to_sap()
     
     def sync_to_sap(self):
-        """Sync invoice from Odoo to SAP"""
-        # Implementation for syncing to SAP
-        pass
+        """
+        Sync (update) invoice from Odoo to SAP.
+        Sends current invoice header and DocumentLines to SAP via PATCH so that
+        additions/deletions/changes in Odoo are applied in SAP.
+        """
+        self.ensure_one()
+        if not self.sap_doc_entry:
+            raise UserError("لا يوجد DocEntry للفاتورة في SAP — لا يمكن التحديث. أنشئ الفاتورة في SAP أولاً.")
+        invoice = self.odoo_invoice_id
+        if not invoice:
+            invoice = self.env["account.move"].search(
+                [("ref", "=", self.sap_invoice_id), ("move_type", "=", "out_invoice")],
+                limit=1,
+            )
+        if not invoice:
+            raise UserError(
+                "لم يتم العثور على فاتورة Odoo مرتبطة بهذا السجل. ربط الفاتورة (Odoo Invoice) أو التأكد من ref."
+            )
+        try:
+            mapper = self.env["sap.data.mapper"]
+            payload = mapper.map_odoo_invoice_to_sap(invoice)
+            # PATCH expects DocumentLines and optionally header fields; send full lines so SAP replaces them
+            update_payload = {
+                "DocumentLines": payload.get("DocumentLines", []),
+            }
+            if payload.get("DocDate"):
+                update_payload["DocDate"] = payload["DocDate"]
+            if payload.get("DocDueDate"):
+                update_payload["DocDueDate"] = payload["DocDueDate"]
+            if payload.get("CardCode"):
+                update_payload["CardCode"] = payload["CardCode"]
+            self.backend_id.update_invoice_in_sap(self.sap_doc_entry, update_payload)
+            self.write({
+                "sync_status": "success",
+                "last_sync": fields.Datetime.now(),
+                "error_message": False,
+                "retry_count": 0,
+            })
+            self.env.cr.commit()
+            _logger.info("Successfully synced invoice to SAP: %s (DocEntry %s)", self.sap_invoice_id, self.sap_doc_entry)
+        except Exception as e:
+            self.write({
+                "sync_status": "error",
+                "error_message": str(e),
+                "retry_count": self.retry_count + 1,
+            })
+            self.env.cr.commit()
+            _logger.error("Error syncing invoice to SAP: %s", e, exc_info=True)
+            raise UserError("فشل تحديث الفاتورة في SAP: %s" % e)
     
     @api.model
     def sync_all_invoices(self, backend_id):

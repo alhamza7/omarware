@@ -29,6 +29,7 @@ from ..core.sap_alert_system import SapAlertRule, SapAlert
 from ..core.sap_performance_monitor import SapPerformanceMetrics
 
 # New comprehensive product migration models
+from . import sap_product_brand  # product.brand model synced from SAP U_ST_MainBrand
 from . import sap_product_extended
 from . import sap_product_pricelist_sync
 from . import sap_product_warehouse_info
@@ -41,6 +42,12 @@ from . import ir_asset  # Patch for ir.asset to handle None manifest
 
 # Auto Sync
 from . import sap_auto_sync
+
+# Realtime fast-poll delta sync (prices + stock + product data every 2 min)
+from . import sap_realtime_sync
+
+# IQD/USD exchange rate sync from SAP (every 30 min)
+from . import sap_exchange_rate_sync
 
 # Custom Report Designer
 from . import custom_report_template

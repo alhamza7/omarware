@@ -402,11 +402,11 @@ class SapProductPricelistSync(models.Model):
                 ('applied_on', '=', '1_product'),
             ]
             
-            # Add UoM to domain if specified
+            # Use product_uom_id (the correct field for UoM-specific pricing)
             if uom:
-                domain.append(('product_packaging_id', '=', uom.id))
+                domain.append(('product_uom_id', '=', uom.id))
             else:
-                domain.append(('product_packaging_id', '=', False))
+                domain.append(('product_uom_id', '=', False))
             
             pricelist_item = self.env['product.pricelist.item'].search(domain, limit=1)
             
@@ -420,9 +420,9 @@ class SapProductPricelistSync(models.Model):
                 'min_quantity': 1,
             }
             
-            # Add UoM/packaging if specified
+            # Add UoM if specified (product_uom_id is the field _get_available_uoms reads)
             if uom:
-                item_vals['product_packaging_id'] = uom.id
+                item_vals['product_uom_id'] = uom.id
                 _logger.info(f"Adding UoM {uom.name} to pricelist item")
             
             # Add date validity if present

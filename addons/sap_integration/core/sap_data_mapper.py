@@ -407,10 +407,11 @@ class SapDataMapper(models.AbstractModel):
                 document_lines = []
                 for line in odoo_invoice.invoice_line_ids:
                     line_data = {
-                        'ItemCode': line.product_id.default_code or '',
-                        'ItemDescription': line.name,
+                        'ItemCode': line.product_id.default_code or '' if line.product_id else '',
+                        'ItemDescription': line.name or '',
                         'Quantity': float(line.quantity),
                         'Price': float(line.price_unit),
+                        'UnitPrice': float(line.price_unit),
                         'DiscountPercent': float(line.discount),
                         'TaxCode': self._get_sap_tax_code(line.tax_ids[0]) if line.tax_ids else '',
                     }

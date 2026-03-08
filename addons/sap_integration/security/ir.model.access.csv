@@ -102,3 +102,9 @@ access_custom_report_total_manager,custom.report.total manager,model_custom_repo
 access_custom_report_total_user,custom.report.total user,model_custom_report_total,sap_integration.group_sap_user,1,0,0,0
 access_custom_report_section_manager,custom.report.section manager,model_custom_report_section,sap_integration.group_sap_manager,1,1,1,1
 access_custom_report_section_user,custom.report.section user,model_custom_report_section,sap_integration.group_sap_user,1,0,0,0
+access_sap_realtime_sync_manager,sap.realtime.sync manager,model_sap_realtime_sync,sap_integration.group_sap_manager,1,1,1,1
+access_sap_realtime_sync_user,sap.realtime.sync user,model_sap_realtime_sync,sap_integration.group_sap_user,1,0,0,0
+access_sap_exchange_rate_sync_manager,sap.exchange.rate.sync manager,model_sap_exchange_rate_sync,sap_integration.group_sap_manager,1,1,1,1
+access_sap_exchange_rate_sync_user,sap.exchange.rate.sync user,model_sap_exchange_rate_sync,sap_integration.group_sap_user,1,0,0,0
+access_product_brand_manager,product.brand manager,model_product_brand,sap_integration.group_sap_manager,1,1,1,1
+access_product_brand_user,product.brand user,model_product_brand,base.group_user,1,0,0,0

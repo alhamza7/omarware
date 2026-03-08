@@ -23,6 +23,54 @@ class ProductTemplate(models.Model):
         store=True,
         help="SAP UoMGroupEntry number"
     )
+
+    # Brand & naming from SAP (U_ST_* UDFs) — stored for fast search & POS display
+    sap_main_brand = fields.Char(
+        string='Brand (SAP)',
+        compute='_compute_sap_extended_fields',
+        store=True,
+        help="SAP field U_ST_MainBrand — e.g. Lacoste, Chanel"
+    )
+    sap_brand_id = fields.Many2one(
+        'product.brand',
+        string='Brand',
+        compute='_compute_sap_extended_fields',
+        store=True,
+        index=True,
+        help="Brand record linked from SAP U_ST_MainBrand"
+    )
+    sap_eng_name = fields.Char(
+        string='English Name (SAP)',
+        compute='_compute_sap_extended_fields',
+        store=True,
+        help="SAP field U_ST_EngName — English product name"
+    )
+    sap_capacity = fields.Char(
+        string='Capacity (SAP)',
+        compute='_compute_sap_extended_fields',
+        store=True,
+        help="SAP field U_ST_Capacity — e.g. 100ML"
+    )
+    sap_items_group_code = fields.Integer(
+        string='Items Group Code (SAP)',
+        compute='_compute_sap_extended_fields',
+        store=True,
+        help="SAP ItemsGroupCode — product category group"
+    )
+    sap_items_group_name = fields.Char(
+        string='Items Group Name (SAP)',
+        compute='_compute_sap_extended_fields',
+        store=True,
+        help="SAP ItemsGroupName"
+    )
+    sap_category_id = fields.Many2one(
+        'product.category',
+        string='SAP Category',
+        compute='_compute_sap_extended_fields',
+        store=True,
+        index=True,
+        help="Odoo product.category linked from SAP ItemsGroupName"
+    )
     
     available_product_uom_ids = fields.Many2many(
         'uom.uom',
@@ -35,7 +83,6 @@ class ProductTemplate(models.Model):
     def _compute_sap_extended_fields(self):
         """Compute SAP extended fields from first variant"""
         for template in self:
-            # Get first variant's extended info
             if template.product_variant_ids:
                 first_variant = template.product_variant_ids[0]
                 extended_info = self.env['sap.product.extended'].search([
@@ -45,12 +92,33 @@ class ProductTemplate(models.Model):
                 if extended_info:
                     template.sap_uom_group_id = extended_info.sap_uom_group_id
                     template.sap_uom_group_entry = extended_info.sap_uom_group_entry
+                    template.sap_main_brand = extended_info.main_brand
+                    template.sap_brand_id = extended_info.brand_id
+                    template.sap_eng_name = extended_info.eng_name
+                    template.sap_capacity = extended_info.capacity
+                    template.sap_items_group_code = extended_info.items_group_code
+                    template.sap_items_group_name = extended_info.items_group_name
+                    template.sap_category_id = extended_info.sap_category_id
                 else:
                     template.sap_uom_group_id = False
                     template.sap_uom_group_entry = 0
+                    template.sap_main_brand = False
+                    template.sap_brand_id = False
+                    template.sap_eng_name = False
+                    template.sap_capacity = False
+                    template.sap_items_group_code = 0
+                    template.sap_items_group_name = False
+                    template.sap_category_id = False
             else:
                 template.sap_uom_group_id = False
                 template.sap_uom_group_entry = 0
+                template.sap_main_brand = False
+                template.sap_brand_id = False
+                template.sap_eng_name = False
+                template.sap_capacity = False
+                template.sap_items_group_code = 0
+                template.sap_items_group_name = False
+                template.sap_category_id = False
     
     def _inverse_sap_uom_group(self):
         """Update SAP extended info when UoM group is changed"""
