@@ -66,73 +66,138 @@ class ProductProductExtended(models.Model):
             'total_qty': total_qty,
         }
     
+    @api.model
+    def get_available_uoms_with_prices(self, product_id, pricelist_id=None):
+        """
+        Public RPC method called from POS JS to get all UoMs with prices for a product.
+        - Returns UoMs that have explicit prices in the pricelist
+        - Also returns UoMs from the SAP UoM Group even if not in pricelist,
+          computing price as base_price * factor (fallback)
+        """
+        product = self.browse(product_id)
+        if not product.exists():
+            return []
+        return self._get_available_uoms(product, pricelist_id)
+
     def _get_available_uoms(self, product, pricelist_id):
-        """Get all UoMs available for this product from pricelist items"""
-        if not pricelist_id:
-            return [{
-                'id': product.uom_id.id,
-                'name': product.uom_id.name,
-                'price': product.list_price,
-                'price_iqd': self._convert_to_iqd(product.list_price),
-                'is_base': True,
-            }]
-        
-        # Get pricelist items with UoM
-        items = self.env['product.pricelist.item'].search([
-            ('pricelist_id', '=', pricelist_id),
-            ('product_tmpl_id', '=', product.product_tmpl_id.id),
-            ('product_uom_id', '!=', False),
-            '|',
-            ('product_id', '=', False),
-            ('product_id', '=', product.id),
-        ])
-        
+        """
+        Get all UoMs for a product with prices.
+        Priority:
+          1. UoMs with explicit pricelist items (price from SAP)
+          2. UoMs in SAP UoM Group without pricelist price → fallback: base_price × factor
+          3. Always include the base UoM
+        """
+        pricelist = self.env['product.pricelist'].browse(pricelist_id) if pricelist_id else None
+
+        # Get base price for the product's base UoM
+        base_uom = product.uom_id
+        base_price = product.list_price
+        if pricelist:
+            try:
+                base_price = pricelist._get_product_price(product, 1.0, uom=base_uom)
+                if not base_price:
+                    base_price = product.list_price
+            except Exception:
+                base_price = product.list_price
+
         uoms = []
         seen_uom_ids = set()
-        pricelist = self.env['product.pricelist'].browse(pricelist_id)
-        
-        for item in items:
-            uom = item.product_uom_id
-            if uom.id in seen_uom_ids:
-                continue
-            
-            # Get price using pricelist (same as sale order)
-            try:
-                price = pricelist._get_product_price(product, 1.0, uom=uom)
-            except:
-                price = product.list_price
-            
-            uoms.append({
-                'id': uom.id,
-                'name': uom.name,
-                'price': price,
-                'price_iqd': self._convert_to_iqd(price),
-                'is_base': uom.id == product.uom_id.id,
-            })
-            seen_uom_ids.add(uom.id)
-        
-        # Add base UoM if not in list
-        if product.uom_id.id not in seen_uom_ids:
-            try:
-                price = pricelist._get_product_price(product, 1.0, uom=product.uom_id)
-            except:
-                price = product.list_price
-            
+
+        # --- Step 1: UoMs with explicit pricelist items ---
+        if pricelist_id:
+            items = self.env['product.pricelist.item'].search([
+                ('pricelist_id', '=', pricelist_id),
+                ('product_tmpl_id', '=', product.product_tmpl_id.id),
+                ('product_uom_id', '!=', False),
+                '|',
+                ('product_id', '=', False),
+                ('product_id', '=', product.id),
+            ])
+
+            for item in items:
+                uom = item.product_uom_id
+                if uom.id in seen_uom_ids:
+                    continue
+
+                try:
+                    price = pricelist._get_product_price(product, 1.0, uom=uom)
+                    if not price:
+                        # Fallback: base_price × UoM factor relative to base UoM
+                        price = self._compute_price_by_factor(base_price, uom, base_uom)
+                except Exception:
+                    price = self._compute_price_by_factor(base_price, uom, base_uom)
+
+                uoms.append({
+                    'id': uom.id,
+                    'name': uom.name,
+                    'price': price,
+                    'price_iqd': self._convert_to_iqd(price),
+                    'is_base': uom.id == base_uom.id,
+                    'has_sap_price': True,
+                })
+                seen_uom_ids.add(uom.id)
+
+        # --- Step 2: UoMs from SAP UoM Group (even without pricelist price) ---
+        sap_group = None
+        if hasattr(product, 'sap_uom_group_id') and product.sap_uom_group_id:
+            sap_group = product.sap_uom_group_id
+        elif hasattr(product.product_tmpl_id, 'sap_uom_group_id') and product.product_tmpl_id.sap_uom_group_id:
+            sap_group = product.product_tmpl_id.sap_uom_group_id
+
+        if sap_group:
+            for uom_sync in sap_group.uom_ids:
+                odoo_uom = uom_sync.odoo_uom_id if uom_sync.odoo_uom_id else None
+                if not odoo_uom or odoo_uom.id in seen_uom_ids:
+                    continue
+
+                # Fallback price: base_price × conversion factor
+                price = self._compute_price_by_factor(base_price, odoo_uom, base_uom)
+
+                uoms.append({
+                    'id': odoo_uom.id,
+                    'name': odoo_uom.name,
+                    'price': price,
+                    'price_iqd': self._convert_to_iqd(price),
+                    'is_base': odoo_uom.id == base_uom.id,
+                    'has_sap_price': False,
+                })
+                seen_uom_ids.add(odoo_uom.id)
+
+        # --- Step 3: Always ensure base UoM is included ---
+        if base_uom.id not in seen_uom_ids:
             uoms.insert(0, {
-                'id': product.uom_id.id,
-                'name': product.uom_id.name,
-                'price': price,
-                'price_iqd': self._convert_to_iqd(price),
+                'id': base_uom.id,
+                'name': base_uom.name,
+                'price': base_price,
+                'price_iqd': self._convert_to_iqd(base_price),
                 'is_base': True,
+                'has_sap_price': True,
             })
-        
+
+        # Sort: base UoM first, then by name
+        uoms.sort(key=lambda u: (0 if u['is_base'] else 1, u['name']))
+
         return uoms if uoms else [{
-            'id': product.uom_id.id,
-            'name': product.uom_id.name,
-            'price': product.list_price,
-            'price_iqd': self._convert_to_iqd(product.list_price),
+            'id': base_uom.id,
+            'name': base_uom.name,
+            'price': base_price,
+            'price_iqd': self._convert_to_iqd(base_price),
             'is_base': True,
+            'has_sap_price': False,
         }]
+
+    def _compute_price_by_factor(self, base_price, target_uom, base_uom):
+        """
+        Compute price for a target UoM using Odoo's built-in conversion.
+        If target_uom has factor > 1 (e.g., Box = 12 pieces), price = base_price × factor.
+        Falls back to base_price if conversion fails.
+        """
+        try:
+            if target_uom and base_uom and target_uom.id != base_uom.id:
+                return base_uom._compute_price(base_price, target_uom)
+        except Exception:
+            pass
+        return base_price
     
     def _convert_to_iqd(self, usd_amount):
         """Convert USD to IQD"""
@@ -175,6 +240,70 @@ class ProductProductExtended(models.Model):
         else:
             return (5, '', '')
     
+    @api.model
+    def search_products_simple_for_pos(self, search_term, limit=20):
+        """
+        Lightweight product search for the left-panel inline search box.
+        Searches main barcode, alternative barcodes, product name, and internal reference.
+        Returns minimal fields needed for the dropdown: id, name, default_code, list_price, uom_id.
+        Alternative barcode match sets matched_via_alt_barcode=True so the JS can highlight it.
+        """
+        term = (search_term or '').strip()
+        if not term or len(term) < 1:
+            return []
+
+        ProductSudo = self.sudo()
+        matched_product = None
+
+        # --- Exact barcode match (main + alternative) ---
+        if 4 <= len(term) <= 20 and not any(c.isspace() for c in term):
+            product_by_barcode = ProductSudo.search([
+                ('sale_ok', '=', True),
+                ('barcode', '=', term),
+            ], limit=1)
+            if product_by_barcode:
+                matched_product = product_by_barcode
+            elif 'product.barcode.alternative' in self.env:
+                alt = self.env['product.barcode.alternative'].sudo().search([
+                    ('barcode', '=', term),
+                    ('active', '=', True),
+                ], limit=1)
+                if alt and alt.product_id and alt.product_id.sale_ok:
+                    matched_product = ProductSudo.browse(alt.product_id.id)
+
+        if matched_product:
+            products = matched_product
+        else:
+            # General text/code search across name, default_code, barcode, alternative barcode
+            alt_product_ids = []
+            if 'product.barcode.alternative' in self.env:
+                alt_matches = self.env['product.barcode.alternative'].sudo().search([
+                    ('barcode', 'ilike', term),
+                    ('active', '=', True),
+                ], limit=limit)
+                alt_product_ids = [a.product_id.id for a in alt_matches if a.product_id]
+
+            domain = [
+                ('sale_ok', '=', True),
+                '|', '|', '|',
+                ('name', 'ilike', term),
+                ('default_code', 'ilike', term),
+                ('barcode', 'ilike', term),
+                ('id', 'in', alt_product_ids),
+            ]
+            products = ProductSudo.search(domain, limit=limit)
+
+        result = []
+        for p in products:
+            result.append({
+                'id': p.id,
+                'name': p.name,
+                'default_code': p.default_code or '',
+                'list_price': p.list_price,
+                'uom_id': [p.uom_id.id, p.uom_id.name] if p.uom_id else [False, ''],
+            })
+        return result
+
     @api.model
     def search_products_for_pos(self, search_term, limit=50, pricelist_id=None):
         """

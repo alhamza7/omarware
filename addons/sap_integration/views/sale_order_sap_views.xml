@@ -24,6 +24,13 @@
                             class="btn-primary"
                             invisible="sap_synced"
                             icon="fa-paper-plane"/>
+                    <button name="action_update_sap_document"
+                            type="object"
+                            string="تحديث في SAP"
+                            class="btn-warning"
+                            invisible="not sap_doc_entry"
+                            icon="fa-refresh"
+                            confirm="سيتم إرسال آخر تعديلات الطلب إلى SAP. هل تريد المتابعة؟"/>
                 </xpath>
                 
                 <!-- Add SAP sync status in header -->
@@ -47,6 +54,14 @@
                         <field name="sap_doc_num" string="SAP Document Number" readonly="1"/>
                         <field name="sap_doc_entry" string="SAP Doc Entry" readonly="1"/>
                         <field name="sap_synced" string="Synced to SAP" readonly="1"/>
+                        <field name="sap_last_sync_date" string="آخر مزامنة" readonly="1"/>
+                    </group>
+                    <group string="خطأ SAP" invisible="not sap_error_message">
+                        <field name="sap_error_message" 
+                               string="سبب الفشل" 
+                               readonly="1"
+                               widget="text"
+                               nolabel="1"/>
                     </group>
                     <group string="ملاحظات SAP / SAP Notes">
                         <field name="note" 

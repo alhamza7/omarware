@@ -29,6 +29,7 @@ from ..core.sap_alert_system import SapAlertRule, SapAlert
 from ..core.sap_performance_monitor import SapPerformanceMetrics
 
 # New comprehensive product migration models
+from . import sap_product_brand  # product.brand model synced from SAP U_ST_MainBrand
 from . import sap_product_extended
 from . import sap_product_pricelist_sync
 from . import sap_product_warehouse_info

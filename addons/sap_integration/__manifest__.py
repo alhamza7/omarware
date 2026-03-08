@@ -104,6 +104,7 @@
         'report/sale_report_inherit.xml',  # Add SAP Document Number to sale order PDF
         
         # New: Complete Product Migration Views
+        'views/sap_product_brand_views.xml',           # Brand management
         'views/sap_product_extended_views.xml',  # Extended product information
         'views/sap_product_pricelist_sync_views.xml',  # Pricelist synchronization
         'views/sap_product_warehouse_info_views.xml',  # Warehouse information

@@ -154,24 +154,18 @@ export class PosPerfumeScreen extends Component {
             line.showProductDropdown = true;
             
             try {
-                const products = await this.orm.searchRead(
+                // Use server-side search to include alternative barcodes
+                const products = await this.orm.call(
                     'product.product',
-                    [
-                        ['sale_ok', '=', true],
-                        '|', '|',
-                        ['name', 'ilike', searchTerm],
-                        ['default_code', 'ilike', searchTerm],
-                        ['barcode', 'ilike', searchTerm],
-                    ],
-                    ['id', 'name', 'default_code', 'list_price', 'uom_id'],
-                    { limit: 20 }
+                    'search_products_simple_for_pos',
+                    [searchTerm, 20]
                 );
-                
+
                 // Add uom_name for display
                 products.forEach(p => {
                     p.uom_name = p.uom_id ? p.uom_id[1] : '-';
                 });
-                
+
                 line.searchResults = products;
                 line.selectedProductIndex = 0;
             } catch (error) {

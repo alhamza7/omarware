@@ -324,6 +324,82 @@ class SapProductExtended(models.Model):
         string='Remarks',
         help="Internal remarks"
     )
+
+    # ========== SAP User-Defined Fields (U_ST_*) - Fragrance/Brand Info ==========
+    main_brand = fields.Char(
+        string='Main Brand (SAP raw)',
+        help="SAP field U_ST_MainBrand raw text — linked brand is in brand_id"
+    )
+    brand_id = fields.Many2one(
+        'product.brand',
+        string='Brand',
+        index=True,
+        help="Brand linked from SAP U_ST_MainBrand"
+    )
+    eng_name = fields.Char(
+        string='English Name',
+        help="SAP field U_ST_EngName — English product name"
+    )
+    capacity = fields.Char(
+        string='Capacity',
+        help="SAP field U_ST_Capacity — e.g. 100ML, 200ML"
+    )
+    packaging = fields.Char(
+        string='Packaging',
+        help="SAP field U_ST_Packaging — packaging description"
+    )
+    country_origin = fields.Char(
+        string='Country of Origin',
+        help="SAP field U_ST_CountryOrigine"
+    )
+    fragrance_top_notes = fields.Text(
+        string='Top Notes',
+        help="SAP field U_ST_Starting — opening/top fragrance notes"
+    )
+    fragrance_middle_notes = fields.Text(
+        string='Middle Notes (Heart)',
+        help="SAP field U_ST_Inside — middle/heart fragrance notes"
+    )
+    fragrance_base_notes = fields.Text(
+        string='Base Notes',
+        help="SAP field U_ST_Base — base fragrance notes"
+    )
+    fragrance_description = fields.Text(
+        string='Fragrance Description',
+        help="SAP field U_ST_Lines — full fragrance description"
+    )
+    fragrantica_link = fields.Char(
+        string='Fragrantica Link',
+        help="SAP field U_ST_LINKS — link to Fragrantica page"
+    )
+    sap_classification_1 = fields.Char(
+        string='Classification 1 (U_ST_IMD06)',
+        help="SAP user-defined classification field IMD06"
+    )
+    sap_classification_2 = fields.Char(
+        string='Classification 2 (U_ST_IMD07)',
+        help="SAP user-defined classification field IMD07"
+    )
+    sap_classification_3 = fields.Char(
+        string='Classification 3 (U_ST_IMD08)',
+        help="SAP user-defined classification field IMD08"
+    )
+    sap_classification_4 = fields.Char(
+        string='Classification 4 (U_ST_IMD12)',
+        help="SAP user-defined classification field IMD12"
+    )
+    brand_id = fields.Many2one(
+        'product.brand',
+        string='Brand',
+        index=True,
+        help="Brand linked from SAP U_ST_MainBrand"
+    )
+    sap_category_id = fields.Many2one(
+        'product.category',
+        string='SAP Category',
+        index=True,
+        help="Odoo product.category linked from SAP ItemsGroupName"
+    )
     
     # ========== SAP Specific Fields ==========
     sap_item_type = fields.Selection([
@@ -601,8 +677,76 @@ class SapProductExtended(models.Model):
         # Item type
         if 'ItemType' in sap_data:
             vals['sap_item_type'] = sap_data['ItemType']
-        
+
+        # ========== SAP User-Defined Fields (U_ST_*) ==========
+        udf_mapping = {
+            'U_ST_MainBrand': 'main_brand',
+            'U_ST_EngName': 'eng_name',
+            'U_ST_Capacity': 'capacity',
+            'U_ST_Packaging': 'packaging',
+            'U_ST_CountryOrigine': 'country_origin',
+            'U_ST_Starting': 'fragrance_top_notes',
+            'U_ST_Inside': 'fragrance_middle_notes',
+            'U_ST_Base': 'fragrance_base_notes',
+            'U_ST_Lines': 'fragrance_description',
+            'U_ST_LINKS': 'fragrantica_link',
+            'U_ST_IMD06': 'sap_classification_1',
+            'U_ST_IMD07': 'sap_classification_2',
+            'U_ST_IMD08': 'sap_classification_3',
+            'U_ST_IMD12': 'sap_classification_4',
+        }
+        for sap_key, odoo_field in udf_mapping.items():
+            if sap_key in sap_data and sap_data[sap_key]:
+                vals[odoo_field] = sap_data[sap_key]
+
+        # Auto-create/link Brand record from U_ST_MainBrand
+        sap_brand_name = sap_data.get('U_ST_MainBrand', '').strip() if sap_data.get('U_ST_MainBrand') else ''
+        if sap_brand_name:
+            brand = self.env['product.brand'].get_or_create_by_sap_name(sap_brand_name)
+            if brand:
+                vals['brand_id'] = brand.id
+
+        # Auto-create/link product.category from ItemsGroupCode + ItemsGroupName
+        items_group_name = sap_data.get('ItemsGroupName', '').strip() if sap_data.get('ItemsGroupName') else ''
+        items_group_code = sap_data.get('ItemsGroupCode')
+        if items_group_name:
+            category = self._get_or_create_product_category(items_group_name, items_group_code)
+            if category:
+                vals['sap_category_id'] = category.id
+
         return vals
+
+    def _get_or_create_product_category(self, group_name, group_code=None):
+        """
+        Find or create a product.category matching the SAP ItemsGroup.
+        Categories are placed under a parent 'SAP Groups' category.
+        """
+        try:
+            # Ensure parent category exists
+            parent = self.env['product.category'].search([
+                ('name', '=', 'SAP Groups'),
+                ('parent_id', '=', False),
+            ], limit=1)
+            if not parent:
+                parent = self.env['product.category'].create({'name': 'SAP Groups'})
+
+            # Search by name under the parent
+            category = self.env['product.category'].search([
+                ('name', '=', group_name),
+                ('parent_id', '=', parent.id),
+            ], limit=1)
+
+            if not category:
+                category = self.env['product.category'].create({
+                    'name': group_name,
+                    'parent_id': parent.id,
+                })
+                _logger.info("Created product.category '%s' from SAP group code %s", group_name, group_code)
+
+            return category
+        except Exception as e:
+            _logger.warning("Could not create product.category for '%s': %s", group_name, e)
+            return False
     
     # ========== Action Methods ==========
     def action_view_product(self):

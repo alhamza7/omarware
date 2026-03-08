@@ -556,34 +556,74 @@ class SapServiceLayerConnection:
             _logger.error(f"Error creating sales order: {str(e)}")
             raise
     
-    def update_quotation(self, doc_entry, quotation_data):
-        """Update quotation in SAP Service Layer"""
+    def update_quotation(self, doc_entry, quotation_data, existing_odoo_lines=None):
+        """
+        Update quotation in SAP Service Layer.
+        Fetches current SAP lines and closes any that are no longer present in Odoo.
+        existing_odoo_lines: list of dicts with keys 'item_code' and 'sap_line_num'
+          for lines currently in Odoo. Lines in SAP but not in this list get LineStatus=bost_Close.
+        """
         try:
             url = f"{self.base_url}/Quotations({doc_entry})"
             headers = self._get_headers()
-            
+
             _logger.info(f"[SAP Update] Updating quotation {doc_entry} in SAP: {url}")
-            
-            # Log DocumentLines to verify ItemDescription is included
-            doc_lines = quotation_data.get('DocumentLines', [])
-            _logger.info(f"[SAP Update] Sending {len(doc_lines)} DocumentLines")
-            for idx, line in enumerate(doc_lines):
-                item_desc = line.get('ItemDescription', 'NOT_SET')
-                _logger.info(f"[SAP Update] DocumentLine[{idx}]: ItemCode={line.get('ItemCode')}, Quantity={line.get('Quantity')}, ItemDescription='{item_desc}'")
-            
-            # Log full payload
+
+            # Step 1: Fetch current SAP lines to find deleted ones
+            patch_lines = list(quotation_data.get('DocumentLines', []))
+
+            if existing_odoo_lines is not None:
+                try:
+                    current_sap = self.get(
+                        f"Quotations({doc_entry})",
+                        {'$select': 'DocEntry,DocumentLines'},
+                    )
+                    sap_lines = current_sap.get('DocumentLines', [])
+                    odoo_item_codes = {l['item_code'] for l in existing_odoo_lines}
+
+                    for sap_line in sap_lines:
+                        item_code = sap_line.get('ItemCode', '')
+                        line_num = sap_line.get('LineNum')
+                        line_status = sap_line.get('LineStatus', '')
+
+                        # Skip already-closed lines
+                        if line_status == 'bost_Close':
+                            continue
+
+                        # If this item is no longer in Odoo lines → close it in SAP
+                        if item_code not in odoo_item_codes and line_num is not None:
+                            patch_lines.append({
+                                'LineNum': line_num,
+                                'LineStatus': 'bost_Close',
+                            })
+                            _logger.info(f"[SAP Update] Closing deleted line: ItemCode={item_code}, LineNum={line_num}")
+                        else:
+                            # Add LineNum to existing line so SAP matches it correctly
+                            for pl in patch_lines:
+                                if pl.get('ItemCode') == item_code and 'LineNum' not in pl:
+                                    pl['LineNum'] = line_num
+                                    break
+
+                except Exception as fetch_err:
+                    _logger.warning(f"[SAP Update] Could not fetch SAP lines for close check: {fetch_err}")
+
+            send_data = {**quotation_data, 'DocumentLines': patch_lines}
+
+            # Log payload
             import json
-            _logger.info(f"[SAP Update] Full quotation data being sent:\n{json.dumps(quotation_data, indent=2, ensure_ascii=False)}")
-            
-            response = self.session.patch(url, json=quotation_data, headers=headers, timeout=30)
-            
+            _logger.info(f"[SAP Update] Sending {len(patch_lines)} DocumentLines (including any closed)")
+            for idx, line in enumerate(patch_lines):
+                _logger.info(f"[SAP Update] Line[{idx}]: ItemCode={line.get('ItemCode')}, LineNum={line.get('LineNum', 'N/A')}, LineStatus={line.get('LineStatus', 'open')}")
+
+            response = self.session.patch(url, json=send_data, headers=headers, timeout=30)
+
             if response.status_code in [200, 204]:
                 _logger.info(f"[SAP Update] ✅ Successfully updated quotation {doc_entry}")
                 return response.json() if response.content else {}
             else:
                 _logger.error(f"[SAP Update] ❌ Error updating quotation {doc_entry}: {response.status_code} - {response.text}")
                 return None
-                
+
         except Exception as e:
             _logger.error(f"[SAP Update] ❌ Exception updating quotation {doc_entry}: {str(e)}", exc_info=True)
             return None

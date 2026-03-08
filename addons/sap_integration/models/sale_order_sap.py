@@ -211,21 +211,66 @@ class SaleOrder(models.Model):
         
         return result
     
-    def _send_to_sap(self):
-        """إرسال quotation/sale order إلى SAP ومزامنته"""
+    def action_sync_as_quotation(self):
+        """
+        إرسال/تحديث المستند في SAP كـ Quotation بغض النظر عن حالته في Odoo.
+        يُستخدم من زر "Quotation" في POS Perfume.
+        """
+        self.ensure_one()
+        try:
+            self._send_to_sap(force_as_quotation=True)
+        except Exception as e:
+            raise UserError(f'فشل إرسال Quotation إلى SAP:\n{str(e)}')
+
+        self.env.cr.execute(
+            "SELECT sap_synced, sap_error_message FROM sale_order WHERE id=%s",
+            (self.id,)
+        )
+        row = self.env.cr.fetchone()
+        synced = row[0] if row else False
+        error_msg = row[1] if row else ''
+
+        if synced:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'تم الإرسال',
+                    'message': f'✅ تم إرسال Quotation {self.name} إلى SAP بنجاح!',
+                    'type': 'success',
+                    'sticky': False,
+                }
+            }
+        else:
+            raise UserError(
+                f'فشل إرسال Quotation {self.name} إلى SAP.\n\n'
+                f'السبب:\n{error_msg or "خطأ غير معروف"}'
+            )
+
+    def _send_to_sap(self, force_as_quotation=False):
+        """إرسال quotation/sale order إلى SAP ومزامنته.
+        force_as_quotation=True: يُرسل دائماً كـ Quotation بغض النظر عن state.
+        """
         for quotation in self:
-            # تحديد نوع المستند للّوج فقط (Quotation vs Sale Order)
-            if quotation.state == 'sale':
+            # تحديد نوع المستند — force_as_quotation يُجبر الإرسال كـ Quotation
+            if force_as_quotation:
+                doc_type = "quotation"
+                doc_label = "Quotation"
+                send_as_sale = False
+            elif quotation.state == 'sale':
                 doc_type = "sale order"
                 doc_label = "Sale Order"
+                send_as_sale = True
             elif quotation.state == 'draft':
                 doc_type = "quotation (draft)"
                 doc_label = "Quotation"
+                send_as_sale = False
             else:
                 doc_type = "quotation"
                 doc_label = "Quotation"
+                send_as_sale = False
 
-            _logger.info(f">>> Starting _send_to_sap for {doc_type} {quotation.name} <<<")
+            _logger.info(f">>> Starting _send_to_sap for {doc_type} {quotation.name} (send_as_sale={send_as_sale}) <<<")
             sync_successful = False
             
             # Log invoice_type if present
@@ -287,109 +332,97 @@ class SaleOrder(models.Model):
                 
                 # إرسال إلى SAP
                 connection = backend.get_connection()
-                
-                # تحديد نوع الوثيقة في SAP بناءً على حالة الطلب
-                if quotation.state == 'sale':
-                    # للـ sale orders: تحويل من quotation أو إنشاء order في SAP
+
+                # تحديد نوع الوثيقة في SAP:
+                # send_as_sale=True  → Sales Order (POST /Orders)
+                # send_as_sale=False → Quotation  (POST/PATCH /Quotations)
+                if send_as_sale:
+                    # للـ sale orders: إنشاء Sales Order في SAP مباشرة
+                    # نستخدم دائماً POST /Orders بدلاً من /Close لأن:
+                    # - /Close يُغلق الـ Quotation فقط ولا يُنشئ Order
+                    # - POST /Orders مع BaseType=23/BaseEntry/BaseLine يُنشئ Order مرتبط بالـ Quotation
+                    headers = connection._get_headers()
+
                     if quotation.sap_doc_entry and quotation.sap_doc_entry > 0:
-                        # تحويل quotation موجود في SAP إلى order باستخدام Transform API
-                        _logger.info(f"Transforming quotation {quotation.name} to sale order in SAP (DocEntry: {quotation.sap_doc_entry})")
+                        # يوجد Quotation في SAP - نتحقق منه أولاً، ثم ننشئ Sales Order مرتبطاً به
+                        _logger.info(f"Converting quotation {quotation.name} to SAP Sales Order (QuotationDocEntry: {quotation.sap_doc_entry})")
                         try:
-                            # استخدام Transform API لتحويل Quotation → Order
-                            url = f"{connection.base_url}/Quotations({quotation.sap_doc_entry})"
-                            headers = connection._get_headers()
-                            
-                            # أولاً: نحدّث الـ Quotation ببيانات جديدة (إن وجدت)
-                            # لا نرسل CardCode لأنه موجود أصلاً
-                            update_data = quotation_data.copy()
-                            if 'CardCode' in update_data:
-                                update_data.pop('CardCode', None)
-                            
-                            # تحديث الـ Quotation قبل التحويل
-                            _logger.info(f"Updating quotation data before transform for {quotation.name}")
-                            update_response = connection.session.patch(url, json=update_data, headers=headers, timeout=30)
-                            
-                            if update_response.status_code not in [200, 204]:
-                                _logger.warning(f"⚠️ Could not update quotation before transform: {update_response.status_code} - {update_response.text}")
-                            
-                            # الآن: تحويل Quotation إلى Order
-                            transform_url = f"{connection.base_url}/Quotations({quotation.sap_doc_entry})/Close"
-                            _logger.info(f"Calling Transform API: {transform_url}")
-                            
-                            # SAP Transform API - يحول quotation إلى order ويرجع DocEntry الجديد
-                            transform_response = connection.session.post(transform_url, json={}, headers=headers, timeout=30)
-                            
-                            if transform_response.status_code in [200, 201, 204]:
-                                # Transform نجح - نحتاج الحصول على DocEntry الجديد
-                                # SAP يرجع Order الجديد في الـ response
-                                if transform_response.content:
-                                    result = transform_response.json()
-                                    _logger.info(f"✅ Transform successful, response: {result}")
+                            # تحقق من أن الـ Quotation لا يزال موجوداً في SAP
+                            check_url = f"{connection.base_url}/Quotations({quotation.sap_doc_entry})?$select=DocEntry,DocStatus"
+                            check_resp = connection.session.get(check_url, headers=headers, timeout=30)
+
+                            quotation_exists = check_resp.status_code == 200
+                            _logger.info(f"Quotation check: status={check_resp.status_code}, exists={quotation_exists}")
+
+                            if quotation_exists:
+                                # أولاً: نحدّث بيانات الـ Quotation في SAP (الأسطر الجديدة)
+                                patch_data = quotation_data.copy()
+                                patch_data.pop('CardCode', None)
+                                patch_url = f"{connection.base_url}/Quotations({quotation.sap_doc_entry})"
+                                patch_resp = connection.session.patch(patch_url, json=patch_data, headers=headers, timeout=30)
+                                if patch_resp.status_code not in [200, 204]:
+                                    _logger.warning(f"⚠️ PATCH Quotation returned {patch_resp.status_code}: {patch_resp.text[:300]}")
                                 else:
-                                    # إذا لم يرجع بيانات، نحاول إنشاء Order مباشرة
-                                    _logger.info(f"Transform returned empty response, creating new order")
-                                    result = None
-                                
-                                # إذا لم نحصل على DocEntry من Transform، ننشئ Order جديد
-                                if not result or not result.get('DocEntry'):
-                                    _logger.info(f"Creating new order in SAP after quotation close")
-                                    create_url = f"{connection.base_url}/Orders"
-                                    create_response = connection.session.post(create_url, json=quotation_data, headers=headers, timeout=30)
-                                    
-                                    if create_response.status_code in [200, 201]:
-                                        result = create_response.json()
-                                        _logger.info(f"✅ Order created: DocNum={result.get('DocNum')}, DocEntry={result.get('DocEntry')}")
-                                    else:
-                                        error_msg = f"❌ Error creating order after transform: {create_response.status_code} - {create_response.text}"
-                                        _logger.error(error_msg)
-                                        result = None
-                                        quotation.sudo().write({
-                                            'sap_synced': False,
-                                            'sap_error_message': error_msg,
-                                            'sap_last_sync_date': fields.Datetime.now()
-                                        })
-                                
-                                if result:
-                                    # تحديث Odoo بالمعلومات الجديدة من SAP
-                                    update_vals = {
-                                        'sap_synced': True,
-                                        'sap_error_message': False,
-                                        'sap_last_sync_date': fields.Datetime.now()
-                                    }
-                                    if result.get('DocNum'):
-                                        update_vals['sap_doc_num'] = result.get('DocNum')
-                                    if result.get('DocEntry'):
-                                        update_vals['sap_doc_entry'] = result.get('DocEntry')
-                                    
-                                    quotation.sudo().write(update_vals)
-                                    _logger.info(f"✅ Sale order {quotation.name} synced to SAP: DocNum={update_vals.get('sap_doc_num')}, DocEntry={update_vals.get('sap_doc_entry')}")
-                                    sync_successful = True
+                                    _logger.info(f"✅ Quotation updated successfully before conversion")
+
+                                # ننشئ Sales Order مرتبطاً بالـ Quotation عبر BaseEntry/BaseLine
+                                order_lines = []
+                                for idx, line in enumerate(quotation_data.get('DocumentLines', [])):
+                                    order_line = line.copy()
+                                    order_line['BaseType'] = 23          # 23 = Quotation في SAP
+                                    order_line['BaseEntry'] = quotation.sap_doc_entry
+                                    order_line['BaseLine'] = idx
+                                    order_lines.append(order_line)
+
+                                order_data = quotation_data.copy()
+                                order_data['DocumentLines'] = order_lines
+                                _logger.info(f"Creating SAP Sales Order linked to Quotation DocEntry={quotation.sap_doc_entry}")
                             else:
-                                error_msg = f"❌ Transform failed for quotation {quotation.name}: {transform_response.status_code} - {transform_response.text}"
+                                # الـ Quotation غير موجود في SAP - ننشئ Order مباشرة بدون ربط
+                                _logger.warning(f"Quotation {quotation.sap_doc_entry} not found in SAP (404), creating standalone Order")
+                                order_data = quotation_data.copy()
+
+                            # إنشاء Sales Order
+                            create_url = f"{connection.base_url}/Orders"
+                            create_resp = connection.session.post(create_url, json=order_data, headers=headers, timeout=30)
+
+                            if create_resp.status_code in [200, 201]:
+                                result = create_resp.json()
+                                update_vals = {
+                                    'sap_synced': True,
+                                    'sap_error_message': False,
+                                    'sap_last_sync_date': fields.Datetime.now(),
+                                }
+                                if result.get('DocNum'):
+                                    update_vals['sap_doc_num'] = result.get('DocNum')
+                                if result.get('DocEntry'):
+                                    update_vals['sap_doc_entry'] = result.get('DocEntry')
+                                quotation.sudo().write(update_vals)
+                                _logger.info(f"✅ SAP Sales Order created for {quotation.name}: DocNum={update_vals.get('sap_doc_num')}, DocEntry={update_vals.get('sap_doc_entry')}")
+                                sync_successful = True
+                            else:
+                                error_msg = f"❌ Failed to create SAP Sales Order for {quotation.name}: {create_resp.status_code} - {create_resp.text}"
                                 _logger.error(error_msg)
                                 quotation.sudo().write({
                                     'sap_synced': False,
                                     'sap_error_message': error_msg,
-                                    'sap_last_sync_date': fields.Datetime.now()
+                                    'sap_last_sync_date': fields.Datetime.now(),
                                 })
                         except Exception as e:
-                            error_msg = f"❌ Error transforming quotation {quotation.name} to order in SAP: {e}"
+                            error_msg = f"❌ Error converting quotation {quotation.name} to SAP Sales Order: {e}"
                             _logger.error(error_msg, exc_info=True)
                             quotation.sudo().write({
                                 'sap_synced': False,
                                 'sap_error_message': str(e),
-                                'sap_last_sync_date': fields.Datetime.now()
+                                'sap_last_sync_date': fields.Datetime.now(),
                             })
                     else:
-                        # إنشاء sale order جديد في SAP (لم يكن quotation من قبل)
-                        _logger.info(f"Creating new sale order {quotation.name} in SAP (no previous quotation)")
+                        # لا يوجد Quotation في SAP - ننشئ Sales Order مباشرة
+                        _logger.info(f"Creating new SAP Sales Order for {quotation.name} (no prior quotation)")
                         url = f"{connection.base_url}/Orders"
-                        headers = connection._get_headers()
                         response = connection.session.post(url, json=quotation_data, headers=headers, timeout=30)
                         if response.status_code in [200, 201]:
                             result = response.json() if response.content else {}
-                            
-                            # تحديث رقم Document إذا تم إرجاعه
                             update_vals = {}
                             if result.get('DocNum'):
                                 update_vals['sap_doc_num'] = result.get('DocNum')
@@ -400,27 +433,50 @@ class SaleOrder(models.Model):
                                 update_vals['sap_error_message'] = False
                                 update_vals['sap_last_sync_date'] = fields.Datetime.now()
                                 quotation.sudo().write(update_vals)
-                                _logger.info(f"✅ Sale order {quotation.name} created in SAP: DocNum={update_vals.get('sap_doc_num')}, DocEntry={update_vals.get('sap_doc_entry')}")
+                                _logger.info(f"✅ SAP Sales Order created for {quotation.name}: DocNum={update_vals.get('sap_doc_num')}, DocEntry={update_vals.get('sap_doc_entry')}")
                                 sync_successful = True
                         else:
-                            error_msg = f"❌ Error creating sale order {quotation.name} in SAP: {response.status_code} - {response.text}"
+                            error_msg = f"❌ Error creating SAP Sales Order for {quotation.name}: {response.status_code} - {response.text}"
                             _logger.error(error_msg)
                             quotation.sudo().write({
                                 'sap_synced': False,
                                 'sap_error_message': error_msg,
-                                'sap_last_sync_date': fields.Datetime.now()
+                                'sap_last_sync_date': fields.Datetime.now(),
                             })
                 else:
                     # للـ quotations (draft or quotation state): تحديث أو إنشاء quotation في SAP
                     if quotation.sap_doc_entry and quotation.sap_doc_entry > 0:
-                        # تحديث quotation موجود في SAP
+                        # تحديث quotation موجود في SAP — مع إغلاق الأسطر المحذوفة
                         _logger.info(f"Updating existing quotation {quotation.name} in SAP (DocEntry: {quotation.sap_doc_entry})")
-                        result = connection.update_quotation(quotation.sap_doc_entry, quotation_data)
-                        
-                        if result is not None:  # PATCH returns empty body on success (204), so check for None instead
-                            # تحديث نجح
-                            quotation.sudo().write({'sap_synced': True})
+
+                        # Build list of current Odoo lines for deleted-line detection
+                        odoo_lines_info = [
+                            {
+                                'item_code': (line.product_id.default_code or line.product_id.barcode or ''),
+                                'sap_line_num': line.sap_line_num,
+                            }
+                            for line in quotation.order_line
+                            if line.product_id
+                        ]
+
+                        result = connection.update_quotation(
+                            quotation.sap_doc_entry,
+                            quotation_data,
+                            existing_odoo_lines=odoo_lines_info,
+                        )
+
+                        if result is not None:
+                            quotation.sudo().write({
+                                'sap_synced': True,
+                                'sap_error_message': False,
+                                'sap_last_sync_date': fields.Datetime.now(),
+                            })
                             _logger.info(f"✅ Quotation {quotation.name} updated in SAP (DocEntry: {quotation.sap_doc_entry})")
+                            # Refresh LineNums after update
+                            try:
+                                self._store_sap_line_nums(quotation, connection)
+                            except Exception:
+                                pass
                             sync_successful = True
                         else:
                             error_msg = f"❌ Failed to update quotation {quotation.name} in SAP: update_quotation returned None"
@@ -449,6 +505,11 @@ class SaleOrder(models.Model):
                             if quotation.invoice_type:
                                 inv_type_info = f", InvoiceType={quotation.invoice_type} (U_InvType sent to SAP)"
                             _logger.info(f"✅ {state_label.capitalize()} {quotation.name} created in SAP: DocNum={doc_num}, DocEntry={doc_entry}{inv_type_info}")
+                            # Store SAP LineNums after first creation
+                            try:
+                                self._store_sap_line_nums(quotation, connection)
+                            except Exception:
+                                pass
                             sync_successful = True
                         else:
                             error_msg = f"❌ Failed to create {state_label} {quotation.name} in SAP: create_quotation returned None or empty result. Check SAP logs for details."
@@ -476,7 +537,7 @@ class SaleOrder(models.Model):
     
     def _prepare_quotation_data_for_sap(self, quotation, backend=None):
         """إعداد بيانات quotation للـ SAP Service Layer"""
-        # إعداد سطور الوثيقة
+        # إعداد سطور الوثيقة — فقط الأسطر الموجودة (المحذوفة تُعالج في update_quotation)
         document_lines = []
         for line in quotation.order_line:
             # تخطي السطور بدون منتج
@@ -705,8 +766,44 @@ class SaleOrder(models.Model):
             quotation_data['DocDueDate'] = quotation.validity_date.strftime('%Y-%m-%d')
         
         return quotation_data
-    
-    def action_confirm(self):
+
+    def _store_sap_line_nums(self, quotation, connection):
+        """
+        Fetch the current Quotation/Order from SAP and store LineNum per order line.
+        Matches by ItemCode. Called after create or update to keep LineNums in sync.
+        """
+        try:
+            # Determine endpoint: Quotations or Orders
+            if quotation.state == 'sale':
+                endpoint = f"Orders({quotation.sap_doc_entry})"
+            else:
+                endpoint = f"Quotations({quotation.sap_doc_entry})"
+
+            sap_doc = connection.get(endpoint, {'$select': 'DocEntry,DocumentLines'})
+            sap_lines = sap_doc.get('DocumentLines', [])
+
+            # Build map: ItemCode → LineNum (take first open line per ItemCode)
+            item_line_map = {}
+            for sap_line in sap_lines:
+                item_code = sap_line.get('ItemCode', '')
+                line_num = sap_line.get('LineNum')
+                line_status = sap_line.get('LineStatus', '')
+                if item_code and line_num is not None and line_status != 'bost_Close':
+                    if item_code not in item_line_map:
+                        item_line_map[item_code] = line_num
+
+            # Store LineNum on each Odoo order line
+            for line in quotation.order_line:
+                item_code = line.product_id.default_code or ''
+                line_num = item_line_map.get(item_code, -1)
+                if line.sap_line_num != line_num:
+                    line.sudo().write({'sap_line_num': line_num})
+
+            _logger.info(f"✅ Stored SAP LineNums for {quotation.name}: {item_line_map}")
+        except Exception as e:
+            _logger.warning(f"⚠️ Could not store SAP LineNums for {quotation.name}: {e}")
+
+
         """Override action_confirm to convert quotation to sales order in SAP"""
         result = super(SaleOrder, self).action_confirm()
         
@@ -744,28 +841,153 @@ class SaleOrder(models.Model):
         return result
     
     def action_manual_sync_to_sap(self):
-        """إجراء يدوي لإرسال quotation إلى SAP"""
+        """إرسال/تحديث يدوي إلى SAP مع إظهار نتيجة واضحة للمستخدم"""
         self.ensure_one()
-        self._send_to_sap()
-        return {
-            'type': 'ir.actions.client',
-            'tag': 'display_notification',
-            'params': {
-                'title': 'تم الإرسال إلى SAP',
-                'message': f'تم إرسال Quotation {self.name} إلى SAP بنجاح. رقم SAP: {self.sap_doc_num or "قيد المعالجة"}',
-                'type': 'success',
-                'sticky': False,
+        try:
+            self._send_to_sap()
+        except Exception as e:
+            # رفع UserError حتى يرى المستخدم الخطأ
+            raise UserError(f'فشل الإرسال إلى SAP:\n{str(e)}')
+
+        # بعد _send_to_sap، تحقق من النتيجة الفعلية
+        self.env.cr.execute(
+            "SELECT sap_synced, sap_error_message FROM sale_order WHERE id=%s",
+            (self.id,)
+        )
+        row = self.env.cr.fetchone()
+        synced = row[0] if row else False
+        error_msg = row[1] if row else None
+
+        if synced:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': '✅ تم المزامنة مع SAP',
+                    'message': f'{self.name} | رقم SAP: {self.sap_doc_num or "—"}',
+                    'type': 'success',
+                    'sticky': False,
+                }
             }
-        }
+        else:
+            raise UserError(
+                f'فشلت المزامنة مع SAP للطلب {self.name}.\n\n'
+                f'السبب:\n{error_msg or "خطأ غير معروف — راجع سجل النظام"}'
+            )
+
+    def action_update_sap_document(self):
+        """
+        تحديث مستند موجود في SAP بـ PATCH مباشر (بدون إعادة إنشاء).
+        يعمل على Quotations و Sales Orders.
+        يُظهر نتيجة واضحة للمستخدم سواء نجح أو فشل.
+        """
+        self.ensure_one()
+
+        if not self.sap_doc_entry or self.sap_doc_entry <= 0:
+            raise UserError(
+                f'لا يمكن تحديث الطلب {self.name} في SAP:\n'
+                f'لا يوجد رقم مستند SAP (DocEntry) مسجل.\n'
+                f'يرجى إرسال الطلب أولاً باستخدام "إرسال إلى SAP".'
+            )
+
+        backend = self.env['sap.backend'].search([('active', '=', True)], limit=1)
+        if not backend:
+            raise UserError('لا يوجد SAP Backend نشط. تحقق من الإعدادات.')
+
+        try:
+            connection = backend.get_connection()
+            doc_data = self._prepare_quotation_data_for_sap(self, backend)
+
+            # إزالة CardCode لأن PATCH لا يقبله على مستند موجود
+            doc_data.pop('CardCode', None)
+
+            # تحديد نوع المستند في SAP (Quotation أو Order)
+            if self.state == 'draft':
+                endpoint = f"Quotations({self.sap_doc_entry})"
+                doc_type_label = 'Quotation (عرض السعر)'
+            else:
+                endpoint = f"Orders({self.sap_doc_entry})"
+                doc_type_label = 'Sales Order (أمر البيع)'
+
+            url = f"{connection.base_url}/{endpoint}"
+            headers = connection._get_headers()
+
+            _logger.info(f"[PATCH] Updating SAP {doc_type_label} {self.name} → {url}")
+            response = connection.session.patch(url, json=doc_data, headers=headers, timeout=30)
+
+            if response.status_code in (200, 204):
+                self.sudo().write({
+                    'sap_synced': True,
+                    'sap_error_message': False,
+                    'sap_last_sync_date': fields.Datetime.now(),
+                })
+                _logger.info(f"✅ PATCH success for {self.name} (DocEntry: {self.sap_doc_entry})")
+                return {
+                    'type': 'ir.actions.client',
+                    'tag': 'display_notification',
+                    'params': {
+                        'title': '✅ تم التحديث في SAP',
+                        'message': (
+                            f'{self.name} ({doc_type_label})\n'
+                            f'رقم SAP: {self.sap_doc_num or self.sap_doc_entry}'
+                        ),
+                        'type': 'success',
+                        'sticky': False,
+                    }
+                }
+            else:
+                # محاولة قراءة رسالة الخطأ من SAP
+                try:
+                    sap_error = response.json()
+                    sap_msg = (
+                        sap_error.get('error', {}).get('message', {}).get('value')
+                        or sap_error.get('error', {}).get('message')
+                        or response.text[:500]
+                    )
+                except Exception:
+                    sap_msg = response.text[:500] if response.text else f'HTTP {response.status_code}'
+
+                error_text = (
+                    f'فشل تحديث {doc_type_label} {self.name} في SAP.\n\n'
+                    f'كود الخطأ: {response.status_code}\n'
+                    f'رسالة SAP: {sap_msg}'
+                )
+                self.sudo().write({
+                    'sap_synced': False,
+                    'sap_error_message': error_text,
+                    'sap_last_sync_date': fields.Datetime.now(),
+                })
+                _logger.error(f"❌ PATCH failed for {self.name}: {response.status_code} — {sap_msg}")
+                raise UserError(error_text)
+
+        except UserError:
+            raise
+        except Exception as e:
+            error_text = f'خطأ غير متوقع عند تحديث {self.name} في SAP:\n{str(e)}'
+            self.sudo().write({
+                'sap_synced': False,
+                'sap_error_message': error_text,
+                'sap_last_sync_date': fields.Datetime.now(),
+            })
+            _logger.error(error_text, exc_info=True)
+            raise UserError(error_text)
 
 
 class SaleOrderLine(models.Model):
     _inherit = 'sale.order.line'
-    
+
     # Custom product name for invoice/report display and SAP ItemDescription
     custom_product_name = fields.Char(
         string='Custom Product Name (Invoice Only)',
         help='Custom product name to display in invoice/report. If set, this name will be used in the report and sent to SAP as ItemDescription. The original product name remains unchanged.'
+    )
+
+    # SAP LineNum for this line — stored after first sync so PATCH can reference it
+    sap_line_num = fields.Integer(
+        string='SAP Line Number',
+        default=-1,
+        copy=False,
+        help='LineNum assigned by SAP for this order line. Used to update/close lines via PATCH.'
     )
 
 

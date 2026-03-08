@@ -37,7 +37,7 @@ class SapRealtimeSync(models.Model):
         ('stock', 'Stock (Warehouse Info)'),
         ('products', 'Product Data'),
         ('customers', 'Customers (BusinessPartners)'),
-        ('all', 'All (Prices + Stock + Products + Customers)'),
+        ('all', 'All (Prices + Stock + Products + Customers + Barcodes)'),
     ], string='Entity Type', required=True, default='all')
     active = fields.Boolean(default=True)
     # When enabled, items that exist in SAP but not yet in Odoo will be created automatically
@@ -190,6 +190,12 @@ class SapRealtimeSync(models.Model):
                     count = self._sync_stock(backend, changed_items)
                     items_changed += count
                     log_lines.append(f'  Stock records updated: {count}')
+
+                if entity_type in ('all',):
+                    count = self._sync_barcodes(backend, changed_items)
+                    items_changed += count
+                    if count:
+                        log_lines.append(f'  Alternative barcodes updated: {count}')
 
             if changed_partners:
                 updated_p, created_p = self._sync_customers(backend, changed_partners)
@@ -561,3 +567,101 @@ class SapRealtimeSync(models.Model):
                 )
 
         return updated, created
+
+    def _sync_barcodes(self, backend, sap_items):
+        """
+        Sync alternative barcodes (ItemBarCodeCollection) for changed items.
+        SAP does not return ItemBarCodeCollection in batch responses, so we fetch
+        each changed item individually using $expand to get the full barcode list.
+        UoM is resolved via sap.uom.sync (by UoMEntry ID) with a name-based fallback.
+        Returns total barcode records synced.
+        """
+        if 'product.barcode.alternative' not in self.env:
+            return 0
+
+        AltBarcode = self.env['product.barcode.alternative']
+        Product = self.env['product.product']
+        connection = backend.get_connection()
+        synced = 0
+
+        for sap_item in sap_items:
+            item_code = (sap_item.get('ItemCode') or '').strip()
+            if not item_code:
+                continue
+
+            product = Product.search([('default_code', '=', item_code)], limit=1)
+            if not product:
+                continue
+
+            try:
+                # ItemBarCodeCollection may not be in batch response — fetch item directly
+                # Note: $expand=ItemBarCodeCollection is NOT supported in all SAP B1 versions
+                barcodes_collection = sap_item.get('ItemBarCodeCollection', [])
+
+                if not barcodes_collection:
+                    try:
+                        full_item = connection.get(f"Items('{item_code}')")
+                        barcodes_collection = full_item.get('ItemBarCodeCollection', [])
+                    except Exception:
+                        pass
+
+                if not barcodes_collection:
+                    continue
+
+                # Rebuild alternative barcodes: delete existing and recreate from SAP
+                existing = AltBarcode.search([('product_id', '=', product.id)])
+                if existing:
+                    existing.unlink()
+
+                main_barcode = product.barcode
+                item_synced = 0
+
+                for bc_entry in barcodes_collection:
+                    barcode_val = bc_entry.get('Barcode') or bc_entry.get('BarcodeValue')
+                    if not barcode_val or barcode_val == main_barcode:
+                        continue
+
+                    uom_entry = bc_entry.get('UoMEntry') or bc_entry.get('UomEntry')
+                    free_text = bc_entry.get('FreeText') or bc_entry.get('UoMName', '')
+
+                    # Resolve UoM: prefer sap.uom.sync by UoMEntry (accurate),
+                    # fall back to name search
+                    uom_id = None
+                    if uom_entry:
+                        uom_sync = self.env['sap.uom.sync'].search([
+                            ('backend_id', '=', backend.id),
+                            ('sap_uom_entry', '=', uom_entry),
+                        ], limit=1)
+                        if uom_sync and uom_sync.odoo_uom_id:
+                            uom_id = uom_sync.odoo_uom_id.id
+
+                    if not uom_id and free_text:
+                        odoo_uom = self.env['uom.uom'].search([
+                            ('name', '=ilike', free_text)
+                        ], limit=1)
+                        if odoo_uom:
+                            uom_id = odoo_uom.id
+
+                    AltBarcode.create({
+                        'product_id': product.id,
+                        'barcode': barcode_val,
+                        'uom_name': free_text,
+                        'uom_id': uom_id,
+                        'sap_uom_entry': uom_entry,
+                        'active': True,
+                        'last_sync': fields.Datetime.now(),
+                    })
+                    item_synced += 1
+
+                synced += item_synced
+                if item_synced:
+                    _logger.debug(
+                        'SAP Realtime Sync: %d barcode(s) synced for %s', item_synced, item_code
+                    )
+
+            except Exception as exc:
+                _logger.warning(
+                    'SAP Realtime Sync: failed to sync barcodes for %s: %s', item_code, exc,
+                )
+
+        return synced
