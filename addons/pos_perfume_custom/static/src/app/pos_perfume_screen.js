@@ -2093,7 +2093,7 @@ export class PosPerfumeScreen extends Component {
         }
 
         try {
-            // 2. Ensure a sale.order record exists (creates one if not already)
+            // 2. Ensure a sale.order record exists in DRAFT state (no SAP sync yet)
             let saleOrderId = null;
             const posOrders = await this.orm.read('pos.perfume.order', [orderId], ['sale_order_id']);
             if (posOrders[0]?.sale_order_id) {
@@ -2101,9 +2101,8 @@ export class PosPerfumeScreen extends Component {
                     ? posOrders[0].sale_order_id[0]
                     : posOrders[0].sale_order_id;
             } else {
-                // Create sale.order from POS order
-                const result = await this.orm.call('pos.perfume.order', 'action_confirm', [[orderId]]);
-                saleOrderId = result?.res_id || null;
+                // Create sale.order in draft — action_ensure_sale_order does NOT trigger SAP sync
+                saleOrderId = await this.orm.call('pos.perfume.order', 'action_ensure_sale_order', [[orderId]]);
             }
 
             if (!saleOrderId) {
@@ -2404,9 +2403,17 @@ export class PosPerfumeScreen extends Component {
                         });
                     }
                     
-                    // Trigger SAP sync by calling action_manual_sync_to_sap
+                    // Trigger SAP sync — respects current document type in SAP:
+                    // - If sale.order state is 'draft'/'sent' → sync as Quotation (update existing or create new)
+                    // - If sale.order state is 'sale' → sync as Sales Order
                     try {
-                        await this.orm.call('sale.order', 'action_manual_sync_to_sap', [[saleOrderId]]);
+                        if (saleOrder.state === 'draft' || saleOrder.state === 'sent') {
+                            // Keep as Quotation in SAP
+                            await this.orm.call('sale.order', 'action_sync_as_quotation', [[saleOrderId]]);
+                        } else {
+                            // Already a Sales Order — update it as Sales Order
+                            await this.orm.call('sale.order', 'action_manual_sync_to_sap', [[saleOrderId]]);
+                        }
                         console.log('SAP sync successful for order:', saleOrderId);
                         this.notification.add(_t("تم الحفظ والمزامنة مع SAP بنجاح!"), { type: "success" });
                     } catch (syncError) {

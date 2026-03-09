@@ -61,26 +61,12 @@ class SaleOrder(models.Model):
         
         _logger.info(f"=== Sale Order Created: {order.name}, state={order.state}, sap_synced={order.sap_synced}, partner={order.partner_id.name if order.partner_id else 'None'}, partner_ref={order.partner_id.ref if order.partner_id else 'None'}, order_lines_count={len(order.order_line)} ===")
         
-        # إرسال إلى SAP بناءً على الحالة
-        if not order.sap_synced:
-            # التحقق من وجود بيانات كافية قبل الإرسال
-            if order.partner_id and order.partner_id.ref and order.order_line:
-                # إرسال إلى SAP بناءً على الحالة
-                if order.state == 'draft':
-                    _logger.info(f"Order {order.name} is draft, will be sent as Quotation to SAP")
-                elif order.state == 'sale':
-                    _logger.info(f"Order {order.name} is already confirmed (sale), will be sent as Sales Order to SAP")
-                else:
-                    _logger.info(f"Order {order.name} in state {order.state}, attempting to send to SAP")
-                
-                try:
-                    order._send_to_sap()
-                except Exception as e:
-                    _logger.warning(f"Could not send order {order.name} to SAP on create: {e}")
-            else:
-                _logger.info(f"Conditions not met for order {order.name}: partner_id={order.partner_id is not None}, partner_ref={order.partner_id.ref if order.partner_id else None}, order_lines={len(order.order_line) if order.order_line else 0}")
-        else:
-            _logger.info(f"Order {order.name} already synced to SAP, skipping")
+        # لا نُرسل إلى SAP تلقائياً هنا.
+        # الـ POS JS يتحكم بالإرسال صراحةً:
+        #   - createQuotation   → action_sync_as_quotation  (Quotation)
+        #   - confirmSaleOrder  → action_manual_sync_to_sap (Sales Order)
+        # هذا يمنع الإرسال المزدوج أو الإرسال بنوع خاطئ.
+        _logger.info(f"[SAP] Order {order.name} created — SAP sync deferred to explicit JS call.")
         
         return order
     
@@ -112,66 +98,10 @@ class SaleOrder(models.Model):
             _logger.info(f"🔍 [DIAGNOSIS] state_changed_to_sale={state_changed_to_sale} ('state' in vals={('state' in vals)}, vals.get('state')={vals.get('state')}, old={old_states.get(order.id)}, doc_entry={order.sap_doc_entry})")
             
             if state_changed_to_sale:
-                # تحويل Quotation إلى Sales Order في SAP
-                _logger.info(f"🔄 State changed from draft to sale for {order.name}, converting quotation to sales order in SAP (DocEntry: {order.sap_doc_entry})")
-                try:
-                    backend = self.env['sap.backend'].search([('active', '=', True)], limit=1)
-                    if backend:
-                        _logger.info(f"✓ Found active backend: {backend.name}")
-                        connection = backend.get_connection()
-                        _logger.info(f"✓ Got connection, calling convert_quotation_to_order({order.sap_doc_entry})")
-                        
-                        sap_order = connection.convert_quotation_to_order(order.sap_doc_entry)
-                        
-                        _logger.info(f"🔍 convert_quotation_to_order returned: {sap_order}")
-                        
-                        if sap_order:
-                            # تحديث رقم Document من SAP Sales Order
-                            update_vals = {}
-                            if sap_order.get('DocNum'):
-                                update_vals['sap_doc_num'] = sap_order.get('DocNum')
-                            if sap_order.get('DocEntry'):
-                                update_vals['sap_doc_entry'] = sap_order.get('DocEntry')
-                            
-                            if update_vals:
-                                # استخدام sudo().write لتجنب إعادة استدعاء write
-                                _logger.info(f"✓ Updating order with new SAP data: {update_vals}")
-                                update_vals['sap_synced'] = True
-                                update_vals['sap_error_message'] = False
-                                update_vals['sap_last_sync_date'] = fields.Datetime.now()
-                                order.sudo().write(update_vals)
-                                _logger.info(f"✅ Successfully converted quotation {order.name} to sales order in SAP. New DocNum: {update_vals.get('sap_doc_num')}, DocEntry: {update_vals.get('sap_doc_entry')}")
-                            else:
-                                _logger.warning(f"⚠️ sap_order returned but no DocNum/DocEntry found: {sap_order}")
-                                order.sudo().write({
-                                    'sap_synced': False,
-                                    'sap_error_message': 'التحويل نجح لكن SAP لم يرجع DocNum/DocEntry',
-                                    'sap_last_sync_date': fields.Datetime.now()
-                                })
-                        else:
-                            error_msg = f"❌ convert_quotation_to_order returned None/False for {order.name} (DocEntry: {order.sap_doc_entry})"
-                            _logger.error(error_msg)
-                            order.sudo().write({
-                                'sap_synced': False,
-                                'sap_error_message': 'فشل تحويل Quotation إلى Sales Order في SAP',
-                                'sap_last_sync_date': fields.Datetime.now()
-                            })
-                    else:
-                        _logger.error(f"❌ No active SAP backend found to convert quotation {order.name}")
-                        order.sudo().write({
-                            'sap_synced': False,
-                            'sap_error_message': 'لا يوجد SAP backend نشط',
-                            'sap_last_sync_date': fields.Datetime.now()
-                        })
-                except Exception as e:
-                    _logger.error(f"❌ Exception converting quotation {order.name} to sales order in SAP: {str(e)}", exc_info=True)
-                    order.sudo().write({
-                        'sap_synced': False,
-                        'sap_error_message': f'خطأ في التحويل: {str(e)}',
-                        'sap_last_sync_date': fields.Datetime.now()
-                    })
-                
-                # بعد التحويل، لا نحتاج لتحديث إضافي
+                # تغيّرت الحالة إلى 'sale' — لكن الـ POS JS يتحكم بالإرسال إلى SAP صراحةً
+                # عبر confirmSaleOrder → action_manual_sync_to_sap
+                # لذا لا نُرسل هنا تلقائياً حتى نتجنب إرسال نفس الطلب مرتين أو بنوع خاطئ
+                _logger.info(f"🔍 [DIAGNOSIS] state_changed_to_sale for {order.name} — skipping auto-SAP-sync (JS handles this explicitly)")
                 continue
             
             # إذا تم تحديث بيانات مهمة (وليس فقط تغيير الحالة)

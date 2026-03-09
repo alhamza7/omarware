@@ -475,23 +475,10 @@ class PosPerfumeOrder(models.Model):
             sale_order = self.env['sale.order'].create(sale_vals)
             _logger.info(f"[POS Draft] Draft sale order created: {sale_order.name} (ID: {sale_order.id}), state={sale_order.state}")
             
-            # SAP sync should happen automatically in sale.order create method
-            # We'll attempt manual sync if auto-sync didn't work, but don't block on it
-            # Note: SAP sync errors are logged but don't prevent order creation
-            try:
-                if not sale_order.sap_synced:
-                    _logger.warning(f"[POS Draft] Sale order {sale_order.name} was not auto-synced to SAP, attempting manual sync...")
-                    sale_order._send_to_sap()
-                    # Refresh to get updated SAP sync status
-                    sale_order.invalidate_recordset(['sap_synced', 'sap_doc_num', 'sap_doc_entry'])
-                    sale_order.refresh()
-                    if sale_order.sap_synced:
-                        _logger.info(f"[POS Draft] Manual SAP sync successful for {sale_order.name}")
-                    else:
-                        _logger.error(f"[POS Draft] Manual SAP sync failed for {sale_order.name}")
-            except Exception as sap_error:
-                _logger.error(f"[POS Draft] Error during SAP sync for {sale_order.name}: {sap_error}", exc_info=True)
-                # Don't raise - allow order creation to succeed even if SAP sync fails
+            # Note: SAP sync is NOT triggered here intentionally.
+            # JS controls when to sync (createQuotation → action_sync_as_quotation,
+            # confirmSaleOrder → action_manual_sync_to_sap).
+            # This prevents duplicate or wrong-type SAP sync calls.
             
             # Link sale order to POS order
             self.write({
@@ -509,8 +496,27 @@ class PosPerfumeOrder(models.Model):
         self.ensure_one()
         self.state = 'quotation'
         return True
-    
-    def action_confirm(self):
+
+    def action_ensure_sale_order(self):
+        """
+        Ensure a sale.order record exists for this POS order (in draft state).
+        Used by createQuotation in POS JS — does NOT confirm/send to SAP.
+        Returns the sale.order ID so JS can call action_sync_as_quotation on it.
+        """
+        self.ensure_one()
+        if self.sale_order_id:
+            _logger.info(f"[POS] action_ensure_sale_order: existing sale.order {self.sale_order_id.name}")
+            return self.sale_order_id.id
+
+        # Create sale.order in draft — no SAP sync yet (JS handles that)
+        draft_so = self._create_draft_sale_order()
+        if not draft_so:
+            raise UserError(_('Could not create sale order. Please check partner and order lines.'))
+
+        _logger.info(f"[POS] action_ensure_sale_order: created sale.order {draft_so.name}")
+        return draft_so.id
+
+
         """Confirm order and create sale order"""
         import logging
         _logger = logging.getLogger(__name__)
