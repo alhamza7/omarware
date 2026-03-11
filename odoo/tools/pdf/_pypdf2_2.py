@@ -17,3 +17,22 @@ class PdfWriter(_Writer):
 
     def _addObject(self, *args, **kwargs):
         return self._add_object(*args, **kwargs)
+
+    def cloneReaderDocumentRoot(self, reader):
+        # PyPDF2 3.0 removed this method; delegate to the new name
+        return self.clone_reader_document_root(reader)
+
+    def addPage(self, page):
+        return self.add_page(page)
+
+    def appendPagesFromReader(self, reader):
+        return self.append_pages_from_reader(reader)
+
+    def addBlankPage(self, width=None, height=None):
+        return self.add_blank_page(width=width, height=height)
+
+    def addAttachment(self, fname, data):
+        return self.add_attachment(fname, data)
+
+    def addMetadata(self, infos):
+        return self.add_metadata(infos)
