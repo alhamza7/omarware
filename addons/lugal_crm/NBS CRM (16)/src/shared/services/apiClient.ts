@@ -150,7 +150,43 @@ export async function apiPublicPost<T>(
   return rpc<T>(route, params, false);
 }
 
-/** Attempt to refresh the access token silently. Returns true on success. */
+/**
+ * Upload files via multipart/form-data (for image and document upload).
+ * The backend route uses type='http' (not JSON-RPC), so we send a plain
+ * fetch with Bearer token and parse the JSON response directly.
+ */
+export async function apiUpload<T>(
+  route: string,
+  formData: FormData,
+): Promise<ApiResult<T>> {
+  const token = getAccessToken();
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  try {
+    const res = await fetch(`${API_BASE}${route}`, {
+      method:  'POST',
+      headers,
+      body:    formData,
+    });
+
+    const json = await res.json() as { success: boolean; data?: T; error?: string };
+
+    if (!json.success) {
+      return { success: false, error: json.error ?? 'Upload failed' };
+    }
+    return { success: true, data: json.data };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network error';
+    return { success: false, error: message };
+  }
+}
+
+/**
+ * Attempt to refresh the access token using the stored refresh token.
+ * Returns true if a new access token was obtained and stored, false otherwise.
+ * Clears all tokens on failure to force re-login.
+ */
 async function tryRefreshToken(): Promise<boolean> {
   const refresh = getRefreshToken();
   if (!refresh) return false;

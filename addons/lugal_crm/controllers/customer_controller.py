@@ -9,6 +9,18 @@ from ._error import crm_error
 
 _logger = logging.getLogger(__name__)
 
+# Maps incoming social handle field names to their channel key stored in channel_identity
+_SOCIAL_HANDLE_CHANNEL_MAP = {
+    'instagram_handle': 'instagram',
+    'tiktok_handle':    'tiktok',
+    'whatsapp_number':  'whatsapp',
+    'snapchat_handle':  'snapchat',
+    'twitter_handle':   'x',
+    'telegram_handle':  'telegram',
+    'pinterest_handle': 'pinterest',
+    'youtube_handle':   'youtube',
+}
+
 
 def _customer_to_dict(customer):
     """Serialize lugal.crm.customer to a dict for API response (full response contract)."""
@@ -306,16 +318,6 @@ class CustomerController(http.Controller):
         """
         import json
 
-        SOCIAL_HANDLE_CHANNEL_MAP = {
-            'instagram_handle': 'instagram',
-            'tiktok_handle':    'tiktok',
-            'whatsapp_number':  'whatsapp',
-            'snapchat_handle':  'snapchat',
-            'twitter_handle':   'x',
-            'telegram_handle':  'telegram',
-            'pinterest_handle': 'pinterest',
-            'youtube_handle':   'youtube',
-        }
         # Fields that arrive as lists/objects and need JSON serialisation before storing
         JSON_FIELDS = {'shop_images', 'customer_docs'}
         # Many2many fields that must be wrapped in ORM (6, 0, ids) replace command
@@ -328,14 +330,14 @@ class CustomerController(http.Controller):
             # Separate social handles from model fields
             social_handles = {
                 field: kwargs[field]
-                for field in SOCIAL_HANDLE_CHANNEL_MAP
+                for field in _SOCIAL_HANDLE_CHANNEL_MAP
                 if kwargs.get(field)
             }
 
             customer_fields = request.env['lugal.crm.customer'].sudo()._fields
             vals = {}
             for k, v in kwargs.items():
-                if k in SOCIAL_HANDLE_CHANNEL_MAP or v is None:
+                if k in _SOCIAL_HANDLE_CHANNEL_MAP or v is None:
                     continue
                 if k in JSON_FIELDS:
                     # Serialise list/object payloads to JSON text for storage
@@ -389,7 +391,7 @@ class CustomerController(http.Controller):
 
             # Create channel identity records for each provided social handle
             ChannelIdentity = request.env['lugal.crm.channel.identity'].sudo()
-            for handle_field, channel_key in SOCIAL_HANDLE_CHANNEL_MAP.items():
+            for handle_field, channel_key in _SOCIAL_HANDLE_CHANNEL_MAP.items():
                 handle_value = social_handles.get(handle_field)
                 if handle_value:
                     ChannelIdentity.create({
@@ -423,16 +425,6 @@ class CustomerController(http.Controller):
         """
         import json
 
-        SOCIAL_HANDLE_CHANNEL_MAP = {
-            'instagram_handle': 'instagram',
-            'tiktok_handle':    'tiktok',
-            'whatsapp_number':  'whatsapp',
-            'snapchat_handle':  'snapchat',
-            'twitter_handle':   'x',
-            'telegram_handle':  'telegram',
-            'pinterest_handle': 'pinterest',
-            'youtube_handle':   'youtube',
-        }
         JSON_FIELDS = {'shop_images', 'customer_docs'}
         READONLY_FIELDS = {'id', 'create_date', 'create_uid', 'write_date', 'write_uid'}
         M2M_FIELDS = {'tag_ids', 'branch_ids', 'channel_identity_ids'}
@@ -450,13 +442,13 @@ class CustomerController(http.Controller):
             # Separate social handles from model fields
             social_handles = {
                 field: kwargs[field]
-                for field in SOCIAL_HANDLE_CHANNEL_MAP
+                for field in _SOCIAL_HANDLE_CHANNEL_MAP
                 if kwargs.get(field) is not None
             }
 
             vals = {}
             for k, v in kwargs.items():
-                if k in SOCIAL_HANDLE_CHANNEL_MAP or v is None:
+                if k in _SOCIAL_HANDLE_CHANNEL_MAP or v is None:
                     continue
                 if k in JSON_FIELDS:
                     vals[k] = json.dumps(v) if not isinstance(v, str) else v
@@ -506,7 +498,7 @@ class CustomerController(http.Controller):
             # Upsert channel identity records for each provided social handle
             if social_handles:
                 ChannelIdentity = request.env['lugal.crm.channel.identity'].sudo()
-                for handle_field, channel_key in SOCIAL_HANDLE_CHANNEL_MAP.items():
+                for handle_field, channel_key in _SOCIAL_HANDLE_CHANNEL_MAP.items():
                     handle_value = social_handles.get(handle_field)
                     if handle_value is None:
                         continue

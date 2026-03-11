@@ -17,8 +17,19 @@ import {
   PhoneOutgoing, User, Timer, StickyNote,
   LayoutDashboard, Ticket, UserCheck, Globe,
   Star, CircleDot, CalendarCheck, BadgeCheck, Banknote,
-  ClipboardList, Box, MessageCircle, Camera, Music, Hash, AtSign, Fingerprint, Link2, ShieldCheck
+  ClipboardList, Box, MessageCircle, Camera, Music, Hash, AtSign, Fingerprint, Link2, ShieldCheck,
+  Trash2
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "./ui/alert-dialog";
 import { motion, AnimatePresence } from "motion/react";
 import { differenceInDays, differenceInHours, differenceInMonths, differenceInYears, format } from "date-fns";
 import { ar } from "date-fns/locale";
@@ -480,10 +491,11 @@ interface CustomerDetailDialogProps {
   open: boolean;
   onClose: () => void;
   profileImage?: string;
+  onDelete?: (id: number) => Promise<void>;
 }
 
 // ─── Main Component ─────────────────────────────────────
-export function CustomerDetailDialog({ customer, open, onClose, profileImage }: CustomerDetailDialogProps) {
+export function CustomerDetailDialog({ customer, open, onClose, profileImage, onDelete }: CustomerDetailDialogProps) {
   const [activeTab, setActiveTab] = useState<string>("overview");
   const [expandedCall, setExpandedCall] = useState<string | null>(null);
   const [expandedSample, setExpandedSample] = useState<string | null>(null);
@@ -491,6 +503,17 @@ export function CustomerDetailDialog({ customer, open, onClose, profileImage }: 
   const [newNoteText, setNewNoteText] = useState("");
   const [selectedNoteColor, setSelectedNoteColor] = useState<"yellow" | "pink" | "green" | "blue" | "purple">("yellow");
   const [addedNotes, setAddedNotes] = useState<StickyNote[]>([]);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    if (!onDelete || !customer?.id) return;
+    setIsDeleting(true);
+    await onDelete(Number(customer.id));
+    setIsDeleting(false);
+    setShowDeleteConfirm(false);
+    onClose();
+  };
 
   const handleAddNote = () => {
     if (!newNoteText.trim()) return;
@@ -533,6 +556,18 @@ export function CustomerDetailDialog({ customer, open, onClose, profileImage }: 
             >
               <ArrowRight className="w-4 h-4" />
             </Button>
+
+            {/* Delete button */}
+            {onDelete && (
+              <Button
+                variant="ghost" size="icon"
+                className="absolute top-4 start-16 text-red-400 hover:text-red-500 bg-white/80 dark:bg-[#1a1d24]/80 hover:bg-red-50 dark:hover:bg-red-500/10 backdrop-blur-sm shadow-sm dark:shadow-none dark:border dark:border-white/5 rounded-full w-9 h-9 z-20"
+                onClick={() => setShowDeleteConfirm(true)}
+                title="حذف العميل"
+              >
+                <Trash2 className="w-4 h-4" />
+              </Button>
+            )}
 
             {/* Status Indicators */}
             <div className="absolute bottom-3 end-4 flex items-center gap-2 flex-wrap z-10">
@@ -808,6 +843,15 @@ export function CustomerDetailDialog({ customer, open, onClose, profileImage }: 
                   <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-slate-400 dark:text-slate-500 hover:text-primary">
                     <MoreHorizontal className="w-4 h-4" />
                   </Button>
+                  {onDelete && (
+                    <Button
+                      variant="ghost" size="sm"
+                      className="h-7 ms-auto text-[11px] rounded-lg gap-1.5 text-red-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
+                      onClick={() => setShowDeleteConfirm(true)}
+                    >
+                      <Trash2 className="w-3 h-3" /> حذف العميل
+                    </Button>
+                  )}
                 </div>
               </div>
 
@@ -1478,6 +1522,32 @@ export function CustomerDetailDialog({ customer, open, onClose, profileImage }: 
         customerAddress={`${data.address.city}، ${data.address.district}، ${data.address.street}`}
         customerPhone={data.phones[0]?.number}
       />
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <AlertDialogContent dir="rtl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-red-500">
+              <Trash2 className="w-5 h-5" /> حذف العميل
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              هل أنت متأكد من حذف العميل <span className="font-bold text-foreground">{data.name}</span>؟
+              <br />
+              سيتم أرشفته وإخفاؤه من CRM وجهات الاتصال. لا يمكن التراجع عن هذا الإجراء.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-row-reverse gap-2">
+            <AlertDialogCancel disabled={isDeleting}>إلغاء</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={isDeleting}
+              className="bg-red-500 hover:bg-red-600 text-white border-none"
+            >
+              {isDeleting ? 'جاري الحذف...' : 'تأكيد الحذف'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }

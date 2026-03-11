@@ -298,7 +298,10 @@ class AnalyticsController(http.Controller):
 
     @http.route('/api/crm/analytics/branch_report', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def branch_report(self, date_from=None, date_to=None, **kwargs):
-        """Report per branch: customers, tickets, calls, messages."""
+        """Report per branch: customers, tickets, calls, messages.
+
+        Uses a single SQL aggregation instead of 4 × N search_count() calls.
+        """
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
@@ -306,33 +309,72 @@ class AnalyticsController(http.Controller):
             df = _parse_dt(date_from)
             dt = _parse_dt(date_to)
 
-            branches = request.env['lugal.crm.branch'].search([('active', '=', True), ('is_deleted', '=', False)])
-            result = []
-            for branch in branches:
-                cust_count = request.env['lugal.crm.customer'].search_count([
-                    ('is_deleted', '=', False), ('active', '=', True),
-                    ('branch_ids', 'in', [branch.id]),
-                ])
-                ticket_domain = [('is_deleted', '=', False), ('branch_id', '=', branch.id)]
-                open_tickets = request.env['lugal.crm.ticket'].search_count(
-                    ticket_domain + [('status', 'in', ['open', 'in_progress'])])
+            # Build optional date filters for calls and messages
+            call_date_filter = ''
+            call_params = []
+            if df:
+                call_date_filter += ' AND c.started_at >= %s'
+                call_params.append(df)
+            if dt:
+                call_date_filter += ' AND c.started_at <= %s'
+                call_params.append(dt)
 
-                call_domain = [('is_deleted', '=', False), ('active', '=', True), ('branch_id', '=', branch.id)]
-                call_domain += _date_domain('started_at', df, dt)
-                call_count = request.env['lugal.crm.call'].search_count(call_domain)
+            msg_date_filter = ''
+            msg_params = []
+            if df:
+                msg_date_filter += ' AND m.sent_at >= %s'
+                msg_params.append(df)
+            if dt:
+                msg_date_filter += ' AND m.sent_at <= %s'
+                msg_params.append(dt)
 
-                msg_domain = [('is_deleted', '=', False), ('branch_id', '=', branch.id)]
-                msg_domain += _date_domain('sent_at', df, dt)
-                msg_count = request.env['lugal.crm.omnichannel.message'].search_count(msg_domain)
+            # Single query: all four counts per branch in one pass
+            sql = f"""
+                SELECT
+                    b.id                          AS branch_id,
+                    b.name                        AS branch_name,
+                    COUNT(DISTINCT rel.customer_id) FILTER (
+                        WHERE cust.is_deleted = false AND cust.active = true
+                    )                             AS customers,
+                    COUNT(DISTINCT t.id) FILTER (
+                        WHERE t.is_deleted = false
+                          AND t.status IN ('open', 'in_progress')
+                    )                             AS open_tickets,
+                    COUNT(DISTINCT call.id) FILTER (
+                        WHERE call.is_deleted = false
+                          AND call.active = true
+                          {call_date_filter.replace('%s', '%s')}
+                    )                             AS calls,
+                    COUNT(DISTINCT msg.id) FILTER (
+                        WHERE msg.is_deleted = false
+                          {msg_date_filter.replace('%s', '%s')}
+                    )                             AS messages
+                FROM lugal_crm_branch b
+                LEFT JOIN lugal_crm_customer_branch_rel rel ON rel.branch_id = b.id
+                LEFT JOIN lugal_crm_customer cust ON cust.id = rel.customer_id
+                LEFT JOIN lugal_crm_ticket t ON t.branch_id = b.id
+                LEFT JOIN lugal_crm_call call ON call.branch_id = b.id
+                LEFT JOIN lugal_crm_omnichannel_message msg ON msg.branch_id = b.id
+                WHERE b.active = true
+                  AND b.is_deleted = false
+                GROUP BY b.id, b.name
+                ORDER BY b.name
+            """
 
-                result.append({
-                    'branch_id': branch.id,
-                    'branch_name': branch.name,
-                    'customers': cust_count,
-                    'open_tickets': open_tickets,
-                    'calls': call_count,
-                    'messages': msg_count,
-                })
+            request.env.cr.execute(sql, call_params + msg_params)
+            rows = request.env.cr.dictfetchall()
+
+            result = [
+                {
+                    'branch_id':    row['branch_id'],
+                    'branch_name':  row['branch_name'],
+                    'customers':    row['customers'] or 0,
+                    'open_tickets': row['open_tickets'] or 0,
+                    'calls':        row['calls'] or 0,
+                    'messages':     row['messages'] or 0,
+                }
+                for row in rows
+            ]
 
             return {'success': True, 'data': {'branches': result}}
         except Exception as e:

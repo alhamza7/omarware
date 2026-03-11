@@ -97,16 +97,16 @@ class ResPartnerCrmSync(models.Model):
                 if crm:
                     crm.with_context(_skip_partner_sync=True).write(crm_vals)
 
-        # ── Archive / un-archive CRM record when partner active changes ──
+        # ── Archive / un-archive ALL CRM records when partner active changes ──
         if 'active' in vals:
-            Customer = self.env['lugal.crm.customer'].sudo()
-            for partner in self:
-                crm = Customer.search([('partner_id', '=', partner.id)], limit=1)
-                if crm:
-                    crm.with_context(_skip_partner_sync=True).write({
-                        'active':     vals['active'],
-                        'is_deleted': not vals['active'],
-                    })
+            Customer = self.env['lugal.crm.customer'].sudo().with_context(active_test=False)
+            partner_ids = self.ids
+            crm_records = Customer.search([('partner_id', 'in', partner_ids)])
+            if crm_records:
+                crm_records.with_context(_skip_partner_sync=True).write({
+                    'active':     vals['active'],
+                    'is_deleted': not vals['active'],
+                })
 
         # ── Auto-create CRM record when customer_rank becomes > 0 ────────
         if vals.get('customer_rank', 0) > 0:

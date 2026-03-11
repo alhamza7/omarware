@@ -16,3 +16,4 @@ from . import workforce_controller
 from . import task_controller
 from . import config_controller
 from . import qa_controller
+from . import upload_controller
