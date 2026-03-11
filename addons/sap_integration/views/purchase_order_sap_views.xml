@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+
+        <!-- SAP fields on Purchase Order Form -->
+        <record id="view_purchase_order_form_sap_inherit" model="ir.ui.view">
+            <field name="name">purchase.order.form.sap.inherit</field>
+            <field name="model">purchase.order</field>
+            <field name="inherit_id" ref="purchase.purchase_rfq"/>
+            <field name="arch" type="xml">
+
+                <!-- Hidden sentinel fields used in button visibility expressions -->
+                <xpath expr="//header" position="inside">
+                    <field name="sap_synced"    invisible="1"/>
+                    <field name="sap_doc_entry" invisible="1"/>
+                </xpath>
+
+                <!-- Action buttons in header -->
+                <xpath expr="//header/button[@name='action_rfq_send']" position="after">
+                    <button name="action_manual_sync_to_sap"
+                            type="object"
+                            string="إرسال إلى SAP"
+                            class="btn-primary"
+                            invisible="sap_synced"
+                            icon="fa-paper-plane"/>
+                    <button name="action_manual_sync_to_sap"
+                            type="object"
+                            string="تحديث في SAP"
+                            class="btn-warning"
+                            invisible="not sap_doc_entry"
+                            icon="fa-refresh"
+                            confirm="سيتم إرسال آخر تعديلات طلب الشراء إلى SAP. هل تريد المتابعة؟"/>
+                </xpath>
+
+                <!-- SAP tab in notebook -->
+                <xpath expr="//notebook" position="inside">
+                    <page string="SAP Information" name="sap_info">
+                        <group col="2">
+                            <field name="sap_doc_num"        string="SAP Document Number" readonly="1"/>
+                            <field name="sap_doc_entry"      string="SAP Doc Entry"       readonly="1"/>
+                            <field name="sap_synced"         string="Synced to SAP"       readonly="1"/>
+                            <field name="sap_last_sync_date" string="آخر مزامنة"          readonly="1"/>
+                        </group>
+                        <group string="خطأ SAP" invisible="not sap_error_message">
+                            <field name="sap_error_message"
+                                   string="سبب الفشل"
+                                   readonly="1"
+                                   widget="text"
+                                   nolabel="1"/>
+                        </group>
+                    </page>
+                </xpath>
+
+            </field>
+        </record>
+
+        <!-- SAP columns in Purchase Order tree / list -->
+        <record id="view_purchase_order_tree_sap_inherit" model="ir.ui.view">
+            <field name="name">purchase.order.tree.sap.inherit</field>
+            <field name="model">purchase.order</field>
+            <field name="inherit_id" ref="purchase.purchase_rfq_tree_view"/>
+            <field name="arch" type="xml">
+                <xpath expr="//field[@name='partner_id']" position="after">
+                    <field name="sap_doc_num" string="SAP Doc"      optional="hide"/>
+                    <field name="sap_synced"  string="Synced to SAP" optional="show"/>
+                </xpath>
+            </field>
+        </record>
+
+    </data>
+</odoo>
