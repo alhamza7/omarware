@@ -2082,6 +2082,7 @@ export class PosPerfumeScreen extends Component {
      */
     async createQuotation() {
         // 1. Save the POS order as 'quotation' state
+        const lines = this.state.currentOrder.lines.filter(l => l.product_id);
         const saved = await this.saveOrder('quotation');
         if (!saved) return;
 
@@ -2093,7 +2094,7 @@ export class PosPerfumeScreen extends Component {
         }
 
         try {
-            // 2. Ensure a sale.order record exists (creates one if not already)
+            // 2. Ensure a sale.order record exists in DRAFT state (no SAP sync yet)
             let saleOrderId = null;
             const posOrders = await this.orm.read('pos.perfume.order', [orderId], ['sale_order_id']);
             if (posOrders[0]?.sale_order_id) {
@@ -2101,15 +2102,17 @@ export class PosPerfumeScreen extends Component {
                     ? posOrders[0].sale_order_id[0]
                     : posOrders[0].sale_order_id;
             } else {
-                // Create sale.order from POS order
-                const result = await this.orm.call('pos.perfume.order', 'action_confirm', [[orderId]]);
-                saleOrderId = result?.res_id || null;
+                // Create sale.order in draft — action_ensure_sale_order does NOT trigger SAP sync
+                saleOrderId = await this.orm.call('pos.perfume.order', 'action_ensure_sale_order', [[orderId]]);
             }
 
             if (!saleOrderId) {
                 this.notification.add(_t("تعذّر إنشاء سجل الطلب. حاول مرة أخرى."), { type: "danger" });
                 return;
             }
+
+            // 2.5. Sync all POS lines (including custom_product_name) to sale.order via action_confirm
+            await this.orm.call('pos.perfume.order', 'action_confirm', [[orderId]]);
 
             // 3. Sync to SAP as Quotation (never as Sales Order)
             try {
@@ -2295,57 +2298,6 @@ export class PosPerfumeScreen extends Component {
     }
     
     /**
-     * Build sale.order.line vals from a POS line.
-     * Conditionally includes product_warehouse_id only when a warehouse is set,
-     * so the call is safe whether or not sale_order_line_multi_warehouse is installed.
-     */
-    _buildSaleOrderLineVals(line, includeProductId = false) {
-        const vals = {
-            product_uom_qty: line.quantity,
-            product_uom_id: line.uom_id,
-            price_unit: line.unitPrice,
-            discount: line.discountPercent,
-        };
-        if (includeProductId) {
-            vals.product_id = line.product_id;
-        }
-        if (line.warehouse_id) {
-            vals.product_warehouse_id = line.warehouse_id;
-        }
-        if (line.custom_product_name) {
-            vals.custom_product_name = line.custom_product_name;
-        }
-        return vals;
-    }
-
-    /**
-     * Write sale.order lines via ORM with automatic fallback.
-     * If the server rejects product_warehouse_id (module not installed),
-     * strips that field from all line commands and retries once.
-     */
-    async _writeSaleOrderLines(saleOrderId, orderLines) {
-        try {
-            await this.orm.write('sale.order', [saleOrderId], { order_line: orderLines });
-        } catch (writeError) {
-            const errMsg = (writeError.message || '') + (writeError.data?.message || '');
-            if (errMsg.includes('product_warehouse_id')) {
-                console.warn('[SaleOrder] product_warehouse_id field not available, retrying without it...');
-                const fallbackLines = orderLines.map(cmd => {
-                    if ((cmd[0] === 0 || cmd[0] === 1) && cmd[2]) {
-                        const vals = { ...cmd[2] };
-                        delete vals.product_warehouse_id;
-                        return [cmd[0], cmd[1], vals];
-                    }
-                    return cmd;
-                });
-                await this.orm.write('sale.order', [saleOrderId], { order_line: fallbackLines });
-            } else {
-                throw writeError;
-            }
-        }
-    }
-
-    /**
      * Save order with SAP sync - Save and sync to SAP if there are changes
      */
     async saveOrderWithSync() {
@@ -2375,60 +2327,51 @@ export class PosPerfumeScreen extends Component {
                 }
             }
             
-            // Save the POS order
-            const orderId = await this.saveOrder(currentState);
+            // Save the POS order — preserve current state (draft/quotation/sale)
+            // For new unsaved orders, use 'quotation' as default state
+            const saveState = currentState === 'draft' ? 'quotation' : currentState;
+            const orderId = await this.saveOrder(saveState);
             if (!orderId) {
                 return false;
             }
+
+            // After save, re-read to get sale_order_id (may have been created by Python create hook)
+            const freshOrders = await this.orm.read('pos.perfume.order', [orderId], ['state', 'sale_order_id']);
+            if (freshOrders.length > 0) {
+                if (!saleOrderId && freshOrders[0].sale_order_id) {
+                    saleOrderId = Array.isArray(freshOrders[0].sale_order_id)
+                        ? freshOrders[0].sale_order_id[0]
+                        : freshOrders[0].sale_order_id;
+                }
+                // Update currentState from fresh read
+                currentState = freshOrders[0].state || currentState;
+            }
+
+            // If still no sale order, ensure one is created
+            if (!saleOrderId) {
+                saleOrderId = await this.orm.call('pos.perfume.order', 'action_ensure_sale_order', [[orderId]]);
+            }
             
-            // If there's a sale order, update it and sync to SAP
+            // If there's a sale order, update lines via action_confirm then sync to SAP
             if (saleOrderId) {
                 try {
-                    // First, check the sale order state
-                    const saleOrders = await this.orm.read('sale.order', [saleOrderId], ['state', 'order_line']);
-                    if (saleOrders.length === 0) {
-                        throw new Error('Sale order not found');
-                    }
+                    // action_confirm syncs all POS lines (including custom_product_name) to sale.order
+                    await this.orm.call('pos.perfume.order', 'action_confirm', [[orderId]]);
                     
-                    const saleOrder = saleOrders[0];
-                    const isConfirmed = saleOrder.state === 'sale';
-                    
-                    if (isConfirmed) {
-                        // For confirmed sale orders, we can't delete lines
-                        // Instead, we'll update existing lines or add new ones
-                        const existingLineIds = saleOrder.order_line || [];
-                        const orderLines = [];
-
-                        // Update existing lines or add new ones
-                        lines.forEach((line, index) => {
-                            if (index < existingLineIds.length) {
-                                const lineId = Array.isArray(existingLineIds[index])
-                                    ? existingLineIds[index][0]
-                                    : existingLineIds[index];
-                                orderLines.push([1, lineId, this._buildSaleOrderLineVals(line)]);
-                            } else {
-                                orderLines.push([0, 0, this._buildSaleOrderLineVals(line, true)]);
-                            }
-                        });
-
-                        // Zero-out lines removed from the POS order
-                        for (let i = lines.length; i < existingLineIds.length; i++) {
-                            const lineId = Array.isArray(existingLineIds[i])
-                                ? existingLineIds[i][0]
-                                : existingLineIds[i];
-                            orderLines.push([1, lineId, { product_uom_qty: 0 }]);
-                        }
-
-                        await this._writeSaleOrderLines(saleOrderId, orderLines);
-                    } else {
-                        // For draft/quotation orders, clear existing lines and add fresh ones
-                        const orderLines = lines.map(line => [0, 0, this._buildSaleOrderLineVals(line, true)]);
-                        await this._writeSaleOrderLines(saleOrderId, [[5, 0, 0], ...orderLines]);
-                    }
-                    
-                    // Trigger SAP sync by calling action_manual_sync_to_sap
+                    // Trigger SAP sync — rule:
+                    // - pos state 'quotation' OR sale.order state 'draft'/'sent' → sync as Quotation
+                    // - pos state 'sale' AND sale.order state 'sale' → sync as Sales Order
+                    // Never convert quotation → sales order from Save button
                     try {
-                        await this.orm.call('sale.order', 'action_manual_sync_to_sap', [[saleOrderId]]);
+                        const isQuotation = (currentState === 'quotation') ||
+                                            (saleOrder.state === 'draft' || saleOrder.state === 'sent');
+                        if (isQuotation) {
+                            // Keep as Quotation in SAP — never convert from Save
+                            await this.orm.call('sale.order', 'action_sync_as_quotation', [[saleOrderId]]);
+                        } else {
+                            // Already a Sales Order in both Odoo and SAP — update it
+                            await this.orm.call('sale.order', 'action_manual_sync_to_sap', [[saleOrderId]]);
+                        }
                         console.log('SAP sync successful for order:', saleOrderId);
                         this.notification.add(_t("تم الحفظ والمزامنة مع SAP بنجاح!"), { type: "success" });
                     } catch (syncError) {
@@ -2493,7 +2436,7 @@ export class PosPerfumeScreen extends Component {
             if (!orderId) return;
             const posOrderId = Array.isArray(orderId) ? orderId[0] : orderId;
 
-            // Step 2: Ensure sale.order exists and is confirmed in Odoo
+            // Step 2: Get or create sale.order
             let saleOrderId = null;
             const posOrders = await this.orm.read('pos.perfume.order', [posOrderId], ['sale_order_id']);
             if (posOrders[0]?.sale_order_id) {
@@ -2510,26 +2453,51 @@ export class PosPerfumeScreen extends Component {
                 return;
             }
 
+            // Step 2.5: Sync all POS lines (including custom_product_name) to sale.order via action_confirm
+            await this.orm.call('pos.perfume.order', 'action_confirm', [[posOrderId]]);
+
+            // Step 3: Read sale order state and SAP status
+            const soData = await this.orm.read('sale.order', [saleOrderId], ['state', 'sap_doc_entry', 'sap_doc_num']);
+            const soState = soData[0]?.state;
+            const existingSapDocEntry = soData[0]?.sap_doc_entry;
+            const existingSapDocNum = soData[0]?.sap_doc_num;
+
             // Confirm in Odoo if still draft/sent
-            const soData = await this.orm.read('sale.order', [saleOrderId], ['state']);
-            if (soData[0]?.state === 'draft' || soData[0]?.state === 'sent') {
+            if (soState === 'draft' || soState === 'sent') {
                 await this.orm.call('sale.order', 'action_confirm', [[saleOrderId]]);
             }
 
-            // Step 3: Sync to SAP as Sales Order (action_manual_sync_to_sap sends as sale because state='sale')
-            try {
-                await this.orm.call('sale.order', 'action_manual_sync_to_sap', [[saleOrderId]]);
-            } catch (sapError) {
-                await this.loadOrder(posOrderId);
-                const errMsg = sapError.data?.message || sapError.message || 'خطأ غير معروف';
-                this.notification.add(_t("تم الحفظ كـ Sale Order، لكن فشل الإرسال إلى SAP:\n") + errMsg, {
-                    type: "danger",
-                    sticky: true,
-                });
-                return;
+            // Step 4: Sync to SAP — but only if not already a confirmed Sales Order in SAP
+            // (prevents duplicate orders when user clicks button twice)
+            if (existingSapDocEntry && existingSapDocNum) {
+                // Already a Sales Order in SAP — update it
+                try {
+                    await this.orm.call('sale.order', 'action_manual_sync_to_sap', [[saleOrderId]]);
+                } catch (sapError) {
+                    await this.loadOrder(posOrderId);
+                    const errMsg = sapError.data?.message || sapError.message || 'خطأ غير معروف';
+                    this.notification.add(_t("فشل تحديث Sales Order في SAP:\n") + errMsg, {
+                        type: "danger",
+                        sticky: true,
+                    });
+                    return;
+                }
+            } else {
+                // New — create Sales Order in SAP
+                try {
+                    await this.orm.call('sale.order', 'action_manual_sync_to_sap', [[saleOrderId]]);
+                } catch (sapError) {
+                    await this.loadOrder(posOrderId);
+                    const errMsg = sapError.data?.message || sapError.message || 'خطأ غير معروف';
+                    this.notification.add(_t("تم الحفظ كـ Sale Order، لكن فشل الإرسال إلى SAP:\n") + errMsg, {
+                        type: "danger",
+                        sticky: true,
+                    });
+                    return;
+                }
             }
 
-            // Step 4: Reload and show success
+            // Step 5: Reload and show success
             await this.loadOrder(posOrderId);
             const soAfter = await this.orm.read('sale.order', [saleOrderId], ['sap_doc_num', 'sap_synced']);
             const docNum = soAfter[0]?.sap_doc_num;
