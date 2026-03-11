@@ -41,10 +41,12 @@ class PosPerfumeApiCustomers(http.Controller):
                            ('phone', 'ilike', query),
                            ('ref', 'ilike', query)]
 
-            partners = request.env['res.partner'].search(
-                domain, limit=limit, offset=offset, order='name asc'
+            # Use sudo() so record rules (e.g. company) do not hide newly created customers
+            Partner = request.env['res.partner'].sudo()
+            partners = Partner.search(
+                domain, limit=limit, offset=offset, order='id desc, name asc'
             )
-            total = request.env['res.partner'].search_count(domain)
+            total = Partner.search_count(domain)
 
             return _success({
                 'total': total,
