@@ -201,11 +201,10 @@ class SapProductPricelistSync(models.Model):
                         uom = self._get_uom_by_code(uom_code)
 
                     # When SAP sends a base price without a UoMCode, it represents the
-                    # SalesUnit price. Resolve the SalesUnit so packaging-based legacy
-                    # pricelist items get updated with the correct price.
-                    sales_uom = None
+                    # SalesUnit price. Use sales_uom_id directly as the UoM for this price
+                    # so it gets stored and indexed by the correct unit from the start.
                     if not uom:
-                        sales_uom = self._get_sales_uom_for_product(product, backend)
+                        uom = self._get_sales_uom_for_product(product, backend)
 
                     # Search for existing sync record
                     sync_record = self.search([
@@ -215,7 +214,7 @@ class SapProductPricelistSync(models.Model):
                         ('uom_id', '=', uom.id if uom else False)
                     ], limit=1)
                     
-                    # Prepare values
+                    # Prepare values — uom is already resolved (sales_uom or explicit UoMCode)
                     vals = self._prepare_sync_values(
                         product, backend, odoo_pricelist, price_data, uom
                     )
@@ -231,15 +230,8 @@ class SapProductPricelistSync(models.Model):
                         results['created'] += 1
                         _logger.info(f"✅ CREATED price for {product.name} (PriceList: {pricelist_num})")
                     
-                    # Create or update pricelist item in Odoo
+                    # Create or update pricelist item in Odoo with the resolved UoM
                     self._create_or_update_pricelist_item(sync_record, product, odoo_pricelist, price, uom)
-
-                    # Also update legacy packaging-based item for the SalesUnit when the
-                    # base price has no UoM (SAP sends price for SalesUnit without UoMCode)
-                    if sales_uom and sales_uom != uom:
-                        self._create_or_update_pricelist_item(
-                            sync_record, product, odoo_pricelist, price, sales_uom
-                        )
                     
                     # ========== NEW: Process UoM-specific prices ==========
                     uom_prices = price_data.get('UoMPrices', [])
@@ -411,38 +403,37 @@ class SapProductPricelistSync(models.Model):
     def _get_sales_uom_for_product(self, product, backend):
         """Return the Odoo UoM that matches the SAP SalesUnit for this product.
 
-        SAP sends the base ItemPrice without a UoMCode, but the price corresponds
-        to the product's SalesUnit (e.g. 'درزن'). By resolving the SalesUnit here
-        we can keep legacy pricelist items (which use product_packaging_id) up to date.
+        SAP sends the base ItemPrice without a UoMCode — the price corresponds to
+        the product's SalesUnit (e.g. 'كغم', 'درزن').
 
-        Returns None when no SalesUnit mapping is found or when the SalesUnit is the
-        same as the generic 'Units' placeholder (id=1).
+        Lookup order:
+          1. sap.product.extended.sales_uom_id  (most reliable, directly from SAP SalesUnit)
+          2. UoM group member closest to factor=1.0  (fallback when extended is missing)
+
+        Returns None when no SalesUnit can be resolved.
         """
         try:
             extended = self.env['sap.product.extended'].search(
                 [('product_id', '=', product.id), ('backend_id', '=', backend.id)],
                 limit=1,
             )
-            if not extended or not extended.sap_uom_group_id:
-                return None
 
-            # Get UoM group members
-            group_uom_syncs = extended.sap_uom_group_id.uom_ids
-            if not group_uom_syncs:
-                return None
+            # 1. Direct sales_uom_id from SAP SalesUnit field — preferred
+            if extended and extended.sales_uom_id:
+                if extended.sales_uom_id.id != self.SAP_GENERIC_UOM_ID:
+                    return extended.sales_uom_id
 
-            # The SalesUnit is typically the UoM with factor closest to 1 in the group
-            # (it's the "base sell" unit). Exclude the generic Units UoM (id=1).
-            candidate_uoms = [
-                us.odoo_uom_id for us in group_uom_syncs
-                if us.odoo_uom_id and us.odoo_uom_id.id != self.SAP_GENERIC_UOM_ID
-            ]
-            if not candidate_uoms:
-                return None
+            # 2. Fallback: resolve from UoM group (factor closest to 1.0)
+            if extended and extended.sap_uom_group_id:
+                group_uom_syncs = extended.sap_uom_group_id.uom_ids
+                candidate_uoms = [
+                    us.odoo_uom_id for us in group_uom_syncs
+                    if us.odoo_uom_id and us.odoo_uom_id.id != self.SAP_GENERIC_UOM_ID
+                ]
+                if candidate_uoms:
+                    return min(candidate_uoms, key=lambda u: (abs(u.factor - 1.0), u.id))
 
-            # Prefer UoM with factor closest to 1.0 (= the base selling unit)
-            sales_uom = min(candidate_uoms, key=lambda u: (abs(u.factor - 1.0), u.id))
-            return sales_uom
+            return None
         except Exception as e:
             _logger.warning(f"[PriceSync] Could not resolve SalesUnit for {product.default_code}: {e}")
             return None

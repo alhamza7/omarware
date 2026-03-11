@@ -518,7 +518,8 @@ class SapProductExtended(models.Model):
             backend: sap.backend record (optional, for UoM Group linking)
         """
         vals = {}
-        
+        backend_id = backend.id if backend else None
+
         # Foreign names
         if 'ForeignName' in sap_data:
             vals['foreign_name'] = sap_data['ForeignName']
@@ -529,12 +530,10 @@ class SapProductExtended(models.Model):
             uom_group_entry = sap_data['UoMGroupEntry']
             vals['sap_uom_group_entry'] = uom_group_entry
             
-            # Try to find or create the UoM Group
-            if uom_group_entry and uom_group_entry != -1 and backend:
-                # Search for existing UoM Group by AbsEntry
+            if uom_group_entry and uom_group_entry != -1 and backend_id:
                 uom_group = self.env['sap.uom.group'].search([
                     ('sap_abs_entry', '=', uom_group_entry),
-                    ('backend_id', '=', backend.id)
+                    ('backend_id', '=', backend_id)
                 ], limit=1)
                 
                 if uom_group:
@@ -542,39 +541,50 @@ class SapProductExtended(models.Model):
                     _logger.info(f"Linked product to UoM Group: {uom_group.name} (Entry: {uom_group_entry})")
                 else:
                     _logger.warning(f"UoM Group with Entry {uom_group_entry} not found - will be synced later")
-        
+
+        # Helper: resolve SAP UoM code → Odoo uom.uom id
+        # Searches sap.uom.sync by backend first, then falls back to name match on uom.uom
+        def _resolve_uom(sap_uom_code):
+            """Resolve a SAP UoM code string to an Odoo uom.uom id."""
+            if not sap_uom_code:
+                return None
+            # 1. Prefer the explicit mapping table (backend-specific)
+            domain = [('sap_uom_id', '=', sap_uom_code)]
+            if backend_id:
+                domain_be = domain + [('backend_id', '=', backend_id)]
+                uom_sync = self.env['sap.uom.sync'].search(domain_be, limit=1)
+                if uom_sync and uom_sync.odoo_uom_id:
+                    return uom_sync.odoo_uom_id.id
+            # 2. Fallback: any matching entry in sap.uom.sync regardless of backend
+            uom_sync = self.env['sap.uom.sync'].search(domain, limit=1)
+            if uom_sync and uom_sync.odoo_uom_id:
+                return uom_sync.odoo_uom_id.id
+            # 3. Last resort: direct name match on uom.uom
+            uom = self.env['uom.uom'].search([('name', '=', sap_uom_code)], limit=1)
+            if uom:
+                return uom.id
+            return None
+
         if 'SalesUnit' in sap_data:
             sales_unit_code = sap_data['SalesUnit']
             vals['sales_unit'] = sales_unit_code
-            # Try to map to Odoo UoM
-            uom_sync = self.env['sap.uom.sync'].search([
-                ('backend_id', '=', vals.get('backend_id')),
-                ('sap_uom_id', '=', sales_unit_code)
-            ], limit=1)
-            if uom_sync and uom_sync.odoo_uom_id:
-                vals['sales_uom_id'] = uom_sync.odoo_uom_id.id
+            resolved = _resolve_uom(sales_unit_code)
+            if resolved:
+                vals['sales_uom_id'] = resolved
         
         if 'PurchaseUnit' in sap_data:
             purchase_unit_code = sap_data['PurchaseUnit']
             vals['purchase_unit'] = purchase_unit_code
-            # Try to map to Odoo UoM
-            uom_sync = self.env['sap.uom.sync'].search([
-                ('backend_id', '=', vals.get('backend_id')),
-                ('sap_uom_id', '=', purchase_unit_code)
-            ], limit=1)
-            if uom_sync and uom_sync.odoo_uom_id:
-                vals['purchase_uom_id'] = uom_sync.odoo_uom_id.id
+            resolved = _resolve_uom(purchase_unit_code)
+            if resolved:
+                vals['purchase_uom_id'] = resolved
         
         if 'InventoryUoM' in sap_data:
             inventory_uom_code = sap_data['InventoryUoM']
             vals['inventory_uom'] = inventory_uom_code
-            # Try to map to Odoo UoM
-            uom_sync = self.env['sap.uom.sync'].search([
-                ('backend_id', '=', vals.get('backend_id')),
-                ('sap_uom_id', '=', inventory_uom_code)
-            ], limit=1)
-            if uom_sync and uom_sync.odoo_uom_id:
-                vals['inventory_uom_id'] = uom_sync.odoo_uom_id.id
+            resolved = _resolve_uom(inventory_uom_code)
+            if resolved:
+                vals['inventory_uom_id'] = resolved
         
         # Manufacturer
         if 'ManufacturerCatalogNo' in sap_data:
