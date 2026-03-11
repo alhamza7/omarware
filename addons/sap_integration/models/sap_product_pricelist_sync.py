@@ -20,7 +20,10 @@ class SapProductPricelistSync(models.Model):
     _name = 'sap.product.pricelist.sync'
     _description = 'SAP Product Pricelist Synchronization'
     _order = 'product_id, sap_pricelist_num'
-    
+
+    # SAP exports base-unit prices with UoMCode = None or with UoM = "Units" (id=1).
+    # We use this constant to detect and remap generic-UoM items.
+    SAP_GENERIC_UOM_ID = 1  # "Units" – SAP's catch-all UoM placeholder
     # ========== Relations ==========
     product_id = fields.Many2one(
         'product.product',
@@ -196,7 +199,14 @@ class SapProductPricelistSync(models.Model):
                     uom = None
                     if uom_code:
                         uom = self._get_uom_by_code(uom_code)
-                    
+
+                    # When SAP sends a base price without a UoMCode, it represents the
+                    # SalesUnit price. Resolve the SalesUnit so packaging-based legacy
+                    # pricelist items get updated with the correct price.
+                    sales_uom = None
+                    if not uom:
+                        sales_uom = self._get_sales_uom_for_product(product, backend)
+
                     # Search for existing sync record
                     sync_record = self.search([
                         ('product_id', '=', product.id),
@@ -223,6 +233,13 @@ class SapProductPricelistSync(models.Model):
                     
                     # Create or update pricelist item in Odoo
                     self._create_or_update_pricelist_item(sync_record, product, odoo_pricelist, price, uom)
+
+                    # Also update legacy packaging-based item for the SalesUnit when the
+                    # base price has no UoM (SAP sends price for SalesUnit without UoMCode)
+                    if sales_uom and sales_uom != uom:
+                        self._create_or_update_pricelist_item(
+                            sync_record, product, odoo_pricelist, price, sales_uom
+                        )
                     
                     # ========== NEW: Process UoM-specific prices ==========
                     uom_prices = price_data.get('UoMPrices', [])
@@ -390,25 +407,82 @@ class SapProductPricelistSync(models.Model):
         ], limit=1)
         
         return uom
-    
-    def _create_or_update_pricelist_item(self, sync_record, product, pricelist, price, uom=None):
-        """Create or update product.pricelist.item in Odoo"""
+
+    def _get_sales_uom_for_product(self, product, backend):
+        """Return the Odoo UoM that matches the SAP SalesUnit for this product.
+
+        SAP sends the base ItemPrice without a UoMCode, but the price corresponds
+        to the product's SalesUnit (e.g. 'درزن'). By resolving the SalesUnit here
+        we can keep legacy pricelist items (which use product_packaging_id) up to date.
+
+        Returns None when no SalesUnit mapping is found or when the SalesUnit is the
+        same as the generic 'Units' placeholder (id=1).
+        """
         try:
-            # Search for existing pricelist item
-            # Use product_tmpl_id instead of product_id for template-level pricing
-            domain = [
+            extended = self.env['sap.product.extended'].search(
+                [('product_id', '=', product.id), ('backend_id', '=', backend.id)],
+                limit=1,
+            )
+            if not extended or not extended.sap_uom_group_id:
+                return None
+
+            # Get UoM group members
+            group_uom_syncs = extended.sap_uom_group_id.uom_ids
+            if not group_uom_syncs:
+                return None
+
+            # The SalesUnit is typically the UoM with factor closest to 1 in the group
+            # (it's the "base sell" unit). Exclude the generic Units UoM (id=1).
+            candidate_uoms = [
+                us.odoo_uom_id for us in group_uom_syncs
+                if us.odoo_uom_id and us.odoo_uom_id.id != self.SAP_GENERIC_UOM_ID
+            ]
+            if not candidate_uoms:
+                return None
+
+            # Prefer UoM with factor closest to 1.0 (= the base selling unit)
+            sales_uom = min(candidate_uoms, key=lambda u: (abs(u.factor - 1.0), u.id))
+            return sales_uom
+        except Exception as e:
+            _logger.warning(f"[PriceSync] Could not resolve SalesUnit for {product.default_code}: {e}")
+            return None
+
+
+    def _create_or_update_pricelist_item(self, sync_record, product, pricelist, price, uom=None):
+        """Create or update product.pricelist.item in Odoo.
+
+        Searches for existing items by product_uom_id first.
+        Also updates legacy items that used product_packaging_id for the same UoM,
+        preventing stale prices from old sync runs from overriding current SAP data.
+        """
+        try:
+            tmpl_id = product.product_tmpl_id.id
+            base_domain = [
                 ('pricelist_id', '=', pricelist.id),
-                ('product_tmpl_id', '=', product.product_tmpl_id.id),
+                ('product_tmpl_id', '=', tmpl_id),
                 ('applied_on', '=', '1_product'),
             ]
-            
-            # Use product_uom_id (the correct field for UoM-specific pricing)
+
+            # Search by product_uom_id (new-style items)
             if uom:
-                domain.append(('product_uom_id', '=', uom.id))
+                domain = base_domain + [('product_uom_id', '=', uom.id)]
             else:
-                domain.append(('product_uom_id', '=', False))
-            
+                domain = base_domain + [('product_uom_id', '=', False)]
+
             pricelist_item = self.env['product.pricelist.item'].search(domain, limit=1)
+
+            # Also update any legacy packaging-based item for the same UoM so that
+            # old items with product_packaging_id=<uom_id> don't shadow the new price.
+            if uom:
+                legacy_items = self.env['product.pricelist.item'].search(
+                    base_domain + [('product_packaging_id', '=', uom.id)], limit=0
+                )
+                if legacy_items:
+                    legacy_items.write({'fixed_price': price})
+                    _logger.info(
+                        f"Updated {len(legacy_items)} legacy packaging-based pricelist item(s) "
+                        f"for {product.default_code} UoM {uom.name} → {price}"
+                    )
             
             # Prepare values - use product_tmpl_id for template-level pricing
             item_vals = {

@@ -319,40 +319,59 @@ class SapProductWarehouseInfo(models.Model):
         return warehouse
     
     def _update_stock_quant(self, warehouse_info, product, warehouse, warehouse_data):
-        """Update stock.quant with quantities from SAP"""
+        """
+        Update stock.quant with the quantity from SAP.
+
+        Uses the Odoo inventory adjustment API:
+          1. write({'inventory_quantity': target}) — sets the target count
+          2. action_apply_inventory()             — creates the move and applies it
+
+        This works for both increase and decrease to zero.
+        Never skips qty=0 — SAP zero must zero out the Odoo quant.
+        """
         try:
             in_stock = float(warehouse_data.get('InStock', 0.0))
-            
-            if in_stock == 0:
-                return  # Don't create quant for zero stock
-            
-            # Get location
             location = warehouse.lot_stock_id
-            
-            # Search for existing quant
-            quant = self.env['stock.quant'].search([
+
+            quants = self.env['stock.quant'].search([
                 ('product_id', '=', product.id),
-                ('location_id', '=', location.id)
-            ], limit=1)
-            
-            if quant:
-                # Update existing
-                quant.sudo().write({
-                    'quantity': in_stock,
-                })
-                _logger.info(f"Updated stock quant for {product.name}: {in_stock}")
-            else:
-                # Create new
-                self.env['stock.quant'].sudo().create({
+                ('location_id', '=', location.id),
+                ('location_id.usage', '=', 'internal'),
+            ])
+
+            if quants:
+                for quant in quants:
+                    if quant.quantity == in_stock:
+                        continue  # already correct — skip
+                    _logger.info(
+                        'Stock quant [%s] wh=%s: %.4f → %.4f',
+                        product.default_code, warehouse.code,
+                        quant.quantity, in_stock,
+                    )
+                    quant.sudo().write({'inventory_quantity': in_stock})
+                    quant.sudo().action_apply_inventory()
+
+            elif in_stock > 0:
+                # No quant yet but SAP has stock — create and apply
+                quant = self.env['stock.quant'].sudo().create({
                     'product_id': product.id,
                     'location_id': location.id,
-                    'quantity': in_stock,
+                    'inventory_quantity': in_stock,
                 })
-                _logger.info(f"Created stock quant for {product.name}: {in_stock}")
-            
+                quant.sudo().action_apply_inventory()
+                _logger.info(
+                    'Created stock quant [%s] wh=%s: %.4f',
+                    product.default_code, warehouse.code, in_stock,
+                )
+            # else: in_stock == 0 and no quant — nothing to do
+
         except Exception as e:
-            _logger.error(f"Error updating stock quant: {str(e)}")
-            # Don't raise - continue with other operations
+            _logger.error(
+                'Error updating stock quant for [%s] wh=%s: %s',
+                product.default_code,
+                warehouse_data.get('WarehouseCode', '?'),
+                e,
+            )
     
     def _create_or_update_orderpoint(self, warehouse_info, product, warehouse, warehouse_data):
         """Create or update stock.warehouse.orderpoint (reorder rule)"""

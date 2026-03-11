@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 from odoo import models, fields, api, _
 from odoo.exceptions import UserError, ValidationError
+import logging
 
+_logger = logging.getLogger(__name__)
 
 class PosPerfumeOrder(models.Model):
     _name = 'pos.perfume.order'
@@ -411,8 +413,6 @@ class PosPerfumeOrder(models.Model):
     
     def _create_draft_sale_order(self):
         """Create draft sale order for SAP sync"""
-        import logging
-        _logger = logging.getLogger(__name__)
         
         self.ensure_one()
         
@@ -516,10 +516,8 @@ class PosPerfumeOrder(models.Model):
         _logger.info(f"[POS] action_ensure_sale_order: created sale.order {draft_so.name}")
         return draft_so.id
 
-
+    def action_confirm(self):
         """Confirm order and create sale order"""
-        import logging
-        _logger = logging.getLogger(__name__)
         
         # Get IDs and normalize them - flatten nested lists and ensure integers
         def normalize_ids(ids):
@@ -600,81 +598,64 @@ class PosPerfumeOrder(models.Model):
                     update_vals['note'] = order.note
                     _logger.info(f"[POS Confirm] Syncing note to sale.order {sale_order.name}")
                 
-                # ⚠️ IMPORTANT: Check if sale.order.line has custom_product_name set
-                # This happens when user edits the quotation directly from Backend (not POS)
-                # In this case, sale.order.line.custom_product_name should take precedence
-                _logger.info(f"[POS Confirm] Checking sale.order.line for custom_product_name...")
-                for sale_line in sale_order.order_line:
-                    if sale_line.custom_product_name:
-                        _logger.info(f"[POS Confirm] ✅ sale.order.line ID {sale_line.id} has custom_product_name='{sale_line.custom_product_name}'")
-                    else:
-                        _logger.info(f"[POS Confirm] ⚠️ sale.order.line ID {sale_line.id} has NO custom_product_name")
-                
-                # Update order lines to sync any changes from POS (like quantity, price, etc.)
-                # BUT DO NOT override custom_product_name if it's already set in sale.order.line
-                _logger.info(f"[POS Confirm] Checking {len(order_lines)} POS lines for updates...")
-                
-                # Sort both lists by sequence to ensure correct matching
-                pos_lines_sorted = order_lines.sorted(lambda l: l.sequence if hasattr(l, 'sequence') else 0)
-                sale_lines_sorted = sale_order.order_line.sorted(lambda l: l.sequence if hasattr(l, 'sequence') else 0)
-                
-                _logger.info(f"[POS Confirm] POS lines count: {len(pos_lines_sorted)}, Sale lines count: {len(sale_lines_sorted)}")
-                
-                # Match lines by index (sequence order)
-                for idx, line in enumerate(pos_lines_sorted):
+                # مزامنة أسطر sale.order من أسطر POS
+                # للـ sale order المؤكد: نُحدِّث الأسطر الموجودة بالـ product_id المطابق
+                #   ونُصفِّر الكمية للأسطر المحذوفة من POS (Odoo لا يسمح بحذفها)
+                #   ونُضيف الأسطر الجديدة
+                # للـ sale order غير المؤكد (draft/quotation): نحذف الكل ونُعيد إنشاءها
+                _logger.info(f"[POS Confirm] Syncing sale.order lines from POS lines... (sale_order state={sale_order.state})")
+
+                # بناء قاموس الأسطر المطلوبة من POS: product_id → بيانات السطر
+                pos_lines_by_product = {}
+                for line in order_lines:
                     if not line.product_id:
-                        _logger.warning(f"[POS Confirm] Line {idx} has no product, skipping")
                         continue
-                    
-                    _logger.info(f"[POS Confirm] Processing POS line {idx}: product={line.product_id.name}, qty={line.quantity}, custom_name={line.custom_product_name}")
-                    
-                    # Get matching sale order line by index
-                    if idx < len(sale_lines_sorted):
-                        matching_sale_line = sale_lines_sorted[idx]
-                        _logger.info(f"[POS Confirm] Matched with sale.order.line ID {matching_sale_line.id}, product={matching_sale_line.product_id.name}, existing_custom_name='{matching_sale_line.custom_product_name}'")
-                        
-                        # Update existing line
-                        line_update_vals = {
-                            'product_uom_qty': line.quantity or 1.0,
-                            'price_unit': line.unit_price or 0.0,
-                            'discount': line.discount_percent or 0.0,
-                        }
-                        
-                        # ⚠️ CRITICAL: Only update custom_product_name if:
-                        # 1. POS line has custom_product_name AND
-                        # 2. Sale line does NOT have custom_product_name (to avoid overwriting backend edits)
-                        if line.custom_product_name and not matching_sale_line.custom_product_name:
-                            line_update_vals['custom_product_name'] = line.custom_product_name
-                            _logger.info(f"[POS Confirm] ✅ Setting custom_product_name='{line.custom_product_name}' from POS line")
-                        elif matching_sale_line.custom_product_name:
-                            _logger.info(f"[POS Confirm] ℹ️ Keeping existing custom_product_name='{matching_sale_line.custom_product_name}' from sale.order.line (not overwriting)")
-                        else:
-                            _logger.info(f"[POS Confirm] ⚠️ No custom_product_name in either POS or Sale line")
-                        
-                        matching_sale_line.write(line_update_vals)
-                        _logger.info(f"[POS Confirm] ✅ Line {idx} updated successfully")
-                    else:
-                        _logger.warning(f"[POS Confirm] ⚠️ No matching sale.order.line at index {idx} for product {line.product_id.name}")
-                
-                sale_order.write(update_vals)
-                _logger.info(f"[POS Confirm] Updated sale order {sale_order.name} to 'sale' state")
-                
-                # Force SAP sync if not already synced
-                if not sale_order.sap_synced:
-                    _logger.info(f"[POS Confirm] Sale order {sale_order.name} not synced to SAP, attempting manual sync...")
-                    try:
-                        sale_order._send_to_sap()
-                        _logger.info(f"[POS Confirm] Manual SAP sync completed for {sale_order.name}")
-                    except Exception as sap_error:
-                        _logger.error(f"[POS Confirm] Failed to sync sale order {sale_order.name} to SAP: {sap_error}", exc_info=True)
+                    uom_id = line.product_uom_id.id if line.product_uom_id else line.product_id.uom_id.id
+                    pos_lines_by_product[line.product_id.id] = {
+                        'product_uom_qty': line.quantity or 1.0,
+                        'product_uom_id': uom_id,
+                        'price_unit': line.unit_price or 0.0,
+                        'discount': line.discount_percent or 0.0,
+                        'custom_product_name': line.custom_product_name or False,
+                    }
+                    if line.warehouse_id and 'product_warehouse_id' in self.env['sale.order.line']._fields:
+                        pos_lines_by_product[line.product_id.id]['product_warehouse_id'] = line.warehouse_id.id
+                    _logger.info(f"[POS Confirm] POS line: product={line.product_id.name}, custom_name={line.custom_product_name!r}")
+
+                if sale_order.state in ('draft', 'sent'):
+                    # غير مؤكد → يمكن حذف وإعادة إنشاء الأسطر
+                    new_sale_lines = [(0, 0, {**vals, 'product_id': pid}) for pid, vals in pos_lines_by_product.items()]
+                    update_vals['order_line'] = [(5, 0, 0)] + new_sale_lines
+                    _logger.info(f"[POS Confirm] Draft SO: replacing {len(sale_order.order_line)} lines with {len(new_sale_lines)} new lines")
+                    sale_order.write(update_vals)
                 else:
-                    # Force re-sync to send updated data to SAP
-                    _logger.info(f"[POS Confirm] Re-syncing sale order {sale_order.name} to SAP with updated data...")
-                    try:
-                        sale_order._send_to_sap()
-                        _logger.info(f"[POS Confirm] Re-sync completed for {sale_order.name}")
-                    except Exception as sap_error:
-                        _logger.error(f"[POS Confirm] Failed to re-sync sale order {sale_order.name} to SAP: {sap_error}", exc_info=True)
+                    # مؤكد → Odoo يمنع الحذف، نُحدِّث/نُصفِّر/نُضيف
+                    line_ops = []
+                    existing_product_ids = set()
+
+                    for existing_line in sale_order.order_line:
+                        pid = existing_line.product_id.id
+                        existing_product_ids.add(pid)
+                        if pid in pos_lines_by_product:
+                            # تحديث السطر الموجود
+                            line_ops.append((1, existing_line.id, pos_lines_by_product[pid]))
+                        else:
+                            # المنتج حُذف من POS → نُصفِّر الكمية
+                            line_ops.append((1, existing_line.id, {'product_uom_qty': 0.0}))
+                            _logger.info(f"[POS Confirm] Zeroing removed line: product={existing_line.product_id.name}")
+
+                    # إضافة الأسطر الجديدة غير الموجودة في sale.order
+                    for pid, vals in pos_lines_by_product.items():
+                        if pid not in existing_product_ids:
+                            line_ops.append((0, 0, {**vals, 'product_id': pid}))
+                            _logger.info(f"[POS Confirm] Adding new line: product_id={pid}")
+
+                    update_vals['order_line'] = line_ops
+                    _logger.info(f"[POS Confirm] Confirmed SO: {len(line_ops)} line operations")
+                    sale_order.write(update_vals)
+
+                _logger.info(f"[POS Confirm] Updated sale order {sale_order.name}")
+                # SAP sync is handled explicitly by JS (action_manual_sync_to_sap) after this call.
 
             else:
                 # Create new Sale Order - use read data or direct access with fallback
@@ -758,28 +739,8 @@ class PosPerfumeOrder(models.Model):
                     
                     sale_order = self.env['sale.order'].create(sale_vals)
                     _logger.info(f"[POS Confirm] Sale order created: {sale_order.name} (ID: {sale_order.id}), state={sale_order.state}")
-                    
-                    # SAP sync should happen automatically in sale.order create method
-                    # We'll attempt manual sync if auto-sync didn't work, but don't block on it
-                    # Note: SAP sync errors are logged but don't prevent order creation
-                    try:
-                        if not sale_order.sap_synced:
-                            _logger.warning(f"[POS Confirm] Sale order {sale_order.name} was not auto-synced to SAP, attempting manual sync...")
-                            sale_order._send_to_sap()
-                            # Refresh to get updated SAP sync status
-                            sale_order.invalidate_recordset(['sap_synced', 'sap_doc_num', 'sap_doc_entry'])
-                            sale_order.refresh()
-                            if sale_order.sap_synced:
-                                _logger.info(f"[POS Confirm] Manual SAP sync successful for {sale_order.name}")
-                            else:
-                                _logger.error(f"[POS Confirm] Manual SAP sync failed for {sale_order.name}")
-                    except Exception as sap_error:
-                        _logger.error(f"[POS Confirm] Error during SAP sync for {sale_order.name}: {sap_error}", exc_info=True)
-                        # Don't raise - allow order creation to succeed even if SAP sync fails
-                    
-                    # Important: keep sale.order in its current state here.
-                    # Confirmation (changing state from draft/sent to sale) is handled
-                    # by calling sale.order.action_confirm() from the UI/JS layer.
+                    # SAP sync is handled explicitly by JS (action_manual_sync_to_sap) after this call.
+                    # Do NOT call _send_to_sap() here to avoid double-sending.
                     
                 except Exception as e:
                     _logger.error(f"[POS Confirm] Error creating sale order: {e}", exc_info=True)
@@ -872,8 +833,6 @@ class PosPerfumeOrder(models.Model):
     
     def action_print_to_sap(self):
         """إرسال طلب طباعة إلى SAP على DEFAULT LAYOUT"""
-        import logging
-        _logger = logging.getLogger(__name__)
         
         self.ensure_one()
         
