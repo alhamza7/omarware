@@ -153,9 +153,18 @@ class SaleOrder(models.Model):
 
     def write(self, vals):
         values = vals
-        if values.get('order_line') and self.state == 'sale':
+        # Capture quantities before write whenever order_line is updated (so we have them after write
+        # even when state changes to 'sale' during this write and would otherwise be unset).
+        # Initialize both so they are always bound and never trigger UnboundLocalError.
+        pre_order_line_qty_by_order = {}
+        pre_order_line_qty = {}
+        if values.get('order_line'):
             for order in self:
-                pre_order_line_qty = {order_line: order_line.product_uom_qty for order_line in order.mapped('order_line') if not order_line.is_expense}
+                pre_order_line_qty_by_order[order] = {
+                    order_line: order_line.product_uom_qty
+                    for order_line in order.mapped('order_line')
+                    if not order_line.is_expense
+                }
 
         if values.get('partner_shipping_id') and self.env.context.get('update_delivery_shipping_partner'):
             for order in self:
@@ -183,6 +192,7 @@ class SaleOrder(models.Model):
         res = super().write(values)
         if values.get('order_line') and self.state == 'sale':
             for order in self:
+                pre_order_line_qty = pre_order_line_qty_by_order.get(order, {})
                 to_log = {}
                 order.order_line.fetch(['product_uom_id', 'product_uom_qty', 'display_type', 'is_downpayment'])
                 for order_line in order.order_line:
