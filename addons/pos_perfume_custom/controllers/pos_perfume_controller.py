@@ -117,7 +117,7 @@ class PosPerfumeController(http.Controller):
             ('pricelist_id', '=', pricelist.id),
             ('product_tmpl_id', '=', product.product_tmpl_id.id),
             '|', ('product_id', '=', False), ('product_id', '=', product.id),
-        ])
+        ], order='write_date asc, id asc')
         _logger.info(f"[POS] Found {len(items)} pricelist items")
 
         # Step 3: Process items with group filter
@@ -163,7 +163,29 @@ class PosPerfumeController(http.Controller):
         for item in items:
             price = item.fixed_price if item.compute_price == 'fixed' else product.list_price
 
-            if not item.product_packaging_id:
+            # Some old duplicated rows were saved with both product_uom_id and
+            # product_packaging_id set. Prefer the explicit UoM and ignore the stale
+            # packaging residue so POS does not read a wrong historical price.
+            if item.product_uom_id and item.product_packaging_id:
+                raw_uom = item.product_uom_id
+                _logger.info(
+                    f"[POS]   Normalizing mixed pricelist row id={item.id} "
+                    f"UoM={item.product_uom_id.name} packaging={item.product_packaging_id.name}"
+                )
+                if raw_uom.id == self.SAP_GENERIC_UOM_ID:
+                    if product.uom_id.id != self.SAP_GENERIC_UOM_ID:
+                        uom = product.uom_id
+                    else:
+                        uom = raw_uom
+                else:
+                    uom = raw_uom
+
+                if available_uom_ids and uom.id not in available_uom_ids:
+                    continue
+
+                uoms_with_prices[uom.id] = {'uom': uom, 'price': price, 'has_packaging': False}
+                _logger.info(f"[POS]   UoM {uom.name}: {price} (normalized mixed row)")
+            elif not item.product_packaging_id:
                 # No packaging: resolve target UoM
                 raw_uom = item.product_uom_id or product.uom_id
 

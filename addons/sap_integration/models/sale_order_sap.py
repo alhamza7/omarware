@@ -281,8 +281,18 @@ class SaleOrder(models.Model):
                         # أولاً: هل هو Sales Order موجود؟
                         order_check_url = f"{connection.base_url}/Orders({quotation.sap_doc_entry})?$select=DocEntry,DocNum"
                         order_check = connection.session.get(order_check_url, headers=headers, timeout=30)
-                        is_existing_order = order_check.status_code == 200
-                        _logger.info(f"[SAP] Order check status={order_check.status_code} for DocEntry={quotation.sap_doc_entry}")
+                        order_doc = order_check.json() if order_check.status_code == 200 and order_check.content else {}
+                        order_doc_num = str(order_doc.get('DocNum', '')) if order_doc else ''
+                        expected_doc_num = str(quotation.sap_doc_num or '')
+                        is_existing_order = (
+                            order_check.status_code == 200 and
+                            (not expected_doc_num or order_doc_num == expected_doc_num)
+                        )
+                        _logger.info(
+                            f"[SAP] Order check status={order_check.status_code} for DocEntry={quotation.sap_doc_entry}, "
+                            f"returned DocNum={order_doc_num or 'N/A'}, expected DocNum={expected_doc_num or 'N/A'}, "
+                            f"match={is_existing_order}"
+                        )
 
                         if is_existing_order:
                             # ✅ Sales Order موجود بالفعل في SAP → نُحدِّثه مع معالجة الأسطر المحذوفة
@@ -337,8 +347,18 @@ class SaleOrder(models.Model):
                             # ثانياً: ليس Order — هل هو Quotation؟
                             quote_check_url = f"{connection.base_url}/Quotations({quotation.sap_doc_entry})?$select=DocEntry,DocNum"
                             quote_check = connection.session.get(quote_check_url, headers=headers, timeout=30)
-                            is_existing_quotation = quote_check.status_code == 200
-                            _logger.info(f"[SAP] Quotation check status={quote_check.status_code} for DocEntry={quotation.sap_doc_entry}")
+                            quote_doc = quote_check.json() if quote_check.status_code == 200 and quote_check.content else {}
+                            quote_doc_num = str(quote_doc.get('DocNum', '')) if quote_doc else ''
+                            expected_doc_num = str(quotation.sap_doc_num or '')
+                            is_existing_quotation = (
+                                quote_check.status_code == 200 and
+                                (not expected_doc_num or quote_doc_num == expected_doc_num)
+                            )
+                            _logger.info(
+                                f"[SAP] Quotation check status={quote_check.status_code} for DocEntry={quotation.sap_doc_entry}, "
+                                f"returned DocNum={quote_doc_num or 'N/A'}, expected DocNum={expected_doc_num or 'N/A'}, "
+                                f"match={is_existing_quotation}"
+                            )
 
                             if is_existing_quotation:
                                 # ✅ Quotation موجود → نُحدِّثه ثم نُحوِّله لـ Sales Order

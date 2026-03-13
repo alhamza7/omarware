@@ -518,6 +518,8 @@ class PosPerfumeOrder(models.Model):
 
     def action_confirm(self):
         """Confirm order and create sale order"""
+        force_sale_order = self.env.context.get('force_sale_order')
+        force_quotation = self.env.context.get('force_quotation')
         
         # Get IDs and normalize them - flatten nested lists and ensure integers
         def normalize_ids(ids):
@@ -586,9 +588,14 @@ class PosPerfumeOrder(models.Model):
                 _logger.info(f"[POS Confirm] Using existing sale order {order.sale_order_id.name} (ID: {order.sale_order_id.id})")
                 sale_order = order.sale_order_id
 
-                # Update sale order to confirmed state
+                # Explicit caller intent controls whether we keep draft quotation
+                # or force a confirmed sales order.
+                target_sale_state = 'sale'
+                if force_quotation and not force_sale_order:
+                    target_sale_state = 'draft'
+
                 update_vals = {
-                    'state': 'sale',
+                    'state': target_sale_state,
                 }
                 # Sync invoice_type and note from POS order to sale.order if present
                 if order.invoice_type:
@@ -666,7 +673,12 @@ class PosPerfumeOrder(models.Model):
                 # - إذا كان في أي حالة أخرى (مثلاً 'draft' عند ضغط زر Sale Order في الـ POS)
                 #   فنُنشئ sale.order بحالة 'sale' ليُرسل إلى SAP كـ Sales Order مباشرة.
                 current_state = order.state
-                sale_state = 'draft' if current_state == 'quotation' else 'sale'
+                if force_sale_order:
+                    sale_state = 'sale'
+                elif force_quotation:
+                    sale_state = 'draft'
+                else:
+                    sale_state = 'draft' if current_state == 'quotation' else 'sale'
 
                 sale_vals = {
                     'partner_id': order_data.get('partner_id', [False])[0] if order_data.get('partner_id') else order.partner_id.id,
@@ -748,7 +760,12 @@ class PosPerfumeOrder(models.Model):
             
             # Update POS order - preserve current state if it's 'quotation', otherwise set to 'sale'
             current_state = order.state
-            new_state = 'sale' if current_state != 'quotation' else 'quotation'
+            if force_sale_order:
+                new_state = 'sale'
+            elif force_quotation:
+                new_state = 'quotation'
+            else:
+                new_state = 'sale' if current_state != 'quotation' else 'quotation'
             
             order.write({
                 'state': new_state,

@@ -469,20 +469,25 @@ class SapProductPricelistSync(models.Model):
             else:
                 domain = base_domain + [('product_uom_id', '=', False)]
 
-            pricelist_item = self.env['product.pricelist.item'].search(domain, limit=1)
+            matching_items = self.env['product.pricelist.item'].search(
+                domain, order='write_date desc, id desc'
+            )
 
-            # Also update any legacy packaging-based item for the same UoM so that
-            # old items with product_packaging_id=<uom_id> don't shadow the new price.
+            # Also gather any legacy packaging-based items for the same UoM so we can
+            # normalize them into a single canonical UoM-based item.
+            legacy_items = self.env['product.pricelist.item']
             if uom:
                 legacy_items = self.env['product.pricelist.item'].search(
-                    base_domain + [('product_packaging_id', '=', uom.id)], limit=0
+                    base_domain + [('product_packaging_id', '=', uom.id)],
+                    order='write_date desc, id desc',
                 )
-                if legacy_items:
-                    legacy_items.write({'fixed_price': price})
-                    _logger.info(
-                        f"Updated {len(legacy_items)} legacy packaging-based pricelist item(s) "
-                        f"for {product.default_code} UoM {uom.name} → {price}"
-                    )
+
+            candidate_items = (matching_items | legacy_items).sorted(
+                key=lambda item: (item.write_date or item.create_date or fields.Datetime.now(), item.id),
+                reverse=True,
+            )
+            pricelist_item = candidate_items[:1]
+            duplicate_items = candidate_items[1:]
             
             # Prepare values - use product_tmpl_id for template-level pricing
             item_vals = {
@@ -492,12 +497,16 @@ class SapProductPricelistSync(models.Model):
                 'compute_price': 'fixed',
                 'fixed_price': price,
                 'min_quantity': 1,
+                'product_id': False,
+                'product_packaging_id': False,
             }
             
             # Add UoM if specified (product_uom_id is the field _get_available_uoms reads)
             if uom:
                 item_vals['product_uom_id'] = uom.id
                 _logger.info(f"Adding UoM {uom.name} to pricelist item")
+            else:
+                item_vals['product_uom_id'] = False
             
             # Add date validity if present
             if sync_record.date_start:
@@ -513,6 +522,18 @@ class SapProductPricelistSync(models.Model):
                 # Create new
                 pricelist_item = self.env['product.pricelist.item'].create(item_vals)
                 _logger.info(f"Created pricelist item for {product.name}")
+
+            # Remove stale duplicates so POS reads a single authoritative price row.
+            if duplicate_items:
+                duplicate_count = len(duplicate_items)
+                duplicate_items.unlink()
+                _logger.info(
+                    "Removed %s duplicate pricelist item(s) for %s in pricelist %s%s",
+                    duplicate_count,
+                    product.default_code,
+                    pricelist.name,
+                    f" / UoM {uom.name}" if uom else "",
+                )
             
             # Link back to sync record
             sync_record.write({
