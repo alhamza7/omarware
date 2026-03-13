@@ -2112,7 +2112,12 @@ export class PosPerfumeScreen extends Component {
             }
 
             // 2.5. Sync all POS lines (including custom_product_name) to sale.order via action_confirm
-            await this.orm.call('pos.perfume.order', 'action_confirm', [[orderId]]);
+            await this.orm.call(
+                'pos.perfume.order',
+                'action_confirm',
+                [[orderId]],
+                { context: { force_quotation: true } }
+            );
 
             // 3. Sync to SAP as Quotation (never as Sales Order)
             try {
@@ -2357,6 +2362,12 @@ export class PosPerfumeScreen extends Component {
                 try {
                     // action_confirm syncs all POS lines (including custom_product_name) to sale.order
                     await this.orm.call('pos.perfume.order', 'action_confirm', [[orderId]]);
+                    const saleOrderAfterConfirm = await this.orm.read(
+                        'sale.order',
+                        [saleOrderId],
+                        ['state', 'sap_doc_entry', 'sap_doc_num']
+                    );
+                    const saleOrderState = saleOrderAfterConfirm[0]?.state;
                     
                     // Trigger SAP sync — rule:
                     // - pos state 'quotation' OR sale.order state 'draft'/'sent' → sync as Quotation
@@ -2364,7 +2375,7 @@ export class PosPerfumeScreen extends Component {
                     // Never convert quotation → sales order from Save button
                     try {
                         const isQuotation = (currentState === 'quotation') ||
-                                            (saleOrder.state === 'draft' || saleOrder.state === 'sent');
+                                            (saleOrderState === 'draft' || saleOrderState === 'sent');
                         if (isQuotation) {
                             // Keep as Quotation in SAP — never convert from Save
                             await this.orm.call('sale.order', 'action_sync_as_quotation', [[saleOrderId]]);
@@ -2444,7 +2455,12 @@ export class PosPerfumeScreen extends Component {
                     ? posOrders[0].sale_order_id[0]
                     : posOrders[0].sale_order_id;
             } else {
-                const result = await this.orm.call('pos.perfume.order', 'action_confirm', [[posOrderId]]);
+                const result = await this.orm.call(
+                    'pos.perfume.order',
+                    'action_confirm',
+                    [[posOrderId]],
+                    { context: { force_sale_order: true } }
+                );
                 saleOrderId = result?.res_id || null;
             }
 
@@ -2454,7 +2470,12 @@ export class PosPerfumeScreen extends Component {
             }
 
             // Step 2.5: Sync all POS lines (including custom_product_name) to sale.order via action_confirm
-            await this.orm.call('pos.perfume.order', 'action_confirm', [[posOrderId]]);
+            await this.orm.call(
+                'pos.perfume.order',
+                'action_confirm',
+                [[posOrderId]],
+                { context: { force_sale_order: true } }
+            );
 
             // Step 3: Read sale order state and SAP status
             const soData = await this.orm.read('sale.order', [saleOrderId], ['state', 'sap_doc_entry', 'sap_doc_num']);
