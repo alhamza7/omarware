@@ -551,15 +551,8 @@ class PosPerfumeOrder(models.Model):
         
         for order in orders:
             order_id = order.id
-            # Read all needed fields at once to avoid multiple field cache accesses
-            try:
-                order_data = order.read(['name', 'partner_id', 'user_id', 'date', 'pricelist_id', 'note'])[0]
-                order_name = order_data.get('name', f"Order-{order_id}")
-            except (TypeError, AttributeError, KeyError, IndexError) as e:
-                _logger.warning(f"[POS Confirm] Error reading order data: {e}, using ID only")
-                order_name = f"Order-{order_id}"
-                order_data = {}
-            
+            # Access fields directly via ORM attributes (avoids display_name cache issue)
+            order_name = order.name or f"Order-{order_id}"
             _logger.info(f"[POS Confirm] Processing order {order_id}: {order_name}")
             
             # Validate - get order lines using search to avoid field cache issues
@@ -623,11 +616,16 @@ class PosPerfumeOrder(models.Model):
                     _logger.info(f"[POS Confirm] POS line: product={line.product_id.name}, custom_name={line.custom_product_name!r}")
 
                 if sale_order.state in ('draft', 'sent'):
-                    # غير مؤكد → يمكن حذف وإعادة إنشاء الأسطر
+                    # غير مؤكد → يمكن حذف وإعادة إنشاء الأسطر قبل تأكيد الـ SO
                     new_sale_lines = [(0, 0, {**vals, 'product_id': pid}) for pid, vals in pos_lines_by_product.items()]
-                    update_vals['order_line'] = [(5, 0, 0)] + new_sale_lines
                     _logger.info(f"[POS Confirm] Draft SO: replacing {len(sale_order.order_line)} lines with {len(new_sale_lines)} new lines")
-                    sale_order.write(update_vals)
+                    # Write lines first (while SO is still draft to allow (5,0,0) delete)
+                    # then write header including state change — this avoids the sale_stock
+                    # UnboundLocalError and sale_order_line._unlink_except_confirmed errors.
+                    sale_order.sudo().write({'order_line': [(5, 0, 0)] + new_sale_lines})
+                    header_vals = {k: v for k, v in update_vals.items()}
+                    if header_vals:
+                        sale_order.sudo().write(header_vals)
                 else:
                     # مؤكد → Odoo يمنع الحذف، نُحدِّث/نُصفِّر/نُضيف
                     line_ops = []
@@ -669,14 +667,14 @@ class PosPerfumeOrder(models.Model):
                 sale_state = 'draft' if current_state == 'quotation' else 'sale'
 
                 sale_vals = {
-                    'partner_id': order_data.get('partner_id', [False])[0] if order_data.get('partner_id') else order.partner_id.id,
-                    'user_id': order_data.get('user_id', [False])[0] if order_data.get('user_id') else order.user_id.id,
-                    'date_order': order_data.get('date') or order.date,
+                    'partner_id': order.partner_id.id,
+                    'user_id': order.user_id.id if order.user_id else False,
+                    'date_order': order.date,
                     'origin': order_name,
-                    'note': order_data.get('note', '') or (order.note or ''),
+                    'note': order.note or '',
                     # Sync invoice_type from POS order to sale.order (field defined in sap_integration)
                     'invoice_type': order.invoice_type or False,
-                    'pricelist_id': order_data.get('pricelist_id', [False])[0] if order_data.get('pricelist_id') else (order.pricelist_id.id if order.pricelist_id else False),
+                    'pricelist_id': order.pricelist_id.id if order.pricelist_id else False,
                     'state': sale_state,
                 }
                 
@@ -734,14 +732,18 @@ class PosPerfumeOrder(models.Model):
                 _logger.info(f"[POS Confirm] Sale vals: partner={sale_vals['partner_id']}, pricelist={sale_vals['pricelist_id']}")
 
                 try:
-                    # Get current state before creating sale order
-                    current_state = order.state
-                    
+                    # Create SO in draft first (regardless of desired final state), then
+                    # write lines, then transition to the target state.
+                    # This avoids sale_stock's UnboundLocalError which occurs when
+                    # state='sale' and order_line are sent together in a single create().
+                    target_state = sale_vals.pop('state', 'draft')
                     sale_order = self.env['sale.order'].create(sale_vals)
+                    if target_state == 'sale':
+                        sale_order.sudo().write({'state': 'sale'})
                     _logger.info(f"[POS Confirm] Sale order created: {sale_order.name} (ID: {sale_order.id}), state={sale_order.state}")
                     # SAP sync is handled explicitly by JS (action_manual_sync_to_sap) after this call.
                     # Do NOT call _send_to_sap() here to avoid double-sending.
-                    
+
                 except Exception as e:
                     _logger.error(f"[POS Confirm] Error creating sale order: {e}", exc_info=True)
                     raise

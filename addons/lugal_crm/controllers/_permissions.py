@@ -17,8 +17,12 @@ Group hierarchy (each level implies all levels below it):
     group_lugal_crm_supervisor      — Implies agent
     group_lugal_crm_manager         — Implies supervisor
     group_lugal_crm_general_manager — Implies manager
-    group_lugal_crm_qa_auditor      — QA role (independent)
-    group_lugal_crm_qa_supervisor   — Implies qa_auditor
+    group_lugal_crm_qa              — QA Auditor role (independent track)
+    group_lugal_crm_qa_supervisor   — Implies group_lugal_crm_qa
+
+Also:
+    Odoo base group 'base.group_system' (Technical Admin) always has full access
+    via require_group — has_group() returns True for admins regardless of explicit membership.
 """
 
 import logging
@@ -31,7 +35,7 @@ AGENT           = 'lugal_crm.group_lugal_crm_agent'
 SUPERVISOR      = 'lugal_crm.group_lugal_crm_supervisor'
 MANAGER         = 'lugal_crm.group_lugal_crm_manager'
 GENERAL_MANAGER = 'lugal_crm.group_lugal_crm_general_manager'
-QA_AUDITOR      = 'lugal_crm.group_lugal_crm_qa_auditor'
+QA_AUDITOR      = 'lugal_crm.group_lugal_crm_qa'           # defined as group_lugal_crm_qa in groups.xml
 QA_SUPERVISOR   = 'lugal_crm.group_lugal_crm_qa_supervisor'
 
 

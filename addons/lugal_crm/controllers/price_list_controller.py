@@ -9,19 +9,38 @@ from ._error import crm_error
 _logger = logging.getLogger(__name__)
 
 
+def _get_sales_uom(product):
+    """
+    Return the sales UoM for a product.
+    Priority: sap.product.extended.sales_uom_id → product.uom_id (Odoo default).
+    """
+    try:
+        ext = request.env['sap.product.extended'].sudo().search(
+            [('product_id', '=', product.id)], limit=1
+        )
+        if ext and ext.sales_uom_id:
+            return ext.sales_uom_id
+    except Exception:
+        pass
+    return product.uom_id
+
+
 def _product_to_dict(product, pricelist=None, available_uoms=None):
     """
     Serialize product.product to a dict for the CRM price-list view.
-    Includes pricelist price (when provided) and UoM options.
+    The main `price` field is always fetched using the product's sales UoM so
+    the returned value matches the SAP-linked sales-unit price, not the raw list_price.
     """
+    sales_uom = _get_sales_uom(product)
+
     price = product.list_price
     if pricelist and pricelist.exists():
         try:
-            price = pricelist._get_product_price(product, 1.0) or product.list_price
+            price = pricelist._get_product_price(product, 1.0, uom=sales_uom) or product.list_price
         except Exception:
             price = product.list_price
 
-    uom_name = product.uom_id.name if product.uom_id else ''
+    uom_name = sales_uom.name if sales_uom else ''
     categ_name = product.categ_id.name if product.categ_id else ''
     foreign_name = getattr(product, 'foreign_name', '') or getattr(product.product_tmpl_id, 'foreign_name', '') or ''
 
@@ -32,7 +51,7 @@ def _product_to_dict(product, pricelist=None, available_uoms=None):
         'item_code': product.default_code or '',
         'category_id': product.categ_id.id if product.categ_id else None,
         'category_name': categ_name,
-        'uom_id': product.uom_id.id if product.uom_id else None,
+        'uom_id': sales_uom.id if sales_uom else None,
         'uom_name': uom_name,
         'price': price,
         'list_price': product.list_price,
@@ -44,25 +63,45 @@ def _product_to_dict(product, pricelist=None, available_uoms=None):
 
 
 def _get_uoms_for_product(product, pricelist):
-    """Collect all UoMs defined in pricelist items for this product, with their prices."""
+    """
+    Collect all UoMs for a product from pricelist items, with their prices.
+    Ensures the sales UoM (from sap.product.extended) is always included first,
+    even when the pricelist item has uom_id = False (base price linked to sales unit).
+    """
     if not pricelist or not pricelist.exists():
         return []
+
+    sales_uom = _get_sales_uom(product)
+    seen_uom_ids = set()
+    result = []
+
+    # All fixed-price pricelist items for this product.
+    # Items are stored against product_tmpl_id (applied_on=1_product), not product_id.
     items = request.env['product.pricelist.item'].search([
         ('pricelist_id', '=', pricelist.id),
-        ('product_id', '=', product.id),
+        ('product_tmpl_id', '=', product.product_tmpl_id.id),
         ('compute_price', '=', 'fixed'),
     ])
-    uom_ids = items.mapped('uom_id').ids
-    if not uom_ids:
-        return []
-    uoms = request.env['uom.uom'].browse(uom_ids)
-    result = []
-    for uom in uoms:
+
+    for item in items:
+        uom = item.product_uom_id if item.product_uom_id else sales_uom
+        if not uom or uom.id in seen_uom_ids:
+            continue
         try:
             uom_price = pricelist._get_product_price(product, 1.0, uom=uom)
         except Exception:
             uom_price = product.list_price
+        seen_uom_ids.add(uom.id)
         result.append({'uom_id': uom.id, 'uom_name': uom.name, 'price': uom_price})
+
+    # Guarantee the sales UoM is in the list even with no explicit pricelist items
+    if sales_uom and sales_uom.id not in seen_uom_ids:
+        try:
+            uom_price = pricelist._get_product_price(product, 1.0, uom=sales_uom)
+        except Exception:
+            uom_price = product.list_price
+        result.insert(0, {'uom_id': sales_uom.id, 'uom_name': sales_uom.name, 'price': uom_price})
+
     return result
 
 

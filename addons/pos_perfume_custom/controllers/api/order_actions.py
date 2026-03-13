@@ -35,6 +35,8 @@ class PosPerfumeApiOrderActions(http.Controller):
         """Confirm a POS order → creates/updates a sale.order and syncs to SAP.
 
         POST /api/pos_perfume/v1/orders/123/confirm
+        Allowed from: draft, quotation.
+        Requires at least one order line.
         """
         try:
             auth_err = _check_auth()
@@ -49,7 +51,7 @@ class PosPerfumeApiOrderActions(http.Controller):
             if not order.order_line_ids:
                 return _error('Cannot confirm an order without lines')
 
-            order.action_confirm()
+            order.sudo().action_confirm()
 
             return _success({
                 'id': order.id,

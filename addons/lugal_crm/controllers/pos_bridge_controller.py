@@ -18,6 +18,22 @@ def _pos_available():
     return 'pos.perfume.order' in request.env
 
 
+def _get_sales_uom(product):
+    """
+    Return the sales UoM for a product.
+    Priority: sap.product.extended.sales_uom_id → product.uom_id (Odoo default).
+    """
+    try:
+        ext = request.env['sap.product.extended'].sudo().search(
+            [('product_id', '=', product.id)], limit=1
+        )
+        if ext and ext.sales_uom_id:
+            return ext.sales_uom_id
+    except Exception:
+        pass
+    return product.uom_id
+
+
 def _get_setup_data():
     """Return pricelists, warehouses, invoice_types, exchange_rate (same shape as POS /setup)."""
     env = request.env
@@ -66,7 +82,8 @@ def _build_line_vals(data):
     product = request.env['product.product'].browse(int(product_id))
     if not product.exists():
         return None, 'Product not found'
-    uom = product.uom_id
+    # Default to sales UoM (SAP-linked), not the inventory UoM
+    uom = _get_sales_uom(product)
     if product_uom_id:
         uom = request.env['uom.uom'].browse(int(product_uom_id))
         if not uom.exists():
@@ -152,12 +169,13 @@ class PosBridgeController(http.Controller):
             items = []
             for p in products:
                 foreign_name = getattr(p, 'foreign_name', '') or ''
+                sales_uom = _get_sales_uom(p)
                 items.append({
                     'id': p.id,
                     'name': p.name,
                     'default_code': p.default_code or '',
                     'foreign_name': foreign_name,
-                    'uom_id': {'id': p.uom_id.id, 'name': p.uom_id.name},
+                    'uom_id': {'id': sales_uom.id, 'name': sales_uom.name},
                     'list_price': p.list_price,
                     'qty_available': p.qty_available,
                 })
@@ -182,13 +200,32 @@ class PosBridgeController(http.Controller):
                 if pl_id:
                     pricelist = request.env['product.pricelist'].browse(pl_id)
             price_unit = product.list_price
+            sales_uom = _get_sales_uom(product)
             if pricelist and pricelist.exists():
                 try:
-                    price_unit = pricelist._get_product_price(product, 1.0) or product.list_price
+                    price_unit = pricelist._get_product_price(product, 1.0, uom=sales_uom) or product.list_price
                 except Exception:
                     price_unit = product.list_price
-            # Simple UoM list (base UoM only if no multi-uom)
-            available_uoms = [{'id': product.uom_id.id, 'name': product.uom_id.name, 'price': price_unit}]
+            # All pricelist UoMs + guarantee the sales UoM is always present
+            seen_uom_ids = set()
+            available_uoms = []
+            uom_items = request.env['product.pricelist.item'].search([
+                ('pricelist_id', '=', pricelist.id if pricelist else 0),
+                ('product_tmpl_id', '=', product.product_tmpl_id.id),
+                ('compute_price', '=', 'fixed'),
+            ]) if pricelist and pricelist.exists() else []
+            for item in uom_items:
+                uom = item.product_uom_id if item.product_uom_id else sales_uom
+                if not uom or uom.id in seen_uom_ids:
+                    continue
+                try:
+                    uom_price = pricelist._get_product_price(product, 1.0, uom=uom)
+                except Exception:
+                    uom_price = product.list_price
+                seen_uom_ids.add(uom.id)
+                available_uoms.append({'id': uom.id, 'name': uom.name, 'price': uom_price})
+            if sales_uom and sales_uom.id not in seen_uom_ids:
+                available_uoms.insert(0, {'id': sales_uom.id, 'name': sales_uom.name, 'price': price_unit})
             warehouses = request.env['stock.warehouse'].search([('active', '=', True)])
             warehouse_data = []
             for w in warehouses:
@@ -203,8 +240,8 @@ class PosBridgeController(http.Controller):
                 'data': {
                     'product_id': product.id,
                     'product_name': product.name,
-                    'product_uom_id': product.uom_id.id,
-                    'product_uom_name': product.uom_id.name,
+                    'product_uom_id': sales_uom.id if sales_uom else product.uom_id.id,
+                    'product_uom_name': sales_uom.name if sales_uom else product.uom_id.name,
                     'price_unit': price_unit,
                     'available_qty': product.qty_available,
                     'default_code': product.default_code or '',

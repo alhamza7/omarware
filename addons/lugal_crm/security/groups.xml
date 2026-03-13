@@ -31,8 +31,9 @@
         <record id="group_lugal_crm_general_manager" model="res.groups">
             <field name="name">CRM General Manager / المدير العام CRM</field>
             <field name="sequence">40</field>
-            <field name="implied_ids" eval="[(4, ref('group_lugal_crm_manager'))]"/>
+            <field name="implied_ids" eval="[(4, ref('group_lugal_crm_manager')), (4, ref('group_lugal_crm_qa_supervisor'))]"/>
             <field name="comment">Full system access: delete records, reset sequences, export data, manage audit logs.</field>
+            <field name="users" eval="[(4, ref('base.user_root')), (4, ref('base.user_admin'))]"/>
         </record>
 
         <!-- QA Track -->
