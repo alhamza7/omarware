@@ -37,12 +37,15 @@ from . import product_template_uom  # UoM Group fields for products
 from . import sale_order_line_uom  # UoM restriction for sale orders
 from . import sap_order_mixin      # Shared SAP fields + helpers for sale/purchase orders
 from . import sale_order_sap       # SAP integration for sale orders
-from . import purchase_order_sap   # SAP integration for purchase ordersfrom . import sale_order_line_procurement  # Compatibility shim for procurement group
+from . import purchase_order_sap   # SAP integration for purchase orders
+from . import sale_order_line_procurement  # Compatibility shim for procurement group
 from . import res_partner_sap  # SAP integration for partners/customers
 from . import ir_asset  # Patch for ir.asset to handle None manifest
 
 # Auto Sync
 from . import sap_auto_sync
+from . import sap_realtime_sync
+from . import sap_exchange_rate_sync
 
 # Custom Report Designer
 from . import custom_report_template

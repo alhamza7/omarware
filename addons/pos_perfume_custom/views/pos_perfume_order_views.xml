@@ -110,11 +110,6 @@
                                    style="color: red; font-weight: bold;"/>
                         </group>
                         <div colspan="2" invisible="sap_synced">
-                            <button name="action_retry_sap_sync" 
-                                    string="إعادة المحاولة - إرسال إلى SAP" 
-                                    type="object" 
-                                    class="btn-warning"
-                                    icon="fa-refresh"/>
                         </div>
                     </group>
                     

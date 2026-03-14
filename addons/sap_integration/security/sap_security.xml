@@ -8,28 +8,15 @@
             <field name="sequence">20</field>
         </record>
 
-        <!-- SAP Privileges for Odoo 19+ -->
-        <record model="res.groups.privilege" id="res_groups_privilege_sap_user">
-            <field name="name">SAP User</field>
-            <field name="category_id" ref="module_category_sap_integration"/>
-        </record>
-        
-        <record model="res.groups.privilege" id="res_groups_privilege_sap_manager">
-            <field name="name">SAP Manager</field>
-            <field name="category_id" ref="module_category_sap_integration"/>
-        </record>
-
         <!-- SAP User Group: Can view and sync -->
         <record id="group_sap_user" model="res.groups">
             <field name="name">SAP User</field>
-            <field name="privilege_id" ref="res_groups_privilege_sap_user"/>
             <field name="comment">Can view SAP data and trigger synchronization</field>
         </record>
 
         <!-- SAP Manager Group: Full access -->
         <record id="group_sap_manager" model="res.groups">
             <field name="name">SAP Manager</field>
-            <field name="privilege_id" ref="res_groups_privilege_sap_manager"/>
             <field name="implied_ids" eval="[(4, ref('group_sap_user'))]"/>
             <field name="comment">Full access to SAP Integration configuration and data</field>
         </record>
