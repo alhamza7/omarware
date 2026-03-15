@@ -492,8 +492,28 @@ class PosPerfumeOrder(models.Model):
             return False
     
     def action_quotation(self):
-        """Set order to quotation state"""
+        """
+        Set POS order to 'quotation' state and create/update the linked sale.order
+        as a Odoo Quotation (state='draft'). This mirrors the Quotation flow:
+          POS state → 'quotation'
+          sale.order state → 'draft'  (appears as Quotation in Odoo)
+        """
         self.ensure_one()
+
+        if not self.order_line_ids:
+            raise UserError(_('Cannot create a quotation without order lines.'))
+
+        if self.sale_order_id:
+            # Already has an SO — move it back to draft (quotation)
+            so = self.sale_order_id
+            if so.state not in ('done', 'cancel'):
+                so.sudo().write({'state': 'draft'})
+        else:
+            # Create a new sale.order in draft state
+            draft_so = self._create_draft_sale_order()
+            if not draft_so:
+                raise UserError(_('Could not create sale order for quotation. Check partner and lines.'))
+
         self.state = 'quotation'
         return True
 
@@ -518,8 +538,6 @@ class PosPerfumeOrder(models.Model):
 
     def action_confirm(self):
         """Confirm order and create sale order"""
-        force_sale_order = self.env.context.get('force_sale_order')
-        force_quotation = self.env.context.get('force_quotation')
         
         # Get IDs and normalize them - flatten nested lists and ensure integers
         def normalize_ids(ids):
@@ -581,14 +599,9 @@ class PosPerfumeOrder(models.Model):
                 _logger.info(f"[POS Confirm] Using existing sale order {order.sale_order_id.name} (ID: {order.sale_order_id.id})")
                 sale_order = order.sale_order_id
 
-                # Explicit caller intent controls whether we keep draft quotation
-                # or force a confirmed sales order.
-                target_sale_state = 'sale'
-                if force_quotation and not force_sale_order:
-                    target_sale_state = 'draft'
-
+                # Update sale order to confirmed state
                 update_vals = {
-                    'state': target_sale_state,
+                    'state': 'sale',
                 }
                 # Sync invoice_type and note from POS order to sale.order if present
                 if order.invoice_type:
@@ -664,19 +677,10 @@ class PosPerfumeOrder(models.Model):
 
             else:
                 # Create new Sale Order - use read data or direct access with fallback
-                # ملاحظة مهمة:
-                # - إذا كان طلب الـ POS في حالة 'quotation' فهذا يعني أن المستخدم
-                #   أراد إنشاء عرض سعر فقط، فنُنشئ sale.order بحالة 'draft' ليُرسل
-                #   إلى SAP كـ Quotation.
-                # - إذا كان في أي حالة أخرى (مثلاً 'draft' عند ضغط زر Sale Order في الـ POS)
-                #   فنُنشئ sale.order بحالة 'sale' ليُرسل إلى SAP كـ Sales Order مباشرة.
-                current_state = order.state
-                if force_sale_order:
-                    sale_state = 'sale'
-                elif force_quotation:
-                    sale_state = 'draft'
-                else:
-                    sale_state = 'draft' if current_state == 'quotation' else 'sale'
+                # action_confirm always creates/updates the sale.order in confirmed ('sale') state.
+                # /quotation endpoint sets POS state='quotation' + SO state='draft'.
+                # /confirm endpoint always sets POS state='sale' + SO state='sale'.
+                sale_state = 'sale'
 
                 sale_vals = {
                     'partner_id': order.partner_id.id,
@@ -760,21 +764,13 @@ class PosPerfumeOrder(models.Model):
                     _logger.error(f"[POS Confirm] Error creating sale order: {e}", exc_info=True)
                     raise
             
-            # Update POS order - preserve current state if it's 'quotation', otherwise set to 'sale'
-            current_state = order.state
-            if force_sale_order:
-                new_state = 'sale'
-            elif force_quotation:
-                new_state = 'quotation'
-            else:
-                new_state = 'sale' if current_state != 'quotation' else 'quotation'
-            
+            # Update POS order — always move to 'sale' regardless of previous state
             order.write({
-                'state': new_state,
+                'state': 'sale',
                 'sale_order_id': sale_order.id,
             })
             
-            _logger.info(f"[POS Confirm] POS order updated to state={new_state} (was {current_state})")
+            _logger.info(f"[POS Confirm] POS order updated to state=sale (was {order.state})")
             
             # Return action with res_id for JavaScript to handle
             results.append({

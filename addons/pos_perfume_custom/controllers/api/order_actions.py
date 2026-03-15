@@ -18,7 +18,7 @@ import logging
 from odoo import http
 from odoo.http import request, Response
 
-from ._helpers import _success, _error, _get_json_body, _check_auth
+from ._helpers import _success, _error, _get_json_body, _check_auth, _serialize_order
 
 _logger = logging.getLogger(__name__)
 
@@ -32,11 +32,13 @@ class PosPerfumeApiOrderActions(http.Controller):
     @http.route('/api/pos_perfume/v1/orders/<int:order_id>/confirm',
                 type='http', auth='none', methods=['POST'], csrf=False)
     def confirm_order(self, order_id, **kwargs):
-        """Confirm a POS order → creates/updates a sale.order and syncs to SAP.
+        """Confirm a POS order → creates/updates a sale.order in 'sale' state and syncs to SAP.
 
         POST /api/pos_perfume/v1/orders/123/confirm
         Allowed from: draft, quotation.
         Requires at least one order line.
+        POS state  → 'sale'
+        SO state   → 'sale'
         """
         try:
             auth_err = _check_auth()
@@ -52,21 +54,9 @@ class PosPerfumeApiOrderActions(http.Controller):
                 return _error('Cannot confirm an order without lines')
 
             order.sudo().action_confirm()
+            order.invalidate_recordset()
 
-            return _success({
-                'id': order.id,
-                'name': order.name,
-                'state': order.state,
-                'sale_order_id': {
-                    'id': order.sale_order_id.id,
-                    'name': order.sale_order_id.name,
-                    'state': order.sale_order_id.state,
-                } if order.sale_order_id else None,
-                'sap_synced': order.sap_synced,
-                'sap_doc_num': order.sap_doc_num or '',
-                'sap_doc_entry': order.sap_doc_entry or 0,
-                'sap_error_message': order.sap_error_message or '',
-            }, message='Order confirmed')
+            return _success(_serialize_order(order), message='Order confirmed')
         except Exception as e:
             _logger.error('[POS API] confirm_order: %s', e, exc_info=True)
             return _error(str(e), 500)
@@ -74,9 +64,13 @@ class PosPerfumeApiOrderActions(http.Controller):
     @http.route('/api/pos_perfume/v1/orders/<int:order_id>/quotation',
                 type='http', auth='none', methods=['POST'], csrf=False)
     def set_quotation(self, order_id, **kwargs):
-        """Set order state to 'quotation'.
+        """Create a Quotation from this POS order.
 
         POST /api/pos_perfume/v1/orders/123/quotation
+        Allowed from: draft.
+        Requires at least one order line.
+        POS state  → 'quotation'
+        SO state   → 'draft'  (Odoo Quotation)
         """
         try:
             auth_err = _check_auth()
@@ -88,9 +82,13 @@ class PosPerfumeApiOrderActions(http.Controller):
                 return _error('Order not found', 404)
             if order.state in ('done', 'cancel'):
                 return _error(f"Cannot change state of a '{order.state}' order")
+            if not order.order_line_ids:
+                return _error('Cannot create a quotation without order lines')
 
-            order.action_quotation()
-            return _success({'id': order.id, 'state': order.state}, message='Order set to quotation')
+            order.sudo().action_quotation()
+            order.invalidate_recordset()
+
+            return _success(_serialize_order(order), message='Quotation created')
         except Exception as e:
             _logger.error('[POS API] set_quotation: %s', e, exc_info=True)
             return _error(str(e), 500)
@@ -101,6 +99,7 @@ class PosPerfumeApiOrderActions(http.Controller):
         """Cancel an order.
 
         POST /api/pos_perfume/v1/orders/123/cancel
+        POS state → 'cancel'
         """
         try:
             auth_err = _check_auth()
@@ -113,8 +112,10 @@ class PosPerfumeApiOrderActions(http.Controller):
             if order.state == 'done':
                 return _error("Cannot cancel a done order")
 
-            order.action_cancel()
-            return _success({'id': order.id, 'state': 'cancel'}, message='Order cancelled')
+            order.sudo().action_cancel()
+            order.invalidate_recordset()
+
+            return _success(_serialize_order(order), message='Order cancelled')
         except Exception as e:
             _logger.error('[POS API] cancel_order: %s', e, exc_info=True)
             return _error(str(e), 500)
@@ -122,9 +123,10 @@ class PosPerfumeApiOrderActions(http.Controller):
     @http.route('/api/pos_perfume/v1/orders/<int:order_id>/draft',
                 type='http', auth='none', methods=['POST'], csrf=False)
     def reset_to_draft(self, order_id, **kwargs):
-        """Reset a cancelled order back to draft.
+        """Reset any order back to draft.
 
         POST /api/pos_perfume/v1/orders/123/draft
+        POS state → 'draft'
         """
         try:
             auth_err = _check_auth()
@@ -135,8 +137,10 @@ class PosPerfumeApiOrderActions(http.Controller):
             if not order.exists():
                 return _error('Order not found', 404)
 
-            order.action_draft()
-            return _success({'id': order.id, 'state': order.state}, message='Order reset to draft')
+            order.sudo().action_draft()
+            order.invalidate_recordset()
+
+            return _success(_serialize_order(order), message='Order reset to draft')
         except Exception as e:
             _logger.error('[POS API] reset_to_draft: %s', e, exc_info=True)
             return _error(str(e), 500)
