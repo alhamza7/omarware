@@ -144,21 +144,39 @@ Roles are hierarchical. A higher role implies all lower roles.
 
 ### Customer Object
 
+The full customer object is returned by `POST /api/crm/customers/<id>`. The list endpoint returns the same shape but without the enriched arrays (`activity_timeline`, `call_log`, etc. are always `[]` in list responses for performance).
+
 ```json
 {
   "id": 42,
   "name": "Ahmad Al-Rashidi",
   "name_ar": "أحمد الراشدي",
   "partner_id": 105,
+
+  // ── Phones ──────────────────────────────────────────────────────────────
   "phone_1": "+9647701234567",
-  "phone_2": "",
+  "phone_2": "+9647709876543",
   "phone_3": "",
+
+  // ── Email ───────────────────────────────────────────────────────────────
   "email": "ahmad@example.com",
+
+  // ── Address ─────────────────────────────────────────────────────────────
   "address": "Baghdad, Al-Mansour",
   "city": "Baghdad",
+  "state": "Baghdad Governorate",
+  "district": "Al-Mansour",
+  "building": "Tower 7, Floor 3",
+  "postal_code": "10001",
   "country_id": 103,
   "country_name": "Iraq",
 
+  // ── Billing / Shipping ───────────────────────────────────────────────────
+  "shipping_address": "Warehouse 4, Industrial Zone, Baghdad",
+  "billing_address": "Main Office, Al-Mansour, Baghdad",
+  "billing_method": "Monthly Invoice",
+
+  // ── Classification ───────────────────────────────────────────────────────
   "stage_id": 3,
   "stage_name": "Active",
   "stage_type": "active",
@@ -166,58 +184,351 @@ Roles are hierarchical. A higher role implies all lower roles.
   "tag_names": ["Wholesale", "VIP"],
   "vip_status": true,
   "is_enterprise": false,
+  "activity_type": "wholesale",
+  "customer_strength": "high",
+  "dealing_method": "cash",
+  "customer_rating": 5,
+  "assigned_agent": "Fatima Hassan",
 
-  "branch_ids": [1, 2],
+  // ── Account Manager ──────────────────────────────────────────────────────
   "account_manager_id": 7,
   "account_manager_name": "Sara Khalid",
-  "referral_source": "instagram",
+  "account_manager_phone": "+9647801234567",
 
+  // ── Branches ─────────────────────────────────────────────────────────────
+  "branch_ids": [1, 2],
+  "branches": [
+    {
+      "id": 1,
+      "name": "Main Branch",
+      "name_ar": "الفرع الرئيسي",
+      "code": "MAIN",
+      "city": "Baghdad",
+      "branch_location": "Al-Mansour, Baghdad",
+      "branch_phone": "+9647712345678",
+      "branch_manager": "Ali Hassan"
+    }
+  ],
+  // root-level shortcuts (first branch only, for backward compat)
+  "branch_location": "Al-Mansour, Baghdad",
+  "branch_manager": "Ali Hassan",
+  "branch_phone": "+9647712345678",
+
+  // ── Referral & Shop ──────────────────────────────────────────────────────
+  "referral_source": "instagram",
   "shop_name": "Al-Rashidi Perfumes",
   "shop_location": "Al-Mansour Market, Shop 12",
+  "shop_images": ["https://host/web/content/123?download=true"],
 
+  // ── Loyalty & Preferences ────────────────────────────────────────────────
   "loyalty_points": 250,
   "preferred_contact_time": "morning",
   "preferred_contact_channel": "whatsapp",
+  "favorite_fragrance": "Oud Rose",
 
+  // ── Commerce ─────────────────────────────────────────────────────────────
   "credit_limit": 5000.0,
   "lifetime_value": 12000.0,
   "credit_debt": 800.0,
+  "total_orders": 38,
 
+  // ── Dates ────────────────────────────────────────────────────────────────
   "member_since": "2023-01-15",
   "last_call_date": "2024-03-10T14:22:00",
-  "last_activity_date": "2024-03-10T14:22:00",
-  "is_deleted": false,
-  "active": true,
-  "create_date": "2023-01-15T08:00:00",
+  "last_purchase_date": "2024-03-08",
+  "days_since_purchase": 2,
 
-  "social_handles": {
-    "instagram": "@ahmad_perfume",
-    "whatsapp": "+9647701234567",
-    "tiktok": "",
-    "snapchat": "",
-    "twitter": "",
-    "telegram": "@ahmadcrm",
-    "pinterest": "",
-    "youtube": ""
-  },
+  // ── Status ───────────────────────────────────────────────────────────────
+  "open_invoice_status": "overdue",
+  "delivery_status": "in_transit",
+
+  // ── Timestamps ───────────────────────────────────────────────────────────
+  "created_at": "2023-01-15T08:00:00",
+  "updated_at": "2024-03-10T14:22:00",
+
+  // ── Social handles (flat keys) ───────────────────────────────────────────
+  "instagram_handle": "@ahmad_perfume",
+  "tiktok_handle": "",
+  "whatsapp_number": "+9647701234567",
+  "snapchat_handle": "",
+  "twitter_handle": "",
+  "telegram_handle": "@ahmadcrm",
+  "pinterest_handle": "",
+  "youtube_handle": "",
+
+  // ── Channel identities (full list) ───────────────────────────────────────
   "channel_identities": [
     {
-      "id": 10,
       "channel": "whatsapp",
       "handle": "+9647701234567",
-      "is_active": true
+      "verified": true,
+      "is_primary": true
     }
   ],
-  "shop_images": ["https://host/web/content/123?access_token=abc"],
-  "documents": [
+
+  // ── Documents / Attachments ───────────────────────────────────────────────
+  "customer_docs": [
+    { "type": "national_id", "name": "ID Card", "url": "https://host/file.pdf" }
+  ],
+  "attachments": [
     {
-      "type": "national_id",
-      "url": "https://host/web/content/124?access_token=xyz",
-      "filename": "national_id.pdf"
+      "id": 88,
+      "name": "contract.pdf",
+      "mimetype": "application/pdf",
+      "url": "/web/content/88?download=true",
+      "uploaded_by": "Sara Khalid"
+    }
+  ],
+
+  // ── Samples ───────────────────────────────────────────────────────────────
+  "samples": [
+    {
+      "id": "sample_42",
+      "name": "Sample – Ahmad Al-Rashidi",
+      "version": "v2",
+      "dateSent": "2024-02-01",
+      "image": "/web/image/lugal.crm.customer/42/sample_image"
+    }
+  ],
+
+  // ── Notes ─────────────────────────────────────────────────────────────────
+  "notes": "Prefers Oud fragrances. Call only in the morning.",
+  "note_author": "Sara Khalid",
+  "internal_note_author": "Sara Khalid",
+
+  // ── Activity Timeline ─────────────────────────────────────────────────────
+  // Merged sorted list of calls, interactions, and tickets (newest first)
+  "activity_timeline": [
+    {
+      "type": "call",
+      "id": 201,
+      "timestamp": "2024-03-10T14:22:00",
+      "description": "outbound — sale confirmed",
+      "date": "2024-03-10",
+      "user": "Sara Khalid"
+    },
+    {
+      "type": "note",
+      "id": 55,
+      "timestamp": "2024-03-09T10:00:00",
+      "description": "Customer requested a new sample",
+      "date": "2024-03-09",
+      "user": "Ahmad Agent"
+    },
+    {
+      "type": "ticket",
+      "id": 12,
+      "timestamp": "2024-03-07T09:30:00",
+      "description": "Delivery delayed",
+      "date": "2024-03-07",
+      "user": "Support Team"
+    }
+  ],
+
+  // ── Call Log ──────────────────────────────────────────────────────────────
+  "call_log": [
+    {
+      "id": 201,
+      "date": "2024-03-10",
+      "time": "14:22",
+      "duration": "185",
+      "agent": "Sara Khalid",
+      "type": "outbound",
+      "notes": "Confirmed next order.",
+      "action": "sale confirmed",
+      "aiSummary": ""
+    }
+  ],
+
+  // ── Payments ──────────────────────────────────────────────────────────────
+  "payments": [
+    {
+      "id": 501,
+      "date": "2024-03-01",
+      "time": "",
+      "amount": 1250.0,
+      "method": "30 Days",
+      "user": "Accountant",
+      "source": "INV/2024/0031",
+      "invoiceId": "INV/2024/0031",
+      "status": "paid"
+    }
+  ],
+
+  // ── Tickets ───────────────────────────────────────────────────────────────
+  "tickets": [
+    {
+      "id": 12,
+      "subject": "Delivery delayed",
+      "status": "resolved",
+      "priority": "high",
+      "date": "2024-03-07",
+      "assignedTo": "Support Team"
+    }
+  ],
+
+  // ── Follow-ups ────────────────────────────────────────────────────────────
+  "follow_ups": [
+    {
+      "id": 9,
+      "title": "Call back after sample delivery",
+      "description": "Check if customer likes the new Oud Rose batch.",
+      "dueDate": "2024-03-15T10:00:00",
+      "assignedTo": "Sara Khalid",
+      "assignedBy": "Manager",
+      "priority": "high",
+      "status": "open"
+    }
+  ],
+
+  // ── Internal Notes ────────────────────────────────────────────────────────
+  "internal_notes": [
+    {
+      "id": 55,
+      "body": "Customer requested a new sample of Oud Rose.",
+      "date": "2024-03-09T10:00:00",
+      "internal_note_author": "Ahmad Agent",
+      "note_author": "Ahmad Agent"
+    }
+  ],
+
+  // ── Top Products ──────────────────────────────────────────────────────────
+  "top_products": [
+    {
+      "name": "Oud Rose 50ml",
+      "quantity": 24.0,
+      "totalSpent": 4800.0,
+      "lastPurchase": "2024-03-08"
     }
   ]
 }
 ```
+
+---
+
+### Customer Object — Field Reference
+
+#### Identity & Contact
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | integer | CRM customer ID |
+| `name` | string | Full name (EN) |
+| `name_ar` | string | Full name (AR) |
+| `partner_id` | integer | Linked Odoo `res.partner` ID |
+| `phone_1` | string | Primary phone |
+| `phone_2` | string | Secondary phone |
+| `phone_3` | string | Third phone |
+| `email` | string | Email address |
+
+#### Address
+
+| Field | Type | Description |
+|---|---|---|
+| `address` | string | Full free-text address |
+| `city` | string | City |
+| `state` | string | State / Province / Governorate |
+| `district` | string | District / Neighbourhood |
+| `building` | string | Building number or name |
+| `postal_code` | string | Postal / ZIP code |
+| `country_id` | integer | Odoo country ID |
+| `country_name` | string | Country display name |
+| `shipping_address` | string | Preferred shipping address |
+| `billing_address` | string | Billing address |
+| `billing_method` | string | Billing method (e.g. "Monthly Invoice") |
+
+#### Classification
+
+| Field | Type | Description |
+|---|---|---|
+| `stage_id` / `stage_name` / `stage_type` | integer / string / string | Pipeline stage |
+| `tag_ids` / `tag_names` | integer[] / string[] | Tags |
+| `vip_status` | boolean | VIP flag |
+| `is_enterprise` | boolean | B2B / enterprise flag |
+| `activity_type` | string | Business activity type |
+| `customer_strength` | string | Strength rating label |
+| `dealing_method` | string | Cash / credit / etc. |
+| `customer_rating` | integer | 0–5 star rating |
+| `assigned_agent` | string | Agent name string |
+
+#### Account Manager
+
+| Field | Type | Description |
+|---|---|---|
+| `account_manager_id` | integer | User ID |
+| `account_manager_name` | string | Full name |
+| `account_manager_phone` | string | Phone from manager's Odoo contact |
+
+#### Branches
+
+| Field | Type | Description |
+|---|---|---|
+| `branch_ids` | integer[] | IDs of linked branches |
+| `branches` | array | Full branch objects (see below) |
+| `branch_location` | string | Address of **first** branch (shortcut) |
+| `branch_manager` | string | Manager name of **first** branch (shortcut) |
+| `branch_phone` | string | Phone of **first** branch (shortcut) |
+
+**Branch object:**
+```json
+{
+  "id": 1,
+  "name": "Main Branch",
+  "name_ar": "الفرع الرئيسي",
+  "code": "MAIN",
+  "city": "Baghdad",
+  "branch_location": "Al-Mansour, Baghdad",
+  "branch_phone": "+9647712345678",
+  "branch_manager": "Ali Hassan"
+}
+```
+
+#### Commerce & Loyalty
+
+| Field | Type | Description |
+|---|---|---|
+| `credit_limit` | float | Credit ceiling |
+| `lifetime_value` | float | Total historical spend |
+| `credit_debt` | float | Current outstanding debt |
+| `total_orders` | integer | Count of non-cancelled orders |
+| `loyalty_points` | float | Accumulated loyalty points |
+| `preferred_contact_time` | string | e.g. "morning" |
+| `preferred_contact_channel` | string | e.g. "whatsapp" |
+| `favorite_fragrance` | string | Customer's favorite fragrance |
+
+#### Dates
+
+| Field | Type | Description |
+|---|---|---|
+| `member_since` | date | When customer was added (YYYY-MM-DD) |
+| `last_call_date` | datetime | Last recorded call |
+| `last_purchase_date` | date | Last purchase date |
+| `days_since_purchase` | integer | Computed: today – last_purchase_date |
+| `created_at` | datetime | Record creation timestamp |
+| `updated_at` | datetime | Last update timestamp |
+
+#### Media & Documents
+
+| Field | Type | Description |
+|---|---|---|
+| `shop_images` | string[] | Array of image URLs |
+| `customer_docs` | object[] | `{type, name, url}` array |
+| `attachments` | object[] | `{id, name, mimetype, url, uploaded_by}` array |
+| `samples` | object[] | `{id, name, version, dateSent, image}` array |
+
+#### Arrays (enriched in detail endpoint only)
+
+| Field | Type | Description |
+|---|---|---|
+| `activity_timeline` | object[] | Merged sorted timeline `{type, id, timestamp, description, date, user}` |
+| `call_log` | object[] | `{id, date, time, duration, agent, type, notes, action, aiSummary}` |
+| `payments` | object[] | `{id, date, time, amount, method, user, source, invoiceId, status}` |
+| `tickets` | object[] | `{id, subject, status, priority, date, assignedTo}` |
+| `follow_ups` | object[] | `{id, title, description, dueDate, assignedTo, assignedBy, priority, status}` |
+| `internal_notes` | object[] | `{id, body, date, internal_note_author, note_author}` |
+| `top_products` | object[] | `{name, quantity, totalSpent, lastPurchase}` — top 10 by spend |
+
+> **Note:** `activity_timeline`, `call_log`, `payments`, `tickets`, `follow_ups`, `internal_notes`, and `top_products` are **only populated by the detail endpoint** (`POST /api/crm/customers/<id>`). The list endpoint always returns `[]` for these fields.
 
 ---
 
@@ -242,9 +553,11 @@ Paginated list of customers with optional filters.
 
 ### `POST /api/crm/customers/<id>` `[Any]`
 
-Get a single customer by CRM `id` or `partner_id`.
+Get the full customer detail for the customer modal. Returns all fields including enriched arrays.
 
-**Response:** Single [Customer Object](#customer-object).
+Accepts either a CRM `id` or a `res.partner` `id` — the API resolves both transparently.
+
+**Response:** Full [Customer Object](#customer-object) with all enriched arrays populated.
 
 ---
 
@@ -262,9 +575,16 @@ Create a new customer.
 | `phone_2` | string | No | Secondary phone |
 | `phone_3` | string | No | Third phone |
 | `email` | string | No | Email address |
-| `address` | string | No | Full address |
+| `address` | string | No | Full free-text address |
 | `city` | string | No | City |
+| `state` | string | No | State / Province / Governorate |
+| `district` | string | No | District / Neighbourhood |
+| `building` | string | No | Building number or name |
+| `postal_code` | string | No | Postal / ZIP code |
 | `country_id` | integer | No | Odoo country ID |
+| `shipping_address` | string | No | Preferred shipping address (`favorite_shipping_address` alias) |
+| `billing_address` | string | No | Billing address |
+| `billing_method` | string | No | Billing method label |
 | `stage_id` | integer | No | Pipeline stage ID |
 | `tag_ids` | integer[] | No | Tag IDs (M2M) |
 | `branch_ids` | integer[] | No | Branch IDs (M2M) |
@@ -274,13 +594,19 @@ Create a new customer.
 | `referral_source` | string | No | How customer was referred |
 | `shop_name` | string | No | Shop or business name |
 | `shop_location` | string | No | Physical shop location |
-| `credit_limit` | float | No | Credit limit (USD) |
+| `favorite_fragrance` | string | No | Customer's favorite fragrance |
+| `credit_limit` | float | No | Credit limit |
+| `preferred_contact_time` | string | No | Preferred contact time |
+| `preferred_contact_channel` | string | No | Preferred contact channel |
 | `instagram_handle` | string | No | Instagram handle |
 | `whatsapp_number` | string | No | WhatsApp number |
 | `tiktok_handle` | string | No | TikTok handle |
 | `snapchat_handle` | string | No | Snapchat handle |
 | `twitter_handle` | string | No | X (Twitter) handle |
 | `telegram_handle` | string | No | Telegram handle |
+| `notes` | string | No | Internal free-text notes |
+| `shop_images` | string[] | No | Array of image URLs (stored as JSON) |
+| `customer_docs` | object[] | No | `{type, name, url}` array (stored as JSON) |
 
 **Response:** `{ "success": true, "data": { "id": 42 } }`
 
