@@ -22,95 +22,182 @@ _SOCIAL_HANDLE_CHANNEL_MAP = {
 }
 
 
+def _parse_json_field(raw):
+    """Safely parse a JSON text field; returns [] on any failure."""
+    import json
+    if not raw:
+        return []
+    try:
+        return json.loads(raw)
+    except Exception:
+        return []
+
+
+def _serialize_branch(branch):
+    """Return a flat dict for one lugal.crm.branch record."""
+    return {
+        'id':               branch.id,
+        'name':             branch.name or '',
+        'name_ar':          branch.name_ar or '',
+        'code':             branch.code or '',
+        'city':             branch.city or '',
+        'branch_location':  branch.address or '',
+        'branch_phone':     branch.phone or '',
+        'branch_manager':   branch.manager_id.name if branch.manager_id else '',
+    }
+
+
+def _serialize_attachment(att):
+    """Return a flat dict for one ir.attachment record, including the uploader."""
+    return {
+        'id':          att.id,
+        'name':        att.name or '',
+        'mimetype':    att.mimetype or '',
+        'url':         f'/web/content/{att.id}?download=true',
+        'uploaded_by': att.create_uid.name if att.create_uid else '',
+    }
+
+
 def _customer_to_dict(customer):
     """Serialize lugal.crm.customer to a dict for API response (full response contract)."""
-    import json
-
-    # --- Social handles from channel_identity records ---
+    # --- Social handles ---
     social = {ci.channel: ci.handle for ci in customer.channel_identity_ids}
 
-    # --- Parse JSON text fields safely ---
-    def _parse_json(raw):
-        if not raw:
-            return []
-        try:
-            return json.loads(raw)
-        except Exception:
-            return []
+    # --- Branches with all sub-fields ---
+    branches = [_serialize_branch(b) for b in customer.branch_ids]
+
+    # --- Attachments with uploader ---
+    attachments = [_serialize_attachment(a) for a in customer.attachment_ids]
+
+    # --- Samples (single-record fields flattened into a 1-item list if set) ---
+    samples = []
+    if customer.sample_version or customer.sample_date or customer.sample_image:
+        samples = [{
+            'id':       f'sample_{customer.id}',
+            'name':     f'Sample – {customer.name}',
+            'version':  customer.sample_version or '',
+            'dateSent': customer.sample_date.isoformat() if customer.sample_date else None,
+            'image':    f'/web/image/lugal.crm.customer/{customer.id}/sample_image' if customer.sample_image else '',
+        }]
+
+    # --- Account manager phone (from linked res.users → res.partner) ---
+    account_manager_phone = ''
+    if customer.account_manager_id and customer.account_manager_id.partner_id:
+        account_manager_phone = customer.account_manager_id.partner_id.phone or ''
 
     return {
-        # Identity
-        'id':                      customer.id,
-        'name':                    customer.name,
-        'name_ar':                 customer.name_ar or '',
-        'partner_id':              customer.partner_id.id if customer.partner_id else None,
-        'phone_1':                 customer.phone_1 or '',
-        'phone_2':                 customer.phone_2 or '',
-        'phone_3':                 customer.phone_3 or '',
-        'email':                   customer.email or '',
-        'address':                 customer.address or '',
-        'city':                    customer.city or '',
-        'country_id':              customer.country_id.id if customer.country_id else None,
-        'country_name':            customer.country_id.name if customer.country_id else '',
-        # Classification
-        'stage_id':                customer.stage_id.id if customer.stage_id else None,
-        'stage_name':              customer.stage_id.name if customer.stage_id else '',
-        'stage_type':              customer.stage_id.stage_type if customer.stage_id else '',
-        'tag_ids':                 customer.tag_ids.ids,
-        'tag_names':               [t.name for t in customer.tag_ids],
-        'vip_status':              customer.vip_status,
-        'is_enterprise':           customer.is_enterprise,
-        # Relations
-        'branch_ids':              customer.branch_ids.ids,
-        'account_manager_id':      customer.account_manager_id.id if customer.account_manager_id else None,
-        'account_manager_name':    customer.account_manager_id.name if customer.account_manager_id else '',
-        'referral_source':         customer.referral_source or '',
-        # Location / Shop
-        'shop_name':               customer.shop_name or '',
-        'shop_location':           customer.shop_location or '',
-        # Loyalty
-        'loyalty_points':          customer.loyalty_points,
-        'preferred_contact_time':  customer.preferred_contact_time or '',
+        # ── Identity ──────────────────────────────────────────────────────
+        'id':                        customer.id,
+        'name':                      customer.name,
+        'name_ar':                   customer.name_ar or '',
+        'partner_id':                customer.partner_id.id if customer.partner_id else None,
+        'phone_1':                   customer.phone_1 or '',
+        'phone_2':                   customer.phone_2 or '',
+        'phone_3':                   customer.phone_3 or '',
+        'email':                     customer.email or '',
+        # ── Address ───────────────────────────────────────────────────────
+        'address':                   customer.address or '',
+        'city':                      customer.city or '',
+        'state':                     customer.state or '',
+        'district':                  customer.district or '',
+        'building':                  customer.building or '',
+        'postal_code':               customer.postal_code or '',
+        'country_id':                customer.country_id.id if customer.country_id else None,
+        'country_name':              customer.country_id.name if customer.country_id else '',
+        # ── Billing / Shipping ────────────────────────────────────────────
+        'shipping_address':          customer.favorite_shipping_address or '',
+        'billing_address':           customer.billing_address or '',
+        'billing_method':            customer.billing_method or '',
+        # ── Classification ────────────────────────────────────────────────
+        'stage_id':                  customer.stage_id.id if customer.stage_id else None,
+        'stage_name':                customer.stage_id.name if customer.stage_id else '',
+        'stage_type':                customer.stage_id.stage_type if customer.stage_id else '',
+        'tag_ids':                   customer.tag_ids.ids,
+        'tag_names':                 [t.name for t in customer.tag_ids],
+        'vip_status':                customer.vip_status,
+        'is_enterprise':             customer.is_enterprise,
+        # ── Account Manager ───────────────────────────────────────────────
+        'account_manager_id':        customer.account_manager_id.id if customer.account_manager_id else None,
+        'account_manager_name':      customer.account_manager_id.name if customer.account_manager_id else '',
+        'account_manager_phone':     account_manager_phone,
+        # ── Relations ─────────────────────────────────────────────────────
+        'branch_ids':                customer.branch_ids.ids,
+        'branches':                  branches,
+        'referral_source':           customer.referral_source or '',
+        # ── Location / Shop ───────────────────────────────────────────────
+        'shop_name':                 customer.shop_name or '',
+        'shop_location':             customer.shop_location or '',
+        # ── Loyalty ───────────────────────────────────────────────────────
+        'loyalty_points':            customer.loyalty_points,
+        'preferred_contact_time':    customer.preferred_contact_time or '',
         'preferred_contact_channel': customer.preferred_contact_channel or '',
-        # Commerce
-        'credit_limit':            customer.credit_limit,
-        'lifetime_value':          customer.lifetime_value,
-        'credit_debt':             customer.credit_debt,
-        # Dates
-        'member_since':            customer.member_since.isoformat() if customer.member_since else None,
-        'last_call_date':          customer.last_call_date.isoformat() if customer.last_call_date else None,
-        'last_purchase_date':      customer.last_purchase_date.isoformat() if customer.last_purchase_date else None,
-        'days_since_purchase':     customer.days_since_purchase,
-        # Status
-        'open_invoice_status':     customer.open_invoice_status or '',
-        'delivery_status':         customer.delivery_status or '',
-        # Timestamps
-        'created_at':              customer.create_date.isoformat() if customer.create_date else None,
-        'updated_at':              customer.write_date.isoformat() if customer.write_date else None,
-        # Social handles (from channel_identity records)
-        'instagram_handle':        social.get('instagram', ''),
-        'tiktok_handle':           social.get('tiktok', ''),
-        'whatsapp_number':         social.get('whatsapp', ''),
-        'snapchat_handle':         social.get('snapchat', ''),
-        'twitter_handle':          social.get('x', ''),
-        'telegram_handle':         social.get('telegram', ''),
-        'pinterest_handle':        social.get('pinterest', ''),
-        'youtube_handle':          social.get('youtube', ''),
-        # Channel identities (full list for the kanban/detail view)
-        'channel_identities':      [
-            {'channel': ci.channel, 'handle': ci.handle, 'verified': ci.is_verified}
+        # ── Commerce ──────────────────────────────────────────────────────
+        'credit_limit':              customer.credit_limit,
+        'lifetime_value':            customer.lifetime_value,
+        'credit_debt':               customer.credit_debt,
+        # ── Dates ─────────────────────────────────────────────────────────
+        'member_since':              customer.member_since.isoformat() if customer.member_since else None,
+        'last_call_date':            customer.last_call_date.isoformat() if customer.last_call_date else None,
+        'last_purchase_date':        customer.last_purchase_date.isoformat() if customer.last_purchase_date else None,
+        'days_since_purchase':       customer.days_since_purchase,
+        # ── Status ────────────────────────────────────────────────────────
+        'open_invoice_status':       customer.open_invoice_status or '',
+        'delivery_status':           customer.delivery_status or '',
+        # ── Timestamps ────────────────────────────────────────────────────
+        'created_at':                customer.create_date.isoformat() if customer.create_date else None,
+        'updated_at':                customer.write_date.isoformat() if customer.write_date else None,
+        # ── Social handles (flat keys for legacy compat) ───────────────────
+        'instagram_handle':          social.get('instagram', ''),
+        'tiktok_handle':             social.get('tiktok', ''),
+        'whatsapp_number':           social.get('whatsapp', ''),
+        'snapchat_handle':           social.get('snapchat', ''),
+        'twitter_handle':            social.get('x', ''),
+        'telegram_handle':           social.get('telegram', ''),
+        'pinterest_handle':          social.get('pinterest', ''),
+        'youtube_handle':            social.get('youtube', ''),
+        # ── Channel identities (full list with is_primary flag) ────────────
+        'channel_identities':        [
+            {
+                'channel':     ci.channel,
+                'handle':      ci.handle,
+                'verified':    ci.is_verified,
+                'is_primary':  ci.is_primary,
+            }
             for ci in customer.channel_identity_ids
         ],
-        # Extended classification
-        'activity_type':           customer.activity_type or '',
-        'customer_strength':       customer.customer_strength or '',
-        'dealing_method':          customer.dealing_method or '',
-        'customer_rating':         customer.customer_rating or 0,
-        'assigned_agent':          customer.assigned_agent or '',
-        'notes':                   customer.notes or '',
-        # Media (JSON arrays)
-        'shop_images':             _parse_json(customer.shop_images),
-        'customer_docs':           _parse_json(customer.customer_docs),
+        # ── Extended classification ───────────────────────────────────────
+        'activity_type':             customer.activity_type or '',
+        'customer_strength':         customer.customer_strength or '',
+        'dealing_method':            customer.dealing_method or '',
+        'customer_rating':           customer.customer_rating or 0,
+        'assigned_agent':            customer.assigned_agent or '',
+        # ── Notes ─────────────────────────────────────────────────────────
+        'notes':                     customer.notes or '',
+        # ── Media (JSON arrays) ───────────────────────────────────────────
+        'shop_images':               _parse_json_field(customer.shop_images),
+        'customer_docs':             _parse_json_field(customer.customer_docs),
+        # ── Attachments ───────────────────────────────────────────────────
+        'attachments':               attachments,
+        # ── Samples ───────────────────────────────────────────────────────
+        'samples':                   samples,
+        # ── Preferences ───────────────────────────────────────────────────
+        'favorite_fragrance':        customer.favorite_fragrance or '',
+        # ── Placeholders (enriched in get_customer via dedicated queries) ──
+        'total_orders':              0,
+        'activity_timeline':         [],
+        'call_log':                  [],
+        'payments':                  [],
+        'tickets':                   [],
+        'follow_ups':                [],
+        'internal_notes':            [],
+        'top_products':              [],
+        # branch sub-fields at root level (backward compat shortcuts)
+        'branch_location':           branches[0]['branch_location'] if branches else '',
+        'branch_manager':            branches[0]['branch_manager'] if branches else '',
+        'branch_phone':              branches[0]['branch_phone'] if branches else '',
+        # note_author / internal_note_author are injected by get_customer
+        'note_author':               '',
+        'internal_note_author':      '',
     }
 
 
@@ -283,21 +370,232 @@ class CustomerController(http.Controller):
 
     @http.route('/api/crm/customers/<int:customer_id>', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def get_customer(self, customer_id, **kwargs):
-        """Get a single customer by ID."""
+        """
+        Return a single customer with all detail-modal data:
+        - Full customer fields (addresses, preferences, billing, etc.)
+        - account_manager_phone
+        - total_orders count
+        - branches with location / manager / phone per branch
+        - attachments with uploaded_by
+        - samples list
+        - activity_timeline (calls + interactions + messages + tickets merged)
+        - call_log (detailed call records)
+        - tickets list
+        - follow_ups (lugal.crm.task records)
+        - internal_notes (interaction_type='note')
+        - top_products (most purchased items)
+        - payments stub (account.move lines — empty list when module absent)
+        """
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
             customer = _resolve_customer(customer_id)
             if not customer.exists() or customer.is_deleted:
                 return {'success': False, 'error': 'Customer not found'}
+
             data = _customer_to_dict(customer)
-            # Add channel identities
+
+            # ── Channel identities (rich version with is_primary) ─────────
             data['channel_identities'] = [
-                {'channel': c.channel, 'handle': c.handle, 'is_verified': c.is_verified, 'is_primary': c.is_primary}
+                {
+                    'channel':    c.channel,
+                    'handle':     c.handle,
+                    'is_verified': c.is_verified,
+                    'is_primary': c.is_primary,
+                }
                 for c in request.env['lugal.crm.channel.identity'].sudo().search([
                     ('customer_id', '=', customer.id), ('is_deleted', '=', False)
                 ])
             ]
+
+            # ── Total orders ──────────────────────────────────────────────
+            if customer.partner_id:
+                data['total_orders'] = request.env['pos.perfume.order'].sudo().search_count([
+                    ('partner_id', '=', customer.partner_id.id),
+                    ('state', 'not in', ('cancel',)),
+                ])
+            else:
+                data['total_orders'] = 0
+
+            # ── Activity timeline (calls + interactions + messages + tickets) ──
+            timeline = []
+
+            calls = request.env['lugal.crm.call'].sudo().search([
+                ('customer_id', '=', customer.id), ('is_deleted', '=', False)
+            ], limit=100)
+            for c in calls:
+                timeline.append({
+                    'type':             'call',
+                    'id':               c.id,
+                    'timestamp':        c.started_at.isoformat() if c.started_at else None,
+                    'description':      f'{c.call_type} — {c.outcome or ""}',
+                    'date':             c.started_at.date().isoformat() if c.started_at else None,
+                    'user':             c.agent_id.name if c.agent_id else '',
+                })
+
+            interactions = request.env['lugal.crm.interaction'].sudo().search([
+                ('customer_id', '=', customer.id),
+                ('is_deleted', '=', False),
+                ('interaction_type', 'not in', ('note',)),
+            ], limit=100)
+            for i in interactions:
+                timeline.append({
+                    'type':        i.interaction_type,
+                    'id':          i.id,
+                    'timestamp':   i.interaction_date.isoformat() if i.interaction_date else None,
+                    'description': i.subject or '',
+                    'date':        i.interaction_date.date().isoformat() if i.interaction_date else None,
+                    'user':        i.user_id.name if i.user_id else '',
+                })
+
+            tickets_for_timeline = request.env['lugal.crm.ticket'].sudo().search([
+                ('customer_id', '=', customer.id), ('is_deleted', '=', False)
+            ], limit=100)
+            for t in tickets_for_timeline:
+                timeline.append({
+                    'type':        'ticket',
+                    'id':          t.id,
+                    'timestamp':   t.create_date.isoformat() if t.create_date else None,
+                    'description': t.title or '',
+                    'date':        t.create_date.date().isoformat() if t.create_date else None,
+                    'user':        t.assigned_to_id.name if t.assigned_to_id else '',
+                })
+
+            timeline.sort(key=lambda x: x.get('timestamp') or '', reverse=True)
+            data['activity_timeline'] = timeline
+
+            # ── Call log (detailed) ───────────────────────────────────────
+            call_records = request.env['lugal.crm.call'].sudo().search([
+                ('customer_id', '=', customer.id), ('is_deleted', '=', False)
+            ], limit=200, order='started_at desc')
+            data['call_log'] = [
+                {
+                    'id':         c.id,
+                    'date':       c.started_at.date().isoformat() if c.started_at else None,
+                    'time':       c.started_at.strftime('%H:%M') if c.started_at else '',
+                    'duration':   str(c.duration_seconds or 0),
+                    'agent':      c.agent_id.name if c.agent_id else '',
+                    'type':       c.call_type or '',
+                    'notes':      c.notes or '',
+                    'action':     c.outcome or '',
+                    'aiSummary':  '',
+                }
+                for c in call_records
+            ]
+
+            # ── Tickets ───────────────────────────────────────────────────
+            ticket_records = request.env['lugal.crm.ticket'].sudo().search([
+                ('customer_id', '=', customer.id), ('is_deleted', '=', False)
+            ], limit=100, order='create_date desc')
+            data['tickets'] = [
+                {
+                    'id':         t.id,
+                    'subject':    t.title or '',
+                    'status':     t.status or '',
+                    'priority':   t.priority or '',
+                    'date':       t.create_date.date().isoformat() if t.create_date else None,
+                    'assignedTo': t.assigned_to_id.name if t.assigned_to_id else '',
+                }
+                for t in ticket_records
+            ]
+
+            # ── Follow-ups (tasks) ────────────────────────────────────────
+            task_records = request.env['lugal.crm.task'].sudo().search([
+                ('customer_id', '=', customer.id), ('is_deleted', '=', False)
+            ], limit=100, order='due_date asc')
+            data['follow_ups'] = [
+                {
+                    'id':          t.id,
+                    'title':       t.title or '',
+                    'description': t.description or '',
+                    'dueDate':     t.due_date.isoformat() if t.due_date else None,
+                    'assignedTo':  t.assigned_to_id.name if t.assigned_to_id else '',
+                    'assignedBy':  t.created_by_id.name if t.created_by_id else '',
+                    'priority':    t.priority or '',
+                    'status':      t.status or '',
+                }
+                for t in task_records
+            ]
+
+            # ── Internal notes ────────────────────────────────────────────
+            note_records = request.env['lugal.crm.interaction'].sudo().search([
+                ('customer_id', '=', customer.id),
+                ('is_deleted', '=', False),
+                ('interaction_type', '=', 'note'),
+            ], limit=100, order='interaction_date desc')
+            data['internal_notes'] = [
+                {
+                    'id':                   n.id,
+                    'body':                 n.body or '',
+                    'date':                 n.interaction_date.isoformat() if n.interaction_date else None,
+                    'internal_note_author': n.user_id.name if n.user_id else '',
+                    'note_author':          n.user_id.name if n.user_id else '',
+                }
+                for n in note_records
+            ]
+            # Convenience root-level shortcuts used by some UI components
+            if note_records:
+                data['note_author']          = note_records[0].user_id.name if note_records[0].user_id else ''
+                data['internal_note_author'] = data['note_author']
+
+            # ── Top products ──────────────────────────────────────────────
+            if customer.partner_id:
+                lines = request.env['pos.perfume.order.line'].sudo().search([
+                    ('order_id.partner_id', '=', customer.partner_id.id),
+                    ('order_id.state', 'not in', ('cancel',)),
+                ], limit=500)
+                product_stats = {}
+                for line in lines:
+                    pid = line.product_id.id if line.product_id else None
+                    if not pid:
+                        continue
+                    if pid not in product_stats:
+                        product_stats[pid] = {
+                            'name':         line.product_id.name or '',
+                            'quantity':     0.0,
+                            'totalSpent':   0.0,
+                            'lastPurchase': None,
+                        }
+                    product_stats[pid]['quantity']   += line.qty or 0
+                    product_stats[pid]['totalSpent'] += (line.qty or 0) * (line.unit_price or 0)
+                    order_date = line.order_id.create_date
+                    if order_date:
+                        date_str = order_date.date().isoformat()
+                        if not product_stats[pid]['lastPurchase'] or date_str > product_stats[pid]['lastPurchase']:
+                            product_stats[pid]['lastPurchase'] = date_str
+
+                top = sorted(product_stats.values(), key=lambda x: x['totalSpent'], reverse=True)[:10]
+                data['top_products'] = top
+            else:
+                data['top_products'] = []
+
+            # ── Payments (account.move lines if module present) ───────────
+            try:
+                if customer.partner_id:
+                    invoices = request.env['account.move'].sudo().search([
+                        ('partner_id', '=', customer.partner_id.id),
+                        ('move_type', 'in', ('out_invoice', 'out_receipt')),
+                        ('state', '=', 'posted'),
+                    ], limit=200, order='invoice_date desc')
+                    data['payments'] = [
+                        {
+                            'id':        inv.id,
+                            'date':      inv.invoice_date.isoformat() if inv.invoice_date else None,
+                            'time':      '',
+                            'amount':    inv.amount_total,
+                            'method':    inv.invoice_payment_term_id.name if inv.invoice_payment_term_id else '',
+                            'user':      inv.invoice_user_id.name if inv.invoice_user_id else '',
+                            'source':    inv.ref or '',
+                            'invoiceId': inv.name or '',
+                            'status':    inv.payment_state or '',
+                        }
+                        for inv in invoices
+                    ]
+                else:
+                    data['payments'] = []
+            except Exception:
+                data['payments'] = []
+
             return {'success': True, 'data': data}
         except Exception as e:
             return crm_error(e, 'get_customer')

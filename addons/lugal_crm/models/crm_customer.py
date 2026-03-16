@@ -80,6 +80,16 @@ class CrmCustomer(models.Model):
     shop_location = fields.Char(string='Shop Location / موقع المحل', tracking=True)
     favorite_shipping_address = fields.Text(string='Favorite Shipping Address / عنوان الشحن المفضل', tracking=True)
     billing_address = fields.Text(string='Billing Address / عنوان الفوترة', tracking=True)
+    billing_method = fields.Char(string='Billing Method / طريقة الفوترة', tracking=True)
+
+    # --- Extended Address ---
+    state = fields.Char(string='State / Province / المحافظة', tracking=True)
+    district = fields.Char(string='District / الحي', tracking=True)
+    building = fields.Char(string='Building / المبنى', tracking=True)
+    postal_code = fields.Char(string='Postal Code / الرمز البريدي', tracking=True)
+
+    # --- Preferences ---
+    favorite_fragrance = fields.Char(string='Favorite Fragrance / العطر المفضل', tracking=True)
 
     # --- Samples ---
     sample_version = fields.Char(string='Sample Version / نسخة العينة', tracking=True)
