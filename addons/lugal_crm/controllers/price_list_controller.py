@@ -77,25 +77,33 @@ def _get_uoms_for_product(product, pricelist):
 
     # All fixed-price pricelist items for this product.
     # Items are stored against product_tmpl_id (applied_on=1_product), not product_id.
+    # Order: zero-price rows first so that if a non-zero row exists for the same UoM,
+    # it wins (seen_uom_ids de-duplication keeps only the first encounter per UoM,
+    # so we process zero-price rows first and let non-zero rows overwrite them).
     items = request.env['product.pricelist.item'].search([
         ('pricelist_id', '=', pricelist.id),
         ('product_tmpl_id', '=', product.product_tmpl_id.id),
         ('compute_price', '=', 'fixed'),
-    ])
+    ], order='fixed_price asc, write_date asc, id asc')
 
+    # Build a dict keyed by uom_id so non-zero prices overwrite zeros for the same UoM
+    uom_price_map = {}
     for item in items:
         uom = item.product_uom_id if item.product_uom_id else sales_uom
-        if not uom or uom.id in seen_uom_ids:
+        if not uom:
             continue
         try:
             uom_price = pricelist._get_product_price(product, 1.0, uom=uom)
         except Exception:
             uom_price = product.list_price
-        seen_uom_ids.add(uom.id)
-        result.append({'uom_id': uom.id, 'uom_name': uom.name, 'price': uom_price})
+        # Always keep the higher price for the same UoM
+        if uom.id not in uom_price_map or uom_price > uom_price_map[uom.id]['price']:
+            uom_price_map[uom.id] = {'uom_id': uom.id, 'uom_name': uom.name, 'price': uom_price}
+
+    result = list(uom_price_map.values())
 
     # Guarantee the sales UoM is in the list even with no explicit pricelist items
-    if sales_uom and sales_uom.id not in seen_uom_ids:
+    if sales_uom and sales_uom.id not in uom_price_map:
         try:
             uom_price = pricelist._get_product_price(product, 1.0, uom=sales_uom)
         except Exception:

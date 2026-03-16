@@ -113,11 +113,13 @@ class PosPerfumeController(http.Controller):
             _logger.info(f"[POS] UoM Group: {extended_info.sap_uom_group_id.name}, UoMs: {available_uom_ids}")
 
         # Step 2: Get pricelist items for this product
+        # Order: non-zero prices first, then newest. This means when we later build
+        # the UoM dict (last-write wins per uom_id), we always prefer a priced row.
         items = request.env['product.pricelist.item'].search([
             ('pricelist_id', '=', pricelist.id),
             ('product_tmpl_id', '=', product.product_tmpl_id.id),
             '|', ('product_id', '=', False), ('product_id', '=', product.id),
-        ], order='write_date asc, id asc')
+        ], order='fixed_price asc, write_date asc, id asc')
         _logger.info(f"[POS] Found {len(items)} pricelist items")
 
         # Step 3: Process items with group filter

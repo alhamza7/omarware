@@ -442,9 +442,10 @@ class SapProductPricelistSync(models.Model):
     def _create_or_update_pricelist_item(self, sync_record, product, pricelist, price, uom=None):
         """Create or update product.pricelist.item in Odoo.
 
-        Searches for existing items by product_uom_id first.
-        Also updates legacy items that used product_packaging_id for the same UoM,
-        preventing stale prices from old sync runs from overriding current SAP data.
+        Deduplication strategy:
+          - Among all matching rows (by pricelist + tmpl + uom), keep the one with
+            the highest fixed_price. If all are zero, keep the newest row.
+          - Delete the rest to prevent zero-price duplicates from overriding real prices.
         """
         try:
             tmpl_id = product.product_tmpl_id.id
@@ -461,7 +462,7 @@ class SapProductPricelistSync(models.Model):
                 domain = base_domain + [('product_uom_id', '=', False)]
 
             matching_items = self.env['product.pricelist.item'].search(
-                domain, order='write_date desc, id desc'
+                domain, order='fixed_price desc, write_date desc, id desc'
             )
 
             # Also gather any legacy packaging-based items for the same UoM so we can
@@ -470,11 +471,18 @@ class SapProductPricelistSync(models.Model):
             if uom:
                 legacy_items = self.env['product.pricelist.item'].search(
                     base_domain + [('product_packaging_id', '=', uom.id)],
-                    order='write_date desc, id desc',
+                    order='fixed_price desc, write_date desc, id desc',
                 )
 
+            # Sort: non-zero prices first, then by write_date desc.
+            # This guarantees we always update (and keep) the highest-priced row.
             candidate_items = (matching_items | legacy_items).sorted(
-                key=lambda item: (item.write_date or item.create_date or fields.Datetime.now(), item.id),
+                key=lambda item: (
+                    1 if (item.fixed_price or 0) > 0 else 0,
+                    item.fixed_price or 0,
+                    item.write_date or item.create_date or fields.Datetime.now(),
+                    item.id,
+                ),
                 reverse=True,
             )
             pricelist_item = candidate_items[:1]
