@@ -30,14 +30,18 @@ class PosPerfumeController(http.Controller):
             if not product.exists():
                 return {'success': False, 'error': 'Product not found'}
             
-            # Ensure pricelist is a single record
+            # Ensure pricelist is a single record; skip empty pricelists
             pricelist = None
             if pricelist_id:
                 if isinstance(pricelist_id, list):
                     pricelist_id = pricelist_id[0]
-                pricelist = request.env['product.pricelist'].browse(int(pricelist_id))
-                if not pricelist.exists():
-                    pricelist = None
+                candidate = request.env['product.pricelist'].browse(int(pricelist_id))
+                if candidate.exists():
+                    has_items = request.env['product.pricelist.item'].sudo().search_count([
+                        ('pricelist_id', '=', candidate.id),
+                        ('fixed_price', '>', 0),
+                    ])
+                    pricelist = candidate if has_items else None
             
             # Get all UoMs with prices from pricelist items (uses product_packaging_id mapping)
             available_uoms = self._get_uoms_from_pricelist(product, pricelist)

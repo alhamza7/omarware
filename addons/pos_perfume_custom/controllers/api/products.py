@@ -274,8 +274,14 @@ class PosPerfumeApiProducts(http.Controller):
 
             pricelist = None
             if pricelist_id:
-                pricelist = request.env['product.pricelist'].browse(int(pricelist_id))
-                if not pricelist.exists():
+                candidate = request.env['product.pricelist'].browse(int(pricelist_id))
+                if candidate.exists():
+                    has_items = request.env['product.pricelist.item'].sudo().search_count([
+                        ('pricelist_id', '=', candidate.id),
+                        ('fixed_price', '>', 0),
+                    ])
+                    pricelist = candidate if has_items else ctrl._resolve_best_pricelist()
+                else:
                     pricelist = None
 
             available_uoms = ctrl._get_uoms_from_pricelist(product, pricelist)
@@ -296,12 +302,47 @@ class PosPerfumeApiProducts(http.Controller):
 # ---------------------------------------------------------------------------
 
 def _resolve_pricelist(pricelist_id):
-    """Return a product.pricelist record or None."""
+    """
+    Return a product.pricelist record for the given ID.
+
+    If the requested pricelist exists but contains NO non-zero priced items,
+    it is considered empty and the best available pricelist is returned instead.
+    This prevents the frontend from accidentally passing an empty duplicate
+    pricelist ID (e.g. id=1) and receiving all-zero prices.
+
+    Result is cached per request+ID to avoid repeated DB lookups.
+    """
     if not pricelist_id:
         return None
     pid = pricelist_id[0] if isinstance(pricelist_id, list) else int(pricelist_id)
+
+    cache_key = f'_pricelist_resolved_{pid}'
+    cached = getattr(request, cache_key, 'UNSET')
+    if cached != 'UNSET':
+        return cached
+
     pricelist = request.env['product.pricelist'].browse(pid)
-    return pricelist if pricelist.exists() else None
+    if not pricelist.exists():
+        setattr(request, cache_key, None)
+        return None
+
+    # Check if this pricelist has any priced items
+    request.env.cr.execute(
+        "SELECT 1 FROM product_pricelist_item WHERE pricelist_id=%s AND fixed_price>0 LIMIT 1",
+        (pid,)
+    )
+    if request.env.cr.fetchone():
+        setattr(request, cache_key, pricelist)
+        return pricelist
+
+    # Empty pricelist — auto-select the best populated one
+    _logger.warning(
+        '[POS API] pricelist_id=%s has no priced items — falling back to best pricelist', pid
+    )
+    from odoo.addons.pos_perfume_custom.controllers.pos_perfume_controller import PosPerfumeController
+    best = PosPerfumeController()._resolve_best_pricelist()
+    setattr(request, cache_key, best)
+    return best
 
 
 # Brand key → default_code prefix list (used when SAP ext not available)
