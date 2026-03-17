@@ -162,35 +162,38 @@ class PosPerfumeController(http.Controller):
 
     def _resolve_best_pricelist(self):
         """
-        Auto-select the best pricelist when none is explicitly passed.
-        Prefers a pricelist named 'Price List 1' with the most non-zero priced items.
-        Falls back to the first active pricelist.
+        Auto-select the pricelist with the most non-zero priced items.
+
+        Uses a single SQL query to find the best pricelist ID directly — avoids
+        ORM search overhead and the risk of picking an empty duplicate pricelist.
+        Result is cached per request to avoid repeating the query per product.
         """
+        cached = getattr(request, '_cached_best_pricelist', None)
+        if cached is not None:
+            return cached
+
         try:
-            Pricelist = request.env['product.pricelist'].sudo()
-            # Find candidates matching 'Price List 1'
-            candidates = Pricelist.search([
-                ('active', '=', True),
-                ('name', 'ilike', 'Price List 1'),
-            ])
-            if not candidates:
-                return Pricelist.search([('active', '=', True)], limit=1, order='id asc')
+            request.env.cr.execute("""
+                SELECT pricelist_id, COUNT(*) AS cnt
+                FROM product_pricelist_item
+                WHERE fixed_price > 0
+                GROUP BY pricelist_id
+                ORDER BY cnt DESC
+                LIMIT 1
+            """)
+            row = request.env.cr.fetchone()
+            if row:
+                pl = request.env['product.pricelist'].sudo().browse(row[0])
+                if pl.exists() and pl.active:
+                    request._cached_best_pricelist = pl
+                    return pl
 
-            if len(candidates) == 1:
-                return candidates[0]
-
-            # Pick the one with the most non-zero priced items
-            best = candidates[0]
-            best_count = 0
-            for pl in candidates:
-                count = request.env['product.pricelist.item'].sudo().search_count([
-                    ('pricelist_id', '=', pl.id),
-                    ('fixed_price', '>', 0),
-                ])
-                if count > best_count:
-                    best_count = count
-                    best = pl
-            return best
+            # Fallback: first active pricelist
+            pl = request.env['product.pricelist'].sudo().search(
+                [('active', '=', True)], limit=1, order='id asc'
+            )
+            request._cached_best_pricelist = pl or None
+            return pl or None
         except Exception:
             return None
 

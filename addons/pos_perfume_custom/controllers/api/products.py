@@ -29,13 +29,14 @@ class PosPerfumeApiProducts(http.Controller):
 
     @http.route('/api/pos_perfume/v1/products', type='http', auth='none', methods=['GET'], csrf=False)
     def list_products(self, query='', limit='80', offset='0', pricelist_id='',
-                      brand='', category_type='', category_id='', **kwargs):
+                      brand='', category_type='', category_id='', has_price_only='', **kwargs):
         """Search and list products.
 
         GET /api/pos_perfume/v1/products?query=perfume&limit=80&pricelist_id=1
             &brand=robertet               (filter by brand key)
             &category_type=fragrances     (filter by category type key)
             &category_id=9               (filter by product.category id)
+            &has_price_only=1            (only return products with price > 0)
         """
         try:
             auth_err = _check_auth()
@@ -68,15 +69,28 @@ class PosPerfumeApiProducts(http.Controller):
             if category_id:
                 domain += [('categ_id', '=', int(category_id))]
 
+            ctrl = PosPerfumeController()
+
+            # has_price_only: restrict to products with at least one non-zero pricelist item.
+            # Resolves pricelist early here so we can use it for the filter.
+            resolved_pricelist = _resolve_pricelist(pricelist_id) if pricelist_id else None
+            if has_price_only in ('1', 'true', 'True', True):
+                filter_pl = resolved_pricelist or ctrl._resolve_best_pricelist()
+                if filter_pl:
+                    priced_tmpl_ids = request.env['product.pricelist.item'].sudo().search([
+                        ('pricelist_id', '=', filter_pl.id),
+                        ('compute_price', '=', 'fixed'),
+                        ('fixed_price', '>', 0),
+                    ]).mapped('product_tmpl_id').ids
+                    domain.append(('product_tmpl_id', 'in', priced_tmpl_ids))
+
             products = request.env['product.product'].search(
                 domain, limit=limit, offset=offset, order='name asc'
             )
             total = request.env['product.product'].search_count(domain)
 
             # Resolve pricelist once for the whole page (used for UoM prices)
-            pricelist = _resolve_pricelist(pricelist_id) if pricelist_id else None
-
-            ctrl = PosPerfumeController()
+            pricelist = resolved_pricelist
 
             # Fetch all warehouse stock in one batch query then attach per-product
             warehouse_map = _get_warehouses_batch([p.id for p in products])

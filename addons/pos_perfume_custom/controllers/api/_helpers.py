@@ -766,6 +766,7 @@ def _serialize_product(product, warehouses=None, available_uoms=None, sap_ext=No
         'brand': _get_brand(product, sap_ext=sap_ext),
         'category_type': _get_category_type(product, sap_ext=sap_ext),
         'available_uoms': available_uoms,
+        'has_price': any(u.get('price', 0) > 0 for u in available_uoms),
         'warehouses': warehouses if warehouses is not None else [],
     }
 
