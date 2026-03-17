@@ -1,0 +1,3 @@
+[submodule "addons/lugal_crm"]
+	path = addons/lugal_crm
+	url = https://github.com/alhamza7/lugal_crm.git
