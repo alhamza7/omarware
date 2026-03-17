@@ -92,29 +92,33 @@ class PosPerfumeController(http.Controller):
         """
         Get all UoMs with prices for a product using its SAP UoM Group + pricelist items.
 
+        All UoMs from the product's SAP UoM group are always included in the result.
+        UoMs that have a pricelist entry get their price; UoMs with no entry get price=0.
+
         Special handling for items where product_uom_id = Units (id=1):
         SAP sometimes exports prices with UoM = Units regardless of the actual unit.
-        These items are treated as generic prices and mapped to the product's actual UoM group.
-        
-        Fallback strategy: if UoM group filtering produces no results, retry without the filter
-        to avoid showing price = 0 when the pricelist item's UoM doesn't match the group.
+        These items are treated as generic prices and mapped to the product's actual UoM.
+
+        Fallback: if UoM group filtering produces no pricelist matches, retry without the
+        filter so we never silently drop all prices due to a UoM mismatch.
         """
         if not pricelist:
             return [{'id': product.uom_id.id, 'name': product.uom_id.name, 'price': product.list_price}]
 
-        # Step 1: Get available UoMs from SAP UoM Group
+        # Step 1: Collect all UoMs defined in the product's SAP UoM Group
         available_uom_ids = []
+        group_uom_objects = {}   # uom_id -> uom record, for merging later
         extended_info = request.env['sap.product.extended'].search(
             [('product_id', '=', product.id)], limit=1
         )
         if extended_info and extended_info.sap_uom_group_id:
             uom_syncs = extended_info.sap_uom_group_id.uom_ids
-            available_uom_ids = uom_syncs.mapped('odoo_uom_id').ids
+            for uom_rec in uom_syncs.mapped('odoo_uom_id'):
+                available_uom_ids.append(uom_rec.id)
+                group_uom_objects[uom_rec.id] = uom_rec
             _logger.info(f"[POS] UoM Group: {extended_info.sap_uom_group_id.name}, UoMs: {available_uom_ids}")
 
-        # Step 2: Get pricelist items for this product
-        # Order: non-zero prices first, then newest. This means when we later build
-        # the UoM dict (last-write wins per uom_id), we always prefer a priced row.
+        # Step 2: Get pricelist items — non-zero prices first so they win in the dict merge
         items = request.env['product.pricelist.item'].search([
             ('pricelist_id', '=', pricelist.id),
             ('product_tmpl_id', '=', product.product_tmpl_id.id),
@@ -122,23 +126,28 @@ class PosPerfumeController(http.Controller):
         ], order='fixed_price asc, write_date asc, id asc')
         _logger.info(f"[POS] Found {len(items)} pricelist items")
 
-        # Step 3: Process items with group filter
+        # Step 3: Build priced dict from pricelist items
         uoms_with_prices = self._process_pricelist_items(items, product, available_uom_ids)
 
-        # Step 4: Fallback - if group filter produced nothing, retry without filter
-        # This handles products where SAP uses 'Units' as UoM code even though actual
-        # unit is '0.25 كغم' or similar - the UoM id doesn't match the group
+        # Step 4: Fallback — if group filter gave nothing, retry without filter
         if not uoms_with_prices and items:
             _logger.info(f"[POS] Group filter yielded no results - retrying without UoM filter")
             uoms_with_prices = self._process_pricelist_items(items, product, [])
 
-        # Step 5: Build result list
+        # Step 5: Add any group UoMs that have NO pricelist entry (price = 0)
+        # This ensures every UoM from the SAP group always appears in the response.
+        for uom_id, uom_rec in group_uom_objects.items():
+            if uom_id not in uoms_with_prices:
+                uoms_with_prices[uom_id] = {'uom': uom_rec, 'price': 0.0, 'has_packaging': False}
+                _logger.info(f"[POS]   UoM {uom_rec.name}: 0.0 (no pricelist entry — group member)")
+
+        # Step 6: Build result list
         result = [
             {'id': data['uom'].id, 'name': data['uom'].name, 'price': data['price']}
             for data in uoms_with_prices.values()
         ]
 
-        # Step 6: Ensure product base UoM is always visible
+        # Step 7: Ensure product base UoM is always included
         if product.uom_id.id not in uoms_with_prices:
             best_price = max((v['price'] for v in uoms_with_prices.values()), default=product.list_price)
             result.insert(0, {'id': product.uom_id.id, 'name': product.uom_id.name, 'price': best_price})
