@@ -95,6 +95,9 @@ class PosPerfumeController(http.Controller):
         All UoMs from the product's SAP UoM group are always included in the result.
         UoMs that have a pricelist entry get their price; UoMs with no entry get price=0.
 
+        When no pricelist is given, auto-resolves the best available pricelist (the one
+        with the most non-zero priced items named 'Price List 1', or the first active one).
+
         Special handling for items where product_uom_id = Units (id=1):
         SAP sometimes exports prices with UoM = Units regardless of the actual unit.
         These items are treated as generic prices and mapped to the product's actual UoM.
@@ -102,6 +105,8 @@ class PosPerfumeController(http.Controller):
         Fallback: if UoM group filtering produces no pricelist matches, retry without the
         filter so we never silently drop all prices due to a UoM mismatch.
         """
+        if not pricelist:
+            pricelist = self._resolve_best_pricelist()
         if not pricelist:
             return [{'id': product.uom_id.id, 'name': product.uom_id.name, 'price': product.list_price}]
 
@@ -154,6 +159,40 @@ class PosPerfumeController(http.Controller):
 
         _logger.info(f"[POS] Returning {len(result)} UoMs")
         return result or [{'id': product.uom_id.id, 'name': product.uom_id.name, 'price': product.list_price}]
+
+    def _resolve_best_pricelist(self):
+        """
+        Auto-select the best pricelist when none is explicitly passed.
+        Prefers a pricelist named 'Price List 1' with the most non-zero priced items.
+        Falls back to the first active pricelist.
+        """
+        try:
+            Pricelist = request.env['product.pricelist'].sudo()
+            # Find candidates matching 'Price List 1'
+            candidates = Pricelist.search([
+                ('active', '=', True),
+                ('name', 'ilike', 'Price List 1'),
+            ])
+            if not candidates:
+                return Pricelist.search([('active', '=', True)], limit=1, order='id asc')
+
+            if len(candidates) == 1:
+                return candidates[0]
+
+            # Pick the one with the most non-zero priced items
+            best = candidates[0]
+            best_count = 0
+            for pl in candidates:
+                count = request.env['product.pricelist.item'].sudo().search_count([
+                    ('pricelist_id', '=', pl.id),
+                    ('fixed_price', '>', 0),
+                ])
+                if count > best_count:
+                    best_count = count
+                    best = pl
+            return best
+        except Exception:
+            return None
 
     # SAP exports the base-unit price with product_uom_id = Units (id=1) regardless
     # of the product's actual UoM. We must remap it to the product's real base UoM.
