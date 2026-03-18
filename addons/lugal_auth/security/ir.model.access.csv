@@ -1,5 +1,0 @@
-id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
-access_lugal_jwt_service_user,lugal.jwt.service user,model_lugal_jwt_service,base.group_user,1,0,0,0
-access_lugal_jwt_blacklist_user,lugal.jwt.blacklist user,model_lugal_jwt_blacklist,base.group_user,0,0,1,0
-access_lugal_jwt_blacklist_system,lugal.jwt.blacklist system,model_lugal_jwt_blacklist,base.group_system,1,1,1,1
-access_lugal_auth_rate_limit_system,lugal.auth.rate.limit system,model_lugal_auth_rate_limit,base.group_system,1,1,1,1
