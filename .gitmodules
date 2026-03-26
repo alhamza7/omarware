@@ -7,3 +7,42 @@
 [submodule "addons/lugal_supply"]
 	path = addons/lugal_supply
 	url = https://github.com/alhamza7/lugal_supply.git
+[submodule "addons/lugal_email"]
+	path = addons/lugal_email
+	url = https://github.com/alhamza7/lugal_email.git
+[submodule "addons/lugal_inventory"]
+	path = addons/lugal_inventory
+	url = https://github.com/alhamza7/lugal_inventory.git
+[submodule "addons/lugal_ai"]
+	path = addons/lugal_ai
+	url = https://github.com/alhamza7/lugal_ai.git
+[submodule "addons/lugal_fragrantica"]
+	path = addons/lugal_fragrantica
+	url = https://github.com/alhamza7/lugal_fragrantica.git
+[submodule "addons/ultramsg_integration"]
+	path = addons/ultramsg_integration
+	url = https://github.com/alhamza7/ultramsg_integration.git
+[submodule "addons/perfume_showcase_api"]
+	path = addons/perfume_showcase_api
+	url = https://github.com/alhamza7/perfume_showcase_api.git
+[submodule "addons/invoice_designer"]
+	path = addons/invoice_designer
+	url = https://github.com/alhamza7/invoice_designer.git
+[submodule "addons/custom_pricelist_packaging"]
+	path = addons/custom_pricelist_packaging
+	url = https://github.com/alhamza7/custom_pricelist_packaging.git
+[submodule "addons/product_label_designer"]
+	path = addons/product_label_designer
+	url = https://github.com/alhamza7/product_label_designer.git
+[submodule "addons/nbs_archive"]
+	path = addons/nbs_archive
+	url = https://github.com/alhamza7/nbs_archive.git
+[submodule "addons/sap_integration"]
+	path = addons/sap_integration
+	url = https://github.com/alhamza7/sap_integration.git
+[submodule "addons/pos_perfume_custom"]
+	path = addons/pos_perfume_custom
+	url = https://github.com/alhamza7/pos_perfume_custom.git
+[submodule "addons/repzo_integration"]
+	path = addons/repzo_integration
+	url = https://github.com/alhamza7/repzo_integration.git
