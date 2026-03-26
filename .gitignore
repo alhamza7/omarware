@@ -68,6 +68,30 @@ odoo.conf
 /share/
 /src/
 
+# Frontend apps (managed separately or as submodules later)
+crm-email/node_modules/
+inv-front/node_modules/
+44/node_modules/
+Perfume-Brand-Showcase-Page/node_modules/
+barcode_scaner/node_modules/
+
+# Zip/archive files
+*.zip
+*.tar.gz
+*.rar
+
+# Test screenshot directories
+pos-2step-modal-test/
+pos-detailed-test/
+pos-fixed-test/
+pos-test-screenshots/
+
+# Logs directory
+logs/
+
+# Spreadsheet/office temp files
+~$*
+
 # استثناءات ضرورية لمجلد bootstrap داخل addons
 !addons/web/static/lib/bootstrap/
 !addons/web/static/lib/bootstrap/**
