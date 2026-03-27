@@ -1360,3 +1360,372 @@ const migrateRules = async () => {
 ---
 
 *Last updated: 2026-03-27 — Backend Team, NBS-CRM*
+
+---
+
+## User Profile & Settings
+
+> **Base path:** `POST /api/crm/users/me*`  
+> **Protocol:** JSON-RPC 2.0 (same `crmPost` wrapper)  
+> **Auth:** Bearer JWT required
+
+---
+
+### `GET /api/crm/users/me` — Current User Profile
+
+Returns the authenticated user's full profile **including all configured email accounts**.
+
+```http
+POST /api/crm/users/me
+params: {}
+```
+
+**Response `data`:**
+```typescript
+interface UserProfile {
+  // ── Identity ──────────────────────────────────────────────────────────
+  id:           number;
+  name:         string;
+  login:        string;           // email used as login
+  email:        string;
+  phone:        string;
+  mobile:       string;
+  job_title:    string;
+  avatar_url:   string;           // e.g. /web/image/res.users/4/avatar_128
+
+  // ── Role & Branch ─────────────────────────────────────────────────────
+  role:         'agent' | 'supervisor' | 'admin';
+  branch_id:    number | null;
+  branch_name:  string;
+
+  // ── Preferences ───────────────────────────────────────────────────────
+  is_active:    boolean;
+  lang:         string;           // e.g. 'ar_001', 'en_US'
+  tz:           string;           // e.g. 'Asia/Riyadh'
+
+  // ── Email accounts (from lugal_email module) ──────────────────────────
+  email_accounts: EmailAccount[];
+}
+
+interface EmailAccount {
+  id:             number;
+  name:           string;         // label e.g. "Work Gmail"
+  email_address:  string;
+  display_name:   string;         // shown in From: header
+  imap_host:      string;
+  imap_port:      number;
+  imap_use_ssl:   boolean;
+  smtp_host:      string;
+  smtp_port:      number;
+  smtp_use_tls:   boolean;
+  username:       string;
+  is_active:      boolean;
+  is_default:     boolean;
+  sync_status:    'ok' | 'error' | 'never';
+  last_sync_date: string | null;
+  unread_count:   number;
+  // NOTE: password is NEVER returned
+}
+```
+
+**Example — load settings screen:**
+```typescript
+const { data: profile } = await crmPost('/api/crm/users/me', {});
+
+// Show profile card
+setUserName(profile.name);
+setAvatarUrl(`http://192.168.116.15:8070${profile.avatar_url}`);
+
+// Show email accounts list
+setEmailAccounts(profile.email_accounts);
+```
+
+---
+
+### `POST /api/crm/users/me/update` — Update Profile
+
+All fields are optional (partial update).
+
+| Param | Type | Notes |
+|-------|------|-------|
+| `name` | `string` | Display name |
+| `phone` | `string` | — |
+| `mobile` | `string` | — |
+| `job_title` | `string` | Shown in profile |
+| `lang` | `string` | `ar_001` \| `en_US` \| ... |
+| `tz` | `string` | `Asia/Riyadh` \| `UTC` \| ... |
+| `avatar_128` | `string` | Base64-encoded PNG/JPG |
+
+**Response `data`:** Full `UserProfile` (same as `/me`) — reflecting the new values.
+
+**Example — save profile form:**
+```typescript
+const { data: updatedProfile } = await crmPost('/api/crm/users/me/update', {
+  name:      formData.name,
+  phone:     formData.phone,
+  job_title: formData.jobTitle,
+  lang:      'ar_001',
+});
+```
+
+**Avatar upload — example:**
+```typescript
+const fileToBase64 = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve((reader.result as string).split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+
+const avatarB64 = await fileToBase64(avatarFile);
+await crmPost('/api/crm/users/me/update', { avatar_128: avatarB64 });
+```
+
+---
+
+### `POST /api/crm/users/me/change_password` — Change Password
+
+| Param | Type | Required | Notes |
+|-------|------|----------|-------|
+| `current_password` | `string` | **Yes** | Must match existing password |
+| `new_password` | `string` | **Yes** | Min 8 chars, must include letters + digits |
+
+**Response `data`:** `{ message: "Password changed successfully" }`
+
+**Error cases:**
+- `current_password` wrong → `{ success: false, error: "Current password is incorrect" }`
+- Weak password → `{ success: false, error: "new_password must be at least 8 characters..." }`
+
+**Example:**
+```typescript
+const { success, error } = await crmPost('/api/crm/users/me/change_password', {
+  current_password: form.currentPassword,
+  new_password:     form.newPassword,
+});
+
+if (!success) showError(error);
+else showSuccess('تم تغيير كلمة المرور بنجاح');
+```
+
+---
+
+## Email Account Management (IMAP/SMTP)
+
+> **Base path:** `/api/lugal/email/accounts`  
+> **Protocol:** REST (not JSON-RPC)  
+> **Auth:** `Authorization: Bearer {token}`
+
+Managed by the `lugal_email` module. Each user can have **multiple** email accounts.
+
+---
+
+### List Accounts
+
+```http
+GET /api/lugal/email/accounts
+```
+
+Returns same `EmailAccount[]` as in `/api/crm/users/me` — use either.
+
+---
+
+### Add New Account
+
+```http
+POST /api/lugal/email/accounts
+Content-Type: application/json
+
+{
+  "name":            "Work Gmail",
+  "email_address":   "ahmed@company.com",
+  "display_name":    "أحمد علي",
+  "username":        "ahmed@company.com",
+  "password":        "app-password-here",
+  "imap_host":       "imap.gmail.com",
+  "imap_port":       993,
+  "imap_use_ssl":    true,
+  "smtp_host":       "smtp.gmail.com",
+  "smtp_port":       587,
+  "smtp_use_tls":    true,
+  "is_default":      false
+}
+```
+
+**Required:** `name`, `email_address`  
+**Response:** `{ success: true, data: EmailAccount }`
+
+---
+
+### Update Account
+
+```http
+PATCH /api/lugal/email/accounts/{id}
+Content-Type: application/json
+
+{ "name": "New Label", "is_active": false }
+```
+
+All fields optional. **Note:** `password` can be updated here to change IMAP/SMTP credentials.  
+**Response:** `{ success: true, data: EmailAccount }`
+
+---
+
+### Delete Account
+
+```http
+DELETE /api/lugal/email/accounts/{id}
+```
+
+Deletes the account and all its synced messages.  
+**Response:** `{ success: true, data: { deleted: true, id: number } }`
+
+---
+
+### Test IMAP Connection
+
+```http
+POST /api/lugal/email/accounts/{id}/test
+```
+
+Tests the IMAP connection with the stored credentials.  
+**Response (success):** `{ success: true, data: { status: "ok" } }`  
+**Response (fail):** `{ success: false, error: "IMAP connection failed: ..." }`
+
+---
+
+### Trigger Sync
+
+```http
+POST /api/lugal/email/accounts/{id}/sync
+```
+
+Triggers an incremental IMAP sync (only fetches new UIDs since last sync).  
+**Response:** `{ success: true, data: { synced: number, account_id: number } }`
+
+---
+
+### Set as Default
+
+```http
+POST /api/lugal/email/accounts/{id}/set_default
+```
+
+Marks this account as the default for outgoing mail (unsets others).  
+**Response:** `{ success: true, data: EmailAccount }`
+
+---
+
+### Full Settings Screen Flow
+
+```typescript
+// 1. Load profile + email accounts in one call
+const { data: profile } = await crmPost('/api/crm/users/me', {});
+
+// 2. Display profile section
+renderProfileForm(profile);
+
+// 3. Display email accounts section
+renderEmailAccountsList(profile.email_accounts);
+
+// 4. Add new account button
+const addAccount = async (formData) => {
+  const res = await posPost('/api/lugal/email/accounts', formData);
+  if (res.success) {
+    refreshEmailAccounts();
+    showToast('تم إضافة الحساب بنجاح');
+  }
+};
+
+// 5. Test connection
+const testAccount = async (accountId: number) => {
+  const res = await posPost(`/api/lugal/email/accounts/${accountId}/test`, {});
+  showToast(res.success ? '✅ الاتصال ناجح' : `❌ ${res.error}`);
+};
+
+// 6. Sync account
+const syncAccount = async (accountId: number) => {
+  const res = await posPost(`/api/lugal/email/accounts/${accountId}/sync`, {});
+  if (res.success) showToast(`تمت المزامنة — ${res.data.synced} رسالة جديدة`);
+};
+```
+
+---
+
+## Supply Chain — Email Linking
+
+When an email in the inbox is related to a supply chain record, it can be linked to it. The link appears in `supply_links` on each email message.
+
+### Link an Email to a Supply Record
+
+```http
+POST /api/lugal/email/messages/{id}/link
+
+{
+  "model":       "lugal.supply.negotiation",
+  "record_id":   42,
+  "record_name": "تفاوض على سعر الشحنة"
+}
+```
+
+**Supported `model` values for supply chain:**
+| Model | Description |
+|-------|-------------|
+| `lugal.supply.negotiation` | Link to a negotiation |
+| `lugal.supply.container` | Link to a shipping container |
+| `lugal.crm.supply.po` | Link to a purchase order |
+
+**Response:** `{ success: true, data: { linked: true } }`
+
+### Unlink
+
+```http
+POST /api/lugal/email/messages/{id}/unlink
+```
+
+**Response:** `{ success: true, data: { unlinked: true } }`
+
+### `supply_links` in Message Response
+
+When fetching messages, each message now includes:
+```typescript
+interface EmailMessage {
+  // ... existing fields ...
+  supply_links: {
+    negotiation: { id: number; title: string } | null;
+    container:   { id: number; name: string }  | null;
+    po:          { id: number; name: string }  | null;
+  };
+  crm_links: {
+    customer: { id: number; name: string } | null;
+    ticket:   { id: number; name: string } | null;
+  };
+}
+```
+
+### Auto-link (Server-side)
+
+When a new email arrives in the inbox from a vendor email address that matches an **open negotiation** (`status = open`), the server **automatically** links that email to the negotiation. No frontend action required.
+
+---
+
+## Updated Quick Reference
+
+| # | Endpoint | Method | Module |
+|---|----------|--------|--------|
+| 46 | `/api/crm/users/me` | POST | lugal_crm |
+| 47 | `/api/crm/users/me/update` | POST | lugal_crm |
+| 48 | `/api/crm/users/me/change_password` | POST | lugal_crm |
+| 49 | `/api/lugal/email/accounts` | GET | lugal_email |
+| 50 | `/api/lugal/email/accounts` | POST | lugal_email |
+| 51 | `/api/lugal/email/accounts/{id}` | PATCH | lugal_email |
+| 52 | `/api/lugal/email/accounts/{id}` | DELETE | lugal_email |
+| 53 | `/api/lugal/email/accounts/{id}/test` | POST | lugal_email |
+| 54 | `/api/lugal/email/accounts/{id}/sync` | POST | lugal_email |
+| 55 | `/api/lugal/email/accounts/{id}/set_default` | POST | lugal_email |
+| 56 | `/api/lugal/email/messages/{id}/link` | POST | lugal_email |
+| 57 | `/api/lugal/email/messages/{id}/unlink` | POST | lugal_email |
+
+---
+
+*Last updated: 2026-03-27 — Backend Team, NBS-CRM*
