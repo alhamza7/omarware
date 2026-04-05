@@ -115,3 +115,4 @@ logs/
 addons/lugal_fragrantica/static/fragrantica_data/
 addons/lugal_fragrantica/static/fregran/
 
+*.log

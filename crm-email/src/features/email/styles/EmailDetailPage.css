@@ -1,0 +1,143 @@
+/* ── Detail layout ── */
+.detail-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.detail-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #fff;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #6b7280;
+  padding: 6px;
+  border-radius: 6px;
+  transition: background 0.1s;
+}
+.icon-btn:hover { background: #f3f4f6; color: #111827; }
+.back-btn { margin-right: 4px; }
+
+.detail-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  background: none;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  color: #374151;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+}
+.action-btn:hover      { background: #f9fafb; border-color: #d1d5db; }
+.action-btn.starred    { color: #f59e0b; }
+.action-btn.link-btn   { color: #6d28d9; }
+.action-btn.danger-btn { color: #ef4444; }
+.action-btn.danger-btn:hover { background: #fef2f2; border-color: #fecaca; }
+
+.detail-header {
+  padding: 24px 28px 16px;
+  border-bottom: 1px solid #f1f2f4;
+}
+.detail-subject {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #111827;
+  margin: 0 0 16px;
+  line-height: 1.35;
+}
+.detail-meta { display: flex; flex-direction: column; gap: 6px; }
+.meta-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  font-size: 0.84rem;
+}
+.meta-label {
+  min-width: 50px;
+  color: #9ca3af;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.meta-value { color: #374151; flex: 1; }
+.linked-record-row .meta-value { }
+.linked-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+  border-radius: 6px;
+  padding: 2px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.detail-body {
+  flex: 1;
+  padding: 24px 28px;
+  overflow-y: auto;
+}
+.email-html-body {
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: #374151;
+  max-width: 720px;
+}
+.email-html-body img { max-width: 100%; height: auto; }
+.email-text-body {
+  font-family: monospace;
+  font-size: 0.85rem;
+  color: #374151;
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+
+.detail-attachments {
+  padding: 16px 28px;
+  border-top: 1px solid #f1f2f4;
+  background: #fafafa;
+}
+.attachments-title {
+  font-size: 0.83rem;
+  font-weight: 600;
+  color: #6b7280;
+  margin: 0 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.attachments-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.attachment-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  color: #374151;
+  text-decoration: none;
+  transition: background 0.1s, border-color 0.1s;
+}
+.attachment-item:hover { background: #f9fafb; border-color: #cba6f7; color: #6d28d9; }

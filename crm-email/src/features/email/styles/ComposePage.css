@@ -1,0 +1,115 @@
+/* ── Compose overlay ── */
+.compose-overlay {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 200;
+  display: flex;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+.compose-card {
+  pointer-events: all;
+  width: 560px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+}
+.compose-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #1e1e2e;
+  color: #cdd6f4;
+}
+.compose-title { font-size: 0.9rem; font-weight: 600; }
+.compose-close {
+  background: none;
+  border: none;
+  color: #a6adc8;
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  border-radius: 4px;
+  transition: color 0.1s, background 0.1s;
+}
+.compose-close:hover { color: #cdd6f4; background: #313244; }
+
+.compose-fields { padding: 0; border-bottom: 1px solid #e5e7eb; }
+.compose-field {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid #f1f2f4;
+  padding: 0 16px;
+}
+.compose-field:last-child { border-bottom: none; }
+.compose-field label {
+  min-width: 56px;
+  font-size: 0.8rem;
+  color: #9ca3af;
+  font-weight: 500;
+}
+.compose-field input {
+  flex: 1;
+  padding: 9px 0;
+  border: none;
+  outline: none;
+  font-size: 0.87rem;
+  color: #111827;
+  background: transparent;
+}
+.cc-toggle {
+  background: none;
+  border: none;
+  color: #9ca3af;
+  font-size: 0.78rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+.cc-toggle:hover { background: #f3f4f6; color: #374151; }
+
+.compose-body {
+  flex: 1;
+  min-height: 220px;
+  padding: 14px 16px;
+  border: none;
+  outline: none;
+  resize: none;
+  font-size: 0.87rem;
+  line-height: 1.6;
+  color: #374151;
+  font-family: inherit;
+}
+.compose-body::placeholder { color: #d1d5db; }
+
+.compose-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid #f1f2f4;
+  background: #fafafa;
+}
+.send-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 8px 20px;
+  background: #cba6f7;
+  color: #1e1e2e;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.send-btn:hover:not(:disabled) { background: #b4a0e5; }
+.send-btn:disabled { opacity: 0.5; cursor: not-allowed; }

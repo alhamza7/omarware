@@ -15,6 +15,7 @@ export default defineConfig({
     outDir: 'build',
   },
   server: {
+    host: '0.0.0.0',
     port: 3000,
     open: false,
     watch: {
@@ -24,12 +25,12 @@ export default defineConfig({
     },
     proxy: {
       '/api': {
-        target: 'http://localhost:8070',
+        target: 'http://192.168.116.204:8070',
         changeOrigin: true,
         secure: false,
       },
       '/web': {
-        target: 'http://localhost:8070',
+        target: 'http://192.168.116.204:8070',
         changeOrigin: true,
         secure: false,
       },
