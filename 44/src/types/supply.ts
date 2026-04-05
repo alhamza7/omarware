@@ -193,6 +193,11 @@ export interface Container {
   clearance_info_delivered_at: string | null;
   clearance_info_delivered_by: string;
   attachment_count:            number;
+  penalty_count:               number;
+  vendor_id:                   number | null;
+  vendor_name:                 string;
+  reminder_date:               string | null;
+  reminder_note:               string;
   notes:                       string;
   created_at:                  string;
   updated_at:                  string;

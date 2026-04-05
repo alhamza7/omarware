@@ -169,6 +169,11 @@ export const containerAssignDriver = (
 export const containerUnassignDriver = (id: number) =>
   rpc<Container>(`/api/crm/supply/containers/${id}/unassign_driver`, {});
 
+export const containerSetReminder = (
+  id: number,
+  payload: { reminder_date?: string; reminder_note?: string; clear_reminder?: boolean },
+) => rpc<Container>(`/api/crm/supply/containers/${id}/set_reminder`, { ...payload });
+
 // ── Container Attachments ──────────────────────────────────────────────────
 export const containerAttachList = (containerId: number) =>
   rpc<{ container_id: number; attachments: Attachment[] }>(
@@ -300,7 +305,7 @@ const supplyApi = {
   // containers
   containerList, containerGet, containerCreate, containerUpdate, containerDelete,
   containerMarkArrived, containerClearanceDelivered,
-  containerAssignDriver, containerUnassignDriver,
+  containerAssignDriver, containerUnassignDriver, containerSetReminder,
   containerAttachList, containerAttachUpload, containerAttachUploadMultiple, containerAttachDelete,
   containerCommentList, containerCommentAdd, containerCommentDelete,
   containerAddPenalty, containerPenaltiesList, containerPenaltyDelete,

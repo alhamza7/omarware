@@ -178,6 +178,9 @@ function ContainerDetailSheet({ container: initial, onClose, onUpdated }: {
   const [showDriverForm, setShowDriverForm] = useState(false);
   const [driverName,     setDriverName]     = useState(c.driver_name);
   const [driverPhone,    setDriverPhone]    = useState(c.driver_phone);
+  const [showReminderForm, setShowReminderForm] = useState(false);
+  const [reminderDate,     setReminderDate]     = useState(c.reminder_date?.slice(0, 16) ?? '');
+  const [reminderNote,     setReminderNote]     = useState(c.reminder_note ?? '');
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { setC(initial); }, [initial]);
@@ -212,6 +215,23 @@ function ContainerDetailSheet({ container: initial, onClose, onUpdated }: {
     setBusy('driver');
     const res = await supplyApi.containerAssignDriver(c.id, { driver_name: driverName.trim(), driver_phone: driverPhone.trim() });
     if (res?.success) { setC(res.data); onUpdated(res.data); setShowDriverForm(false); }
+    setBusy(null);
+  };
+
+  const saveReminder = async () => {
+    setBusy('reminder');
+    const res = await supplyApi.containerSetReminder(c.id, {
+      reminder_date: reminderDate || undefined,
+      reminder_note: reminderNote || undefined,
+    });
+    if (res?.success) { setC(res.data); onUpdated(res.data); setShowReminderForm(false); }
+    setBusy(null);
+  };
+
+  const clearReminder = async () => {
+    setBusy('clear-reminder');
+    const res = await supplyApi.containerSetReminder(c.id, { clear_reminder: true });
+    if (res?.success) { setC(res.data); onUpdated(res.data); setReminderDate(''); setReminderNote(''); }
     setBusy(null);
   };
 
@@ -398,6 +418,53 @@ function ContainerDetailSheet({ container: initial, onClose, onUpdated }: {
                   className="flex items-center gap-2 text-sm text-blue-600 hover:underline">
                   <Ship className="w-4 h-4" /> Track Container
                 </a>
+              )}
+
+              {/* Reminder section */}
+              {c.reminder_date ? (
+                <div className="bg-purple-50 rounded-xl p-3 border border-purple-100">
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-xs font-semibold text-purple-700 flex items-center gap-1">
+                      🔔 Reminder
+                    </p>
+                    <div className="flex gap-1">
+                      <button onClick={() => setShowReminderForm(v => !v)}
+                        className="text-xs text-purple-500 hover:text-purple-700 px-2 py-0.5 rounded transition">Edit</button>
+                      <button onClick={clearReminder} disabled={busy === 'clear-reminder'}
+                        className="text-xs text-red-400 hover:text-red-600 px-2 py-0.5 rounded transition disabled:opacity-50">
+                        {busy === 'clear-reminder' ? <Loader2 className="w-3 h-3 animate-spin inline" /> : 'Clear'}
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-sm font-medium text-gray-800">{new Date(c.reminder_date).toLocaleString()}</p>
+                  {c.reminder_note && <p className="text-xs text-gray-600 mt-0.5">{c.reminder_note}</p>}
+                </div>
+              ) : (
+                <button onClick={() => setShowReminderForm(v => !v)}
+                  className="flex items-center gap-2 text-sm text-purple-600 hover:text-purple-800 transition">
+                  🔔 Set Reminder
+                </button>
+              )}
+
+              {showReminderForm && (
+                <div className="bg-purple-50 rounded-xl p-3 border border-purple-100 space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-xs text-gray-600 mb-1 block">Reminder Date/Time</label>
+                      <Input type="datetime-local" value={reminderDate} onChange={e => setReminderDate(e.target.value)} className="h-8 text-sm" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-600 mb-1 block">Note</label>
+                      <Input value={reminderNote} onChange={e => setReminderNote(e.target.value)} placeholder="Optional note" className="h-8 text-sm" />
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button type="button" variant="outline" size="sm" onClick={() => setShowReminderForm(false)}>Cancel</Button>
+                    <Button type="button" size="sm" onClick={saveReminder} disabled={busy === 'reminder'}>
+                      {busy === 'reminder' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null} Save Reminder
+                    </Button>
+                  </div>
+                </div>
               )}
 
               {c.notes && (
