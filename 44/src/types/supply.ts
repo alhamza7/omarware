@@ -27,9 +27,20 @@ export interface Vendor {
   contact_type: 'customer' | 'vendor' | 'both';
   phone:        string;
   email:        string;
+  website:      string;
+  whatsapp:     string;
+  telegram:     string;
+  wechat:       string;
   division:     string;
   city:         string;
   country_name: string;
+  address:      string;
+  payment_terms: string;
+  lead_time_days: number;
+  min_order_value: number;
+  contact_name: string;
+  notes:        string;
+  created_at:   string;
 }
 
 export interface VendorListData {
@@ -37,6 +48,25 @@ export interface VendorListData {
   total:    number;
   page:     number;
   per_page: number;
+}
+
+export interface VendorCreateInput {
+  name:          string;
+  name_ar?:      string;
+  contact_type?: 'customer' | 'vendor' | 'both';
+  division?:     'europe' | 'china' | '';
+  contact_name?: string;
+  phone?:        string;
+  email?:        string;
+  website?:      string;
+  whatsapp?:     string;
+  telegram?:     string;
+  city?:         string;
+  address?:      string;
+  payment_terms?: string;
+  lead_time_days?: number;
+  min_order_value?: number;
+  notes?:        string;
 }
 
 // ─── PO Line ─────────────────────────────────────────────────
@@ -116,6 +146,15 @@ export interface PoCreateInput {
   lines:              PoLineInput[];
 }
 
+export interface PoUpdateInput {
+  name?:         string;
+  division?:     'europe' | 'china' | '';
+  container_id?: number | null;
+  branch_id?:    number | null;
+  currency_id?:  number | null;
+  is_suggested?: boolean;
+}
+
 export interface PoListFilter {
   page?:               number;
   per_page?:           number;
@@ -123,6 +162,71 @@ export interface PoListFilter {
   search?:             string;
   vendor_customer_id?: number | null;
   division?:           'europe' | 'china' | '';
+}
+
+// ─── Container ───────────────────────────────────────────────
+export type ContainerStatus = 'waiting' | 'active' | 'at_port' | 'completed';
+
+export interface Container {
+  id:                          number;
+  name:                        string;
+  container_number:            string;
+  bl_number:                   string;
+  clearance_company_id:        number | null;
+  clearance_company_name:      string;
+  origin_location:             string;
+  destination_port:            string;
+  departure_date:              string | null;
+  eta:                         string | null;
+  arrived_at:                  string | null;
+  status:                      ContainerStatus;
+  division:                    string;
+  tracking_url:                string;
+  total_weight_kg:             number;
+  total_cbm:                   number;
+  driver_id:                   number | null;
+  driver_name:                 string;
+  driver_phone:                string;
+  driver_assigned_at:          string | null;
+  driver_assigned_by:          string;
+  clearance_info_delivered:    boolean;
+  clearance_info_delivered_at: string | null;
+  clearance_info_delivered_by: string;
+  attachment_count:            number;
+  notes:                       string;
+  created_at:                  string;
+  updated_at:                  string;
+}
+
+export interface ContainerListData {
+  items:    Container[];
+  total:    number;
+  page:     number;
+  per_page: number;
+}
+
+export interface ContainerCreateInput {
+  name:                string;
+  container_number?:   string;
+  bl_number?:          string;
+  clearance_company_id?: number;
+  origin_location?:    string;
+  destination_port?:   string;
+  departure_date?:     string;
+  eta?:                string;
+  division?:           string;
+  tracking_url?:       string;
+  total_weight_kg?:    number;
+  total_cbm?:          number;
+  notes?:              string;
+}
+
+export interface ContainerListFilter {
+  page?:      number;
+  per_page?:  number;
+  status?:    ContainerStatus | '';
+  division?:  string;
+  search?:    string;
 }
 
 // ─── Attachment ──────────────────────────────────────────────
@@ -137,11 +241,41 @@ export interface Attachment {
 }
 
 // ─── Comment ─────────────────────────────────────────────────
+// Backend returns is_note (boolean); type field was removed.
 export interface Comment {
-  id:          number;
-  body:        string;
-  type:        'comment' | 'note';
-  author_id:   number;
-  author_name: string;
-  created_at:  string;
+  id:           number;
+  body:         string;
+  body_html:    string;
+  is_note:      boolean;
+  author_id:    number | null;
+  author_name:  string;
+  author_avatar: string | null;
+  message_type: string;
+  subtype:      string;
+  created_at:   string;
+}
+
+// ─── Penalty (Container) ─────────────────────────────────────
+export type PenaltyType = 'storage' | 'damage' | 'late' | 'customs' | 'demurrage' | 'other';
+
+export interface Penalty {
+  id:              number;
+  container_id:    number;
+  container_name:  string;
+  penalty_type:    PenaltyType;
+  amount:          number;
+  currency_id:     number | null;
+  currency_name:   string;
+  reason:          string;
+  penalty_date:    string;
+  created_by_name: string;
+  created_at:      string;
+}
+
+export interface PenaltyInput {
+  penalty_type:  PenaltyType;
+  amount:        number;
+  reason?:       string;
+  penalty_date?: string;
+  currency_id?:  number;
 }
