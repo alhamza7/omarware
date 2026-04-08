@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'Lugal Auth',
-    'version': '1.1.0',
+    'version': '1.1.1',
     'category': 'Technical',
     'summary': 'Centralized JWT authentication service for the Lugal suite',
     'description': """
@@ -27,7 +27,7 @@ Features:
     'author': 'NBS IT Team',
     'website': 'https://nbs.com',
     'license': 'LGPL-3',
-    'depends': ['base'],
+    'depends': ['base', 'web'],
     'data': [
         'security/ir.model.access.csv',
         'data/auth_cron.xml',
