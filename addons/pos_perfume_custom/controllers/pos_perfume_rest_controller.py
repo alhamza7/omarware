@@ -31,11 +31,29 @@ class PosPerfumeRestController(http.Controller):
     def _fail(self, error, status=400):
         return _json({"success": False, "error": error, "data": None}, status=status)
 
+    def _pos_rest_auth(self):
+        """Logged-in session (e.g. Vite proxy + cookie) or ``Authorization: Bearer <API key>`` (rpc scope)."""
+        if request.session.uid:
+            return True
+        auth = (request.httprequest.headers.get("Authorization") or "").strip()
+        if not auth.lower().startswith("bearer "):
+            return False
+        key = auth[7:].strip()
+        if not key:
+            return False
+        uid = request.env["res.users.apikeys"].sudo()._check_credentials(scope="rpc", key=key)
+        if not uid:
+            return False
+        request.update_env(user=uid)
+        return True
+
     # --- bootstrap ---------------------------------------------------------
 
-    @http.route(f"{_PREFIX}/sections", type="http", auth="user", methods=["GET"], csrf=False, cors="*")
+    @http.route(f"{_PREFIX}/sections", type="http", auth="none", methods=["GET"], csrf=False, cors="*")
     def sections(self, **kwargs):
         """UI navigation sections (static); extend if the app expects more keys."""
+        if not self._pos_rest_auth():
+            return self._fail("Unauthorized", 401)
         items = [
             {"id": "pos", "key": "pos", "label": "POS"},
             {"id": "orders", "key": "orders", "label": "Orders"},
@@ -43,8 +61,10 @@ class PosPerfumeRestController(http.Controller):
         ]
         return self._ok({"items": items, "total": len(items)})
 
-    @http.route(f"{_PREFIX}/session", type="http", auth="user", methods=["GET"], csrf=False, cors="*")
+    @http.route(f"{_PREFIX}/session", type="http", auth="none", methods=["GET"], csrf=False, cors="*")
     def session_info(self, **kwargs):
+        if not self._pos_rest_auth():
+            return self._fail("Unauthorized", 401)
         u = request.env.user
         rate = request.env["pos.perfume.order"].sudo().get_exchange_rate_from_db()
         return self._ok(
@@ -59,8 +79,10 @@ class PosPerfumeRestController(http.Controller):
             }
         )
 
-    @http.route(f"{_PREFIX}/setup", type="http", auth="user", methods=["GET"], csrf=False, cors="*")
+    @http.route(f"{_PREFIX}/setup", type="http", auth="none", methods=["GET"], csrf=False, cors="*")
     def setup(self, **kwargs):
+        if not self._pos_rest_auth():
+            return self._fail("Unauthorized", 401)
         env = request.env
         pls = env["product.pricelist"].search([("active", "=", True)])
         whs = env["stock.warehouse"].search([])
@@ -84,8 +106,10 @@ class PosPerfumeRestController(http.Controller):
             }
         )
 
-    @http.route(f"{_PREFIX}/settings", type="http", auth="user", methods=["GET", "PUT"], csrf=False, cors="*")
+    @http.route(f"{_PREFIX}/settings", type="http", auth="none", methods=["GET", "PUT"], csrf=False, cors="*")
     def settings(self, **kwargs):
+        if not self._pos_rest_auth():
+            return self._fail("Unauthorized", 401)
         ICP = request.env["ir.config_parameter"].sudo()
         key = "pos_perfume.default_exchange_rate_usd_iqd"
         if request.httprequest.method == "GET":
@@ -111,8 +135,10 @@ class PosPerfumeRestController(http.Controller):
         ICP.set_param(key, str(rate_f))
         return self._ok({"exchange_rate": rate_f})
 
-    @http.route(f"{_PREFIX}/pricelists", type="http", auth="user", methods=["GET"], csrf=False, cors="*")
+    @http.route(f"{_PREFIX}/pricelists", type="http", auth="none", methods=["GET"], csrf=False, cors="*")
     def pricelists(self, **kwargs):
+        if not self._pos_rest_auth():
+            return self._fail("Unauthorized", 401)
         pls = request.env["product.pricelist"].search([("active", "=", True)])
         items = [
             {
@@ -125,16 +151,20 @@ class PosPerfumeRestController(http.Controller):
         ]
         return self._ok({"items": items, "total": len(items)})
 
-    @http.route(f"{_PREFIX}/warehouses", type="http", auth="user", methods=["GET"], csrf=False, cors="*")
+    @http.route(f"{_PREFIX}/warehouses", type="http", auth="none", methods=["GET"], csrf=False, cors="*")
     def warehouses(self, **kwargs):
+        if not self._pos_rest_auth():
+            return self._fail("Unauthorized", 401)
         whs = request.env["stock.warehouse"].search([])
         items = [{"id": w.id, "name": w.name, "code": w.code or ""} for w in whs]
         return self._ok({"items": items, "total": len(items)})
 
     # --- customers ---------------------------------------------------------
 
-    @http.route(f"{_PREFIX}/customers", type="http", auth="user", methods=["GET", "POST"], csrf=False, cors="*")
+    @http.route(f"{_PREFIX}/customers", type="http", auth="none", methods=["GET", "POST"], csrf=False, cors="*")
     def customers(self, **kwargs):
+        if not self._pos_rest_auth():
+            return self._fail("Unauthorized", 401)
         Partner = request.env["res.partner"]
         if request.httprequest.method == "GET":
             q = request.httprequest.args.get("query") or ""
@@ -184,12 +214,14 @@ class PosPerfumeRestController(http.Controller):
     @http.route(
         f"{_PREFIX}/customers/<int:partner_id>",
         type="http",
-        auth="user",
+        auth="none",
         methods=["GET", "PUT"],
         csrf=False,
         cors="*",
     )
     def customer_one(self, partner_id, **kwargs):
+        if not self._pos_rest_auth():
+            return self._fail("Unauthorized", 401)
         p = request.env["res.partner"].browse(partner_id).exists()
         if not p:
             return self._fail("Customer not found", 404)
@@ -221,8 +253,10 @@ class PosPerfumeRestController(http.Controller):
 
     # --- products ----------------------------------------------------------
 
-    @http.route(f"{_PREFIX}/products", type="http", auth="user", methods=["GET"], csrf=False, cors="*")
+    @http.route(f"{_PREFIX}/products", type="http", auth="none", methods=["GET"], csrf=False, cors="*")
     def products(self, **kwargs):
+        if not self._pos_rest_auth():
+            return self._fail("Unauthorized", 401)
         Product = request.env["product.product"]
         q = request.httprequest.args.get("query") or ""
         limit = min(int(request.httprequest.args.get("limit") or 80), 500)
@@ -269,12 +303,14 @@ class PosPerfumeRestController(http.Controller):
     @http.route(
         f"{_PREFIX}/products/<int:product_id>",
         type="http",
-        auth="user",
+        auth="none",
         methods=["GET"],
         csrf=False,
         cors="*",
     )
     def product_one(self, product_id, **kwargs):
+        if not self._pos_rest_auth():
+            return self._fail("Unauthorized", 401)
         prod = request.env["product.product"].browse(product_id).exists()
         if not prod:
             return self._fail("Product not found", 404)
@@ -298,8 +334,10 @@ class PosPerfumeRestController(http.Controller):
             }
         )
 
-    @http.route(f"{_PREFIX}/products/data", type="http", auth="user", methods=["POST"], csrf=False, cors="*")
+    @http.route(f"{_PREFIX}/products/data", type="http", auth="none", methods=["POST"], csrf=False, cors="*")
     def product_data(self, **kwargs):
+        if not self._pos_rest_auth():
+            return self._fail("Unauthorized", 401)
         body = json.loads(request.httprequest.data.decode("utf-8") or "{}")
         pid = body.get("product_id")
         if not pid:
@@ -317,8 +355,10 @@ class PosPerfumeRestController(http.Controller):
             return self._fail(res.get("error") or "Product data failed", 400)
         return self._ok(res)
 
-    @http.route(f"{_PREFIX}/products/uom_price", type="http", auth="user", methods=["POST"], csrf=False, cors="*")
+    @http.route(f"{_PREFIX}/products/uom_price", type="http", auth="none", methods=["POST"], csrf=False, cors="*")
     def uom_price(self, **kwargs):
+        if not self._pos_rest_auth():
+            return self._fail("Unauthorized", 401)
         body = json.loads(request.httprequest.data.decode("utf-8") or "{}")
         ctrl = PosPerfumeController()
         res = ctrl.get_product_data(
@@ -340,8 +380,10 @@ class PosPerfumeRestController(http.Controller):
 
     # --- orders (read list + minimal write stubs) --------------------------
 
-    @http.route(f"{_PREFIX}/orders", type="http", auth="user", methods=["GET", "POST"], csrf=False, cors="*")
+    @http.route(f"{_PREFIX}/orders", type="http", auth="none", methods=["GET", "POST"], csrf=False, cors="*")
     def orders(self, **kwargs):
+        if not self._pos_rest_auth():
+            return self._fail("Unauthorized", 401)
         Order = request.env["pos.perfume.order"]
         if request.httprequest.method == "GET":
             limit = min(int(request.httprequest.args.get("limit") or 80), 500)
@@ -375,12 +417,14 @@ class PosPerfumeRestController(http.Controller):
     @http.route(
         f"{_PREFIX}/orders/<int:order_id>",
         type="http",
-        auth="user",
+        auth="none",
         methods=["GET", "PUT", "DELETE"],
         csrf=False,
         cors="*",
     )
     def order_one(self, order_id, **kwargs):
+        if not self._pos_rest_auth():
+            return self._fail("Unauthorized", 401)
         o = request.env["pos.perfume.order"].browse(order_id).exists()
         if not o:
             return self._fail("Order not found", 404)
