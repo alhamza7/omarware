@@ -11,6 +11,8 @@ from .pos_perfume_controller import PosPerfumeController
 _logger = logging.getLogger(__name__)
 
 _PREFIX = "/api/pos_perfume/v1"
+# Some frontends issue POST instead of GET; allow both on read-only endpoints.
+_READ = ("GET", "POST")
 
 
 def _json(data, status=200):
@@ -49,7 +51,7 @@ class PosPerfumeRestController(http.Controller):
 
     # --- bootstrap ---------------------------------------------------------
 
-    @http.route(f"{_PREFIX}/sections", type="http", auth="none", methods=["GET"], csrf=False, cors="*")
+    @http.route(f"{_PREFIX}/sections", type="http", auth="none", methods=list(_READ), csrf=False, cors="*")
     def sections(self, **kwargs):
         """UI navigation sections (static); extend if the app expects more keys."""
         if not self._pos_rest_auth():
@@ -61,7 +63,25 @@ class PosPerfumeRestController(http.Controller):
         ]
         return self._ok({"items": items, "total": len(items)})
 
-    @http.route(f"{_PREFIX}/session", type="http", auth="none", methods=["GET"], csrf=False, cors="*")
+    @http.route(f"{_PREFIX}/categories", type="http", auth="none", methods=list(_READ), csrf=False, cors="*")
+    def categories(self, **kwargs):
+        """Product categories (`product.category`) for POS / CRM lists."""
+        if not self._pos_rest_auth():
+            return self._fail("Unauthorized", 401)
+        Category = request.env["product.category"]
+        recs = Category.search([], order="complete_name")
+        items = [
+            {
+                "id": c.id,
+                "name": c.name,
+                "parent_id": c.parent_id.id or None,
+                "complete_name": c.complete_name,
+            }
+            for c in recs
+        ]
+        return self._ok({"items": items, "total": len(items)})
+
+    @http.route(f"{_PREFIX}/session", type="http", auth="none", methods=list(_READ), csrf=False, cors="*")
     def session_info(self, **kwargs):
         if not self._pos_rest_auth():
             return self._fail("Unauthorized", 401)
@@ -79,7 +99,7 @@ class PosPerfumeRestController(http.Controller):
             }
         )
 
-    @http.route(f"{_PREFIX}/setup", type="http", auth="none", methods=["GET"], csrf=False, cors="*")
+    @http.route(f"{_PREFIX}/setup", type="http", auth="none", methods=list(_READ), csrf=False, cors="*")
     def setup(self, **kwargs):
         if not self._pos_rest_auth():
             return self._fail("Unauthorized", 401)
@@ -106,25 +126,34 @@ class PosPerfumeRestController(http.Controller):
             }
         )
 
-    @http.route(f"{_PREFIX}/settings", type="http", auth="none", methods=["GET", "PUT"], csrf=False, cors="*")
+    @http.route(
+        f"{_PREFIX}/settings",
+        type="http",
+        auth="none",
+        methods=["GET", "PUT", "POST"],
+        csrf=False,
+        cors="*",
+    )
     def settings(self, **kwargs):
         if not self._pos_rest_auth():
             return self._fail("Unauthorized", 401)
         ICP = request.env["ir.config_parameter"].sudo()
-        key = "pos_perfume.default_exchange_rate_usd_iqd"
-        if request.httprequest.method == "GET":
-            raw = ICP.get_param(key, "0")
+        param_key = "pos_perfume.default_exchange_rate_usd_iqd"
+        method = request.httprequest.method
+        body = {}
+        if request.httprequest.data:
+            try:
+                body = json.loads(request.httprequest.data.decode("utf-8") or "{}")
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                body = {}
+        update = method == "PUT" or (method == "POST" and "exchange_rate" in body)
+        if not update:
+            raw = ICP.get_param(param_key, "0")
             try:
                 rate = float(raw)
             except (TypeError, ValueError):
                 rate = 0.0
             return self._ok({"exchange_rate": rate})
-        body = {}
-        if request.httprequest.data:
-            try:
-                body = json.loads(request.httprequest.data.decode("utf-8"))
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                return self._fail("Invalid JSON body", 400)
         rate = body.get("exchange_rate")
         if rate is None:
             return self._fail("exchange_rate required", 400)
@@ -132,10 +161,10 @@ class PosPerfumeRestController(http.Controller):
             rate_f = float(rate)
         except (TypeError, ValueError):
             return self._fail("exchange_rate must be a number", 400)
-        ICP.set_param(key, str(rate_f))
+        ICP.set_param(param_key, str(rate_f))
         return self._ok({"exchange_rate": rate_f})
 
-    @http.route(f"{_PREFIX}/pricelists", type="http", auth="none", methods=["GET"], csrf=False, cors="*")
+    @http.route(f"{_PREFIX}/pricelists", type="http", auth="none", methods=list(_READ), csrf=False, cors="*")
     def pricelists(self, **kwargs):
         if not self._pos_rest_auth():
             return self._fail("Unauthorized", 401)
@@ -151,7 +180,7 @@ class PosPerfumeRestController(http.Controller):
         ]
         return self._ok({"items": items, "total": len(items)})
 
-    @http.route(f"{_PREFIX}/warehouses", type="http", auth="none", methods=["GET"], csrf=False, cors="*")
+    @http.route(f"{_PREFIX}/warehouses", type="http", auth="none", methods=list(_READ), csrf=False, cors="*")
     def warehouses(self, **kwargs):
         if not self._pos_rest_auth():
             return self._fail("Unauthorized", 401)
@@ -253,7 +282,7 @@ class PosPerfumeRestController(http.Controller):
 
     # --- products ----------------------------------------------------------
 
-    @http.route(f"{_PREFIX}/products", type="http", auth="none", methods=["GET"], csrf=False, cors="*")
+    @http.route(f"{_PREFIX}/products", type="http", auth="none", methods=list(_READ), csrf=False, cors="*")
     def products(self, **kwargs):
         if not self._pos_rest_auth():
             return self._fail("Unauthorized", 401)
@@ -304,7 +333,7 @@ class PosPerfumeRestController(http.Controller):
         f"{_PREFIX}/products/<int:product_id>",
         type="http",
         auth="none",
-        methods=["GET"],
+        methods=list(_READ),
         csrf=False,
         cors="*",
     )
