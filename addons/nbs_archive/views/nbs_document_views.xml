@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_nbs_document_tree" model="ir.ui.view">
+        <field name="name">nbs.document.tree</field>
+        <field name="model">nbs.document</field>
+        <field name="arch" type="xml">
+            <tree string="Documents">
+                <field name="title"/>
+                <field name="department_id"/>
+                <field name="document_type_id"/>
+                <field name="uploader_id"/>
+                <field name="upload_date"/>
+                <field name="status"/>
+            </tree>
+        </field>
+    </record>
+
+    <record id="action_nbs_document" model="ir.actions.act_window">
+        <field name="name">Documents</field>
+        <field name="res_model">nbs.document</field>
+        <field name="view_mode">tree,form</field>
+    </record>
+
+    <menuitem id="menu_nbs_document"
+              name="All Documents"
+              parent="menu_nbs_documents"
+              action="action_nbs_document"
+              sequence="10"/>
+</odoo>
+
+

@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- List View for Wizard Lines -->
+    <record id="view_print_customer_label_wizard_line_list" model="ir.ui.view">
+        <field name="name">print.customer.label.wizard.line.list</field>
+        <field name="model">print.customer.label.wizard.line</field>
+        <field name="arch" type="xml">
+            <list editable="bottom">
+                <field name="partner_id" readonly="1" options="{'no_create': True, 'no_open': True}"/>
+                <field name="phone_override"/>
+                <field name="mobile_override"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Wizard Form -->
+    <record id="view_print_customer_label_wizard_form" model="ir.ui.view">
+        <field name="name">print.customer.label.wizard.form</field>
+        <field name="model">print.customer.label.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Print Customer Labels">
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="partner_ids" widget="many2many_tags"/>
+                            <field name="template_id"/>
+                            <field name="print_mode" widget="radio"/>
+                            <field name="copies"/>
+                        </group>
+                        <group>
+                            <field name="note" placeholder="أدخل الملاحظات هنا أو اختر من القائمة..." widget="note_with_suggestions"/>
+                        </group>
+                    </group>
+                    
+                    <!-- Customer Data Overrides - Temporarily removed to work around Odoo view validation bug -->
+                    <!-- Will be added back after module upgrade -->
+                    <!--
+                    <notebook>
+                        <page string="تعديل بيانات العملاء" name="customer_data">
+                            <field name="customer_data_ids" nolabel="1" context="{'default_wizard_id': id}">
+                                <tree>
+                                    <field name="partner_id" readonly="1" options="{'no_create': True, 'no_open': True}"/>
+                                </tree>
+                                <form>
+                                    <sheet>
+                                        <group>
+                                            <field name="partner_id" readonly="1"/>
+                                            <field name="phone_override"/>
+                                            <field name="mobile_override"/>
+                                        </group>
+                                    </sheet>
+                                </form>
+                            </field>
+                        </page>
+                    </notebook>
+                    -->
+                    
+                    <group invisible="print_mode != 'a4_sheet'">
+                        <div class="alert alert-info">
+                            <p><i class="fa fa-info-circle"/> <strong>A4 Sheet Mode:</strong></p>
+                            <p>Multiple labels will be arranged on A4 paper according to template settings.</p>
+                        </div>
+                    </group>
+                </sheet>
+                <footer>
+                    <button name="action_preview" string="Preview" type="object" class="btn-secondary" icon="fa-eye"/>
+                    <button name="action_print" string="Print PDF" type="object" class="btn-primary" icon="fa-print"/>
+                    <button string="Cancel" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <!-- Action for Customer -->
+    <record id="action_print_customer_label_wizard" model="ir.actions.act_window">
+        <field name="name">Print Customer Labels</field>
+        <field name="res_model">print.customer.label.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+        <field name="binding_model_id" ref="base.model_res_partner"/>
+        <field name="binding_type">action</field>
+    </record>
+
+</odoo>
+

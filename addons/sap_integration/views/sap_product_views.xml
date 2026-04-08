@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        
+        <!-- SAP Product Sync Tree View -->
+        <record id="view_sap_product_sync_tree" model="ir.ui.view">
+            <field name="name">sap.product.sync.tree</field>
+            <field name="model">sap.product.sync</field>
+            <field name="arch" type="xml">
+                <list string="Product Sync" 
+                      decoration-success="sync_status == 'success'" 
+                      decoration-danger="sync_status == 'error'">
+                    <field name="backend_id"/>
+                    <field name="odoo_product_id"/>
+                    <field name="sap_product_id"/>
+                    <field name="sap_product_name"/>
+                    <field name="sync_status" widget="badge"/>
+                    <field name="sync_direction"/>
+                    <field name="last_sync"/>
+                </list>
+            </field>
+        </record>
+        
+        <!-- SAP Product Sync Form View -->
+        <record id="view_sap_product_sync_form" model="ir.ui.view">
+            <field name="name">sap.product.sync.form</field>
+            <field name="model">sap.product.sync</field>
+            <field name="arch" type="xml">
+                <form string="Product Sync">
+                    <header>
+                        <field name="sync_status" widget="statusbar"/>
+                    </header>
+                    <sheet>
+                        <group>
+                            <group>
+                                <field name="backend_id"/>
+                                <field name="odoo_product_id"/>
+                                <field name="sap_product_id"/>
+                                <field name="sap_product_name"/>
+                            </group>
+                            <group>
+                                <field name="sync_direction"/>
+                                <field name="last_sync"/>
+                                <field name="retry_count"/>
+                                <field name="max_retries"/>
+                            </group>
+                        </group>
+                        <group string="Error" invisible="not error_message">
+                            <field name="error_message"/>
+                        </group>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+        
+        <!-- SAP Product Sync Action -->
+        <record id="action_sap_product_sync" model="ir.actions.act_window">
+            <field name="name">Product Sync</field>
+            <field name="res_model">sap.product.sync</field>
+            <field name="view_mode">list,form</field>
+        </record>
+        
+    </data>
+</odoo>
+
+
+
+
+

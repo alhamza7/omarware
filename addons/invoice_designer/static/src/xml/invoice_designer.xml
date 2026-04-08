@@ -1,0 +1,821 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    
+    <!-- Main Canvas Template -->
+    <t t-name="invoice_designer.Canvas">
+        <div class="invoice_designer_container">
+            
+            <!-- Error Message if no template -->
+            <div t-if="!templateId" class="alert alert-danger m-3" role="alert">
+                <h4 class="alert-heading">Template ID is Missing!</h4>
+                <p>Cannot load the visual designer without a template ID.</p>
+                <hr/>
+                <p class="mb-0">
+                    <strong>Debug Info:</strong><br/>
+                    Props keys: <t t-esc="Object.keys(props).join(', ')"/><br/>
+                    Action: <t t-esc="props.action ? 'exists' : 'missing'"/>
+                </p>
+            </div>
+            
+            <!-- Designer Interface (only if template exists) -->
+            <t t-if="templateId">
+            
+            <!-- Top Toolbar -->
+            <div class="invoice_designer_toolbar">
+                <div class="toolbar_left">
+                    <!-- File Operations -->
+                    <div class="btn-group me-2">
+                        <button class="btn btn-sm btn-primary" t-on-click="saveTemplate" title="حفظ">
+                            <i class="fa fa-save"/> حفظ
+                        </button>
+                        <button class="btn btn-sm btn-secondary" t-on-click="previewTemplate" title="معاينة">
+                            <i class="fa fa-eye"/> معاينة
+                        </button>
+                        <button class="btn btn-sm btn-info" t-on-click="exportPDF" title="تصدير PDF">
+                            <i class="fa fa-file-pdf-o"/> PDF
+                        </button>
+                    </div>
+                    
+                    <!-- Add Elements -->
+                    <div class="btn-group me-2">
+                        <button class="btn btn-sm btn-success dropdown-toggle" data-bs-toggle="dropdown" title="إضافة عنصر">
+                            <i class="fa fa-plus"/> إضافة
+                        </button>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="#" t-on-click="addTextElement">
+                                <i class="fa fa-font"/> نص ثابت
+                            </a></li>
+                            <li><a class="dropdown-item" href="#" t-on-click="addFieldElement">
+                                <i class="fa fa-database"/> حقل ديناميكي
+                            </a></li>
+                            <li><a class="dropdown-item" href="#" t-on-click="addImageElement">
+                                <i class="fa fa-image"/> صورة
+                            </a></li>
+                            <li><a class="dropdown-item" href="#" t-on-click="addTableElement">
+                                <i class="fa fa-table"/> جدول
+                            </a></li>
+                            <li><hr class="dropdown-divider"/></li>
+                            <li><a class="dropdown-item" href="#" t-on-click="addShapeElement">
+                                <i class="fa fa-square"/> شكل
+                            </a></li>
+                            <li><a class="dropdown-item" href="#" t-on-click="addLineElement">
+                                <i class="fa fa-minus"/> خط
+                            </a></li>
+                            <li><hr class="dropdown-divider"/></li>
+                            <li><a class="dropdown-item" href="#" t-on-click="addBarcodeElement">
+                                <i class="fa fa-barcode"/> باركود
+                            </a></li>
+                            <li><a class="dropdown-item" href="#" t-on-click="addQRElement">
+                                <i class="fa fa-qrcode"/> QR Code
+                            </a></li>
+                            <li><a class="dropdown-item" href="#" t-on-click="addIconElement">
+                                <i class="fa fa-star"/> أيقونة
+                            </a></li>
+                            <li><a class="dropdown-item" href="#" t-on-click="addGradientElement">
+                                <i class="fa fa-paint-brush"/> تدرج لوني
+                            </a></li>
+                        </ul>
+                    </div>
+                    
+                    <!-- Alignment Tools -->
+                    <div class="btn-group me-2" t-if="state.selectedElement">
+                        <button class="btn btn-sm btn-outline-secondary" t-on-click="alignLeft" title="محاذاة لليسار">
+                            <i class="fa fa-align-left"/>
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" t-on-click="alignCenter" title="محاذاة للوسط">
+                            <i class="fa fa-align-center"/>
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" t-on-click="alignRight" title="محاذاة لليمين">
+                            <i class="fa fa-align-right"/>
+                        </button>
+                    </div>
+                    
+                    <!-- Layer Tools -->
+                    <div class="btn-group me-2" t-if="state.selectedElement">
+                        <button class="btn btn-sm btn-outline-secondary" t-on-click="bringToFront" title="إحضار للأمام">
+                            <i class="fa fa-arrow-up"/>
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" t-on-click="sendToBack" title="إرسال للخلف">
+                            <i class="fa fa-arrow-down"/>
+                        </button>
+                        <button class="btn btn-sm btn-outline-danger" t-on-click="deleteElement" title="حذف">
+                            <i class="fa fa-trash"/>
+                        </button>
+                    </div>
+                    
+                    <!-- Grid & Snap -->
+                    <div class="btn-group me-2">
+                        <button class="btn btn-sm" t-att-class="state.showGrid ? 'btn-primary' : 'btn-outline-secondary'" 
+                                t-on-click="toggleGrid" title="إظهار/إخفاء الشبكة">
+                            <i class="fa fa-th"/> شبكة
+                        </button>
+                        <button class="btn btn-sm" t-att-class="state.snapToGrid ? 'btn-primary' : 'btn-outline-secondary'" 
+                                t-on-click="toggleSnap" title="الالتقاط بالشبكة">
+                            <i class="fa fa-magnet"/> مغناطيس
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="toolbar_center">
+                    <h4 class="mb-0">
+                        <i class="fa fa-file-text-o text-primary"/>
+                        <t t-if="state.template" t-esc="state.template.name"/>
+                        <span t-if="state.unsavedChanges" class="badge bg-warning text-dark ms-2">غير محفوظ</span>
+                    </h4>
+                </div>
+                
+                <div class="toolbar_right">
+                    <!-- Zoom Controls -->
+                    <button class="btn btn-sm btn-secondary" t-on-click="zoomOut">
+                        <i class="fa fa-search-minus"/>
+                    </button>
+                    <span class="zoom_level mx-2">
+                        <t t-esc="Math.round(state.zoom * 100)"/>%
+                    </span>
+                    <button class="btn btn-sm btn-secondary" t-on-click="zoomIn">
+                        <i class="fa fa-search-plus"/>
+                    </button>
+                    <button class="btn btn-sm btn-secondary ms-2" t-on-click="zoomReset">
+                        <i class="fa fa-expand"/> 100%
+                    </button>
+                    
+                    <!-- Undo/Redo -->
+                    <div class="btn-group ms-3">
+                        <button class="btn btn-sm btn-outline-secondary" t-on-click="undo" 
+                                t-att-disabled="!state.canUndo" title="تراجع">
+                            <i class="fa fa-undo"/>
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" t-on-click="redo" 
+                                t-att-disabled="!state.canRedo" title="إعادة">
+                            <i class="fa fa-repeat"/>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Main Content Area -->
+            <div class="invoice_designer_content">
+                
+                <!-- Left Sidebar - Elements List -->
+                <div class="invoice_designer_sidebar_left">
+                    <div class="sidebar_header">
+                        <h6><i class="fa fa-list"/> العناصر (<t t-esc="state.elements.length"/>)</h6>
+                    </div>
+                    <div class="sidebar_content">
+                        <div class="elements_list">
+                            <div t-foreach="state.elements" t-as="element" t-key="element.id"
+                                 class="element_item" 
+                                 t-att-class="state.selectedElement &amp;&amp; state.selectedElement.id === element.id ? 'active' : ''"
+                                 t-on-click="() => this.selectElement(element)">
+                                <div class="element_icon">
+                                    <i t-if="element.element_type === 'text'" class="fa fa-font"/>
+                                    <i t-elif="element.element_type === 'field'" class="fa fa-database"/>
+                                    <i t-elif="element.element_type === 'image'" class="fa fa-image"/>
+                                    <i t-elif="element.element_type === 'table'" class="fa fa-table"/>
+                                    <i t-elif="element.element_type === 'shape'" class="fa fa-square"/>
+                                    <i t-elif="element.element_type === 'line'" class="fa fa-minus"/>
+                                    <i t-elif="element.element_type === 'barcode'" class="fa fa-barcode"/>
+                                    <i t-elif="element.element_type === 'qr'" class="fa fa-qrcode"/>
+                                    <i t-elif="element.element_type === 'icon'" class="fa fa-star"/>
+                                    <i t-elif="element.element_type === 'gradient_box'" class="fa fa-paint-brush"/>
+                                </div>
+                                <div class="element_info">
+                                    <div class="element_name" t-esc="element.name"/>
+                                    <div class="element_type" t-esc="element.element_type"/>
+                                </div>
+                                <div class="element_actions">
+                                    <button class="btn btn-xs btn-light" t-on-click.stop="() => this.toggleElementVisibility(element)">
+                                        <i t-if="element.visible !== false" class="fa fa-eye"/>
+                                        <i t-else="" class="fa fa-eye-slash"/>
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div t-if="state.elements.length === 0" class="text-center text-muted p-4">
+                                <i class="fa fa-inbox fa-3x mb-2"/>
+                                <p>لا توجد عناصر بعد<br/>ابدأ بإضافة عناصر من شريط الأدوات</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Canvas Area -->
+                <div class="invoice_designer_canvas_wrapper">
+                    <canvas 
+                        t-ref="canvas"
+                        class="invoice_designer_canvas"
+                        t-att-width="state.template ? state.template.page_width * 3.78 : 794"
+                        t-att-height="state.template ? state.template.page_height * 3.78 : 1123">
+                    </canvas>
+                </div>
+                
+                <!-- Properties Panel - Right Sidebar -->
+                <div class="invoice_designer_properties">
+                    <div class="properties_header">
+                        <h5><i class="fa fa-cog"/> <t t-if="state.selectedElement">خصائص العنصر</t><t t-else="">لا يوجد عنصر محدد</t></h5>
+                    </div>
+                    
+                    <div t-if="!state.selectedElement" class="p-4 text-center text-muted">
+                        <i class="fa fa-hand-pointer-o fa-3x mb-2"/>
+                        <p>اختر عنصراً لعرض خصائصه</p>
+                    </div>
+                    
+                    <div t-if="state.selectedElement" class="properties_content">
+                        
+                        <!-- Basic Info -->
+                        <div class="property_section">
+                            <h6 class="property_section_title">معلومات أساسية</h6>
+                            
+                            <div class="form-group">
+                                <label>الاسم</label>
+                                <input type="text" class="form-control" 
+                                       t-model="state.selectedElement.name"
+                                       t-on-change="onPropertyChange"/>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>النوع</label>
+                                <select class="form-select" t-model="state.selectedElement.element_type" 
+                                        t-on-change="onElementTypeChange">
+                                    <option value="text">نص ثابت</option>
+                                    <option value="field">حقل ديناميكي</option>
+                                    <option value="image">صورة</option>
+                                    <option value="table">جدول</option>
+                                    <option value="shape">شكل</option>
+                                    <option value="line">خط</option>
+                                    <option value="barcode">باركود</option>
+                                    <option value="qr">QR Code</option>
+                                    <option value="icon">أيقونة</option>
+                                    <option value="gradient_box">تدرج لوني</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <!-- Position & Size -->
+                        <div class="property_section">
+                            <h6 class="property_section_title">الموضع والحجم</h6>
+                            
+                            <div class="row">
+                                <div class="col-6">
+                                    <div class="form-group">
+                                        <label>X (مم)</label>
+                                        <input type="number" class="form-control" step="0.1"
+                                               t-model="state.selectedElement.x"
+                                               t-on-change="onPropertyChange"/>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="form-group">
+                                        <label>Y (مم)</label>
+                                        <input type="number" class="form-control" step="0.1"
+                                               t-model="state.selectedElement.y"
+                                               t-on-change="onPropertyChange"/>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-6">
+                                    <div class="form-group">
+                                        <label>العرض (مم)</label>
+                                        <input type="number" class="form-control" step="0.1"
+                                               t-model="state.selectedElement.width"
+                                               t-on-change="onPropertyChange"/>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="form-group">
+                                        <label>الارتفاع (مم)</label>
+                                        <input type="number" class="form-control" step="0.1"
+                                               t-model="state.selectedElement.height"
+                                               t-on-change="onPropertyChange"/>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>الدوران (درجة)</label>
+                                <input type="number" class="form-control" 
+                                       t-model="state.selectedElement.rotation"
+                                       t-on-change="onPropertyChange" min="0" max="360"/>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>الطبقة (Z-Index)</label>
+                                <input type="number" class="form-control" 
+                                       t-model="state.selectedElement.z_index"
+                                       t-on-change="onPropertyChange"/>
+                            </div>
+                        </div>
+                        
+                        <!-- Table Settings (for table elements) -->
+                        <div t-if="state.selectedElement.element_type === 'table'" class="property_section">
+                            <h6 class="property_section_title">إعدادات الجدول</h6>
+
+                            <div class="form-group mb-2">
+                                <label>اتجاه الجدول</label>
+                                <select class="form-select" t-model="state.selectedElement.table_direction" t-on-change="onPropertyChange">
+                                    <option value="rtl">من اليمين لليسار (RTL)</option>
+                                    <option value="ltr">من اليسار لليمين (LTR)</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group mb-2">
+                                <label>خط الجدول</label>
+                                <select class="form-select" t-model="state.selectedElement.table_font_family" t-on-change="onPropertyChange">
+                                    <option value="inherit">وراثة من العنصر</option>
+                                    <option value="Almarai">Almarai</option>
+                                    <option value="Cairo">Cairo</option>
+                                    <option value="Tajawal">Tajawal</option>
+                                    <option value="Amiri">Amiri</option>
+                                    <option value="Arial">Arial</option>
+                                    <option value="Helvetica">Helvetica</option>
+                                    <option value="Times New Roman">Times New Roman</option>
+                                    <option value="custom">مخصص</option>
+                                </select>
+                                <input t-if="state.selectedElement.table_font_family === 'custom'" type="text" class="form-control mt-1"
+                                       placeholder="اكتب اسم الخط" t-model="state.selectedElement.table_custom_font" t-on-change="onPropertyChange"/>
+                            </div>
+
+                            <div class="property_subsection">
+                                <h6 class="property_section_title small">إظهار الأعمدة</h6>
+                                <div class="row g-2">
+                                    <div class="col-6"><label><input type="checkbox" t-model="state.selectedElement.show_column_product" t-on-change="onPropertyChange"/> المنتج</label></div>
+                                    <div class="col-6"><label><input type="checkbox" t-model="state.selectedElement.show_column_description" t-on-change="onPropertyChange"/> الوصف</label></div>
+                                    <div class="col-6"><label><input type="checkbox" t-model="state.selectedElement.show_column_qty" t-on-change="onPropertyChange"/> الكمية</label></div>
+                                    <div class="col-6"><label><input type="checkbox" t-model="state.selectedElement.show_column_uom" t-on-change="onPropertyChange"/> الوحدة</label></div>
+                                    <div class="col-6"><label><input type="checkbox" t-model="state.selectedElement.show_column_price" t-on-change="onPropertyChange"/> السعر</label></div>
+                                    <div class="col-6"><label><input type="checkbox" t-model="state.selectedElement.show_column_discount" t-on-change="onPropertyChange"/> الخصم</label></div>
+                                    <div class="col-6"><label><input type="checkbox" t-model="state.selectedElement.show_column_tax" t-on-change="onPropertyChange"/> الضريبة</label></div>
+                                    <div class="col-6"><label><input type="checkbox" t-model="state.selectedElement.show_column_subtotal" t-on-change="onPropertyChange"/> المجموع</label></div>
+                                </div>
+                            </div>
+
+                            <div class="property_subsection">
+                                <h6 class="property_section_title small">ترتيب الأعمدة</h6>
+                                <div class="row g-2">
+                                    <div class="col-6"><label>المنتج</label><input type="number" class="form-control" t-model="state.selectedElement.column_order_product" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-6"><label>الوصف</label><input type="number" class="form-control" t-model="state.selectedElement.column_order_description" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-6"><label>الكمية</label><input type="number" class="form-control" t-model="state.selectedElement.column_order_qty" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-6"><label>الوحدة</label><input type="number" class="form-control" t-model="state.selectedElement.column_order_uom" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-6"><label>السعر</label><input type="number" class="form-control" t-model="state.selectedElement.column_order_price" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-6"><label>الخصم</label><input type="number" class="form-control" t-model="state.selectedElement.column_order_discount" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-6"><label>الضريبة</label><input type="number" class="form-control" t-model="state.selectedElement.column_order_tax" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-6"><label>المجموع</label><input type="number" class="form-control" t-model="state.selectedElement.column_order_subtotal" t-on-change="onPropertyChange"/></div>
+                                </div>
+                            </div>
+
+                            <div class="property_subsection">
+                                <h6 class="property_section_title small">عرض الأعمدة (%)</h6>
+                                <div class="row g-2">
+                                    <div class="col-6"><label>المنتج</label><input type="number" class="form-control" t-model="state.selectedElement.column_width_product" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-6"><label>الوصف</label><input type="number" class="form-control" t-model="state.selectedElement.column_width_description" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-6"><label>الكمية</label><input type="number" class="form-control" t-model="state.selectedElement.column_width_qty" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-6"><label>الوحدة</label><input type="number" class="form-control" t-model="state.selectedElement.column_width_uom" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-6"><label>السعر</label><input type="number" class="form-control" t-model="state.selectedElement.column_width_price" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-6"><label>الخصم</label><input type="number" class="form-control" t-model="state.selectedElement.column_width_discount" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-6"><label>الضريبة</label><input type="number" class="form-control" t-model="state.selectedElement.column_width_tax" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-6"><label>المجموع</label><input type="number" class="form-control" t-model="state.selectedElement.column_width_subtotal" t-on-change="onPropertyChange"/></div>
+                                </div>
+                            </div>
+
+                            <div class="property_subsection">
+                                <h6 class="property_section_title small">محاذاة الأعمدة</h6>
+                                <div class="row g-2">
+                                    <div class="col-6"><label>المنتج</label>
+                                        <select class="form-select" t-model="state.selectedElement.column_align_product" t-on-change="onPropertyChange">
+                                            <option value="left">يسار</option><option value="center">وسط</option><option value="right">يمين</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-6"><label>الوصف</label>
+                                        <select class="form-select" t-model="state.selectedElement.column_align_description" t-on-change="onPropertyChange">
+                                            <option value="left">يسار</option><option value="center">وسط</option><option value="right">يمين</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-6"><label>الكمية</label>
+                                        <select class="form-select" t-model="state.selectedElement.column_align_qty" t-on-change="onPropertyChange">
+                                            <option value="left">يسار</option><option value="center">وسط</option><option value="right">يمين</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-6"><label>الوحدة</label>
+                                        <select class="form-select" t-model="state.selectedElement.column_align_uom" t-on-change="onPropertyChange">
+                                            <option value="left">يسار</option><option value="center">وسط</option><option value="right">يمين</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-6"><label>السعر</label>
+                                        <select class="form-select" t-model="state.selectedElement.column_align_price" t-on-change="onPropertyChange">
+                                            <option value="left">يسار</option><option value="center">وسط</option><option value="right">يمين</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-6"><label>الخصم</label>
+                                        <select class="form-select" t-model="state.selectedElement.column_align_discount" t-on-change="onPropertyChange">
+                                            <option value="left">يسار</option><option value="center">وسط</option><option value="right">يمين</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-6"><label>الضريبة</label>
+                                        <select class="form-select" t-model="state.selectedElement.column_align_tax" t-on-change="onPropertyChange">
+                                            <option value="left">يسار</option><option value="center">وسط</option><option value="right">يمين</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-6"><label>المجموع</label>
+                                        <select class="form-select" t-model="state.selectedElement.column_align_subtotal" t-on-change="onPropertyChange">
+                                            <option value="left">يسار</option><option value="center">وسط</option><option value="right">يمين</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="property_subsection">
+                                <h6 class="property_section_title small">عناوين الأعمدة</h6>
+                                <div class="row g-2">
+                                    <div class="col-6"><label>المنتج</label><input type="text" class="form-control" t-model="state.selectedElement.header_product" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-6"><label>الوصف</label><input type="text" class="form-control" t-model="state.selectedElement.header_description" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-6"><label>الكمية</label><input type="text" class="form-control" t-model="state.selectedElement.header_qty" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-6"><label>الوحدة</label><input type="text" class="form-control" t-model="state.selectedElement.header_uom" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-6"><label>السعر</label><input type="text" class="form-control" t-model="state.selectedElement.header_price" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-6"><label>الخصم</label><input type="text" class="form-control" t-model="state.selectedElement.header_discount" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-6"><label>الضريبة</label><input type="text" class="form-control" t-model="state.selectedElement.header_tax" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-6"><label>المجموع</label><input type="text" class="form-control" t-model="state.selectedElement.header_subtotal" t-on-change="onPropertyChange"/></div>
+                                </div>
+                            </div>
+
+                            <div class="property_subsection">
+                                <h6 class="property_section_title small">تنسيق الرأس والصفوف</h6>
+                                <div class="row g-2">
+                                    <div class="col-6"><label>خلفية الرأس</label><input type="color" class="form-control form-control-color" t-model="state.selectedElement.table_header_bg" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-6"><label>لون نص الرأس</label><input type="color" class="form-control form-control-color" t-model="state.selectedElement.table_header_color" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-6"><label>حجم خط الرأس</label><input type="number" class="form-control" t-model="state.selectedElement.table_header_font_size" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-6"><label>وزن خط الرأس</label>
+                                        <select class="form-select" t-model="state.selectedElement.table_header_font_weight" t-on-change="onPropertyChange">
+                                            <option value="400">Normal</option><option value="600">Semi Bold</option><option value="700">Bold</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-6"><label>خلفية الصف</label><input type="color" class="form-control form-control-color" t-model="state.selectedElement.table_row_bg" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-6"><label>خلفية متناوبة</label><input type="color" class="form-control form-control-color" t-model="state.selectedElement.table_row_alternate_bg" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-6"><label>لون النص</label><input type="color" class="form-control form-control-color" t-model="state.selectedElement.table_row_color" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-6"><label>حجم خط الصف</label><input type="number" class="form-control" t-model="state.selectedElement.table_row_font_size" t-on-change="onPropertyChange"/></div>
+                                </div>
+                            </div>
+
+                            <div class="property_subsection">
+                                <h6 class="property_section_title small">الحدود والحشوة</h6>
+                                <div class="row g-2">
+                                    <div class="col-6"><label>لون الحدود</label><input type="color" class="form-control form-control-color" t-model="state.selectedElement.table_border_color" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-3"><label>سمك الحدود</label><input type="number" class="form-control" t-model="state.selectedElement.table_border_width" t-on-change="onPropertyChange"/></div>
+                                    <div class="col-3"><label>حشوة الخلية</label><input type="number" class="form-control" t-model="state.selectedElement.table_cell_padding" t-on-change="onPropertyChange"/></div>
+                                </div>
+                            </div>
+
+                            <div class="property_subsection">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="showFooter" t-model="state.selectedElement.show_table_footer" t-on-change="onPropertyChange"/>
+                                    <label class="form-check-label" for="showFooter">إظهار تذييل الجدول</label>
+                                </div>
+                                <input t-if="state.selectedElement.show_table_footer" type="text" class="form-control mt-2" placeholder="نص التذييل"
+                                       t-model="state.selectedElement.table_footer_text" t-on-change="onPropertyChange"/>
+                            </div>
+                            
+                            <div class="property_subsection">
+                                <h6 class="property_section_title small">التقسيم التلقائي (Pagination)</h6>
+                                <div class="form-group">
+                                    <label>الحد الأقصى للأسطر في الصفحة</label>
+                                    <input type="number" class="form-control" min="0" max="100"
+                                           t-model="state.selectedElement.table_max_rows_per_page"
+                                           t-on-change="onPropertyChange"
+                                           placeholder="20"/>
+                                    <small class="text-muted">اترك 0 لإلغاء التقسيم (جدول واحد فقط)</small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Content (for text/field) -->
+                        <div t-if="state.selectedElement.element_type === 'text' || state.selectedElement.element_type === 'field'" 
+                             class="property_section">
+                            <h6 class="property_section_title">المحتوى</h6>
+                            
+                            <div t-if="state.selectedElement.element_type === 'text'" class="form-group">
+                                <label>النص</label>
+                                <textarea class="form-control" rows="4"
+                                          t-model="state.selectedElement.content"
+                                          t-on-change="onPropertyChange"/>
+                            </div>
+                            
+                            <div t-if="state.selectedElement.element_type === 'field'" class="form-group">
+                                <label>اسم الحقل</label>
+                                <select class="form-select" t-model="state.selectedElement.field_name" 
+                                        t-on-change="onPropertyChange">
+                                    <option value="">-- اختر حقل --</option>
+                                    <optgroup label="معلومات الطلب">
+                                        <option value="name">رقم الطلب</option>
+                                        <option value="date">التاريخ</option>
+                                        <option value="partner_id.name">اسم العميل</option>
+                                        <option value="user_id.name">المستخدم</option>
+                                        <option value="amount_total">المجموع الكلي</option>
+                                        <option value="amount_discount">الخصم</option>
+                                        <option value="note">ملاحظات</option>
+                                    </optgroup>
+                                    <optgroup label="معلومات الشركة">
+                                        <option value="company_id.name">اسم الشركة</option>
+                                        <option value="company_id.phone">هاتف</option>
+                                        <option value="company_id.email">بريد إلكتروني</option>
+                                        <option value="company_id.street">العنوان</option>
+                                    </optgroup>
+                                </select>
+                            </div>
+                            
+                            <div t-if="state.selectedElement.element_type === 'field'" class="form-group">
+                                <label>صيغة العرض (اختياري)</label>
+                                <input type="text" class="form-control" 
+                                       t-model="state.selectedElement.field_format"
+                                       t-on-change="onPropertyChange"
+                                       placeholder="مثال: %.2f أو %Y-%m-%d"/>
+                                <small class="text-muted">للأرقام: %.2f، للتاريخ: %Y-%m-%d</small>
+                            </div>
+                        </div>
+                        
+                        <!-- Image Settings -->
+                        <div t-if="state.selectedElement.element_type === 'image'" class="property_section">
+                            <h6 class="property_section_title">إعدادات الصورة</h6>
+                            
+                            <div class="form-group">
+                                <label>رفع صورة</label>
+                                <input type="file" class="form-control" accept="image/*"
+                                       t-on-change="onImageUpload"/>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>رابط الصورة (URL)</label>
+                                <input type="url" class="form-control" 
+                                       t-model="state.selectedElement.image_url"
+                                       t-on-change="onPropertyChange"
+                                       placeholder="https://example.com/image.png"/>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>طريقة الملائمة</label>
+                                <select class="form-select" t-model="state.selectedElement.object_fit" 
+                                        t-on-change="onPropertyChange">
+                                    <option value="fill">ملء</option>
+                                    <option value="contain">احتواء</option>
+                                    <option value="cover">تغطية</option>
+                                    <option value="none">لا شيء</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <!-- Shape Settings -->
+                        <div t-if="state.selectedElement.element_type === 'shape'" class="property_section">
+                            <h6 class="property_section_title">إعدادات الشكل</h6>
+                            
+                            <div class="form-group">
+                                <label>نوع الشكل</label>
+                                <select class="form-select" t-model="state.selectedElement.shape_type" 
+                                        t-on-change="onPropertyChange">
+                                    <option value="rectangle">مستطيل</option>
+                                    <option value="circle">دائرة</option>
+                                    <option value="ellipse">بيضاوي</option>
+                                    <option value="triangle">مثلث</option>
+                                    <option value="polygon">مضلع</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <!-- Typography -->
+                        <div t-if="state.selectedElement.element_type === 'text' || state.selectedElement.element_type === 'field'" 
+                             class="property_section">
+                            <h6 class="property_section_title">الخط والنص</h6>
+                            
+                            <div class="form-group">
+                                <label>نوع الخط</label>
+                                <select class="form-select" t-model="state.selectedElement.font_family_name" 
+                                        t-on-change="onPropertyChange">
+                                    <option value="Arial">Arial</option>
+                                    <option value="Times New Roman">Times New Roman</option>
+                                    <option value="Courier New">Courier New</option>
+                                    <option value="Georgia">Georgia</option>
+                                    <option value="Verdana">Verdana</option>
+                                    <option value="Tahoma">Tahoma</option>
+                                    <option value="MCS Taybah S_U normal.">MCS Taybah (عربي)</option>
+                                    <option value="Cairo">Cairo (عربي)</option>
+                                    <option value="Amiri">Amiri (عربي)</option>
+                                </select>
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-6">
+                                    <div class="form-group">
+                                        <label>حجم الخط</label>
+                                        <input type="number" class="form-control" 
+                                               t-model="state.selectedElement.font_size"
+                                               t-on-change="onPropertyChange" min="6" max="100"/>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="form-group">
+                                        <label>وزن الخط</label>
+                                        <select class="form-select" t-model="state.selectedElement.font_weight" 
+                                                t-on-change="onPropertyChange">
+                                            <option value="100">100 - رفيع</option>
+                                            <option value="200">200 - خفيف جداً</option>
+                                            <option value="300">300 - خفيف</option>
+                                            <option value="400">400 - عادي</option>
+                                            <option value="500">500 - متوسط</option>
+                                            <option value="600">600 - شبه عريض</option>
+                                            <option value="700">700 - عريض</option>
+                                            <option value="800">800 - عريض جداً</option>
+                                            <option value="900">900 - أسود</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>نمط الخط</label>
+                                <select class="form-select" t-model="state.selectedElement.font_style" 
+                                        t-on-change="onPropertyChange">
+                                    <option value="normal">عادي</option>
+                                    <option value="italic">مائل</option>
+                                    <option value="oblique">منحرف</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>محاذاة النص</label>
+                                <div class="btn-group w-100">
+                                    <button class="btn btn-sm btn-outline-secondary" 
+                                            t-att-class="state.selectedElement.text_align === 'left' ? 'active' : ''"
+                                            t-on-click="() => this.setTextAlign('left')">
+                                        <i class="fa fa-align-left"/>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary" 
+                                            t-att-class="state.selectedElement.text_align === 'center' ? 'active' : ''"
+                                            t-on-click="() => this.setTextAlign('center')">
+                                        <i class="fa fa-align-center"/>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary" 
+                                            t-att-class="state.selectedElement.text_align === 'right' ? 'active' : ''"
+                                            t-on-click="() => this.setTextAlign('right')">
+                                        <i class="fa fa-align-right"/>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary" 
+                                            t-att-class="state.selectedElement.text_align === 'justify' ? 'active' : ''"
+                                            t-on-click="() => this.setTextAlign('justify')">
+                                        <i class="fa fa-align-justify"/>
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>تزيين النص</label>
+                                <select class="form-select" t-model="state.selectedElement.text_decoration" 
+                                        t-on-change="onPropertyChange">
+                                    <option value="none">بدون</option>
+                                    <option value="underline">تسطير</option>
+                                    <option value="overline">خط علوي</option>
+                                    <option value="line-through">خط وسط</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>تحويل النص</label>
+                                <select class="form-select" t-model="state.selectedElement.text_transform" 
+                                        t-on-change="onPropertyChange">
+                                    <option value="none">بدون</option>
+                                    <option value="uppercase">أحرف كبيرة</option>
+                                    <option value="lowercase">أحرف صغيرة</option>
+                                    <option value="capitalize">أول حرف كبير</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <!-- Colors & Style -->
+                        <div class="property_section">
+                            <h6 class="property_section_title">الألوان والنمط</h6>
+                            
+                            <div class="form-group">
+                                <label>لون النص/الحد</label>
+                                <div class="input-group">
+                                    <input type="color" class="form-control form-control-color" 
+                                           t-model="state.selectedElement.color"
+                                           t-on-change="onPropertyChange"/>
+                                    <input type="text" class="form-control" 
+                                           t-model="state.selectedElement.color"
+                                           t-on-change="onPropertyChange"
+                                           placeholder="#000000"/>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>لون الخلفية</label>
+                                <div class="input-group">
+                                    <input type="color" class="form-control form-control-color" 
+                                           t-model="state.selectedElement.background_color"
+                                           t-on-change="onPropertyChange"/>
+                                    <input type="text" class="form-control" 
+                                           t-model="state.selectedElement.background_color"
+                                           t-on-change="onPropertyChange"
+                                           placeholder="transparent"/>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>عرض الحد (px)</label>
+                                <input type="number" class="form-control" 
+                                       t-model="state.selectedElement.border_width"
+                                       t-on-change="onPropertyChange" min="0" max="20"/>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>نمط الحد</label>
+                                <select class="form-select" t-model="state.selectedElement.border_style" 
+                                        t-on-change="onPropertyChange">
+                                    <option value="none">بدون</option>
+                                    <option value="solid">صلب</option>
+                                    <option value="dashed">متقطع</option>
+                                    <option value="dotted">منقط</option>
+                                    <option value="double">مزدوج</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>الشفافية</label>
+                                <input type="range" class="form-range" 
+                                       t-model="state.selectedElement.opacity"
+                                       t-on-change="onPropertyChange" 
+                                       min="0" max="1" step="0.1"/>
+                                <div class="text-center"><t t-esc="Math.round((state.selectedElement.opacity || 1) * 100)"/>%</div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>نصف قطر الحواف (px)</label>
+                                <input type="number" class="form-control" 
+                                       t-model="state.selectedElement.border_radius"
+                                       t-on-change="onPropertyChange" min="0" max="100"/>
+                            </div>
+                        </div>
+                        
+                        <!-- Spacing -->
+                        <div class="property_section">
+                            <h6 class="property_section_title">الهوامش والمسافات</h6>
+                            
+                            <div class="row">
+                                <div class="col-6">
+                                    <div class="form-group">
+                                        <label>Padding (px)</label>
+                                        <input type="number" class="form-control" 
+                                               t-model="state.selectedElement.padding"
+                                               t-on-change="onPropertyChange" min="0"/>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="form-group">
+                                        <label>تباعد الأسطر</label>
+                                        <input type="number" class="form-control" step="0.1"
+                                               t-model="state.selectedElement.line_height"
+                                               t-on-change="onPropertyChange" min="0.5" max="5"/>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Advanced Effects -->
+                        <div class="property_section">
+                            <h6 class="property_section_title">تأثيرات متقدمة</h6>
+                            
+                            <div class="form-group">
+                                <label>ظل (Shadow)</label>
+                                <input type="text" class="form-control" 
+                                       t-model="state.selectedElement.box_shadow"
+                                       t-on-change="onPropertyChange"
+                                       placeholder="2px 2px 5px rgba(0,0,0,0.3)"/>
+                                <small class="text-muted">مثال: 2px 2px 5px rgba(0,0,0,0.3)</small>
+                            </div>
+                            
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" 
+                                       t-model="state.selectedElement.bold"
+                                       t-on-change="onPropertyChange"/>
+                                <label class="form-check-label">عريض (Bold)</label>
+                            </div>
+                            
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" 
+                                       t-model="state.selectedElement.italic"
+                                       t-on-change="onPropertyChange"/>
+                                <label class="form-check-label">مائل (Italic)</label>
+                            </div>
+                        </div>
+                        
+                    </div>
+                </div>
+                
+            </div>
+            
+            </t>
+            <!-- End of Designer Interface -->
+            
+        </div>
+    </t>
+    
+</templates>
+

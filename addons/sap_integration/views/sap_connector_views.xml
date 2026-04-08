@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- SAP Connector List View -->
+    <record id="view_sap_connector_list" model="ir.ui.view">
+        <field name="name">sap.connector.list</field>
+        <field name="model">sap.connector</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="name"/>
+                <field name="backend_id"/>
+                <field name="sync_customers" optional="show"/>
+                <field name="sync_suppliers" optional="show"/>
+                <field name="sync_products" optional="show"/>
+                <field name="active"/>
+                <field name="sync_status"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- SAP Connector Form View -->
+    <record id="view_sap_connector_form" model="ir.ui.view">
+        <field name="name">sap.connector.form</field>
+        <field name="model">sap.connector</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button name="sync_all" string="Sync All" type="object" class="btn-primary"/>
+                    <field name="sync_status" widget="statusbar"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name" placeholder="Connector Name"/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group string="Configuration">
+                            <field name="backend_id"/>
+                            <field name="active"/>
+                            <field name="auto_sync"/>
+                            <field name="sync_frequency" invisible="not auto_sync"/>
+                            <field name="update_only" invisible="not auto_sync"
+                                   help="Only update existing records, don't create new ones (recommended for auto sync)"/>
+                            <field name="last_sync" readonly="1"/>
+                        </group>
+                        <group string="Sync Options">
+                            <field name="sync_customers"/>
+                            <field name="sync_suppliers"/>
+                            <field name="sync_products"/>
+                            <field name="sync_pricelists"/>
+                            <field name="sync_quotations"/>
+                            <field name="sync_sales"/>
+                            <field name="sync_invoices"/>
+                        </group>
+                    </group>
+                    <group string="Statistics">
+                        <group>
+                            <field name="customers_synced"/>
+                            <field name="suppliers_synced"/>
+                            <field name="products_synced"/>
+                            <field name="pricelists_synced"/>
+                        </group>
+                        <group>
+                            <field name="quotations_synced"/>
+                            <field name="sales_synced"/>
+                            <field name="invoices_synced"/>
+                        </group>
+                    </group>
+                    <group string="Error Log" invisible="not error_message">
+                        <field name="error_message" nolabel="1"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- SAP Connector Action -->
+    <record id="action_sap_connector" model="ir.actions.act_window">
+        <field name="name">SAP Connectors</field>
+        <field name="res_model">sap.connector</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+</odoo>

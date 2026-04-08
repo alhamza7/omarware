@@ -1,0 +1,486 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        
+        <!-- SAP Plugin Manager Tree View -->
+        <record id="view_sap_plugin_manager_tree" model="ir.ui.view">
+            <field name="name">sap.plugin.manager.tree</field>
+            <field name="model">sap.plugin.manager</field>
+            <field name="arch" type="xml">
+                <list string="SAP Plugin Manager" create="false" edit="false">
+                    <field name="name"/>
+                    <field name="version"/>
+                    <field name="author"/>
+                    <field name="category"/>
+                    <field name="status"/>
+                    <field name="registered_at"/>
+                </list>
+            </field>
+        </record>
+        
+        <!-- SAP API Endpoint Tree View -->
+        <record id="view_sap_api_endpoint_tree" model="ir.ui.view">
+            <field name="name">sap.api.endpoint.tree</field>
+            <field name="model">sap.api.endpoint</field>
+            <field name="arch" type="xml">
+                <list string="SAP API Endpoints" create="true" edit="true">
+                    <field name="sequence" widget="handle"/>
+                    <field name="name"/>
+                    <field name="path"/>
+                    <field name="method"/>
+                    <field name="handler_function"/>
+                    <field name="requires_authentication"/>
+                    <field name="rate_limit_enabled"/>
+                    <field name="total_requests"/>
+                    <field name="successful_requests"/>
+                    <field name="failed_requests"/>
+                    <field name="active" widget="boolean_toggle"/>
+                    
+                    <button name="action_test_endpoint" 
+                            type="object" 
+                            icon="fa-play" 
+                            string="Test"/>
+                    <button name="action_view_statistics" 
+                            type="object" 
+                            icon="fa-bar-chart" 
+                            string="Statistics"/>
+                </list>
+            </field>
+        </record>
+        
+        <!-- SAP API Endpoint Form View -->
+        <record id="view_sap_api_endpoint_form" model="ir.ui.view">
+            <field name="name">sap.api.endpoint.form</field>
+            <field name="model">sap.api.endpoint</field>
+            <field name="arch" type="xml">
+                <form string="SAP API Endpoint">
+                    <header>
+                        <button name="action_test_endpoint" 
+                                type="object" 
+                                string="Test Endpoint"
+                                class="btn-primary"/>
+                        <button name="action_view_statistics" 
+                                type="object" 
+                                string="View Statistics"
+                                class="btn-secondary"/>
+                    </header>
+                    
+                    <sheet>
+                        <div class="oe_title">
+                            <h1>
+                                <field name="name" required="1"/>
+                            </h1>
+                        </div>
+                        
+                        <group>
+                            <group>
+                                <field name="path" required="1"/>
+                                <field name="method" required="1"/>
+                                <field name="handler_function" required="1"/>
+                                <field name="description"/>
+                            </group>
+                            <group>
+                                <field name="sequence"/>
+                                <field name="active"/>
+                            </group>
+                        </group>
+                        
+                        <notebook>
+                            <page string="Security" name="security">
+                                <group>
+                                    <field name="requires_authentication"/>
+                                    <field name="api_key_required"/>
+                                    <field name="allowed_ips"/>
+                                </group>
+                            </page>
+                            
+                            <page string="Rate Limiting" name="rate_limiting">
+                                <group>
+                                    <field name="rate_limit_enabled"/>
+                                    <field name="rate_limit_requests"/>
+                                    <field name="rate_limit_window"/>
+                                </group>
+                            </page>
+                            
+                            <page string="Statistics" name="statistics">
+                                <group>
+                                    <group>
+                                        <field name="total_requests" readonly="1"/>
+                                        <field name="successful_requests" readonly="1"/>
+                                        <field name="failed_requests" readonly="1"/>
+                                    </group>
+                                    <group>
+                                        <field name="last_request" readonly="1"/>
+                                    </group>
+                                </group>
+                            </page>
+                        </notebook>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+        
+        <!-- SAP API Key Tree View -->
+        <record id="view_sap_api_key_tree" model="ir.ui.view">
+            <field name="name">sap.api.key.tree</field>
+            <field name="model">sap.api.key</field>
+            <field name="arch" type="xml">
+                <list string="SAP API Keys" create="true" edit="true">
+                    <field name="name"/>
+                    <field name="key_value"/>
+                    <field name="user_id"/>
+                    <field name="expires_date"/>
+                    <field name="last_used"/>
+                    <field name="usage_count"/>
+                    <field name="active" widget="boolean_toggle"/>
+                    
+                    <button name="action_generate_new_key" 
+                            type="object" 
+                            icon="fa-refresh" 
+                            string="Generate New Key"/>
+                    <button name="action_revoke_key" 
+                            type="object" 
+                            icon="fa-ban" 
+                            string="Revoke"/>
+                </list>
+            </field>
+        </record>
+        
+        <!-- SAP API Key Form View -->
+        <record id="view_sap_api_key_form" model="ir.ui.view">
+            <field name="name">sap.api.key.form</field>
+            <field name="model">sap.api.key</field>
+            <field name="arch" type="xml">
+                <form string="SAP API Key">
+                    <header>
+                        <button name="action_generate_new_key" 
+                                type="object" 
+                                string="Generate New Key"
+                                class="btn-primary"/>
+                        <button name="action_revoke_key" 
+                                type="object" 
+                                string="Revoke Key"
+                                class="btn-warning"/>
+                    </header>
+                    
+                    <sheet>
+                        <div class="oe_title">
+                            <h1>
+                                <field name="name" required="1"/>
+                            </h1>
+                        </div>
+                        
+                        <group>
+                            <group>
+                                <field name="key_value" readonly="1"/>
+                                <field name="user_id"/>
+                                <field name="expires_date"/>
+                                <field name="active"/>
+                            </group>
+                            <group>
+                                <field name="last_used" readonly="1"/>
+                                <field name="usage_count" readonly="1"/>
+                            </group>
+                        </group>
+                        
+                        <group string="Description">
+                            <field name="description" nolabel="1"/>
+                        </group>
+                        
+                        <group string="Allowed Endpoints">
+                            <field name="endpoint_ids" widget="many2many_tags"/>
+                        </group>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+        
+        <!-- SAP Webhook Endpoint Tree View -->
+        <record id="view_sap_webhook_endpoint_tree" model="ir.ui.view">
+            <field name="name">sap.webhook.endpoint.tree</field>
+            <field name="model">sap.webhook.endpoint</field>
+            <field name="arch" type="xml">
+                <list string="SAP Webhook Endpoints" create="true" edit="true">
+                    <field name="sequence" widget="handle"/>
+                    <field name="name"/>
+                    <field name="url"/>
+                    <field name="event_types" widget="badge"/>
+                    <field name="http_method"/>
+                    <field name="total_requests"/>
+                    <field name="successful_requests"/>
+                    <field name="failed_requests"/>
+                    <field name="active" widget="boolean_toggle"/>
+                    
+                    <button name="action_test_webhook" 
+                            type="object" 
+                            icon="fa-play" 
+                            string="Test"/>
+                    <button name="action_view_logs" 
+                            type="object" 
+                            icon="fa-list" 
+                            string="View Logs"/>
+                </list>
+            </field>
+        </record>
+        
+        <!-- SAP Webhook Endpoint Form View -->
+        <record id="view_sap_webhook_endpoint_form" model="ir.ui.view">
+            <field name="name">sap.webhook.endpoint.form</field>
+            <field name="model">sap.webhook.endpoint</field>
+            <field name="arch" type="xml">
+                <form string="SAP Webhook Endpoint">
+                    <header>
+                        <button name="action_test_webhook" 
+                                type="object" 
+                                string="Test Webhook"
+                                class="btn-primary"/>
+                        <button name="action_view_logs" 
+                                type="object" 
+                                string="View Logs"
+                                class="btn-secondary"/>
+                    </header>
+                    
+                    <sheet>
+                        <div class="oe_title">
+                            <h1>
+                                <field name="name" required="1"/>
+                            </h1>
+                        </div>
+                        
+                        <group>
+                            <group>
+                                <field name="url" required="1"/>
+                                <field name="event_types" required="1"/>
+                                <field name="custom_event_types"/>
+                                <field name="http_method" required="1"/>
+                            </group>
+                            <group>
+                                <field name="sequence"/>
+                                <field name="active"/>
+                            </group>
+                        </group>
+                        
+                        <group string="Description">
+                            <field name="description" nolabel="1"/>
+                        </group>
+                        
+                        <notebook>
+                            <page string="Security" name="security">
+                                <group>
+                                    <field name="secret_key"/>
+                                    <field name="requires_authentication"/>
+                                    <field name="auth_token"/>
+                                </group>
+                            </page>
+                            
+                            <page string="Configuration" name="configuration">
+                                <group>
+                                    <field name="headers"/>
+                                    <field name="timeout"/>
+                                    <field name="retry_attempts"/>
+                                    <field name="retry_delay"/>
+                                </group>
+                            </page>
+                            
+                            <page string="Statistics" name="statistics">
+                                <group>
+                                    <group>
+                                        <field name="total_requests" readonly="1"/>
+                                        <field name="successful_requests" readonly="1"/>
+                                        <field name="failed_requests" readonly="1"/>
+                                    </group>
+                                    <group>
+                                        <field name="last_request" readonly="1"/>
+                                        <field name="last_success" readonly="1"/>
+                                        <field name="last_failure" readonly="1"/>
+                                    </group>
+                                </group>
+                            </page>
+                        </notebook>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+        
+        <!-- SAP Customization Rule Tree View -->
+        <record id="view_sap_customization_rule_tree" model="ir.ui.view">
+            <field name="name">sap.customization.rule.tree</field>
+            <field name="model">sap.customization.rule</field>
+            <field name="arch" type="xml">
+                <list string="SAP Customization Rules" create="true" edit="true">
+                    <field name="sequence" widget="handle"/>
+                    <field name="name"/>
+                    <field name="rule_type"/>
+                    <field name="trigger_model"/>
+                    <field name="trigger_field"/>
+                    <field name="execution_order"/>
+                    <field name="execution_count"/>
+                    <field name="success_count"/>
+                    <field name="error_count"/>
+                    <field name="active" widget="boolean_toggle"/>
+                    
+                    <button name="action_test_rule" 
+                            type="object" 
+                            icon="fa-play" 
+                            string="Test"/>
+                    <button name="action_view_executions" 
+                            type="object" 
+                            icon="fa-list" 
+                            string="View Executions"/>
+                </list>
+            </field>
+        </record>
+        
+        <!-- SAP Customization Rule Form View -->
+        <record id="view_sap_customization_rule_form" model="ir.ui.view">
+            <field name="name">sap.customization.rule.form</field>
+            <field name="model">sap.customization.rule</field>
+            <field name="arch" type="xml">
+                <form string="SAP Customization Rule">
+                    <header>
+                        <button name="action_test_rule" 
+                                type="object" 
+                                string="Test Rule"
+                                class="btn-primary"/>
+                        <button name="action_view_executions" 
+                                type="object" 
+                                string="View Executions"
+                                class="btn-secondary"/>
+                    </header>
+                    
+                    <sheet>
+                        <div class="oe_title">
+                            <h1>
+                                <field name="name" required="1"/>
+                            </h1>
+                        </div>
+                        
+                        <group>
+                            <group>
+                                <field name="rule_type" required="1"/>
+                                <field name="trigger_model"/>
+                                <field name="trigger_field"/>
+                                <field name="execution_order"/>
+                            </group>
+                            <group>
+                                <field name="sequence"/>
+                                <field name="active"/>
+                            </group>
+                        </group>
+                        
+                        <group string="Description">
+                            <field name="description" nolabel="1"/>
+                        </group>
+                        
+                        <group string="Trigger Condition">
+                            <field name="trigger_condition" nolabel="1"/>
+                        </group>
+                        
+                        <group string="Rule Code">
+                            <field name="rule_code" nolabel="1" widget="ace" options="{'mode': 'python'}"/>
+                        </group>
+                        
+                        <group string="Configuration Data">
+                            <field name="config_data" nolabel="1" widget="ace" options="{'mode': 'json'}"/>
+                        </group>
+                        
+                        <notebook>
+                            <page string="Statistics" name="statistics">
+                                <group>
+                                    <group>
+                                        <field name="execution_count" readonly="1"/>
+                                        <field name="success_count" readonly="1"/>
+                                        <field name="error_count" readonly="1"/>
+                                    </group>
+                                    <group>
+                                        <field name="last_execution" readonly="1"/>
+                                    </group>
+                                </group>
+                            </page>
+                        </notebook>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+        
+        <!-- Actions -->
+        <record id="action_sap_plugin_manager" model="ir.actions.act_window">
+            <field name="name">SAP Plugin Manager</field>
+            <field name="res_model">sap.plugin.manager</field>
+            <field name="view_mode">list,form</field>
+        </record>
+        
+        <record id="action_sap_api_endpoint" model="ir.actions.act_window">
+            <field name="name">SAP API Endpoints</field>
+            <field name="res_model">sap.api.endpoint</field>
+            <field name="view_mode">list,form</field>
+            <field name="context">{'search_default_active': 1}</field>
+        </record>
+        
+        <record id="action_sap_api_key" model="ir.actions.act_window">
+            <field name="name">SAP API Keys</field>
+            <field name="res_model">sap.api.key</field>
+            <field name="view_mode">list,form</field>
+            <field name="context">{'search_default_active': 1}</field>
+        </record>
+        
+        <record id="action_sap_webhook_endpoint" model="ir.actions.act_window">
+            <field name="name">SAP Webhook Endpoints</field>
+            <field name="res_model">sap.webhook.endpoint</field>
+            <field name="view_mode">list,form</field>
+            <field name="context">{'search_default_active': 1}</field>
+        </record>
+        
+        <record id="action_sap_customization_rule" model="ir.actions.act_window">
+            <field name="name">SAP Customization Rules</field>
+            <field name="res_model">sap.customization.rule</field>
+            <field name="view_mode">list,form</field>
+            <field name="context">{'search_default_active': 1}</field>
+        </record>
+        
+        <!-- Menu Items -->
+        <menuitem id="menu_sap_future_proofing"
+                  name="Future-Proofing"
+                  parent="menu_sap_integration"
+                  action="action_sap_plugin_manager"
+                  sequence="100"/>
+        
+        <menuitem id="menu_sap_plugin_manager"
+                  name="Plugin Manager"
+                  parent="menu_sap_future_proofing"
+                  action="action_sap_plugin_manager"
+                  sequence="10"/>
+        
+        <menuitem id="menu_sap_api_framework"
+                  name="API Framework"
+                  parent="menu_sap_future_proofing"
+                  action="action_sap_api_endpoint"
+                  sequence="20"/>
+        
+        <menuitem id="menu_sap_api_endpoints"
+                  name="API Endpoints"
+                  parent="menu_sap_api_framework"
+                  action="action_sap_api_endpoint"
+                  sequence="10"/>
+        
+        <menuitem id="menu_sap_api_keys"
+                  name="API Keys"
+                  parent="menu_sap_api_framework"
+                  action="action_sap_api_key"
+                  sequence="20"/>
+        
+        <menuitem id="menu_sap_webhook_system"
+                  name="Webhook System"
+                  parent="menu_sap_future_proofing"
+                  action="action_sap_webhook_endpoint"
+                  sequence="30"/>
+        
+        <menuitem id="menu_sap_customization_engine"
+                  name="Customization Engine"
+                  parent="menu_sap_future_proofing"
+                  action="action_sap_customization_rule"
+                  sequence="40"/>
+        
+    </data>
+</odoo>
+

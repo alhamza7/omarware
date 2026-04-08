@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    
+    <!-- Sequence for ULTRAMSG Messages -->
+    <record id="seq_ultramsg_message" model="ir.sequence">
+        <field name="name">ULTRAMSG Message Sequence</field>
+        <field name="code">ultramsg.message</field>
+        <field name="prefix">WA</field>
+        <field name="padding">5</field>
+        <field name="number_increment">1</field>
+        <field name="implementation">standard</field>
+    </record>
+    
+</odoo>
+

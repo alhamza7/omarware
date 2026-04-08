@@ -1,0 +1,484 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="0">
+        <!-- NBS Invoice Design Template - Matching HTML Design 100% -->
+        <template id="report_pos_perfume_order_document_nbs" t-name="pos_perfume_custom.report_pos_perfume_order_document_nbs">
+            <t t-call="web.basic_layout">
+                <t t-set="doc" t-value="doc.with_context(lang=doc.partner_id.lang if doc.partner_id else None)"/>
+                <div class="page nbs-invoice" dir="rtl" style="direction: rtl; text-align: right; position: relative;">
+                    <style>
+                        @page {
+                            margin: 15mm 10mm;
+                            size: A4 portrait;
+                        }
+                        
+                        * {
+                            margin: 0;
+                            padding: 0;
+                            box-sizing: border-box;
+                        }
+                        
+                        .nbs-invoice {
+                            font-family: 'MCS Taybah S_U normal.', 'Arial', 'Tahoma', sans-serif;
+                            direction: rtl;
+                            text-align: right;
+                            position: relative;
+                        }
+                        
+                        /* Header Section with Logo */
+                        .invoice-header {
+                            width: 100%;
+                            margin-bottom: 10px;
+                            position: relative;
+                        }
+                        
+                        .header-logo img {
+                            width: 100%;
+                            height: auto;
+                            display: block;
+                        }
+                        
+                        /* Invoice Info Section */
+                        .invoice-info-table {
+                            width: 100%;
+                            border-collapse: collapse;
+                            margin-bottom: 3px;
+                            font-size: 10pt;
+                        }
+                        
+                        .invoice-info-table td {
+                            padding: 3px 8px;
+                            vertical-align: middle;
+                        }
+                        
+                        .info-label {
+                            font-weight: bold;
+                            color: #000;
+                            text-align: center;
+                            background-color: #ffffff;
+                        }
+                        
+                        .info-value {
+                            text-align: center;
+                            color: #000;
+                            background-color: #ffffff;
+                        }
+                        
+                        /* Yellow Header Bar */
+                        .yellow-header-bar {
+                            background-color: #fcefb4;
+                            border: 1px solid #0080ff;
+                            padding: 3px;
+                            margin-bottom: 3px;
+                        }
+                        
+                        /* Products Table */
+                        .products-table {
+                            width: 100%;
+                            border-collapse: collapse;
+                            margin-bottom: 10px;
+                            font-size: 11pt;
+                        }
+                        
+                        .products-table thead {
+                            background-color: #fcefb4;
+                            border: 1px solid #0080ff;
+                        }
+                        
+                        .products-table th {
+                            padding: 3px 5px;
+                            font-weight: bold;
+                            text-align: center;
+                            border-left: 1px solid #808080;
+                            font-size: 12pt;
+                            color: #000;
+                        }
+                        
+                        .products-table th:first-child {
+                            border-left: none;
+                        }
+                        
+                        .products-table tbody tr {
+                            border-bottom: 1px solid #c0c0c0;
+                        }
+                        
+                        .products-table td {
+                            padding: 4px 5px;
+                            text-align: center;
+                            border-left: 1px solid #808080;
+                            font-size: 11pt;
+                            color: #000;
+                        }
+                        
+                        .products-table td:first-child {
+                            border-left: none;
+                        }
+                        
+                        .product-name-cell {
+                            text-align: right;
+                            font-weight: bold;
+                            font-size: 12pt;
+                            padding-right: 8px;
+                        }
+                        
+                        .product-origin {
+                            font-size: 9pt;
+                            color: #808080;
+                            font-weight: bold;
+                            text-align: right;
+                            padding-right: 8px;
+                        }
+                        
+                        .serial-cell {
+                            font-weight: bold;
+                            font-size: 10pt;
+                            color: #000;
+                        }
+                        
+                        .price-cell {
+                            font-weight: bold;
+                            font-size: 11pt;
+                            color: #000;
+                        }
+                        
+                        /* Totals Section */
+                        .totals-box {
+                            width: 100%;
+                            border: 1px solid #808080;
+                            margin-top: 10px;
+                            margin-bottom: 10px;
+                        }
+                        
+                        .totals-table {
+                            width: 100%;
+                            border-collapse: collapse;
+                            font-size: 11pt;
+                        }
+                        
+                        .totals-table td {
+                            padding: 5px 10px;
+                            border-bottom: 1px solid #808080;
+                        }
+                        
+                        .totals-table tr:last-child td {
+                            border-bottom: none;
+                        }
+                        
+                        .totals-right-col {
+                            width: 30%;
+                            border-left: 1px solid #808080;
+                        }
+                        
+                        .totals-label {
+                            text-align: right;
+                            font-weight: normal;
+                            font-size: 12pt;
+                            color: #000;
+                        }
+                        
+                        .totals-value {
+                            text-align: right;
+                            font-weight: bold;
+                            font-size: 12pt;
+                            color: #000;
+                            padding-right: 20px;
+                        }
+                        
+                        .notes-cell {
+                            text-align: right;
+                            font-weight: normal;
+                            padding: 10px;
+                            vertical-align: top;
+                        }
+                        
+                        .based-on-so {
+                            text-align: right;
+                            font-weight: bold;
+                            font-size: 9pt;
+                            color: #000;
+                            padding: 8px;
+                        }
+                        
+                        .invoice-type-cell {
+                            text-align: right;
+                            font-weight: bold;
+                            font-size: 12pt;
+                            color: #000;
+                            padding: 8px;
+                            border-top: 1px solid #808080;
+                        }
+                        
+                        /* Footer Logo */
+                        .footer-logo {
+                            width: 100%;
+                            border-top: 1px solid #ff9a35;
+                            padding-top: 5px;
+                            margin-top: 10px;
+                        }
+                        
+                        .footer-logo img {
+                            width: 100%;
+                            height: auto;
+                            display: block;
+                        }
+                        
+                        .page-number {
+                            text-align: right;
+                            font-size: 8pt;
+                            color: #000;
+                            margin-top: 5px;
+                        }
+                        
+                        @media print {
+                            .nbs-invoice {
+                                -webkit-print-color-adjust: exact;
+                                print-color-adjust: exact;
+                            }
+                        }
+                    </style>
+                    
+                    <!-- Header with Logo -->
+                    <div class="invoice-header">
+                        <div class="header-logo">
+                            <img t-att-src="'/pos_perfume_custom/static/src/img/nbs_header.png'" alt="NBS Header" style="width: 100%; height: 160px; object-fit: contain;"/>
+                        </div>
+                    </div>
+                    
+                    <!-- Invoice Info Section -->
+                    <table class="invoice-info-table">
+                        <tr>
+                            <td class="info-label" style="width: 15%;">الوقت / اليوم</td>
+                            <td class="info-value" style="width: 15%;">
+                                <t t-if="doc.date">
+                                    <span t-esc="doc.date.strftime('%I:%M%p').upper()"/>
+                                </t>
+                            </td>
+                            <td class="info-label" style="width: 15%;">التاريخ</td>
+                            <td class="info-value" style="width: 15%;">
+                                <t t-if="doc.date">
+                                    <span t-esc="doc.date.strftime('%d/%m/%Y')"/>
+                                </t>
+                            </td>
+                            <td class="info-label" style="width: 15%;">رقم الفاتورة</td>
+                            <td class="info-value" style="width: 25%;">
+                                <span t-if="doc.name and doc.name != 'New'" t-esc="doc.name"/>
+                                <span t-else="" t-esc="doc.id"/>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="info-label">رمز العميل</td>
+                            <td class="info-value" colspan="2">
+                                <span t-if="doc.partner_id and doc.partner_id.ref" t-esc="doc.partner_id.ref"/>
+                            </td>
+                            <td class="info-label">نوع الفاتورة</td>
+                            <td class="info-value" colspan="2">
+                                <t t-if="doc.invoice_type">
+                                    <t t-if="doc.invoice_type == '1'">زبون محل</t>
+                                    <t t-elif="doc.invoice_type == '2'">شركات توصيل</t>
+                                    <t t-elif="doc.invoice_type == '3'">نقليات</t>
+                                    <t t-elif="doc.invoice_type == '4'">ديلفري</t>
+                                    <t t-elif="doc.invoice_type == '5'">NBS</t>
+                                    <t t-elif="doc.invoice_type == '6'">شورجة</t>
+                                    <t t-elif="doc.invoice_type == '7'">NA</t>
+                                    <t t-elif="doc.invoice_type == '8'">مكاتب الشورجة</t>
+                                    <t t-else=""><span t-field="doc.invoice_type"/></t>
+                                </t>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td colspan="3"></td>
+                            <td class="info-label">استحقاق الدفع</td>
+                            <td class="info-value" colspan="2">
+                                <t t-if="doc.sale_order_id and doc.sale_order_id.payment_term_id">
+                                    <span t-field="doc.sale_order_id.payment_term_id.name"/>
+                                </t>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td colspan="6" style="text-align: right; padding: 5px; font-size: 12pt;">
+                                <span t-if="doc.partner_id" t-field="doc.partner_id.name"/>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td colspan="6" style="text-align: right; padding: 5px; font-size: 12pt;">
+                                <span t-if="doc.partner_id and doc.partner_id.street" t-field="doc.partner_id.street"/>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td colspan="3" style="text-align: right; padding: 5px; font-size: 13pt; font-weight: bold;">
+                                <span t-if="doc.partner_id and doc.partner_id.phone" t-field="doc.partner_id.phone"/>
+                            </td>
+                            <td colspan="3" style="text-align: right; padding: 5px; font-size: 13pt; font-weight: bold;">
+                                <span t-if="doc.partner_id and doc.partner_id.mobile" t-field="doc.partner_id.mobile"/>
+                            </td>
+                        </tr>
+                    </table>
+                    
+                    <!-- Yellow Header Bar for Table -->
+                    <div class="yellow-header-bar" style="height: 22px;"></div>
+                    
+                    <!-- Products Table -->
+                    <table class="products-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 5%;">ت</th>
+                                <th style="width: 30%;">اسم المادة</th>
+                                <th style="width: 10%;">الكمية</th>
+                                <th style="width: 12%;">الوحدة</th>
+                                <th style="width: 12%;">سعر المادة</th>
+                                <th style="width: 12%;">بعد الخصم</th>
+                                <th style="width: 15%;"> $ المجموع الكلي</th>
+                                <th style="width: 10%;">المنشأ</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <t t-set="line_number" t-value="1"/>
+                            <t t-foreach="doc.order_line_ids" t-as="line">
+                                <tr>
+                                    <td class="serial-cell">
+                                        <t t-esc="'{:03d}'.format(line_number)"/>
+                                    </td>
+                                    <td class="product-name-cell">
+                                        <span t-if="line.custom_product_name" t-esc="line.custom_product_name"/>
+                                        <span t-else="" t-field="line.product_id.name"/>
+                                    </td>
+                                    <td class="price-cell">
+                                        <span t-esc="'{:.0f}'.format(line.quantity)"/>
+                                    </td>
+                                    <td class="product-name-cell" style="font-size: 12pt;">
+                                        <span t-if="line.product_uom_id" t-field="line.product_uom_id.name"/>
+                                        <span t-else="">-</span>
+                                    </td>
+                                    <td class="price-cell">
+                                        <t t-esc="'{:.2f}'.format(line.unit_price)"/>
+                                    </td>
+                                    <td class="price-cell">
+                                        <t t-esc="'{:.2f}'.format(line.unit_price * (1 - line.discount_percent / 100.0))"/>
+                                    </td>
+                                    <td class="price-cell">
+                                        <t t-esc="'{:.2f}'.format(line.line_total)"/>
+                                    </td>
+                                    <td class="product-origin">
+                                        <t t-if="line.product_id and line.product_id.country_id">
+                                            <span t-field="line.product_id.country_id.name"/> المنشأ
+                                        </t>
+                                    </td>
+                                </tr>
+                                <t t-set="line_number" t-value="line_number + 1"/>
+                            </t>
+                        </tbody>
+                    </table>
+                    
+                    <!-- Totals Box -->
+                    <div class="totals-box">
+                        <table class="totals-table">
+                            <tr>
+                                <td rowspan="4" class="notes-cell" style="width: 25%; vertical-align: top;">
+                                    <strong>الملاحظات</strong>
+                                    <div style="margin-top: 5px;">
+                                        <t t-if="doc.note">
+                                            <span t-field="doc.note"/>
+                                        </t>
+                                    </div>
+                                    <div class="based-on-so" style="margin-top: 10px;">
+                                        <t t-if="doc.sale_order_id">
+                                            Based On Sales Orders <br/>
+                                            <span t-field="doc.sale_order_id.name"/>
+                                        </t>
+                                    </div>
+                                </td>
+                                <td class="totals-label" style="width: 20%;">قيمة الفاتورة</td>
+                                <td class="totals-value totals-right-col">
+                                    <t t-esc="'${:,.2f}'.format(doc.amount_untaxed)"/>
+                                </td>
+                                <td class="totals-label" style="width: 20%;">قيمة الفاتورة بعد الخصم ع.د-</td>
+                                <td class="totals-value totals-right-col">
+                                    <t t-esc="'{:,.0f}'.format(doc.amount_total * (doc.exchange_rate or 1410))"/>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="totals-label">قيمة الخصم الكلي</td>
+                                <td class="totals-value">
+                                    <t t-if="doc.amount_discount &gt; 0">
+                                        <t t-esc="'${:,.2f}'.format(doc.amount_discount)"/>
+                                    </t>
+                                    <t t-else="">$0.00</t>
+                                </td>
+                                <td class="totals-label">خدمة التوصيل ع.د-</td>
+                                <td class="totals-value">
+                                    ٠
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="totals-label">الرصيد السابق</td>
+                                <td class="totals-value">
+                                    <t t-if="doc.partner_id and doc.partner_id.credit">
+                                        <t t-esc="'${:,.2f}'.format(doc.partner_id.credit)"/>
+                                    </t>
+                                    <t t-else="">$0.00</t>
+                                </td>
+                                <td class="totals-label">الاجمالي ع.د-</td>
+                                <td class="totals-value">
+                                    <t t-esc="'{:,.0f}'.format(doc.amount_total * (doc.exchange_rate or 1410))"/>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="totals-label">اجمالي الحساب</td>
+                                <td class="totals-value">
+                                    <t t-esc="'${:,.2f}'.format(doc.amount_total + (doc.partner_id.credit if doc.partner_id else 0))"/>
+                                </td>
+                                <td colspan="2"></td>
+                            </tr>
+                            <tr>
+                                <td colspan="5" class="invoice-type-cell">
+                                    <t t-if="doc.invoice_type">
+                                        <t t-if="doc.invoice_type == '1'">زبون محل</t>
+                                        <t t-elif="doc.invoice_type == '2'">شركات توصيل</t>
+                                        <t t-elif="doc.invoice_type == '3'">نقليات</t>
+                                        <t t-elif="doc.invoice_type == '4'">ديلفري</t>
+                                        <t t-elif="doc.invoice_type == '5'">NBS</t>
+                                        <t t-elif="doc.invoice_type == '6'">شورجة</t>
+                                        <t t-elif="doc.invoice_type == '7'">NA</t>
+                                        <t t-elif="doc.invoice_type == '8'">مكاتب الشورجة</t>
+                                    </t>
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+                    
+                    <!-- Footer Logo -->
+                    <div class="footer-logo">
+                        <img t-att-src="'/pos_perfume_custom/static/src/img/nbs_footer.png'" alt="NBS Footer" style="width: 100%; height: 46px; object-fit: contain;"/>
+                    </div>
+                    
+                    <!-- Page Number -->
+                    <div class="page-number">
+                        <span>1</span>
+                    </div>
+                </div>
+            </t>
+        </template>
+
+        <!-- Raw template that calls html_container -->
+        <template id="report_pos_perfume_order_raw_nbs" t-name="pos_perfume_custom.report_pos_perfume_order_raw_nbs">
+            <t t-call="web.html_container">
+                <t t-foreach="docs" t-as="doc">
+                    <t t-call="pos_perfume_custom.report_pos_perfume_order_document_nbs" t-lang="doc.partner_id.lang if doc.partner_id else None"/>
+                </t>
+            </t>
+        </template>
+
+        <!-- Main report template -->
+        <record id="report_pos_perfume_order_nbs" model="ir.ui.view">
+            <field name="name">report_pos_perfume_order_nbs</field>
+            <field name="key">pos_perfume_custom.report_pos_perfume_order_nbs</field>
+            <field name="type">qweb</field>
+            <field name="arch" type="xml">
+                <t t-name="pos_perfume_custom.report_pos_perfume_order_nbs">
+                    <t t-call="pos_perfume_custom.report_pos_perfume_order_raw_nbs"/>
+                </t>
+            </field>
+        </record>
+    </data>
+</odoo>
+

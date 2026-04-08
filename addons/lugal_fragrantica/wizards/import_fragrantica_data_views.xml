@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    
+    <!-- Import Wizard Form View -->
+    <record id="view_import_fragrantica_data_form" model="ir.ui.view">
+        <field name="name">import.fragrantica.data.form</field>
+        <field name="model">import.fragrantica.data</field>
+        <field name="arch" type="xml">
+            <form string="Import Fragrantica Data">
+                <field name="state" invisible="1"/>
+                
+                <group invisible="state != 'start'">
+                    <group>
+                        <field name="db_path" placeholder="/path/to/perfumes.db"/>
+                        <field name="import_images"/>
+                        <field name="skip_images" invisible="not import_images"/>
+                        <field name="batch_size"/>
+                    </group>
+                </group>
+                
+                <group invisible="state not in ['progress', 'done']">
+                    <group string="Progress">
+                        <label for="imported_perfumes"/>
+                        <div>
+                            <field name="imported_perfumes" class="oe_inline"/> / 
+                            <field name="total_perfumes" class="oe_inline"/>
+                        </div>
+                        
+                        <label for="imported_notes"/>
+                        <div>
+                            <field name="imported_notes" class="oe_inline"/> / 
+                            <field name="total_notes" class="oe_inline"/>
+                        </div>
+                        
+                        <label for="imported_accords"/>
+                        <div>
+                            <field name="imported_accords" class="oe_inline"/> / 
+                            <field name="total_accords" class="oe_inline"/>
+                        </div>
+                    </group>
+                </group>
+                
+                <notebook invisible="state not in ['progress', 'done']">
+                    <page string="Import Log">
+                        <field name="log_message" nolabel="1" readonly="1"/>
+                    </page>
+                </notebook>
+                
+                <footer>
+                    <button name="action_import_data" string="Start Import" 
+                            type="object" class="oe_highlight" invisible="state != 'start'"/>
+                    <button name="action_close" string="Close" 
+                            type="object" invisible="state != 'done'"/>
+                    <button string="Cancel" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+    
+    <!-- Import Wizard Action -->
+    <record id="action_import_fragrantica_data" model="ir.actions.act_window">
+        <field name="name">Import Fragrantica Data</field>
+        <field name="res_model">import.fragrantica.data</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+        <field name="binding_model_id" ref="model_fragrantica_perfume"/>
+    </record>
+
+</odoo>
+

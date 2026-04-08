@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    
+    <!-- Product Template Action (filtered by fragrantica) - Define FIRST -->
+    <record id="action_product_template_fragrantica" model="ir.actions.act_window">
+        <field name="name">Linked Products</field>
+        <field name="res_model">product.template</field>
+        <field name="view_mode">list,form</field>
+        <field name="domain">[('fragrantica_perfume_id', '!=', False)]</field>
+    </record>
+    
+    <!-- Fragrantica Perfume List View -->
+    <record id="view_fragrantica_perfume_list" model="ir.ui.view">
+        <field name="name">fragrantica.perfume.list</field>
+        <field name="model">fragrantica.perfume</field>
+        <field name="arch" type="xml">
+            <list string="Fragrantica Perfumes">
+                <field name="image" widget="image" width="50px"/>
+                <field name="name"/>
+                <field name="arabic_name"/>
+                <field name="brand_name"/>
+                <field name="year"/>
+                <field name="fragrantica_id"/>
+            </list>
+        </field>
+    </record>
+    
+    <!-- Fragrantica Perfume Form View -->
+    <record id="view_fragrantica_perfume_form" model="ir.ui.view">
+        <field name="name">fragrantica.perfume.form</field>
+        <field name="model">fragrantica.perfume</field>
+        <field name="arch" type="xml">
+            <form string="Fragrantica Perfume">
+                <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button name="%(action_product_template_fragrantica)d" 
+                                type="action" 
+                                class="oe_stat_button" 
+                                icon="fa-shopping-bag"
+                                context="{'search_default_fragrantica_perfume_id': id}">
+                            <field name="product_ids" widget="statinfo" string="Products"/>
+                        </button>
+                    </div>
+                    
+                    <field name="image" widget="image" class="oe_avatar" 
+                           options="{'preview_image': 'image', 'size': [200, 200]}"/>
+                    
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name" placeholder="Perfume Name (English)"/>
+                        </h1>
+                        <h2>
+                            <field name="arabic_name" placeholder="Perfume Name (Arabic)"/>
+                        </h2>
+                    </div>
+                    
+                    <group>
+                        <group>
+                            <field name="brand_name"/>
+                            <field name="brand_logo" widget="image" options="{'size': [100, 100]}"/>
+                            <field name="year"/>
+                        </group>
+                        <group>
+                            <field name="fragrantica_id" readonly="1"/>
+                            <field name="url" widget="url"/>
+                            <field name="created_at" readonly="1"/>
+                        </group>
+                    </group>
+                    
+                    <notebook>
+                        <page string="Description" name="description">
+                            <group>
+                                <field name="description_title"/>
+                            </group>
+                            <field name="description_full" placeholder="Full description..."/>
+                        </page>
+                        
+                        <page string="Main Accords" name="accords">
+                            <field name="accord_ids">
+                                <list editable="bottom">
+                                    <field name="accord_order" widget="handle"/>
+                                    <field name="accord_name"/>
+                                    <field name="accord_width"/>
+                                    <field name="accord_color" widget="color"/>
+                                </list>
+                            </field>
+                        </page>
+                        
+                        <page string="Notes" name="notes">
+                            <group>
+                                <group string="Top Notes">
+                                    <field name="top_notes_ids" nolabel="1">
+                                        <list>
+                                            <field name="note_image" widget="image" width="30px"/>
+                                            <field name="note_name"/>
+                                            <field name="note_opacity"/>
+                                        </list>
+                                    </field>
+                                </group>
+                                <group string="Middle Notes">
+                                    <field name="middle_notes_ids" nolabel="1">
+                                        <list>
+                                            <field name="note_image" widget="image" width="30px"/>
+                                            <field name="note_name"/>
+                                            <field name="note_opacity"/>
+                                        </list>
+                                    </field>
+                                </group>
+                                <group string="Base Notes">
+                                    <field name="base_notes_ids" nolabel="1">
+                                        <list>
+                                            <field name="note_image" widget="image" width="30px"/>
+                                            <field name="note_name"/>
+                                            <field name="note_opacity"/>
+                                        </list>
+                                    </field>
+                                </group>
+                            </group>
+                        </page>
+                        
+                        <page string="All Notes (Detailed)" name="all_notes">
+                            <field name="note_ids">
+                                <list editable="bottom">
+                                    <field name="note_order" widget="handle"/>
+                                    <field name="note_type"/>
+                                    <field name="note_name"/>
+                                    <field name="note_image" widget="image" width="30px"/>
+                                    <field name="note_opacity"/>
+                                </list>
+                            </field>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    
+    <!-- Fragrantica Perfume Action -->
+    <record id="action_fragrantica_perfume" model="ir.actions.act_window">
+        <field name="name">Fragrantica Perfumes</field>
+        <field name="res_model">fragrantica.perfume</field>
+        <field name="view_mode">list,form</field>
+        <field name="context">{}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                No perfumes in the database yet!
+            </p>
+            <p>
+                Click the "Import Data" menu to import perfumes from the Fragrantica database.
+            </p>
+        </field>
+    </record>
+
+</odoo>
+

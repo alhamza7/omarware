@@ -1,0 +1,250 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    
+    <t t-name="lugal_ai.LugalChatTemplate">
+        <div class="lugal-chat-container">
+            <!-- Header -->
+            <div class="lugal-chat-header">
+                <div class="d-flex align-items-center justify-content-between">
+                    <div class="d-flex align-items-center">
+                        <i class="fa fa-robot fa-2x text-primary me-3"/>
+                        <div>
+                            <h4 class="mb-0">Lugal AI Assistant</h4>
+                            <small class="text-muted">مساعد الذكاء الاصطناعي</small>
+                        </div>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-sm btn-outline-primary" t-on-click="toggleHistory">
+                            <i class="fa fa-history"/> السجل
+                        </button>
+                        <button class="btn btn-sm btn-outline-danger" t-on-click="clearChat">
+                            <i class="fa fa-trash"/> مسح
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Stats Bar -->
+                <div class="lugal-stats-bar mt-3" t-if="state.stats">
+                    <div class="row g-2">
+                        <div class="col-md-3">
+                            <div class="stat-card">
+                                <i class="fa fa-comments text-primary"/>
+                                <div class="stat-value" t-esc="state.stats.total_questions || 0"/>
+                                <div class="stat-label">إجمالي الأسئلة</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card">
+                                <i class="fa fa-clock text-success"/>
+                                <div class="stat-value" t-esc="(state.stats.avg_response_time || 0) + 'ms'"/>
+                                <div class="stat-label">متوسط الاستجابة</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card">
+                                <i class="fa fa-bolt text-warning"/>
+                                <div class="stat-value" t-esc="(state.stats.cached_percentage || 0) + '%'"/>
+                                <div class="stat-label">من الذاكرة</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card">
+                                <i class="fa fa-calendar text-info"/>
+                                <div class="stat-value" t-esc="state.stats.today_questions || 0"/>
+                                <div class="stat-label">اليوم</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Main Content Area -->
+            <div class="lugal-chat-body">
+                <!-- History Sidebar -->
+                <div class="lugal-history-sidebar" t-if="state.showHistory">
+                    <div class="history-header">
+                        <h5><i class="fa fa-history"/> سجل المحادثات</h5>
+                        <button class="btn-close" t-on-click="toggleHistory"/>
+                    </div>
+                    <div class="history-list">
+                        <t t-if="state.history.length === 0">
+                            <div class="text-center text-muted p-4">
+                                <i class="fa fa-inbox fa-3x mb-3 opacity-25"/>
+                                <p>لا يوجد سجل محادثات</p>
+                            </div>
+                        </t>
+                        <t t-else="">
+                            <div class="history-item" 
+                                 t-foreach="state.history" 
+                                 t-as="conv" 
+                                 t-key="conv.id"
+                                 t-on-click="() => this.loadHistoryItem(conv)">
+                                <div class="history-question" t-esc="conv.question"/>
+                                <div class="history-meta">
+                                    <small class="text-muted">
+                                        <i class="fa fa-user"/> <t t-esc="conv.user_name"/>
+                                    </small>
+                                    <small class="text-muted">
+                                        <i class="fa fa-clock"/> <t t-esc="conv.create_date"/>
+                                    </small>
+                                </div>
+                            </div>
+                        </t>
+                    </div>
+                </div>
+                
+                <!-- Chat Messages -->
+                <div class="lugal-chat-messages" t-ref="chatContainer">
+                    <!-- Welcome Message -->
+                    <t t-if="state.messages.length === 0">
+                        <div class="welcome-message">
+                            <i class="fa fa-robot fa-4x text-primary mb-4"/>
+                            <h3>مرحباً بك في Lugal AI! 👋</h3>
+                            <p class="text-muted mb-4">يمكنني مساعدتك في:</p>
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <div class="feature-card">
+                                        <i class="fa fa-box text-primary"/>
+                                        <h6>معلومات المنتجات</h6>
+                                        <small>الأسعار، التوفر، والمخزون</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="feature-card">
+                                        <i class="fa fa-chart-line text-success"/>
+                                        <h6>تقارير المبيعات</h6>
+                                        <small>إحصائيات وتحليلات مفصلة</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="feature-card">
+                                        <i class="fa fa-users text-warning"/>
+                                        <h6>بيانات العملاء</h6>
+                                        <small>معلومات وطلبات العملاء</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="feature-card">
+                                        <i class="fa fa-cogs text-info"/>
+                                        <h6>عمليات تشغيلية</h6>
+                                        <small>إدارة العمليات اليومية</small>
+                                    </div>
+                                </div>
+                            </div>
+                            <p class="text-muted mt-4 mb-0">
+                                <i class="fa fa-lightbulb text-warning"/> اطرح سؤالك في الأسفل للبدء!
+                            </p>
+                        </div>
+                    </t>
+                    
+                    <!-- Messages -->
+                    <t t-else="">
+                        <div class="message-wrapper" t-foreach="state.messages" t-as="message" t-key="message_index">
+                            <!-- User Message -->
+                            <div class="message user-message" t-if="message.type === 'user'">
+                                <div class="message-content">
+                                    <pre class="message-text formatted-text" t-esc="message.text"/>
+                                    <div class="message-time">
+                                        <i class="fa fa-user"/> أنت
+                                    </div>
+                                </div>
+                                <div class="message-avatar">
+                                    <i class="fa fa-user-circle fa-2x text-primary"/>
+                                </div>
+                            </div>
+                            
+                            <!-- AI Message -->
+                            <div class="message ai-message" t-if="message.type === 'ai'">
+                                <div class="message-avatar">
+                                    <i class="fa fa-robot fa-2x text-success"/>
+                                </div>
+                                <div class="message-content">
+                                    <pre class="message-text formatted-text" t-esc="message.text"/>
+                                    <div class="message-meta">
+                                        <div class="d-flex align-items-center gap-3">
+                                            <small class="text-muted">
+                                                <i class="fa fa-clock"/> 
+                                                <t t-if="message.response_time">
+                                                    <t t-esc="message.response_time"/>ms
+                                                </t>
+                                            </small>
+                                            <small t-if="message.was_cached" class="badge bg-warning text-dark">
+                                                <i class="fa fa-bolt"/> Cached
+                                            </small>
+                                            <small t-if="message.category" class="badge bg-info">
+                                                <t t-esc="message.category"/>
+                                            </small>
+                                        </div>
+                                        <!-- Rating -->
+                                        <div class="message-rating" t-if="message.conversation_id">
+                                            <small class="text-muted me-2">تقييم:</small>
+                                            <button class="btn btn-sm btn-rating" 
+                                                    t-att-class="{'active': message.rating === 1}"
+                                                    t-on-click="() => this.rateMessage(message, 1)">
+                                                <i class="fa fa-thumbs-up"/>
+                                            </button>
+                                            <button class="btn btn-sm btn-rating" 
+                                                    t-att-class="{'active': message.rating === -1}"
+                                                    t-on-click="() => this.rateMessage(message, -1)">
+                                                <i class="fa fa-thumbs-down"/>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Error Message -->
+                            <div class="message error-message" t-if="message.type === 'error'">
+                                <div class="alert alert-danger mb-0">
+                                    <i class="fa fa-exclamation-triangle"/> <t t-esc="message.text"/>
+                                </div>
+                            </div>
+                        </div>
+                    </t>
+                    
+                    <!-- Loading Indicator -->
+                    <div class="message ai-message" t-if="state.isLoading">
+                        <div class="message-avatar">
+                            <i class="fa fa-robot fa-2x text-success"/>
+                        </div>
+                        <div class="message-content">
+                            <div class="typing-indicator">
+                                <span></span>
+                                <span></span>
+                                <span></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Input Area -->
+            <div class="lugal-chat-footer">
+                <div class="input-group">
+                    <textarea 
+                        class="form-control"
+                        placeholder="اكتب سؤالك هنا... (اضغط Enter للإرسال، Shift+Enter لسطر جديد)"
+                        t-model="state.inputText"
+                        t-on-keydown="onInputKeydown"
+                        rows="1"
+                        t-att-disabled="state.isLoading"
+                    />
+                    <button 
+                        class="btn btn-primary"
+                        t-on-click="sendMessage"
+                        t-att-disabled="state.isLoading or !state.inputText.trim()">
+                        <i class="fa fa-paper-plane"/>
+                        إرسال
+                    </button>
+                </div>
+                <div class="input-hint">
+                    <small class="text-muted">
+                        <i class="fa fa-info-circle"/> 
+                        مدعوم بتقنية Gemini AI | جميع المحادثات مشفرة وآمنة
+                    </small>
+                </div>
+            </div>
+        </div>
+    </t>
+    
+</templates>

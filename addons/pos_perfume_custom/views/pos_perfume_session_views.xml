@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- ============================================================ -->
+    <!--              POS PERFUME SESSION & FULLSCREEN VIEWS          -->
+    <!-- ============================================================ -->
+
+    <!-- POS Perfume Session Template (Fullscreen) -->
+    <template id="pos_perfume_session_template">
+        <html>
+            <head>
+                <title>POS Perfume - Point of Sale</title>
+                <meta charset="utf-8"/>
+                <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+                
+                <!-- Load Odoo Web Assets -->
+                <t t-call-assets="web.assets_frontend" t-js="false"/>
+                <t t-call-assets="web.assets_frontend" t-css="false"/>
+                
+                <!-- Load POS Assets -->
+                <t t-call-assets="point_of_sale._assets_pos" t-js="false"/>
+                <t t-call-assets="point_of_sale._assets_pos" t-css="false"/>
+            </head>
+            <body class="pos-perfume-fullscreen">
+                <div id="pos_perfume_app_container"></div>
+            </body>
+        </html>
+    </template>
+
+    <!-- Action to open POS Perfume in fullscreen -->
+    <record id="action_pos_perfume_session" model="ir.actions.client">
+        <field name="name">POS Perfume Session</field>
+        <field name="tag">pos_perfume_custom.PosPerfumeApp</field>
+        <field name="target">fullscreen</field>
+    </record>
+
+    <!-- Menu Item -->
+    <menuitem id="menu_pos_perfume_session"
+              name="Open POS Perfume"
+              parent="menu_pos_perfume_root"
+              action="action_pos_perfume_session"
+              sequence="1"/>
+
+</odoo>
+
+
+
+

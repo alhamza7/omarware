@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        
+        <!-- Sync Controls Form -->
+        <record id="view_sap_sync_controls_form" model="ir.ui.view">
+            <field name="name">sap.sync.controls.form</field>
+            <field name="model">sap.sync.engine</field>
+            <field name="arch" type="xml">
+                <form string="SAP Sync Controls">
+                    <sheet>
+                        <div class="oe_title">
+                            <h1>SAP Synchronization Controls</h1>
+                        </div>
+                        
+                        <group>
+                            <group>
+                                <field name="backend_id" string="SAP Backend" required="1"/>
+                                <field name="entity_types" string="Entity Types" widget="many2many_tags"/>
+                                <field name="sync_direction" string="Sync Direction" required="1"/>
+                                <field name="batch_size" string="Batch Size"/>
+                                <field name="force_full_sync" string="Force Full Sync"/>
+                            </group>
+                            <group>
+                                <field name="max_workers" string="Max Workers"/>
+                                <field name="retry_attempts" string="Retry Attempts"/>
+                                <field name="timeout" string="Timeout (seconds)"/>
+                                <field name="incremental_days" string="Incremental Days"/>
+                            </group>
+                        </group>
+                        
+                        <footer>
+                            <button name="action_start_sync" 
+                                    string="Start Sync" 
+                                    type="object" 
+                                    class="btn-primary"/>
+                            <button name="action_start_incremental_sync" 
+                                    string="Start Incremental Sync" 
+                                    type="object" 
+                                    class="btn-secondary"/>
+                            <button name="action_stop_sync" 
+                                    string="Stop Sync" 
+                                    type="object" 
+                                    class="btn-warning"/>
+                        </footer>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+        
+        <!-- Sync Status Graph -->
+        <record id="view_sap_sync_status_graph" model="ir.ui.view">
+            <field name="name">sap.sync.status.graph</field>
+            <field name="model">sap.sync.log</field>
+            <field name="arch" type="xml">
+                <graph string="Sync Status Over Time" type="bar" stacked="True">
+                    <field name="create_date" type="row" interval="day"/>
+                    <field name="status" type="groupBy"/>
+                    <field name="id" type="measure"/>
+                </graph>
+            </field>
+        </record>
+        
+        <!-- Sync Activity Tree -->
+        <record id="view_sap_sync_activity_tree" model="ir.ui.view">
+            <field name="name">sap.sync.activity.tree</field>
+            <field name="model">sap.sync.log</field>
+            <field name="arch" type="xml">
+                <list string="Recent Sync Activity" 
+                      decoration-success="status=='success'" 
+                      decoration-danger="status=='failed'"
+                      decoration-warning="status=='warning'"
+                      create="false" edit="false">
+                    <field name="create_date"/>
+                    <field name="backend_id"/>
+                    <field name="model_name"/>
+                    <field name="operation"/>
+                    <field name="status" widget="badge"/>
+                    <field name="message"/>
+                    <field name="duration"/>
+                    <field name="records_processed"/>
+                </list>
+            </field>
+        </record>
+        
+        <!-- Batch Processing View -->
+        <record id="view_sap_batch_processing_tree" model="ir.ui.view">
+            <field name="name">sap.batch.processing.tree</field>
+            <field name="model">sap.batch.processor</field>
+            <field name="arch" type="xml">
+                <list string="Batch Processing Jobs" create="false" edit="false">
+                    <field name="job_id"/>
+                    <field name="backend_id"/>
+                    <field name="entity_type"/>
+                    <field name="operation_type"/>
+                    <field name="status" widget="badge"/>
+                    <field name="total_records"/>
+                    <field name="processed_records"/>
+                    <field name="progress" widget="progressbar"/>
+                    <field name="start_time"/>
+                    <field name="end_time"/>
+                    <field name="duration"/>
+                </list>
+            </field>
+        </record>
+        
+        <!-- Retry Mechanism View -->
+        <record id="view_sap_retry_mechanism_tree" model="ir.ui.view">
+            <field name="name">sap.retry.mechanism.tree</field>
+            <field name="model">sap.retry.mechanism</field>
+            <field name="arch" type="xml">
+                <list string="Retry Mechanism Status" create="false" edit="false">
+                    <field name="backend_id"/>
+                    <field name="operation_name"/>
+                    <field name="circuit_breaker_state" widget="badge"/>
+                    <field name="retry_count"/>
+                    <field name="last_failure"/>
+                    <field name="failure_count"/>
+                </list>
+            </field>
+        </record>
+        
+        <!-- Actions -->
+        <record id="action_sap_sync_management" model="ir.actions.act_window">
+            <field name="name">SAP Sync Management</field>
+            <field name="res_model">sap.sync.engine</field>
+            <field name="view_mode">form</field>
+        </record>
+        
+        <record id="action_sap_batch_processing" model="ir.actions.act_window">
+            <field name="name">Batch Processing</field>
+            <field name="res_model">sap.batch.processor</field>
+            <field name="view_mode">list,form</field>
+            <field name="view_id" ref="view_sap_batch_processing_tree"/>
+        </record>
+        
+        <record id="action_sap_retry_mechanism" model="ir.actions.act_window">
+            <field name="name">Retry Mechanism</field>
+            <field name="res_model">sap.retry.mechanism</field>
+            <field name="view_mode">list,form</field>
+            <field name="view_id" ref="view_sap_retry_mechanism_tree"/>
+        </record>
+        
+        <!-- Menu Items -->
+        <menuitem id="menu_sap_sync_management"
+                  name="Sync Management"
+                  parent="menu_sap_integration"
+                  action="action_sap_sync_management"
+                  sequence="60"/>
+        
+        <menuitem id="menu_sap_batch_processing"
+                  name="Batch Processing"
+                  parent="menu_sap_sync_management"
+                  action="action_sap_batch_processing"
+                  sequence="10"/>
+        
+        <menuitem id="menu_sap_retry_mechanism"
+                  name="Retry Mechanism"
+                  parent="menu_sap_sync_management"
+                  action="action_sap_retry_mechanism"
+                  sequence="20"/>
+        
+    </data>
+</odoo>

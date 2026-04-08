@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        
+        <!-- User Permission Wizard Form -->
+        <record id="view_sap_user_permission_wizard_form" model="ir.ui.view">
+            <field name="name">sap.user.permission.wizard.form</field>
+            <field name="model">sap.user.permission.wizard</field>
+            <field name="arch" type="xml">
+                <form string="User Permission Management">
+                    <sheet>
+                        <div class="oe_title">
+                            <h1>User Permission Management</h1>
+                        </div>
+                        
+                        <group>
+                            <group>
+                                <field name="user_id" required="1"/>
+                                <field name="role_id" required="1"/>
+                                <field name="backend_access_type" required="1"/>
+                            </group>
+                            <group>
+                                <field name="expires_hours"/>
+                                <field name="expires_date"/>
+                            </group>
+                        </group>
+                        
+                        <group string="Backend Access" invisible="backend_access_type == 'none'">
+                            <field name="backend_ids" widget="many2many_tags"/>
+                        </group>
+                        
+                        <group string="Current Permissions" invisible="not current_permissions">
+                            <field name="current_permissions" widget="text" readonly="1"/>
+                        </group>
+                        
+                        <footer>
+                            <button name="action_grant_permission" 
+                                    string="Grant Permission" 
+                                    type="object" 
+                                    class="btn-primary"/>
+                            <button name="action_revoke_permission" 
+                                    string="Revoke Permission" 
+                                    type="object" 
+                                    class="btn-warning"/>
+                            <button name="action_view_user_permissions" 
+                                    string="View User Permissions" 
+                                    type="object" 
+                                    class="btn-secondary"/>
+                            <button name="action_bulk_assign_permissions" 
+                                    string="Bulk Assign" 
+                                    type="object" 
+                                    class="btn-info"/>
+                            <button string="Cancel" 
+                                    class="btn-secondary" 
+                                    special="cancel"/>
+                        </footer>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+        
+        <!-- Bulk Permission Wizard Form -->
+        <record id="view_sap_bulk_permission_wizard_form" model="ir.ui.view">
+            <field name="name">sap.bulk.permission.wizard.form</field>
+            <field name="model">sap.bulk.permission.wizard</field>
+            <field name="arch" type="xml">
+                <form string="Bulk Permission Assignment">
+                    <sheet>
+                        <div class="oe_title">
+                            <h1>Bulk Permission Assignment</h1>
+                        </div>
+                        
+                        <group>
+                            <group>
+                                <field name="role_id" required="1"/>
+                                <field name="user_selection_type" required="1"/>
+                            </group>
+                            <group>
+                                <field name="backend_access_type" required="1"/>
+                                <field name="expires_date"/>
+                            </group>
+                        </group>
+                        
+                        <group string="User Selection" invisible="user_selection_type == 'all'">
+                            <field name="user_ids" widget="many2many_tags" 
+                                   invisible="user_selection_type != 'specific'"/>
+                            <field name="group_id" 
+                                   invisible="user_selection_type != 'group'"/>
+                        </group>
+                        
+                        <group string="Backend Access" invisible="backend_access_type == 'none'">
+                            <field name="backend_ids" widget="many2many_tags"/>
+                        </group>
+                        
+                        <group string="Assignment Results" invisible="not assignment_results">
+                            <field name="assignment_results" widget="text" readonly="1"/>
+                        </group>
+                        
+                        <footer>
+                            <button name="action_assign_permissions" 
+                                    string="Assign Permissions" 
+                                    type="object" 
+                                    class="btn-primary"/>
+                            <button string="Cancel" 
+                                    class="btn-secondary" 
+                                    special="cancel"/>
+                        </footer>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+        
+        <!-- Actions -->
+        <record id="action_sap_user_permission_wizard" model="ir.actions.act_window">
+            <field name="name">User Permission Management</field>
+            <field name="res_model">sap.user.permission.wizard</field>
+            <field name="view_mode">form</field>
+            <field name="target">new</field>
+        </record>
+        
+        <record id="action_sap_bulk_permission_wizard" model="ir.actions.act_window">
+            <field name="name">Bulk Permission Assignment</field>
+            <field name="res_model">sap.bulk.permission.wizard</field>
+            <field name="view_mode">form</field>
+            <field name="target">new</field>
+        </record>
+        
+    </data>
+</odoo>

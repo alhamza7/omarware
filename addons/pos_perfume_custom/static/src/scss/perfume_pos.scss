@@ -1,0 +1,960 @@
+/* ============================================================ */
+/*              POS PERFUME DESIGN - COMPLETE STYLES            */
+/* ============================================================ */
+
+/* Base Reset */
+* {
+    box-sizing: border-box;
+}
+
+/* Color Variables */
+$perfume-primary: #714B67;
+$perfume-secondary: #8B5A8E;
+$perfume-light: #875F84;
+$perfume-dark: #5a3a52;
+$perfume-hover: #f8f3f7;
+$perfume-selected: #e8d9e5;
+
+/* Excel Colors */
+$excel-focus: #217346;
+$excel-selection: #fffacd;
+$discount-bg: #e8f5e9;
+$total-bg: #fff3e0;
+
+/* Functional Colors */
+$success-green: #4CAF50;
+$info-blue: #2196F3;
+$warning-orange: #FF9800;
+$error-red: #f44336;
+$whatsapp-green: #25D366;
+
+/* Background Colors */
+$main-bg: #f9f9f9;
+$section-bg: #fafafa;
+$white: #ffffff;
+$light-gray: #f0f0f0;
+$border-gray: #e0e0e0;
+$dark-border: #d0d0d0;
+
+/* ============================================================ */
+/*                         HEADER                               */
+/* ============================================================ */
+
+.pos-header {
+    background: linear-gradient(135deg, $perfume-primary 0%, $perfume-secondary 100%);
+    color: white;
+    padding: 12px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    
+    h1 {
+        font-size: 20px;
+        font-weight: 600;
+        margin: 0;
+    }
+    
+    .header-info {
+        display: flex;
+        gap: 30px;
+        font-size: 13px;
+    }
+}
+
+/* ============================================================ */
+/*                     MAIN CONTAINER                           */
+/* ============================================================ */
+
+.pos-perfume-container {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: $main-bg;
+}
+
+.pos-main-container {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+/* ============================================================ */
+/*                   LEFT SECTION: ORDER                        */
+/* ============================================================ */
+
+.order-section {
+    width: 65%;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    background: $section-bg;
+    border-right: 2px solid $border-gray;
+    position: relative;
+    overflow-y: auto;
+}
+
+/* Order Header */
+.order-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px;
+    background: $white;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+    
+    select, input {
+        padding: 8px 12px;
+        border: 2px solid $border-gray;
+        border-radius: 6px;
+        font-size: 14px;
+        
+        &:focus {
+            outline: none;
+            border-color: $perfume-primary;
+            box-shadow: 0 0 0 3px rgba(113, 75, 103, 0.1);
+        }
+    }
+}
+
+/* Customer Search Field */
+.customer-search {
+    &:focus {
+        border-color: $perfume-primary;
+        box-shadow: 0 0 0 3px rgba(113, 75, 103, 0.1);
+    }
+}
+
+.customer-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    width: 100%;
+    max-height: 300px;
+    overflow-y: auto;
+    background: white;
+    border: 2px solid $perfume-primary;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    z-index: 1000;
+    margin-top: 2px;
+    
+    .customer-option {
+        padding: 10px;
+        cursor: pointer;
+        border-bottom: 1px solid #f0f0f0;
+        background: white;
+        transition: background 0.15s ease;
+        
+        &:hover {
+            background: $perfume-hover !important;
+        }
+        
+        &:last-child {
+            border-bottom: none;
+        }
+    }
+}
+
+.btn-add-customer {
+    padding: 8px 15px;
+    background: $perfume-primary;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    white-space: nowrap;
+    font-weight: 600;
+    transition: all 0.2s;
+    
+    &:hover {
+        background: $perfume-secondary;
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(113, 75, 103, 0.3);
+    }
+    
+    &:active {
+        transform: translateY(0);
+    }
+}
+
+/* Order Table */
+.order-table-container {
+    flex: 1;
+    overflow-y: auto;
+    border: 2px solid $border-gray;
+    border-radius: 8px;
+    background: $white;
+}
+
+.order-table {
+    width: 100%;
+    border-collapse: collapse;
+    border-spacing: 0;
+    
+    thead {
+        background: $perfume-light;
+        color: white;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        
+        th {
+            padding: 12px 8px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 13px;
+            border: 1px solid $perfume-dark;
+        }
+    }
+    
+    tbody {
+        tr {
+            background: $white;
+            
+            &:hover td:not(.row-number) {
+                background: $light-gray;
+            }
+        }
+        
+        td {
+            padding: 0;
+            border: 1px solid $dark-border;
+            background: $white;
+        }
+    }
+}
+
+/* Excel-like cells */
+.order-cell-input, .order-cell-select {
+    width: 100%;
+    padding: 8px;
+    border: none;
+    font-size: 13px;
+    background: transparent;
+    box-sizing: border-box;
+    font-family: inherit;
+    
+    &:focus {
+        outline: 2px solid $excel-focus;
+        outline-offset: -2px;
+        background: $excel-selection;
+        z-index: 2;
+        position: relative;
+    }
+}
+
+.order-cell-input[type="number"] {
+    text-align: right;
+}
+
+.readonly-cell {
+    cursor: default;
+    background: $light-gray !important;
+}
+
+.discount-cell {
+    background: $discount-bg !important;
+}
+
+.total-cell {
+    background: $total-bg !important;
+    font-weight: bold;
+}
+
+/* Row number cell */
+.row-number {
+    background: $light-gray !important;
+    text-align: center;
+    font-weight: 600;
+    color: #666;
+    padding: 8px !important;
+    border-right: 2px solid #999 !important;
+}
+
+/* Delete button cell */
+.delete-cell {
+    text-align: center;
+    padding: 8px !important;
+    cursor: pointer;
+    background: $white;
+    vertical-align: middle;
+    
+    &:hover {
+        background: #ffebee !important;
+    }
+}
+
+/* ============================================================ */
+/*                      TOTALS SECTION                          */
+/* ============================================================ */
+
+.totals-section {
+    background: $white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+}
+
+.total-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    font-size: 14px;
+    
+    &.grand-total {
+        border-top: 2px solid $perfume-primary;
+        margin-top: 10px;
+        padding-top: 15px;
+        font-size: 18px;
+        font-weight: bold;
+        color: $perfume-primary;
+    }
+}
+
+/* ============================================================ */
+/*                    ACTION BUTTONS                            */
+/* ============================================================ */
+
+.action-buttons {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+}
+
+.action-btn {
+    padding: 15px;
+    border: none;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    
+    &:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    
+    &:active {
+        transform: translateY(0);
+    }
+    
+    &.btn-quotation {
+        background: $info-blue;
+        color: white;
+    }
+    
+    &.btn-sale-order {
+        background: $success-green;
+        color: white;
+    }
+    
+    &.btn-draft {
+        background: $warning-orange;
+        color: white;
+    }
+    
+    &.btn-cancel {
+        background: $error-red;
+        color: white;
+    }
+    
+    &.btn-whatsapp {
+        background: $whatsapp-green;
+        color: white;
+        grid-column: 1 / -1;
+    }
+}
+
+/* ============================================================ */
+/*                  RIGHT SECTION: SEARCH                       */
+/* ============================================================ */
+
+.search-section {
+    width: 35%;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    background: $white;
+    position: relative;
+    overflow-y: auto;
+}
+
+/* Filters */
+.filters-container {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding-bottom: 10px;
+}
+
+.filter-btn {
+    padding: 10px 20px;
+    background: #f8f8f8;
+    border: 2px solid $border-gray;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 13px;
+    font-weight: 500;
+    
+    &:hover {
+        background: $perfume-primary;
+        color: white;
+        border-color: $perfume-primary;
+    }
+    
+    &.active {
+        background: $perfume-primary;
+        color: white;
+        border-color: $perfume-primary;
+    }
+}
+
+/* Search Bar */
+.search-bar {
+    position: relative;
+}
+
+.search-input {
+    width: 100%;
+    padding: 15px 45px 15px 15px;
+    border: 2px solid $border-gray;
+    border-radius: 8px;
+    font-size: 16px;
+    transition: all 0.2s;
+    
+    &:focus {
+        outline: none;
+        border-color: $perfume-primary;
+        box-shadow: 0 0 0 3px rgba(113, 75, 103, 0.1);
+    }
+}
+
+.search-icon {
+    position: absolute;
+    right: 15px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #999;
+    font-size: 20px;
+    pointer-events: none;
+}
+
+/* Products Table */
+.products-table-container {
+    flex: 1;
+    overflow-y: auto;
+    border: 2px solid $border-gray;
+    border-radius: 8px;
+    background: $white;
+}
+
+.products-table {
+    width: 100%;
+    border-collapse: collapse;
+    
+    thead {
+        background: $perfume-primary;
+        color: white;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        
+        th {
+            padding: 12px 10px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 13px;
+            border-bottom: 2px solid $perfume-dark;
+        }
+    }
+    
+    tbody {
+        tr {
+            border-bottom: 1px solid $light-gray;
+            cursor: pointer;
+            transition: background 0.15s;
+            
+            &:hover {
+                background: $perfume-hover;
+            }
+            
+            &.selected {
+                background: $perfume-selected;
+            }
+        }
+        
+        td {
+            padding: 12px 10px;
+            font-size: 13px;
+            color: #333;
+        }
+    }
+}
+
+.product-code {
+    color: $perfume-primary;
+    font-weight: 600;
+}
+
+.arabic-text {
+    direction: rtl;
+    text-align: right;
+    font-family: 'Arial', sans-serif;
+}
+
+.warehouse-badge {
+    display: inline-block;
+    background: #e8f5e9;
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin: 2px;
+    font-size: 11px;
+}
+
+/* Loading Spinner */
+.loading-spinner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+    font-size: 16px;
+    color: $perfume-primary;
+    
+    i {
+        margin-right: 10px;
+        font-size: 24px;
+    }
+}
+
+/* ============================================================ */
+/*                      SCROLLBAR STYLING                       */
+/* ============================================================ */
+
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 4px;
+    
+    &:hover {
+        background: #555;
+    }
+}
+
+/* ============================================================ */
+/*                   RESPONSIVE (OPTIONAL)                      */
+/* ============================================================ */
+
+@media (max-width: 1200px) {
+    .pos-main-container {
+        flex-direction: column;
+    }
+    
+    .order-section,
+    .search-section {
+        width: 100%;
+        max-height: 50vh;
+    }
+}
+
+/* ============================================================ */
+/*                     UTILITY CLASSES                          */
+/* ============================================================ */
+
+.form-select {
+    padding: 8px 12px;
+    border: 2px solid $border-gray;
+    border-radius: 6px;
+    font-size: 14px;
+    background-color: $white;
+    
+    &:focus {
+        outline: none;
+        border-color: $perfume-primary;
+        box-shadow: 0 0 0 3px rgba(113, 75, 103, 0.1);
+    }
+}
+
+.form-control {
+    padding: 8px 12px;
+    border: 2px solid $border-gray;
+    border-radius: 6px;
+    font-size: 14px;
+    
+    &:focus {
+        outline: none;
+        border-color: $perfume-primary;
+        box-shadow: 0 0 0 3px rgba(113, 75, 103, 0.1);
+    }
+}
+
+/* ============================================================ */
+/*             OVERRIDE POS DEFAULT STYLES                      */
+/* ============================================================ */
+
+/* Override default POS button colors */
+.pos .button.highlight {
+    background-color: $perfume-primary !important;
+    
+    &:hover {
+        background-color: $perfume-secondary !important;
+    }
+}
+
+/* Override POS product card styling */
+.pos .product {
+    border: 1px solid $border-gray;
+    transition: all 0.3s ease;
+    
+    &:hover {
+        border-color: $perfume-primary;
+        box-shadow: 0 2px 8px rgba(113, 75, 103, 0.2);
+    }
+    
+    &.selected {
+        border-color: $perfume-primary;
+        background-color: rgba(113, 75, 103, 0.1);
+    }
+}
+
+/* Arabic name in product cards */
+.product-arabic-name {
+    color: #666;
+    font-size: 0.85em;
+    margin-top: 2px;
+    direction: rtl;
+    text-align: right;
+}
+
+/* Price in IQD */
+.price-iqd {
+    color: #666;
+    font-size: 0.75em;
+    margin-top: 2px;
+}
+
+/* ============================================================ */
+/*         NEW COMPONENTS STYLES - UoM, Customer, Location      */
+/* ============================================================ */
+
+/* Product Search with UoM Component */
+.product-search-uom-container {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    
+    .search-section {
+        flex-shrink: 0;
+    }
+    
+    .products-scroll {
+        max-height: 400px;
+        overflow-y: auto;
+    }
+    
+    .product-card {
+        padding: 12px;
+        margin-bottom: 8px;
+        border: 1px solid $border-gray;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.2s;
+        
+        &:hover {
+            border-color: $perfume-primary;
+            background-color: $perfume-hover;
+            transform: translateX(-2px);
+        }
+        
+        .product-code {
+            font-size: 0.9em;
+        }
+        
+        .product-name {
+            font-size: 1em;
+            margin: 4px 0;
+        }
+        
+        .product-foreign-name {
+            font-size: 0.85em;
+        }
+    }
+    
+    .uom-list {
+        max-height: 350px;
+        overflow-y: auto;
+    }
+    
+    .uom-card {
+        padding: 12px;
+        margin-bottom: 8px;
+        border: 2px solid $border-gray;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.2s;
+        
+        &:hover {
+            border-color: $perfume-secondary;
+            background-color: $perfume-hover;
+        }
+        
+        &.selected {
+            border-color: $perfume-primary;
+            background-color: $perfume-selected;
+            box-shadow: 0 2px 8px rgba(113, 75, 103, 0.2);
+        }
+        
+        .uom-name {
+            font-size: 1.1em;
+            color: $perfume-dark;
+        }
+        
+        .uom-info {
+            font-size: 0.85em;
+            color: #666;
+        }
+        
+        .uom-price-usd {
+            font-size: 1.2em;
+        }
+        
+        .uom-price-iqd {
+            font-size: 0.9em;
+        }
+    }
+    
+    .add-to-order-btn {
+        margin-top: auto;
+        padding: 12px;
+        font-size: 1.1em;
+        font-weight: bold;
+    }
+    
+    .empty-state {
+        color: #999;
+    }
+}
+
+/* Customer Search Component */
+.customer-search-container {
+    position: relative;
+    
+    .selected-customer-badge {
+        animation: fadeIn 0.3s;
+    }
+    
+    .customer-dropdown {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        z-index: 1000;
+        background: $white;
+        border: 1px solid $border-gray;
+        border-radius: 6px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        max-height: 400px;
+        overflow-y: auto;
+        margin-top: 4px;
+        
+        .dropdown-header {
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            border-bottom: 1px solid $border-gray;
+        }
+        
+        .customers-list {
+            padding: 4px;
+        }
+        
+        .customer-item {
+            padding: 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            border-bottom: 1px solid $light-gray;
+            
+            &:last-child {
+                border-bottom: none;
+            }
+            
+            &:hover {
+                background-color: $perfume-hover;
+            }
+            
+            .customer-name {
+                font-size: 1em;
+                margin-bottom: 4px;
+            }
+            
+            .customer-details {
+                font-size: 0.85em;
+            }
+        }
+    }
+}
+
+/* Location Selector Component */
+.location-selector-container {
+    .stock-info-section {
+        margin-top: 16px;
+        
+        .stock-metric {
+            .stock-label {
+                font-size: 0.85em;
+                margin-bottom: 4px;
+            }
+            
+            .stock-value {
+                font-size: 1.3em;
+            }
+        }
+    }
+    
+    .form-select {
+        border: 2px solid $border-gray;
+        
+        &:focus {
+            border-color: $perfume-primary;
+            box-shadow: 0 0 0 0.2rem rgba(113, 75, 103, 0.25);
+        }
+    }
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .product-search-uom-container {
+        .products-scroll {
+            max-height: 300px;
+        }
+        
+        .uom-list {
+            max-height: 250px;
+        }
+    }
+}
+
+/* RTL Support */
+[dir="rtl"] {
+    .product-search-uom-container .product-card:hover {
+        transform: translateX(2px);
+    }
+}
+
+/* ============================================================ */
+/*             PRODUCT PRIORITY BADGES & COLORS                 */
+/* ============================================================ */
+
+/* Badge colors for different product types */
+.badge-r {
+    background-color: #b8860b !important; /* ذهبي غامق - Dark Goldenrod */
+    color: white !important;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 700;
+    display: inline-block;
+    margin-right: 4px;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+
+.badge-adf {
+    background-color: #c2185b !important; /* وردي غامق - Dark Pink */
+    color: white !important;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 700;
+    display: inline-block;
+    margin-right: 4px;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+
+.badge-g {
+    background-color: #1565c0 !important; /* أزرق غامق - Dark Blue */
+    color: white !important;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 700;
+    display: inline-block;
+    margin-right: 4px;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+
+.badge-n1 {
+    background-color: #ffa726 !important;
+    color: white !important;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+    display: inline-block;
+    margin-right: 4px;
+}
+
+/* Colored code in search table */
+.code-r {
+    color: #b8860b !important; /* ذهبي غامق */
+    font-weight: 700;
+}
+
+.code-adf {
+    color: #c2185b !important; /* وردي غامق */
+    font-weight: 700;
+}
+
+.code-g {
+    color: #1565c0 !important; /* أزرق غامق */
+    font-weight: 700;
+}
+
+.code-n1 {
+    color: #ffa726 !important;
+    font-weight: 600;
+}
+
+/* Product badge in cart */
+.product-badge {
+    font-size: 10px;
+    padding: 1px 4px;
+    border-radius: 2px;
+    margin-left: 4px;
+    font-weight: 700;
+    vertical-align: middle;
+}
+
+/* ============================================================ */
+/*                       END OF STYLES                          */
+/* ============================================================ */

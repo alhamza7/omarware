@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates id="template" xml:space="preserve">
+    
+    <!-- Product Search with UoM Selection Template -->
+    <t t-name="pos_perfume_custom.ProductSearchWithUoM">
+        <div class="product-search-uom-container">
+            <!-- Search Section -->
+            <div class="search-section mb-3">
+                <div class="input-group">
+                    <span class="input-group-text bg-primary text-white">
+                        <i class="fa fa-search"/>
+                    </span>
+                    <input 
+                        t-ref="searchInput"
+                        type="text" 
+                        class="form-control product-search-input"
+                        placeholder="🔍 ابحث عن منتج (الاسم، الكود، الاسم الأجنبي)"
+                        t-model="state.searchTerm"
+                        t-on-input="() => this.searchProducts(state.searchTerm)"
+                        t-on-focus="() => state.searchFocused = true"
+                    />
+                    <button class="btn btn-outline-secondary" t-on-click="resetSearch">
+                        <i class="fa fa-times"/>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Loading Indicator -->
+            <div t-if="state.loading" class="text-center my-4">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div>
+            
+            <!-- Products List -->
+            <div class="products-list" t-if="state.products.length > 0 and !state.selectedProduct">
+                <div class="list-header bg-light p-2 mb-2">
+                    <strong>نتائج البحث (<t t-esc="state.products.length"/>)</strong>
+                </div>
+                <div class="products-scroll">
+                    <t t-foreach="state.products" t-as="product" t-key="product.id">
+                        <div class="product-card" 
+                             t-on-click="() => this.selectProduct(product)">
+                            <div class="d-flex justify-content-between">
+                                <div class="flex-grow-1">
+                                    <div class="product-code text-primary fw-bold">
+                                        <t t-esc="product.default_code or 'N/A'"/>
+                                    </div>
+                                    <div class="product-name">
+                                        <t t-esc="product.name"/>
+                                    </div>
+                                    <t t-if="product.foreign_name">
+                                        <div class="product-foreign-name text-muted small">
+                                            <t t-esc="product.foreign_name"/>
+                                        </div>
+                                    </t>
+                                </div>
+                                <div class="product-price text-end">
+                                    <div class="price-usd text-success fw-bold">
+                                        $<t t-esc="formatPrice(product.list_price)"/>
+                                    </div>
+                                    <div class="product-uom text-muted small">
+                                        <t t-esc="product.uom_name"/>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </t>
+                </div>
+            </div>
+            
+            <!-- UoM Selection -->
+            <div class="uom-section" t-if="state.selectedProduct">
+                <div class="selected-product-header mb-3 p-3 bg-light border rounded">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <h5 class="mb-1">
+                                <span class="badge bg-primary me-2">
+                                    <t t-esc="state.selectedProduct.default_code"/>
+                                </span>
+                                <t t-esc="state.selectedProduct.name"/>
+                            </h5>
+                            <t t-if="state.selectedProduct.foreign_name">
+                                <p class="text-muted mb-0 small">
+                                    <t t-esc="state.selectedProduct.foreign_name"/>
+                                </p>
+                            </t>
+                        </div>
+                        <button class="btn btn-sm btn-outline-secondary" t-on-click="resetSearch">
+                            <i class="fa fa-times"/> تغيير
+                        </button>
+                    </div>
+                </div>
+                
+                <h6 class="mb-2">اختر وحدة القياس:</h6>
+                <div class="uom-list mb-3">
+                    <t t-foreach="state.availableUoms" t-as="uom" t-key="uom.id">
+                        <div class="uom-card"
+                             t-on-click="() => this.selectUom(uom)"
+                             t-att-class="{'selected': state.selectedUom?.id === uom.id}">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div class="flex-grow-1">
+                                    <div class="uom-name fw-bold">
+                                        <t t-if="uom.is_base">
+                                            <i class="fa fa-star text-warning me-1"/>
+                                        </t>
+                                        <t t-esc="uom.name"/>
+                                    </div>
+                                    <t t-if="uom.quantity_info">
+                                        <div class="uom-info text-muted small">
+                                            <t t-esc="uom.quantity_info"/>
+                                        </div>
+                                    </t>
+                                    <t t-if="uom.stock_info">
+                                        <div class="stock-info small mt-1">
+                                            <span class="badge bg-success">
+                                                متوفر: <t t-esc="formatQty(uom.stock_info.available)"/>
+                                            </span>
+                                        </div>
+                                    </t>
+                                </div>
+                                <div class="uom-prices text-end">
+                                    <div class="uom-price-usd text-success fw-bold">
+                                        $<t t-esc="formatPrice(uom.price)"/>
+                                    </div>
+                                    <div class="uom-price-iqd text-muted small">
+                                        <t t-esc="formatPriceIQD(uom.price_iqd)"/> IQD
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </t>
+                </div>
+                
+                <!-- Price Info Summary -->
+                <div class="price-info-summary mb-3" t-if="state.priceInfo">
+                    <div class="card">
+                        <div class="card-body">
+                            <h6 class="card-title">ملخص السعر</h6>
+                            <div class="row">
+                                <div class="col-6">
+                                    <div class="price-detail mb-2">
+                                        <span class="text-muted">الوحدة:</span>
+                                        <strong class="ms-2"><t t-esc="state.priceInfo.uom_name"/></strong>
+                                    </div>
+                                    <div class="price-detail mb-2">
+                                        <span class="text-muted">السعر (دولار):</span>
+                                        <strong class="text-success ms-2">$<t t-esc="formatPrice(state.priceInfo.price)"/></strong>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="price-detail mb-2">
+                                        <span class="text-muted">السعر (دينار):</span>
+                                        <strong class="text-primary ms-2">
+                                            <t t-esc="formatPriceIQD(state.priceInfo.price_iqd)"/> IQD
+                                        </strong>
+                                    </div>
+                                    <t t-if="state.priceInfo.stock_info">
+                                        <div class="price-detail mb-2">
+                                            <span class="text-muted">متوفر:</span>
+                                            <strong class="text-success ms-2">
+                                                <t t-esc="formatQty(state.priceInfo.stock_info.available)"/>
+                                            </strong>
+                                        </div>
+                                    </t>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Add to Order Button -->
+                <button class="btn btn-primary btn-lg w-100 add-to-order-btn"
+                        t-on-click="addToOrder"
+                        t-att-disabled="!state.selectedUom">
+                    <i class="fa fa-plus-circle me-2"/>
+                    إضافة إلى الطلب
+                </button>
+            </div>
+            
+            <!-- Empty State -->
+            <div class="empty-state text-center py-5" 
+                 t-if="state.searchTerm and state.products.length === 0 and !state.loading">
+                <i class="fa fa-search fa-3x text-muted mb-3"/>
+                <p class="text-muted">لا توجد منتجات تطابق البحث</p>
+            </div>
+        </div>
+    </t>
+    
+</templates>
+

@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    
+    <!-- Lugal AI Groups -->
+    <record id="group_lugal_user" model="res.groups">
+        <field name="name">Lugal AI User</field>
+        <field name="comment">Basic access to Lugal AI chat and product search</field>
+    </record>
+    
+    <record id="group_lugal_manager" model="res.groups">
+        <field name="name">Lugal AI Manager</field>
+        <field name="implied_ids" eval="[(4, ref('group_lugal_user'))]"/>
+        <field name="comment">Can view all conversations and manage question index</field>
+    </record>
+    
+    <!-- Add Lugal User group to all internal users by default -->
+    <function model="res.groups" name="write">
+        <value eval="[ref('base.group_user')]"/>
+        <value eval="{'implied_ids': [(4, ref('group_lugal_user'))]}"/>
+    </function>
+    
+    <!-- Record Rules -->
+    
+    <!-- Lugal Config: Only admins -->
+    <record id="lugal_config_rule_admin" model="ir.rule">
+        <field name="name">Lugal Config: Admin Access</field>
+        <field name="model_id" ref="model_lugal_config"/>
+        <field name="groups" eval="[(4, ref('base.group_system'))]"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+    </record>
+    
+    <!-- Lugal Conversation: Users see own conversations -->
+    <record id="lugal_conversation_rule_own" model="ir.rule">
+        <field name="name">Lugal Conversation: Own Conversations</field>
+        <field name="model_id" ref="model_lugal_conversation"/>
+        <field name="groups" eval="[(4, ref('group_lugal_user'))]"/>
+        <field name="domain_force">[('user_id', '=', user.id)]</field>
+    </record>
+    
+    <!-- Lugal Conversation: Managers see all -->
+    <record id="lugal_conversation_rule_all" model="ir.rule">
+        <field name="name">Lugal Conversation: All Conversations</field>
+        <field name="model_id" ref="model_lugal_conversation"/>
+        <field name="groups" eval="[(4, ref('group_lugal_manager'))]"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+    </record>
+    
+    <!-- Lugal Cache: All users can read (for performance) -->
+    <record id="lugal_cache_rule_read" model="ir.rule">
+        <field name="name">Lugal Cache: Read Access</field>
+        <field name="model_id" ref="model_lugal_cache"/>
+        <field name="groups" eval="[(4, ref('group_lugal_user'))]"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="perm_read" eval="True"/>
+        <field name="perm_write" eval="False"/>
+        <field name="perm_create" eval="False"/>
+        <field name="perm_unlink" eval="False"/>
+    </record>
+    
+    <!-- Lugal Question Index: All users can read -->
+    <record id="lugal_question_index_rule_read" model="ir.rule">
+        <field name="name">Lugal Question Index: Read Access</field>
+        <field name="model_id" ref="model_lugal_question_index"/>
+        <field name="groups" eval="[(4, ref('group_lugal_user'))]"/>
+        <field name="domain_force">[('is_active', '=', True)]</field>
+        <field name="perm_read" eval="True"/>
+        <field name="perm_write" eval="False"/>
+        <field name="perm_create" eval="False"/>
+        <field name="perm_unlink" eval="False"/>
+    </record>
+    
+    <!-- Lugal Permission: All users can read -->
+    <record id="lugal_permission_rule_read" model="ir.rule">
+        <field name="name">Lugal Permission: Read Access</field>
+        <field name="model_id" ref="model_lugal_permission"/>
+        <field name="groups" eval="[(4, ref('group_lugal_user'))]"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="perm_read" eval="True"/>
+        <field name="perm_write" eval="False"/>
+        <field name="perm_create" eval="False"/>
+        <field name="perm_unlink" eval="False"/>
+    </record>
+    
+</odoo>
+

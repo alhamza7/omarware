@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        
+        <!-- Complete Product Migration Wizard Form -->
+        <record id="view_sap_product_complete_migration_form" model="ir.ui.view">
+            <field name="name">sap.product.complete.migration.form</field>
+            <field name="model">sap.product.complete.migration</field>
+            <field name="arch" type="xml">
+                <form string="Complete Product Migration from SAP">
+                    <sheet>
+                        <div class="oe_title">
+                            <h1>
+                                <field name="state" widget="statusbar" statusbar_visible="draft,running,done"/>
+                            </h1>
+                        </div>
+                        
+                        <!-- Progress Bar (visible when running) -->
+                        <div invisible="state not in ['running', 'done']" class="o_migration_progress">
+                            <group>
+                                <field name="progress_percentage" widget="progressbar" string="Migration Progress"/>
+                                <field name="current_stage" readonly="1"/>
+                                <group invisible="current_batch == 0">
+                                    <label for="current_batch" string="Batch Progress"/>
+                                    <div>
+                                        <field name="current_batch" class="oe_inline"/> / 
+                                        <field name="total_batches" class="oe_inline"/>
+                                    </div>
+                                </group>
+                            </group>
+                            <div class="alert alert-info" invisible="state != 'running'">
+                                <strong>Migration en cours...</strong>
+                                <p>Le processus continue meme en cas d'erreurs. Veuillez patienter...</p>
+                            </div>
+                        </div>
+                        
+                        <group invisible="state != 'draft'">
+                            <group string="Basic Settings">
+                                <field name="backend_id" required="1"/>
+                                <field name="batch_size"/>
+                            </group>
+                            <group string="Advanced Options">
+                                <field name="product_limit" placeholder="0 = Unlimited"/>
+                                <field name="update_existing"/>
+                                <field name="skip_errors"/>
+                                <field name="force_enable_sales_pos" 
+                                       help="Enable all imported products in Sales and Point of Sale, regardless of SAP settings"/>
+                            </group>
+                        </group>
+                        
+                        <notebook>
+                            <page string="Migration Stages" invisible="state != 'draft'">
+                                <group string="Select Migration Stages">
+                                    <field name="stage1_uom_groups"/>
+                                    <field name="stage2_products"/>
+                                    <field name="stage3_pricelists"/>
+                                    <field name="stage4_warehouse_info"/>
+                                </group>
+                                
+                                <group string="Stage Descriptions">
+                                    <div class="alert alert-info">
+                                        <strong>⚡ Update Mode:</strong>
+                                        <p>This wizard will <strong>UPDATE existing records</strong> and only CREATE new ones when needed:</p>
+                                        <ul>
+                                            <li>✏️ <strong>Products:</strong> Updates existing products if "Update Existing" is checked</li>
+                                            <li>✏️ <strong>Pricelists:</strong> Always updates existing prices + creates new ones</li>
+                                            <li>✏️ <strong>Extended Info:</strong> Updates existing records (no duplicates)</li>
+                                            <li>✏️ <strong>Warehouse Info:</strong> Updates existing stock data</li>
+                                        </ul>
+                                        <p><strong>Result:</strong> No duplicate products or prices! Safe to run multiple times. 🎯</p>
+                                    </div>
+                                    <div>
+                                        <p><strong>Stage 1: UoM Groups</strong></p>
+                                        <ul>
+                                            <li>Import Unit of Measure Groups from SAP</li>
+                                            <li>Create conversion factors (e.g., 1kg = 1000g)</li>
+                                            <li>Map SAP UoMs to Odoo UoMs</li>
+                                        </ul>
+                                        
+                                        <p><strong>Stage 2: Products</strong></p>
+                                        <ul>
+                                            <li>Import all products from SAP Items</li>
+                                            <li>Create extended product information</li>
+                                            <li>Include all SAP-specific fields</li>
+                                        </ul>
+                                        
+                                        <p><strong>Stage 3: Pricelists</strong></p>
+                                        <ul>
+                                            <li>Import ItemPrices from SAP</li>
+                                            <li>Create Odoo pricelists</li>
+                                            <li>Support UoM-specific pricing</li>
+                                            <li><strong>⚡ Focus: Update all prices from SAP</strong></li>
+                                        </ul>
+                                        
+                                        <p><strong>Stage 4: Warehouse Info</strong></p>
+                                        <ul>
+                                            <li>Import ItemWarehouseInfo from SAP</li>
+                                            <li>Update stock.quant with quantities</li>
+                                            <li>Create reorder rules</li>
+                                        </ul>
+                                    </div>
+                                </group>
+                            </page>
+                            
+                            <page string="Migration Log" invisible="state == 'draft'">
+                                <div class="alert alert-success" invisible="state != 'done'">
+                                    <strong>Migration terminee avec succes!</strong>
+                                </div>
+                                <div class="alert alert-warning" invisible="errors_count == 0 or state != 'done'">
+                                    <strong>Migration terminee avec <field name="errors_count" readonly="1"/> erreur(s)</strong>
+                                    <p>Consultez l'onglet "Erreurs" pour plus de details.</p>
+                                </div>
+                                <field name="migration_log" widget="text" readonly="1" class="o_field_text o_monospace_font"/>
+                            </page>
+                            
+                            <page string="Errors" invisible="errors_count == 0">
+                                <div class="alert alert-danger">
+                                    <strong>Erreurs rencontrees: <field name="errors_count" readonly="1"/></strong>
+                                </div>
+                                <field name="errors_log" widget="text" readonly="1" class="o_field_text o_monospace_font"/>
+                            </page>
+                            
+                            <page string="Statistics" invisible="state != 'done'">
+                                <group>
+                                    <group>
+                                        <field name="start_time" readonly="1"/>
+                                        <field name="end_time" readonly="1"/>
+                                        <field name="duration_seconds" readonly="1" widget="integer"/>
+                                    </group>
+                                    <group>
+                                        <field name="total_uom_groups" readonly="1"/>
+                                        <field name="total_products" readonly="1"/>
+                                        <field name="total_pricelists" readonly="1"/>
+                                        <field name="total_prices" readonly="1"/>
+                                        <field name="total_warehouses" readonly="1"/>
+                                        <field name="errors_count" readonly="1"/>
+                                    </group>
+                                </group>
+                                
+                                <group>
+                                    <button name="action_view_imported_products" 
+                                            string="View Imported Products" 
+                                            type="object" 
+                                            class="oe_highlight"/>
+                                    <button name="action_view_pricelists" 
+                                            string="View Pricelists" 
+                                            type="object" 
+                                            class="oe_highlight"/>
+                                    <button name="action_view_extended_info" 
+                                            string="View Extended Info" 
+                                            type="object" 
+                                            class="oe_highlight"/>
+                                </group>
+                            </page>
+                        </notebook>
+                    </sheet>
+                    
+                    <footer>
+                        <button name="run_complete_migration" 
+                                string="Run Migration" 
+                                type="object" 
+                                class="btn-primary"
+                                invisible="state != 'draft'"/>
+                        <button string="Close" 
+                                class="btn-secondary" 
+                                special="cancel"/>
+                    </footer>
+                </form>
+            </field>
+        </record>
+        
+        <!-- Action -->
+        <record id="action_sap_product_complete_migration" model="ir.actions.act_window">
+            <field name="name">Complete Product Migration</field>
+            <field name="res_model">sap.product.complete.migration</field>
+            <field name="view_mode">form</field>
+            <field name="target">new</field>
+            <field name="binding_model_id" ref="model_sap_backend"/>
+        </record>
+        
+        <!-- Menu Item -->
+        <menuitem id="menu_sap_product_complete_migration"
+                  name="🚀 Complete Migration"
+                  parent="menu_sap_integration"
+                  action="action_sap_product_complete_migration"
+                  sequence="5"/>
+        
+    </data>
+</odoo>
+
+

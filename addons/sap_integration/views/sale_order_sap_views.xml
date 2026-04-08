@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        
+        <!-- Add SAP fields to Sale Order Form View -->
+        <record id="view_order_form_sap_inherit" model="ir.ui.view">
+            <field name="name">sale.order.form.sap.inherit</field>
+            <field name="model">sale.order</field>
+            <field name="inherit_id" ref="sale.view_order_form"/>
+            <field name="arch" type="xml">
+                <!-- Add SAP Document Number in header -->
+                <xpath expr="//field[@name='client_order_ref']" position="after">
+                    <field name="sap_doc_num" string="SAP Document Number" 
+                           readonly="1" 
+                           widget="statinfo"
+                           invisible="not sap_doc_num"/>
+                </xpath>
+                
+                <!-- Add SAP fields in header buttons -->
+                <xpath expr="//header/button[@name='action_confirm']" position="after">
+                    <button name="action_manual_sync_to_sap" 
+                            type="object" 
+                            string="إرسال إلى SAP" 
+                            class="btn-primary"
+                            invisible="sap_synced"
+                            icon="fa-paper-plane"/>
+                    <button name="action_update_sap_document"
+                            type="object"
+                            string="تحديث في SAP"
+                            class="btn-warning"
+                            invisible="not sap_doc_entry"
+                            icon="fa-refresh"
+                            confirm="سيتم إرسال آخر تعديلات الطلب إلى SAP. هل تريد المتابعة؟"/>
+                </xpath>
+                
+                <!-- Add SAP sync status in header -->
+                <xpath expr="//header" position="inside">
+                    <field name="sap_synced" invisible="1"/>
+                    <field name="sap_doc_entry" invisible="1"/>
+                </xpath>
+                
+                <!-- Add invoice_type field before partner_id -->
+            <xpath expr="//field[@name='partner_id']" position="before">
+                <field name="invoice_type" 
+                       widget="radio" 
+                       options="{'horizontal': true}"
+                       string="نوع الفاتورة / Invoice Type"/>
+            </xpath>
+            
+            <!-- Add SAP information in notebook -->
+            <xpath expr="//notebook" position="inside">
+                <page string="SAP Information" name="sap_info">
+                    <group col="2">
+                        <field name="sap_doc_num" string="SAP Document Number" readonly="1"/>
+                        <field name="sap_doc_entry" string="SAP Doc Entry" readonly="1"/>
+                        <field name="sap_synced" string="Synced to SAP" readonly="1"/>
+                        <field name="sap_last_sync_date" string="آخر مزامنة" readonly="1"/>
+                    </group>
+                    <group string="خطأ SAP" invisible="not sap_error_message">
+                        <field name="sap_error_message" 
+                               string="سبب الفشل" 
+                               readonly="1"
+                               widget="text"
+                               nolabel="1"/>
+                    </group>
+                    <group string="ملاحظات SAP / SAP Notes">
+                        <field name="note" 
+                               placeholder="أدخل الملاحظات هنا... (سيتم إرسالها إلى SAP)"
+                               widget="text"
+                               nolabel="1"/>
+                    </group>
+                </page>
+            </xpath>
+            
+            <!-- Add Deliveries tab to show picking orders -->
+            <!-- Note: This tab is usually added by sale_stock module automatically -->
+            <!-- We're just ensuring it's visible if sale_stock is installed -->
+            </field>
+        </record>
+        
+        <!-- Add SAP Document Number to Sale Order Tree View -->
+        <record id="view_quotation_tree_sap_inherit" model="ir.ui.view">
+            <field name="name">sale.order.tree.sap.inherit</field>
+            <field name="model">sale.order</field>
+            <field name="inherit_id" ref="sale.view_quotation_tree"/>
+            <field name="arch" type="xml">
+                <xpath expr="//field[@name='partner_id']" position="after">
+                    <field name="sap_doc_num" string="SAP Doc" optional="hide"/>
+                    <field name="invoice_type" string="نوع الفاتورة" optional="show"/>
+                </xpath>
+            </field>
+        </record>
+        
+    </data>
+</odoo>

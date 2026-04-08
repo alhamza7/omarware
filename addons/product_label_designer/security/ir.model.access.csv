@@ -1,0 +1,7 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_label_template_user,product.label.template.user,model_product_label_template,stock.group_stock_user,1,1,1,0
+access_label_template_manager,product.label.template.manager,model_product_label_template,stock.group_stock_manager,1,1,1,1
+access_print_wizard_user,print.label.wizard.user,model_print_label_wizard,stock.group_stock_user,1,1,1,1
+access_quick_print_wizard_user,quick.print.wizard.user,model_quick_print_wizard,stock.group_stock_user,1,1,1,1
+access_product_barcode_alternative_user,product.barcode.alternative.user,model_product_barcode_alternative,stock.group_stock_user,1,1,1,1
+access_product_barcode_alternative_manager,product.barcode.alternative.manager,model_product_barcode_alternative,stock.group_stock_manager,1,1,1,1

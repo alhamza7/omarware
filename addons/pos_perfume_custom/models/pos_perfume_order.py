@@ -1,0 +1,1300 @@
+# -*- coding: utf-8 -*-
+from odoo import models, fields, api, _
+from odoo.exceptions import UserError, ValidationError
+import logging
+
+_logger = logging.getLogger(__name__)
+
+class PosPerfumeOrder(models.Model):
+    _name = 'pos.perfume.order'
+    _description = 'POS Perfume Order'
+    _inherit = ['mail.thread', 'mail.activity.mixin']
+    _order = 'date desc, id desc'
+
+    name = fields.Char(
+        string='Order Reference',
+        required=True,
+        copy=False,
+        readonly=True,
+        default='New',
+        tracking=True
+    )
+    
+    date = fields.Datetime(
+        string='Order Date',
+        required=True,
+        default=fields.Datetime.now,
+        tracking=True
+    )
+    
+    user_id = fields.Many2one(
+        'res.users',
+        string='Salesperson',
+        required=True,
+        default=lambda self: self.env.user,
+        tracking=True
+    )
+    
+    partner_id = fields.Many2one(
+        'res.partner',
+        string='Customer',
+        required=True,
+        tracking=True
+    )
+    
+    pricelist_id = fields.Many2one(
+        'product.pricelist',
+        string='Pricelist',
+        required=True,
+        default=lambda self: self._get_default_pricelist(),
+        tracking=True
+    )
+    
+    # Fields for sale.order report compatibility
+    company_id = fields.Many2one(
+        'res.company',
+        string='Company',
+        compute='_compute_company_id',
+        store=False,
+        help='Computed from user context'
+    )
+    
+    fiscal_position_id = fields.Many2one(
+        'account.fiscal.position',
+        string='Fiscal Position',
+        help='Dummy field for report compatibility'
+    )
+    
+    payment_term_id = fields.Many2one(
+        'account.payment.term',
+        string='Payment Terms',
+        help='Dummy field for report compatibility'
+    )
+    
+    validity_date = fields.Date(
+        string='Expiration',
+        help='Dummy field for report compatibility'
+    )
+    
+    partner_invoice_id = fields.Many2one(
+        'res.partner',
+        string='Invoice Address',
+        compute='_compute_partner_addresses',
+        store=False,
+        help='Same as partner_id for POS orders'
+    )
+    
+    partner_shipping_id = fields.Many2one(
+        'res.partner',
+        string='Delivery Address',
+        compute='_compute_partner_addresses',
+        store=False,
+        help='Same as partner_id for POS orders'
+    )
+    
+    def _get_default_pricelist(self):
+        """Get default pricelist - try to find 'Price list 1' first"""
+        # Try to find "Price list 1" - case insensitive
+        pricelist = self.env['product.pricelist'].search([
+            ('name', 'ilike', 'Price list 1'),
+            ('active', '=', True)
+        ], limit=1)
+        
+        # If not found, try "list 1"
+        if not pricelist:
+            pricelist = self.env['product.pricelist'].search([
+                ('name', 'ilike', 'list 1'),
+                ('active', '=', True)
+            ], limit=1)
+        
+        # If still not found, use Public Pricelist (list0)
+        if not pricelist:
+            pricelist = self.env.ref('product.list0', raise_if_not_found=False)
+        
+        return pricelist.id if pricelist else False
+    
+    order_line_ids = fields.One2many(
+        'pos.perfume.order.line',
+        'order_id',
+        string='Order Lines',
+        copy=True
+    )
+    
+    state = fields.Selection([
+        ('draft', 'Draft'),
+        ('quotation', 'Quotation'),
+        ('sale', 'Sale Order'),
+        ('done', 'Done'),
+        ('cancel', 'Cancelled')
+    ], string='Status', default='draft', tracking=True, required=True)
+    
+    # Totals
+    amount_subtotal = fields.Monetary(
+        string='Subtotal',
+        compute='_compute_amounts',
+        store=True,
+        currency_field='currency_id'
+    )
+    
+    amount_discount = fields.Monetary(
+        string='Total Discount',
+        compute='_compute_amounts',
+        store=True,
+        currency_field='currency_id'
+    )
+    
+    amount_tax = fields.Monetary(
+        string='Taxes',
+        compute='_compute_amounts',
+        store=True,
+        currency_field='currency_id'
+    )
+    
+    amount_total = fields.Monetary(
+        string='Total',
+        compute='_compute_amounts',
+        store=True,
+        currency_field='currency_id'
+    )
+    
+    currency_id = fields.Many2one(
+        'res.currency',
+        string='Currency',
+        default=lambda self: self.env.ref('base.USD', raise_if_not_found=False) or self.env.company.currency_id,
+        required=True
+    )
+    
+    # IQD Currency
+    amount_total_iqd = fields.Monetary(
+        string='Total (IQD)',
+        compute='_compute_amount_iqd',
+        store=True,
+        currency_field='currency_iqd_id'
+    )
+    
+    currency_iqd_id = fields.Many2one(
+        'res.currency',
+        string='IQD Currency',
+        default=lambda self: self.env.ref('base.IQD', raise_if_not_found=False)
+    )
+    
+    exchange_rate = fields.Float(
+        string='Exchange Rate (USD to IQD)',
+        default=lambda self: float(self.env['ir.config_parameter'].sudo().get_param('pos_perfume.default_exchange_rate_usd_iqd', '1560.0')),
+        digits=(12, 2),
+        help='Conversion rate from USD to IQD (e.g., 1510). Default value can be changed in Sales Settings.',
+        tracking=True
+    )
+
+    @api.model
+    def get_exchange_rate_from_db(self):
+        """
+        Read exchange rate from DB (no cache). Same key updated by SAP Exchange Rate Sync.
+        POS Perfume IQD prices use this rate → so they follow SAP when sync runs.
+        """
+        param = self.env['ir.config_parameter'].sudo().search(
+            [('key', '=', 'pos_perfume.default_exchange_rate_usd_iqd')], limit=1
+        )
+        if param and param.value:
+            try:
+                return float(param.value)
+            except (TypeError, ValueError):
+                pass
+        return 1560.0  # Fallback aligned with SAP default
+    
+    def action_update_exchange_rate(self):
+        """Update exchange rate to current default value from settings"""
+        default_rate = float(self.env['ir.config_parameter'].sudo().get_param(
+            'pos_perfume.default_exchange_rate_usd_iqd', '1560.0'
+        ))
+        for order in self:
+            order.exchange_rate = default_rate
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'type': 'success',
+                'message': f'تم تحديث سعر الصرف إلى {default_rate}',
+                'sticky': False,
+            }
+        }
+    
+    def action_clear_exchange_rate(self):
+        """Clear exchange rate to use default from settings"""
+        for order in self:
+            order.exchange_rate = False
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'type': 'success',
+                'message': 'تم مسح سعر الصرف - سيتم استخدام السعر الافتراضي من الإعدادات',
+                'sticky': False,
+            }
+        }
+    
+    # Related Sale Order
+    sale_order_id = fields.Many2one(
+        'sale.order',
+        string='Sale Order',
+        readonly=True,
+        copy=False
+    )
+    
+    # Invoice Designer Template - DISABLED: Using default Odoo invoices
+    # invoice_template_id = fields.Many2one(
+    #     'invoice.template.designer',
+    #     string='Invoice Template',
+    #     domain=[('template_type', 'in', ['pos_receipt', 'invoice'])],
+    #     help='Custom template for printing this order'
+    # )
+    
+    # SAP Fields (computed from related sale order)
+    sap_doc_num = fields.Char(
+        string='SAP Document Number',
+        related='sale_order_id.sap_doc_num',
+        readonly=True,
+        store=True,
+        copy=False,
+        help="SAP Document Number from related Sale Order"
+    )
+    
+    sap_doc_entry = fields.Integer(
+        string='SAP Doc Entry',
+        related='sale_order_id.sap_doc_entry',
+        readonly=True,
+        store=True,
+        copy=False,
+        help="SAP Doc Entry from related Sale Order"
+    )
+    
+    # Notes
+    note = fields.Text(string='Notes')
+    
+    # SAP Document Number (legacy field for compatibility)
+    sap_doc_number = fields.Char(
+        string='SAP Document Number',
+        readonly=True,
+        copy=False,
+        help='Document number returned from SAP after successful posting',
+        tracking=True
+    )
+    
+    # SAP Integration Fields - Computed safely from sale_order_id
+    sap_synced = fields.Boolean(
+        string='Synced to SAP',
+        compute='_compute_sap_fields',
+        readonly=True,
+        copy=False,
+        store=False,
+        help='تم المزامنة مع SAP بنجاح'
+    )
+    
+    sap_error_message = fields.Text(
+        string='SAP Error Message',
+        compute='_compute_sap_fields',
+        readonly=True,
+        copy=False,
+        store=False,
+        help='آخر رسالة خطأ من SAP'
+    )
+    
+    sap_last_sync_date = fields.Datetime(
+        string='Last SAP Sync',
+        compute='_compute_sap_fields',
+        readonly=True,
+        copy=False,
+        store=False,
+        help='آخر محاولة مزامنة مع SAP'
+    )
+    
+    # Invoice Type (for SAP) - قيم ثابتة
+    invoice_type = fields.Selection(
+        string='نوع الفاتورة / Invoice Type',
+        selection=[
+            ('1', 'زبون محل'),
+            ('2', 'شركات توصيل'),
+            ('3', 'نقليات'),
+            ('4', 'ديلفري'),
+            ('5', 'NBS'),
+            ('6', 'شورجة'),
+            ('7', 'NA'),
+            ('8', 'مكاتب الشورجة'),
+        ],
+        help="نوع الفاتورة الذي سيتم إرساله إلى SAP (U_InvType)\nالرقم يُرسل إلى SAP، والاسم يظهر في الواجهة"
+    )
+    
+    @api.depends('order_line_ids.line_subtotal', 'order_line_ids.discount_amount')
+    def _compute_amounts(self):
+        """Calculate order totals from lines"""
+        for order in self:
+            amount_subtotal = 0.0
+            amount_discount = 0.0
+            amount_tax = 0.0
+            
+            for line in order.order_line_ids:
+                amount_subtotal += line.line_subtotal
+                amount_discount += line.discount_amount
+            
+            order.amount_subtotal = amount_subtotal
+            order.amount_discount = amount_discount
+            order.amount_tax = amount_tax
+            order.amount_total = amount_subtotal - amount_discount + amount_tax
+    
+    @api.depends('amount_total', 'exchange_rate')
+    def _compute_amount_iqd(self):
+        """Convert total to IQD"""
+        for order in self:
+            order.amount_total_iqd = order.amount_total * order.exchange_rate
+    
+    @api.depends('user_id')
+    def _compute_company_id(self):
+        """Compute company from user/salesperson"""
+        for order in self:
+            order.company_id = order.user_id.company_id if order.user_id else self.env.company
+    
+    @api.depends('partner_id')
+    def _compute_partner_addresses(self):
+        """For POS orders, invoice and shipping addresses are the same as customer"""
+        for order in self:
+            order.partner_invoice_id = order.partner_id
+            order.partner_shipping_id = order.partner_id
+    
+    @api.depends('sale_order_id')
+    def _compute_sap_fields(self):
+        """Safely compute SAP-related fields from sale_order_id"""
+        for order in self:
+            if order.sale_order_id:
+                # Try to get values safely, catching any database errors
+                try:
+                    order.sap_synced = order.sale_order_id.sap_synced or False
+                except Exception:
+                    order.sap_synced = False
+                
+                try:
+                    order.sap_error_message = order.sale_order_id.sap_error_message or False
+                except Exception:
+                    order.sap_error_message = False
+                
+                try:
+                    order.sap_last_sync_date = order.sale_order_id.sap_last_sync_date or False
+                except Exception:
+                    order.sap_last_sync_date = False
+            else:
+                order.sap_synced = False
+                order.sap_error_message = False
+                order.sap_last_sync_date = False
+    
+    @api.onchange('partner_id')
+    def _onchange_partner_pricelist(self):
+        """Set pricelist from customer - DISABLED: Always use Price list 1"""
+        # DISABLED: Keep pricelist fixed to "Price list 1" regardless of customer
+        # if self.partner_id and self.partner_id.property_product_pricelist:
+        #     self.pricelist_id = self.partner_id.property_product_pricelist
+        pass
+    
+    @api.model_create_multi
+    @api.model_create_multi
+    def create(self, vals_list):
+        """Generate sequence number for new orders"""
+        for vals in vals_list:
+            if vals.get('name', 'New') == 'New':
+                # Generate sequence number like S00001, S00002, etc.
+                vals['name'] = self.env['ir.sequence'].next_by_code('pos.perfume.order') or 'New'
+        
+        orders = super().create(vals_list)
+        
+        # Create sale.order for draft orders to send to SAP
+        for order in orders:
+            if order.state == 'draft' and not order.sale_order_id:
+                order._create_draft_sale_order()
+        
+        return orders
+    
+    def _create_draft_sale_order(self):
+        """Create draft sale order for SAP sync"""
+        
+        self.ensure_one()
+        
+        if self.sale_order_id:
+            _logger.info(f"[POS Draft] Order {self.name} already has sale order {self.sale_order_id.name}")
+            return self.sale_order_id
+        
+        if not self.partner_id:
+            _logger.warning(f"[POS Draft] Order {self.name} has no partner, skipping sale order creation")
+            return False
+        
+        if not self.order_line_ids:
+            _logger.warning(f"[POS Draft] Order {self.name} has no lines, skipping sale order creation")
+            return False
+        
+        try:
+            # Prepare sale order values
+            sale_vals = {
+                'partner_id': self.partner_id.id,
+                'date_order': self.date or fields.Datetime.now(),
+                'state': 'draft',  # Keep as draft for SAP
+                'pricelist_id': self.pricelist_id.id if self.pricelist_id else False,
+                # Sync invoice_type and note from POS order to sale.order
+                'invoice_type': self.invoice_type or False,
+                'note': self.note or '',
+            }
+            
+            # Create sale order lines
+            sale_order_lines = []
+            for line in self.order_line_ids:
+                if not line.product_id:
+                    continue
+                
+                uom_id = line.product_uom_id.id if line.product_uom_id else line.product_id.uom_id.id
+                
+                line_vals = {
+                    'product_id': line.product_id.id,
+                    'product_uom_qty': line.quantity or 1.0,
+                    'product_uom_id': uom_id,  # Correct field name in Odoo
+                    'price_unit': line.unit_price or 0.0,
+                    'discount': line.discount_percent or 0.0,
+                }
+                
+                # Add custom product name if set
+                if line.custom_product_name:
+                    line_vals['custom_product_name'] = line.custom_product_name
+                
+                # Add warehouse if available and field exists in sale.order.line
+                if line.warehouse_id:
+                    # Check if product_warehouse_id field exists in sale.order.line model
+                    sale_order_line_model = self.env['sale.order.line']
+                    if 'product_warehouse_id' in sale_order_line_model._fields:
+                        line_vals['product_warehouse_id'] = line.warehouse_id.id
+                
+                sale_order_lines.append((0, 0, line_vals))
+            
+            sale_vals['order_line'] = sale_order_lines
+            
+            _logger.info(f"[POS Draft] Creating draft sale.order for POS order {self.name}")
+            sale_order = self.env['sale.order'].create(sale_vals)
+            _logger.info(f"[POS Draft] Draft sale order created: {sale_order.name} (ID: {sale_order.id}), state={sale_order.state}")
+            
+            # Note: SAP sync is NOT triggered here intentionally.
+            # JS controls when to sync (createQuotation → action_sync_as_quotation,
+            # confirmSaleOrder → action_manual_sync_to_sap).
+            # This prevents duplicate or wrong-type SAP sync calls.
+            
+            # Link sale order to POS order
+            self.write({
+                'sale_order_id': sale_order.id,
+            })
+            
+            return sale_order
+            
+        except Exception as e:
+            _logger.error(f"[POS Draft] Error creating draft sale order: {e}", exc_info=True)
+            return False
+    
+    def action_quotation(self):
+        """Set order to quotation state"""
+        self.ensure_one()
+        self.state = 'quotation'
+        return True
+
+    def action_ensure_sale_order(self):
+        """
+        Ensure a sale.order record exists for this POS order (in draft state).
+        Used by createQuotation in POS JS — does NOT confirm/send to SAP.
+        Returns the sale.order ID so JS can call action_sync_as_quotation on it.
+        """
+        self.ensure_one()
+        if self.sale_order_id:
+            _logger.info(f"[POS] action_ensure_sale_order: existing sale.order {self.sale_order_id.name}")
+            return self.sale_order_id.id
+
+        # Create sale.order in draft — no SAP sync yet (JS handles that)
+        draft_so = self._create_draft_sale_order()
+        if not draft_so:
+            raise UserError(_('Could not create sale order. Please check partner and order lines.'))
+
+        _logger.info(f"[POS] action_ensure_sale_order: created sale.order {draft_so.name}")
+        return draft_so.id
+
+    def action_confirm(self):
+        """Confirm order and create sale order"""
+        force_sale_order = self.env.context.get('force_sale_order')
+        force_quotation = self.env.context.get('force_quotation')
+        
+        # Get IDs and normalize them - flatten nested lists and ensure integers
+        def normalize_ids(ids):
+            """Flatten nested lists and extract integer IDs"""
+            result = []
+            if isinstance(ids, (list, tuple)):
+                for item in ids:
+                    if isinstance(item, (list, tuple)):
+                        result.extend(normalize_ids(item))
+                    elif isinstance(item, int):
+                        result.append(item)
+                    elif hasattr(item, 'id'):
+                        result.append(item.id)
+            elif isinstance(ids, int):
+                result.append(ids)
+            elif hasattr(ids, 'id'):
+                result.append(ids.id)
+            return result
+        
+        order_ids = normalize_ids(self.ids)
+        if not order_ids:
+            raise UserError(_('No orders selected.'))
+        
+        # Ensure all IDs are integers
+        order_ids = [int(id) for id in order_ids if id]
+        
+        # Browse records fresh to avoid any cached state issues
+        orders = self.env['pos.perfume.order'].browse(order_ids)
+        _logger.info(f"[POS Confirm] Starting action_confirm for {len(orders)} orders")
+        results = []
+        
+        for order in orders:
+            order_id = order.id
+            # Read all needed fields at once to avoid multiple field cache accesses
+            try:
+                order_data = order.read(['name', 'partner_id', 'user_id', 'date', 'pricelist_id', 'note'])[0]
+                order_name = order_data.get('name', f"Order-{order_id}")
+            except (TypeError, AttributeError, KeyError, IndexError) as e:
+                _logger.warning(f"[POS Confirm] Error reading order data: {e}, using ID only")
+                order_name = f"Order-{order_id}"
+                order_data = {}
+            
+            _logger.info(f"[POS Confirm] Processing order {order_id}: {order_name}")
+            
+            # Validate - get order lines using search to avoid field cache issues
+            try:
+                order_lines = self.env['pos.perfume.order.line'].search([('order_id', '=', order_id)])
+            except (TypeError, AttributeError):
+                # Fallback to direct access if search fails
+                order_lines = order.order_line_ids
+            
+            if not order_lines:
+                _logger.error(f"[POS Confirm] No lines in order {order_id}")
+                raise UserError(_('Cannot confirm an order without lines.'))
+            
+            _logger.info(f"[POS Confirm] Order has {len(order_lines)} lines")
+            
+            # Log invoice_type if present
+            if order.invoice_type:
+                _logger.info(f"[POS Confirm] Order has invoice_type: {order.invoice_type}")
+            else:
+                _logger.info(f"[POS Confirm] Order has NO invoice_type")
+            
+            # Check if sale order already exists (from draft)
+            if order.sale_order_id:
+                _logger.info(f"[POS Confirm] Using existing sale order {order.sale_order_id.name} (ID: {order.sale_order_id.id})")
+                sale_order = order.sale_order_id
+
+                # Explicit caller intent controls whether we keep draft quotation
+                # or force a confirmed sales order.
+                target_sale_state = 'sale'
+                if force_quotation and not force_sale_order:
+                    target_sale_state = 'draft'
+
+                update_vals = {
+                    'state': target_sale_state,
+                }
+                # Sync invoice_type and note from POS order to sale.order if present
+                if order.invoice_type:
+                    update_vals['invoice_type'] = order.invoice_type
+                    _logger.info(f"[POS Confirm] Syncing invoice_type={order.invoice_type} to sale.order {sale_order.name}")
+                if order.note:
+                    update_vals['note'] = order.note
+                    _logger.info(f"[POS Confirm] Syncing note to sale.order {sale_order.name}")
+                
+                # مزامنة أسطر sale.order من أسطر POS
+                # للـ sale order المؤكد: نُحدِّث الأسطر الموجودة بالـ product_id المطابق
+                #   ونُصفِّر الكمية للأسطر المحذوفة من POS (Odoo لا يسمح بحذفها)
+                #   ونُضيف الأسطر الجديدة
+                # للـ sale order غير المؤكد (draft/quotation): نحذف الكل ونُعيد إنشاءها
+                _logger.info(f"[POS Confirm] Syncing sale.order lines from POS lines... (sale_order state={sale_order.state})")
+
+                # بناء قاموس الأسطر المطلوبة من POS: product_id → بيانات السطر
+                pos_lines_by_product = {}
+                for line in order_lines:
+                    if not line.product_id:
+                        continue
+                    uom_id = line.product_uom_id.id if line.product_uom_id else line.product_id.uom_id.id
+                    pos_lines_by_product[line.product_id.id] = {
+                        'product_uom_qty': line.quantity or 1.0,
+                        'product_uom_id': uom_id,
+                        'price_unit': line.unit_price or 0.0,
+                        'discount': line.discount_percent or 0.0,
+                        'custom_product_name': line.custom_product_name or False,
+                    }
+                    if line.warehouse_id and 'product_warehouse_id' in self.env['sale.order.line']._fields:
+                        pos_lines_by_product[line.product_id.id]['product_warehouse_id'] = line.warehouse_id.id
+                    _logger.info(f"[POS Confirm] POS line: product={line.product_id.name}, custom_name={line.custom_product_name!r}")
+
+                if sale_order.state in ('draft', 'sent'):
+                    # غير مؤكد → يمكن حذف وإعادة إنشاء الأسطر
+                    new_sale_lines = [(0, 0, {**vals, 'product_id': pid}) for pid, vals in pos_lines_by_product.items()]
+                    update_vals['order_line'] = [(5, 0, 0)] + new_sale_lines
+                    _logger.info(f"[POS Confirm] Draft SO: replacing {len(sale_order.order_line)} lines with {len(new_sale_lines)} new lines")
+                    sale_order.write(update_vals)
+                else:
+                    # مؤكد → Odoo يمنع الحذف، نُحدِّث/نُصفِّر/نُضيف
+                    line_ops = []
+                    existing_product_ids = set()
+
+                    for existing_line in sale_order.order_line:
+                        pid = existing_line.product_id.id
+                        existing_product_ids.add(pid)
+                        if pid in pos_lines_by_product:
+                            # تحديث السطر الموجود
+                            line_ops.append((1, existing_line.id, pos_lines_by_product[pid]))
+                        else:
+                            # المنتج حُذف من POS → نُصفِّر الكمية
+                            line_ops.append((1, existing_line.id, {'product_uom_qty': 0.0}))
+                            _logger.info(f"[POS Confirm] Zeroing removed line: product={existing_line.product_id.name}")
+
+                    # إضافة الأسطر الجديدة غير الموجودة في sale.order
+                    for pid, vals in pos_lines_by_product.items():
+                        if pid not in existing_product_ids:
+                            line_ops.append((0, 0, {**vals, 'product_id': pid}))
+                            _logger.info(f"[POS Confirm] Adding new line: product_id={pid}")
+
+                    update_vals['order_line'] = line_ops
+                    _logger.info(f"[POS Confirm] Confirmed SO: {len(line_ops)} line operations")
+                    sale_order.write(update_vals)
+
+                _logger.info(f"[POS Confirm] Updated sale order {sale_order.name}")
+                # SAP sync is handled explicitly by JS (action_manual_sync_to_sap) after this call.
+
+            else:
+                # Create new Sale Order - use read data or direct access with fallback
+                # ملاحظة مهمة:
+                # - إذا كان طلب الـ POS في حالة 'quotation' فهذا يعني أن المستخدم
+                #   أراد إنشاء عرض سعر فقط، فنُنشئ sale.order بحالة 'draft' ليُرسل
+                #   إلى SAP كـ Quotation.
+                # - إذا كان في أي حالة أخرى (مثلاً 'draft' عند ضغط زر Sale Order في الـ POS)
+                #   فنُنشئ sale.order بحالة 'sale' ليُرسل إلى SAP كـ Sales Order مباشرة.
+                current_state = order.state
+                if force_sale_order:
+                    sale_state = 'sale'
+                elif force_quotation:
+                    sale_state = 'draft'
+                else:
+                    sale_state = 'draft' if current_state == 'quotation' else 'sale'
+
+                sale_vals = {
+                    'partner_id': order_data.get('partner_id', [False])[0] if order_data.get('partner_id') else order.partner_id.id,
+                    'user_id': order_data.get('user_id', [False])[0] if order_data.get('user_id') else order.user_id.id,
+                    'date_order': order_data.get('date') or order.date,
+                    'origin': order_name,
+                    'note': order_data.get('note', '') or (order.note or ''),
+                    # Sync invoice_type from POS order to sale.order (field defined in sap_integration)
+                    'invoice_type': order.invoice_type or False,
+                    'pricelist_id': order_data.get('pricelist_id', [False])[0] if order_data.get('pricelist_id') else (order.pricelist_id.id if order.pricelist_id else False),
+                    'state': sale_state,
+                }
+                
+                # Log invoice_type in sale_vals
+                if order.invoice_type:
+                    _logger.info(f"[POS Confirm] Creating sale.order with invoice_type={order.invoice_type}")
+                else:
+                    _logger.info(f"[POS Confirm] Creating sale.order WITHOUT invoice_type")
+
+                # Create sale order lines
+                sale_order_lines = []
+                for line in order_lines:
+                    # Ensure product exists
+                    if not line.product_id:
+                        _logger.warning(f"[POS Confirm] Skipping line without product: {line.id}")
+                        continue
+
+                    # Get UoM - use product_uom_id if set, otherwise product's default UoM
+                    uom_id = None
+                    if line.product_uom_id:
+                        uom_id = line.product_uom_id.id
+                    elif line.product_id and line.product_id.uom_id:
+                        uom_id = line.product_id.uom_id.id
+
+                    if not uom_id:
+                        _logger.error(f"[POS Confirm] No UoM for product {line.product_id.name}")
+                        raise UserError(_('Product %s does not have a unit of measure defined.') % line.product_id.name)
+
+                    line_vals = {
+                        'product_id': line.product_id.id,
+                        'product_uom_qty': line.quantity or 1.0,
+                        'product_uom_id': uom_id,  # Correct field name in Odoo
+                        'price_unit': line.unit_price or 0.0,
+                        'discount': line.discount_percent or 0.0,
+                    }
+
+                    # Add custom product name if set
+                    if line.custom_product_name:
+                        line_vals['custom_product_name'] = line.custom_product_name
+
+                    # Add warehouse info if available (check if module exists)
+                    # Add warehouse if available and field exists in sale.order.line
+                    if line.warehouse_id:
+                        # Check if product_warehouse_id field exists in sale.order.line model
+                        sale_order_line_model = self.env['sale.order.line']
+                        if 'product_warehouse_id' in sale_order_line_model._fields:
+                            line_vals['product_warehouse_id'] = line.warehouse_id.id
+
+                    _logger.debug(f"[POS Confirm] Line vals: product={line.product_id.name}, qty={line.quantity}, uom={uom_id}, price={line.unit_price}")
+                    sale_order_lines.append((0, 0, line_vals))
+
+                sale_vals['order_line'] = sale_order_lines
+
+                _logger.info(f"[POS Confirm] Creating sale.order with {len(sale_order_lines)} lines")
+                _logger.info(f"[POS Confirm] Sale vals: partner={sale_vals['partner_id']}, pricelist={sale_vals['pricelist_id']}")
+
+                try:
+                    # Get current state before creating sale order
+                    current_state = order.state
+                    
+                    sale_order = self.env['sale.order'].create(sale_vals)
+                    _logger.info(f"[POS Confirm] Sale order created: {sale_order.name} (ID: {sale_order.id}), state={sale_order.state}")
+                    # SAP sync is handled explicitly by JS (action_manual_sync_to_sap) after this call.
+                    # Do NOT call _send_to_sap() here to avoid double-sending.
+                    
+                except Exception as e:
+                    _logger.error(f"[POS Confirm] Error creating sale order: {e}", exc_info=True)
+                    raise
+            
+            # Update POS order - preserve current state if it's 'quotation', otherwise set to 'sale'
+            current_state = order.state
+            if force_sale_order:
+                new_state = 'sale'
+            elif force_quotation:
+                new_state = 'quotation'
+            else:
+                new_state = 'sale' if current_state != 'quotation' else 'quotation'
+            
+            order.write({
+                'state': new_state,
+                'sale_order_id': sale_order.id,
+            })
+            
+            _logger.info(f"[POS Confirm] POS order updated to state={new_state} (was {current_state})")
+            
+            # Return action with res_id for JavaScript to handle
+            results.append({
+                'type': 'ir.actions.act_window',
+                'res_model': 'sale.order',
+                'res_id': sale_order.id,
+                'view_mode': 'form',
+                'views': [[False, 'form']],
+                'target': 'current',
+            })
+        
+        # Return single result if single record, otherwise first result
+        # Also ensure we always return a dict with res_id for JavaScript compatibility
+        if len(results) == 1:
+            result = results[0]
+        elif len(results) > 1:
+            result = results[0]
+        else:
+            # Fallback: return empty action if no results
+            result = {'type': 'ir.actions.act_window_close'}
+        
+        _logger.info(f"[POS Confirm] Returning action result: {result}")
+        return result
+    
+    def action_cancel(self):
+        """Cancel order"""
+        for order in self:
+            if order.state == 'done':
+                raise UserError(_('Cannot cancel a done order.'))
+            order.state = 'cancel'
+        return True
+    
+    def action_draft(self):
+        """Set back to draft"""
+        for order in self:
+            order.state = 'draft'
+        return True
+    
+    def action_send_whatsapp(self):
+        """Open WhatsApp wizard"""
+        self.ensure_one()
+        return {
+            'type': 'ir.actions.act_window',
+            'name': _('Send via WhatsApp'),
+            'res_model': 'pos.whatsapp.send',
+            'view_mode': 'form',
+            'target': 'new',
+            'context': {'default_order_id': self.id}
+        }
+    
+    def action_view_sale_order(self):
+        """View linked sale order"""
+        self.ensure_one()
+        if not self.sale_order_id:
+            raise UserError(_('No sale order linked to this POS order.'))
+        
+        return {
+            'type': 'ir.actions.act_window',
+            'name': _('Sale Order'),
+            'res_model': 'sale.order',
+            'res_id': self.sale_order_id.id,
+            'view_mode': 'form',
+            'target': 'current',
+        }
+    
+    def action_print_order(self):
+        """طباعة الطلب باستخدام تقرير Odoo الأصلي"""
+        self.ensure_one()
+        
+        # الحصول على التقرير الأساسي (يرث من sale.order)
+        report = self.env.ref('pos_perfume_custom.action_report_pos_perfume_order')
+        
+        # إرجاع action للطباعة
+        return report.report_action(self)
+    
+    def action_print_to_sap(self):
+        """إرسال طلب طباعة إلى SAP على DEFAULT LAYOUT"""
+        
+        self.ensure_one()
+        
+        # التحقق من وجود sale order مرتبط
+        if not self.sale_order_id:
+            raise UserError(_('No sale order linked to this POS order. Please save the order first.'))
+        
+        # التحقق من وجود SAP DocEntry
+        if not self.sap_doc_entry:
+            raise UserError(_('Order is not synced to SAP yet. Please confirm the order first.'))
+        
+        try:
+            # الحصول على SAP backend
+            backend = self.env['sap.backend'].search([('active', '=', True)], limit=1)
+            if not backend:
+                raise UserError(_('No active SAP backend found. Please configure SAP integration first.'))
+            
+            # تحديد نوع المستند بناءً على حالة sale order
+            if self.sale_order_id.state == 'sale':
+                doc_type = 'Orders'
+            elif self.sale_order_id.state == 'draft':
+                doc_type = 'Quotations'
+            else:
+                doc_type = 'Quotations'
+            
+            # إنشاء اتصال SAP
+            from odoo.addons.sap_integration.models.sap_service_layer import SapServiceLayerConnection
+            
+            sap_conn = SapServiceLayerConnection(
+                base_url=backend.base_url,
+                username=backend.username,
+                password=backend.password,
+                company_db=backend.company_db,
+                timeout=backend.timeout or 30,
+                verify_ssl=backend.verify_ssl
+            )
+            
+            # إرسال طلب الطباعة واسترجاع PDF من API Gateway
+            _logger.info(f"[POS Print] Sending print request to SAP API Gateway: DocEntry={self.sap_doc_entry}, DocType={doc_type}")
+            
+            # الحصول على API Gateway URL من backend
+            api_gateway_url = backend.api_gateway_url if backend.api_gateway_url else None
+            
+            result = sap_conn.print_document(
+                doc_entry=self.sap_doc_entry,
+                doc_type=doc_type,
+                print_format='DEFAULT LAYOUT',
+                return_pdf=True,
+                api_gateway_url=api_gateway_url
+            )
+            
+            _logger.info(f"[POS Print] ✅ Print request successful. PDF received: {bool(result.get('pdf_base64'))}")
+            
+            # إذا تم استرجاع PDF، نحفظه مؤقتاً ونعيده للطباعة
+            if result.get('pdf_base64'):
+                import base64
+                import tempfile
+                import os
+                
+                # تحويل base64 إلى PDF
+                pdf_data = base64.b64decode(result['pdf_base64'])
+                
+                # حفظ PDF مؤقتاً في قاعدة البيانات (كـ attachment)
+                attachment = self.env['ir.attachment'].create({
+                    'name': f'{self.name}_SAP_Print.pdf',
+                    'type': 'binary',
+                    'datas': result['pdf_base64'],
+                    'res_model': 'pos.perfume.order',
+                    'res_id': self.id,
+                    'mimetype': 'application/pdf',
+                })
+                
+                _logger.info(f"[POS Print] PDF saved as attachment ID: {attachment.id}")
+                
+                # إرجاع action لتحميل/طباعة PDF
+                return {
+                    'type': 'ir.actions.act_url',
+                    'url': f'/web/content/{attachment.id}?download=true',
+                    'target': 'new',
+                }
+            else:
+                # إذا لم يتم استرجاع PDF، نعرض إشعار
+                return {
+                    'type': 'ir.actions.client',
+                    'tag': 'display_notification',
+                    'params': {
+                        'title': _('Print Request Sent'),
+                        'message': _('Print request has been sent to SAP successfully.'),
+                        'type': 'success',
+                        'sticky': False,
+                    }
+                }
+            
+        except Exception as e:
+            _logger.error(f"[POS Print] ❌ Error sending print request to SAP: {str(e)}", exc_info=True)
+            raise UserError(_('Error sending print request to SAP: %s') % str(e))
+    
+    # DISABLED: Invoice Designer functions - Use default Odoo reports instead
+    # def action_print_with_designer(self):
+    #     """طباعة الفاتورة باستخدام Invoice Designer"""
+    #     self.ensure_one()
+    #     
+    #     # Get template
+    #     template = self.invoice_template_id
+    #     if not template:
+    #         # Try to get default template for POS
+    #         template = self.env['invoice.template.designer'].search([
+    #             ('template_type', '=', 'pos_receipt'),
+    #             ('is_default', '=', True),
+    #         ], limit=1)
+    #     
+    #     if not template:
+    #         # Fallback to any invoice template
+    #         template = self.env['invoice.template.designer'].search([
+    #             ('template_type', 'in', ['invoice', 'pos_receipt']),
+    #         ], limit=1)
+    #     
+    #     if not template:
+    #         raise UserError(_('No invoice template found. Please create one from Invoice Designer module.'))
+    #     
+    #     # Generate PDF using template
+    #     try:
+    #         pdf_data = template.generate_invoice_pdf(self.id, model_name='pos.perfume.order')
+    #         
+    #         if not pdf_data:
+    #             raise UserError(_('Failed to generate PDF from template.'))
+    #         
+    #         # Save PDF as attachment
+    #         import base64
+    #         attachment = self.env['ir.attachment'].create({
+    #             'name': f'{self.name}.pdf',
+    #             'type': 'binary',
+    #             'datas': base64.b64encode(pdf_data),
+    #             'res_model': 'pos.perfume.order',
+    #             'res_id': self.id,
+    #             'mimetype': 'application/pdf',
+    #         })
+    #         
+    #         # Return PDF as download
+    #         return {
+    #             'type': 'ir.actions.act_url',
+    #             'url': f'/web/content/{attachment.id}?download=true',
+    #             'target': 'new',
+    #         }
+    #     except Exception as e:
+    #         raise UserError(_('Error generating invoice: %s') % str(e))
+    # 
+    # def action_open_designer(self):
+    #     """فتح مصمم الفواتير"""
+    #     self.ensure_one()
+    #     
+    #     # Get or create template
+    #     template = self.invoice_template_id
+    #     if not template:
+    #         # Create a new template for this order
+    #         template = self.env['invoice.template.designer'].create({
+    #             'name': f'Template for {self.name}',
+    #             'code': f'pos_perfume_{self.id}',
+    #             'template_type': 'pos_receipt',
+    #             'page_format': 'A4',
+    #             'page_width': 210,
+    #             'page_height': 297,
+    #         })
+    #         self.invoice_template_id = template.id
+    #     
+    #     # Open designer
+    #     return template.action_open_visual_designer()
+
+
+
+class PosPerfumeOrderLine(models.Model):
+    _name = 'pos.perfume.order.line'
+    _description = 'POS Perfume Order Line'
+    _order = 'sequence, id'
+
+    sequence = fields.Integer(string='Sequence', default=10)
+    
+    order_id = fields.Many2one(
+        'pos.perfume.order',
+        string='Order Reference',
+        required=True,
+        ondelete='cascade',
+        index=True
+    )
+    
+    product_id = fields.Many2one(
+        'product.product',
+        string='Product',
+        required=True,
+        domain=[('sale_ok', '=', True)],
+        index=True
+    )
+    
+    product_code = fields.Char(
+        related='product_id.default_code',
+        string='Product Code',
+        readonly=True,
+        store=True
+    )
+    
+    product_foreign_name = fields.Char(
+        related='product_id.foreign_name',
+        string='Foreign Name',
+        readonly=True,
+        store=True
+    )
+    
+    # Custom product name for invoice/report display only
+    custom_product_name = fields.Char(
+        string='Custom Product Name (Invoice Only)',
+        help='Custom product name to display in invoice/report. If set, this name will be used in the report and sent to SAP as ItemDescription. The original product name remains unchanged.'
+    )
+    
+    # UoM Support
+    product_uom_id = fields.Many2one(
+        'uom.uom',
+        string='Unit of Measure',
+        required=True,
+        help='Unit of measure for this product'
+    )
+    
+    warehouse_id = fields.Many2one(
+        'stock.warehouse',
+        string='Warehouse',
+        required=True
+    )
+    
+    location_id = fields.Many2one(
+        'stock.location',
+        string='Storage Location',
+        help='Specific storage location within warehouse'
+    )
+    
+    quantity = fields.Float(
+        string='Quantity',
+        required=True,
+        default=1.0,
+        digits='Product Unit of Measure'
+    )
+    
+    unit_price = fields.Float(
+        string='Unit Price',
+        required=True,
+        digits='Product Price'
+    )
+    
+    discount_percent = fields.Float(
+        string='Discount %',
+        default=0.0,
+        digits=(5, 2)
+    )
+    
+    # Computed fields
+    price_after_discount = fields.Monetary(
+        string='Price After Discount',
+        compute='_compute_amounts',
+        store=True,
+        currency_field='currency_id'
+    )
+    
+    line_subtotal = fields.Monetary(
+        string='Subtotal',
+        compute='_compute_amounts',
+        store=True,
+        currency_field='currency_id'
+    )
+    
+    discount_amount = fields.Monetary(
+        string='Discount Amount',
+        compute='_compute_amounts',
+        store=True,
+        currency_field='currency_id'
+    )
+    
+    line_total = fields.Monetary(
+        string='Total',
+        compute='_compute_amounts',
+        store=True,
+        currency_field='currency_id'
+    )
+    
+    currency_id = fields.Many2one(
+        related='order_id.currency_id',
+        string='Currency',
+        store=True
+    )
+    
+    # Stock availability
+    available_qty = fields.Float(
+        string='Available Qty',
+        compute='_compute_available_qty',
+        digits='Product Unit of Measure'
+    )
+    
+    # Computed fields for report compatibility
+    name = fields.Char(
+        string='Description',
+        compute='_compute_name',
+        help='Product name for report display'
+    )
+    
+    product_uom_qty = fields.Float(
+        string='Quantity (UoM)',
+        compute='_compute_report_fields',
+        help='Quantity for report compatibility'
+    )
+    
+    price_unit = fields.Float(
+        string='Unit Price',
+        compute='_compute_report_fields',
+        help='Unit price for report compatibility'
+    )
+    
+    price_subtotal = fields.Monetary(
+        string='Subtotal',
+        compute='_compute_report_fields',
+        currency_field='currency_id',
+        help='Subtotal for report compatibility'
+    )
+    
+    @api.depends('product_id', 'custom_product_name')
+    def _compute_name(self):
+        """Compute name field for report compatibility"""
+        for line in self:
+            if line.custom_product_name:
+                line.name = line.custom_product_name
+            elif line.product_id:
+                line.name = line.product_id.name
+            else:
+                line.name = ''
+    
+    @api.depends('quantity', 'unit_price', 'line_total')
+    def _compute_report_fields(self):
+        """Compute fields for report compatibility"""
+        for line in self:
+            line.product_uom_qty = line.quantity
+            line.price_unit = line.unit_price
+            line.price_subtotal = line.line_total
+    
+    @api.depends('quantity', 'unit_price', 'discount_percent')
+    def _compute_amounts(self):
+        """Calculate line amounts"""
+        for line in self:
+            # Price after applying discount percentage
+            price_after_discount = line.unit_price * (1 - line.discount_percent / 100)
+            
+            # Subtotal before discount
+            line_subtotal = line.quantity * line.unit_price
+            
+            # Discount amount
+            discount_amount = line_subtotal * (line.discount_percent / 100)
+            
+            # Line total (quantity * price after discount)
+            line_total = line.quantity * price_after_discount
+            
+            line.update({
+                'price_after_discount': price_after_discount,
+                'line_subtotal': line_subtotal,
+                'discount_amount': discount_amount,
+                'line_total': line_total,
+            })
+    
+    @api.depends('product_id', 'warehouse_id')
+    def _compute_available_qty(self):
+        """Get available quantity in selected warehouse"""
+        for line in self:
+            if line.product_id and line.warehouse_id:
+                # Get stock location of warehouse
+                location = line.warehouse_id.lot_stock_id
+                
+                # Get available quantity
+                quants = self.env['stock.quant'].search([
+                    ('product_id', '=', line.product_id.id),
+                    ('location_id', 'child_of', location.id),
+                ])
+                line.available_qty = sum(quants.mapped('quantity')) - sum(quants.mapped('reserved_quantity'))
+            else:
+                line.available_qty = 0.0
+    
+    @api.onchange('product_id')
+    def _onchange_product_id(self):
+        """Set default price and UoM when product is selected"""
+        if self.product_id:
+            self.product_uom_id = self.product_id.uom_id
+            self.unit_price = self.product_id.list_price
+    
+    @api.onchange('product_id', 'product_uom_id')
+    def _onchange_product_uom(self):
+        """Get price based on UoM from pricelist"""
+        if self.product_id and self.product_uom_id and self.order_id.pricelist_id:
+            price = self._get_uom_price(
+                self.order_id.pricelist_id,
+                self.product_uom_id
+            )
+            if price:
+                self.unit_price = price
+    
+    @api.onchange('warehouse_id')
+    def _onchange_warehouse(self):
+        """Set default location when warehouse changes"""
+        if self.warehouse_id:
+            self.location_id = self.warehouse_id.lot_stock_id
+    
+    def _get_uom_price(self, pricelist, uom):
+        """Get price for specific UoM from pricelist items"""
+        self.ensure_one()
+        
+        # Search for exact UoM match in pricelist
+        item = self.env['product.pricelist.item'].search([
+            ('pricelist_id', '=', pricelist.id),
+            ('product_tmpl_id', '=', self.product_id.product_tmpl_id.id),
+            ('product_packaging_id', '=', uom.id),
+            ('compute_price', '=', 'fixed'),
+        ], limit=1)
+        
+        if item:
+            return item.fixed_price
+        
+        # Fallback to base price with conversion
+        if uom != self.product_id.uom_id:
+            return self.product_id.uom_id._compute_price(
+                self.product_id.list_price,
+                uom
+            )
+        
+        return self.product_id.list_price
+    
+    @api.constrains('quantity')
+    def _check_quantity(self):
+        """Validate quantity is positive"""
+        for line in self:
+            if line.quantity <= 0:
+                raise ValidationError(_('Quantity must be positive.'))
+    
+    @api.constrains('discount_percent')
+    def _check_discount(self):
+        """Validate discount is between 0 and 100"""
+        for line in self:
+            if line.discount_percent < 0 or line.discount_percent > 100:
+                raise ValidationError(_('Discount must be between 0% and 100%.'))
+    
+    @api.constrains('unit_price')
+    def _check_price(self):
+        """Validate price is not negative"""
+        for line in self:
+            if line.unit_price < 0:
+                raise ValidationError(_('Price cannot be negative.'))
+

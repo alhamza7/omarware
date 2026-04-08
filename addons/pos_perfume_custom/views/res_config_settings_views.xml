@@ -1,0 +1,39 @@
+<?xml version="1.0"?>
+<odoo>
+    <data>
+        <!-- Inherit General Configuration Settings -->
+        <record id="res_config_settings_view_form_inherit_pos_perfume" model="ir.ui.view">
+            <field name="name">res.config.settings.view.form.inherit.pos.perfume</field>
+            <field name="model">res.config.settings</field>
+            <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+            <field name="arch" type="xml">
+                <xpath expr="//form" position="inside">
+                    <app string="POS Perfume" name="pos_perfume_settings">
+                        <block title="سعر الصرف">
+                            <setting id="pos_perfume_exchange_rate_setting" 
+                                     string="سعر الصرف الافتراضي"
+                                     help="معامل التحويل من الدولار إلى الدينار العراقي للفواتير الجديدة">
+                                <div class="content-group">
+                                    <div class="row mt16">
+                                        <label for="pos_perfume_exchange_rate" 
+                                               string="1 USD = " 
+                                               class="col-lg-3 o_light_label"/>
+                                        <field name="pos_perfume_exchange_rate" 
+                                               widget="float"
+                                               class="oe_inline"/>
+                                        <span class="o_form_label oe_inline"> IQD</span>
+                                    </div>
+                                </div>
+                                <div class="text-muted">
+                                    هذا السعر سيُستخدم افتراضياً لجميع الفواتير الجديدة في POS Perfume. 
+                                    يمكنك تغيير السعر لكل فاتورة على حدة عند الحاجة.
+                                </div>
+                            </setting>
+                        </block>
+                    </app>
+                </xpath>
+            </field>
+        </record>
+    </data>
+</odoo>
+

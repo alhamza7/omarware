@@ -1,0 +1,76 @@
+<?xml version="1.0"?>
+<odoo>
+    <data noupdate="0">
+        <!-- Paper Format for Fast PDF (Lower quality = faster) -->
+        <record id="paperformat_pos_perfume_fast" model="report.paperformat">
+            <field name="name">Fast Invoice Format</field>
+            <field name="default" eval="False"/>
+            <field name="format">A4</field>
+            <field name="orientation">Portrait</field>
+            <field name="margin_top">8</field>
+            <field name="margin_bottom">8</field>
+            <field name="margin_left">5</field>
+            <field name="margin_right">5</field>
+            <field name="header_line" eval="False"/>
+            <field name="header_spacing">0</field>
+            <field name="dpi">72</field> <!-- Lower DPI = Much faster -->
+        </record>
+        
+        <!-- Paper Format for NBS Invoice - Must be defined before use -->
+        <record id="paperformat_pos_perfume_nbs" model="report.paperformat">
+            <field name="name">NBS Invoice Format</field>
+            <field name="default" eval="True"/>
+            <field name="format">A4</field>
+            <field name="orientation">Portrait</field>
+            <field name="margin_top">10</field>
+            <field name="margin_bottom">10</field>
+            <field name="margin_left">7</field>
+            <field name="margin_right">7</field>
+            <field name="header_line" eval="False"/>
+            <field name="header_spacing">0</field>
+            <field name="dpi">96</field>
+        </record>
+        
+        <!-- Report Action for POS Perfume Order (HTML for fast preview) -->
+        <record id="action_report_pos_perfume_order" model="ir.actions.report">
+            <field name="name">طلب العطور</field>
+            <field name="model">pos.perfume.order</field>
+            <field name="report_type">qweb-html</field>
+            <field name="report_name">pos_perfume_custom.report_pos_perfume_order</field>
+            <field name="report_file">pos_perfume_custom.report_pos_perfume_order</field>
+            <field name="print_report_name">'طلب - %s' % (object.name)</field>
+        </record>
+        
+        <!-- Gold Design Report Action for POS Perfume Order -->
+        <record id="action_report_pos_perfume_order_gold" model="ir.actions.report">
+            <field name="name">فاتورة ذهبية </field>
+            <field name="model">pos.perfume.order</field>
+            <field name="report_type">qweb-html</field>
+            <field name="report_name">pos_perfume_custom.report_pos_perfume_order_gold</field>
+            <field name="report_file">pos_perfume_custom.report_pos_perfume_order_gold</field>
+            <field name="print_report_name">'فاتورة ذهبية - %s' % (object.name)</field>
+        </record>
+        
+        <!-- PDF Report for WhatsApp (uses same template with speed optimizations) -->
+        <record id="action_report_pos_perfume_order_pdf" model="ir.actions.report">
+            <field name="name">فاتورة PDF (واتساب)</field>
+            <field name="model">pos.perfume.order</field>
+            <field name="report_type">qweb-pdf</field>
+            <field name="report_name">pos_perfume_custom.report_pos_perfume_order_simple</field>
+            <field name="report_file">pos_perfume_custom.report_pos_perfume_order_simple</field>
+            <field name="print_report_name">'فاتورة - %s' % (object.name)</field>
+            <field name="paperformat_id" ref="paperformat_pos_perfume_fast"/>
+        </record>
+        
+        <!-- NBS Design Report Action for POS Perfume Order -->
+        <record id="action_report_pos_perfume_order_nbs" model="ir.actions.report">
+            <field name="name">فاتورة NBS -  </field>
+            <field name="model">pos.perfume.order</field>
+            <field name="report_type">qweb-pdf</field>
+            <field name="report_name">pos_perfume_custom.report_pos_perfume_order_nbs</field>
+            <field name="report_file">pos_perfume_custom.report_pos_perfume_order_nbs</field>
+            <field name="print_report_name">'فاتورة NBS - %s' % (object.name)</field>
+            <field name="paperformat_id" ref="paperformat_pos_perfume_nbs"/>
+        </record>
+    </data>
+</odoo>

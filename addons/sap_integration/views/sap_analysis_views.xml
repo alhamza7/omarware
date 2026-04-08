@@ -1,0 +1,256 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        
+        <!-- Error Analysis Graph View -->
+        <record id="view_sap_error_analysis_graph" model="ir.ui.view">
+            <field name="name">sap.error.analysis.graph</field>
+            <field name="model">sap.sync.log</field>
+            <field name="arch" type="xml">
+                <graph string="Error Analysis" type="bar" stacked="True">
+                    <field name="create_date" type="row" interval="day"/>
+                    <field name="status" type="groupBy"/>
+                    <field name="id" type="measure"/>
+                </graph>
+            </field>
+        </record>
+        
+        <!-- Error Analysis Pivot View -->
+        <record id="view_sap_error_analysis_pivot" model="ir.ui.view">
+            <field name="name">sap.error.analysis.pivot</field>
+            <field name="model">sap.sync.log</field>
+            <field name="arch" type="xml">
+                <pivot string="Error Analysis Pivot">
+                    <field name="backend_id" type="row"/>
+                    <field name="operation" type="col"/>
+                    <field name="status" type="col"/>
+                    <field name="id" type="measure"/>
+                </pivot>
+            </field>
+        </record>
+        
+        <!-- SAP Alert Rule Tree View -->
+        <record id="view_sap_alert_rule_tree" model="ir.ui.view">
+            <field name="name">sap.alert.rule.tree</field>
+            <field name="model">sap.alert.rule</field>
+            <field name="arch" type="xml">
+                <list string="Alert Rules" decoration-danger="is_triggered == True" decoration-muted="active == False">
+                    <field name="name"/>
+                    <field name="priority"/>
+                    <field name="condition_type"/>
+                    <field name="threshold_value"/>
+                    <field name="active"/>
+                    <field name="is_triggered"/>
+                    <field name="trigger_count"/>
+                    <field name="last_triggered"/>
+                </list>
+            </field>
+        </record>
+        
+        <!-- SAP Alert Rule Form View -->
+        <record id="view_sap_alert_rule_form" model="ir.ui.view">
+            <field name="name">sap.alert.rule.form</field>
+            <field name="model">sap.alert.rule</field>
+            <field name="arch" type="xml">
+                <form string="Alert Rule">
+                    <sheet>
+                        <div class="oe_title">
+                            <h1>
+                                <field name="name" placeholder="Alert Rule Name"/>
+                            </h1>
+                        </div>
+                        
+                        <group>
+                            <group>
+                                <field name="active"/>
+                                <field name="priority"/>
+                                <field name="condition_type"/>
+                                <field name="threshold_value"/>
+                                <field name="threshold_period"/>
+                            </group>
+                            <group>
+                                <field name="backend_id"/>
+                                <field name="model_name"/>
+                                <field name="operation"/>
+                            </group>
+                        </group>
+                        
+                        <group string="Alert Scope">
+                            <field name="description"/>
+                        </group>
+                        
+                        <group string="Notifications">
+                            <field name="notify_users"/>
+                            <field name="user_ids" widget="many2many_tags"/>
+                            <field name="email_notification"/>
+                            <field name="email_template_id"/>
+                        </group>
+                        
+                        <group string="Alert Status" readonly="1">
+                            <field name="is_triggered"/>
+                            <field name="trigger_count"/>
+                            <field name="last_triggered"/>
+                        </group>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+        
+        <!-- SAP Alert Tree View -->
+        <record id="view_sap_alert_tree" model="ir.ui.view">
+            <field name="name">sap.alert.tree</field>
+            <field name="model">sap.alert</field>
+            <field name="arch" type="xml">
+                <list string="Alerts" decoration-danger="priority == 'critical'" decoration-warning="priority == 'high'">
+                    <field name="create_date"/>
+                    <field name="rule_id"/>
+                    <field name="backend_id"/>
+                    <field name="priority"/>
+                    <field name="status"/>
+                    <field name="message"/>
+                    <field name="acknowledged_by"/>
+                    <field name="resolved_by"/>
+                </list>
+            </field>
+        </record>
+        
+        <!-- SAP Alert Form View -->
+        <record id="view_sap_alert_form" model="ir.ui.view">
+            <field name="name">sap.alert.form</field>
+            <field name="model">sap.alert</field>
+            <field name="arch" type="xml">
+                <form string="Alert">
+                    <sheet>
+                        <div class="oe_title">
+                            <h1>
+                                <field name="message" readonly="1"/>
+                            </h1>
+                        </div>
+                        
+                        <group>
+                            <group>
+                                <field name="rule_id" readonly="1"/>
+                                <field name="backend_id" readonly="1"/>
+                                <field name="priority" readonly="1"/>
+                                <field name="status"/>
+                            </group>
+                            <group>
+                                <field name="model_name" readonly="1"/>
+                                <field name="operation" readonly="1"/>
+                                <field name="create_date" readonly="1"/>
+                            </group>
+                        </group>
+                        
+                        <group string="Details">
+                            <field name="details" readonly="1" nolabel="1"/>
+                        </group>
+                        
+                        <group string="Resolution" invisible="status == 'active'">
+                            <field name="acknowledged_by" readonly="1"/>
+                            <field name="acknowledged_date" readonly="1"/>
+                            <field name="resolved_by" readonly="1"/>
+                            <field name="resolved_date" readonly="1"/>
+                            <field name="resolution_notes" readonly="1"/>
+                        </group>
+                        
+                        <footer>
+                            <button name="acknowledge" string="Acknowledge" type="object" 
+                                    invisible="status != 'active'" class="btn-primary"/>
+                            <button name="resolve" string="Resolve" type="object" 
+                                    invisible="status == 'resolved'" class="btn-secondary"/>
+                        </footer>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+        
+        <!-- Performance Metrics Tree View -->
+        <record id="view_sap_performance_metrics_tree" model="ir.ui.view">
+            <field name="name">sap.performance.metrics.tree</field>
+            <field name="model">sap.performance.metrics</field>
+            <field name="arch" type="xml">
+                <list string="Performance Metrics" decoration-warning="is_slow == True" decoration-danger="is_bottleneck == True">
+                    <field name="timestamp"/>
+                    <field name="backend_id"/>
+                    <field name="operation"/>
+                    <field name="model_name"/>
+                    <field name="duration"/>
+                    <field name="records_processed"/>
+                    <field name="records_per_second"/>
+                    <field name="performance_score"/>
+                    <field name="is_slow"/>
+                    <field name="is_bottleneck"/>
+                </list>
+            </field>
+        </record>
+        
+        <!-- Performance Metrics Graph View -->
+        <record id="view_sap_performance_metrics_graph" model="ir.ui.view">
+            <field name="name">sap.performance.metrics.graph</field>
+            <field name="model">sap.performance.metrics</field>
+            <field name="arch" type="xml">
+                <graph string="Performance Trends" type="line">
+                    <field name="timestamp" type="row" interval="day"/>
+                    <field name="duration" type="measure"/>
+                    <field name="records_per_second" type="measure"/>
+                </graph>
+            </field>
+        </record>
+        
+        <!-- Actions -->
+        <record id="action_sap_error_analysis" model="ir.actions.act_window">
+            <field name="name">Error Analysis</field>
+            <field name="res_model">sap.sync.log</field>
+            <field name="view_mode">graph,pivot,list,form</field>
+        </record>
+        
+        <record id="action_sap_alert_rules" model="ir.actions.act_window">
+            <field name="name">Alert Rules</field>
+            <field name="res_model">sap.alert.rule</field>
+            <field name="view_mode">list,form</field>
+        </record>
+        
+        <record id="action_sap_alerts" model="ir.actions.act_window">
+            <field name="name">Active Alerts</field>
+            <field name="res_model">sap.alert</field>
+            <field name="view_mode">list,form</field>
+        </record>
+        
+        <record id="action_sap_performance_metrics" model="ir.actions.act_window">
+            <field name="name">Performance Metrics</field>
+            <field name="res_model">sap.performance.metrics</field>
+            <field name="view_mode">list,graph</field>
+        </record>
+        
+        <!-- Menu Items -->
+        <menuitem id="menu_sap_analysis"
+                  name="Analysis &amp; Monitoring"
+                  parent="menu_sap_integration"
+                  sequence="200"/>
+        
+        <menuitem id="menu_sap_error_analysis"
+                  name="Error Analysis"
+                  parent="menu_sap_analysis"
+                  action="action_sap_error_analysis"
+                  sequence="10"/>
+        
+        <menuitem id="menu_sap_alerts"
+                  name="Alerts"
+                  parent="menu_sap_analysis"
+                  action="action_sap_alerts"
+                  sequence="20"/>
+        
+        <menuitem id="menu_sap_alert_rules"
+                  name="Alert Rules"
+                  parent="menu_sap_analysis"
+                  action="action_sap_alert_rules"
+                  sequence="30"/>
+        
+        <menuitem id="menu_sap_performance"
+                  name="Performance Metrics"
+                  parent="menu_sap_analysis"
+                  action="action_sap_performance_metrics"
+                  sequence="40"/>
+        
+    </data>
+</odoo>

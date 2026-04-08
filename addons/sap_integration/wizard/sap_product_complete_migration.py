@@ -1,0 +1,1095 @@
+# -*- coding: utf-8 -*-
+# Copyright 2024 Your Company
+# License LGPL-3.0 or later (http://www.gnu.org/licenses/lgpl.html)
+
+"""
+SAP Product Complete Migration
+
+Complete migration wizard for importing all product-related data from SAP to Odoo.
+This includes:
+- UoM Groups with conversion factors
+- Products with all fields
+- Pricelists with UoM-specific pricing
+- Warehouse information with stock levels
+"""
+
+from odoo import models, fields, api
+from odoo.exceptions import UserError
+import logging
+from datetime import datetime
+
+_logger = logging.getLogger(__name__)
+
+
+class SapProductCompleteMigration(models.TransientModel):
+    """Complete Product Migration from SAP"""
+    _name = 'sap.product.complete.migration'
+    _description = 'Complete Product Migration from SAP'
+    
+    # ========== Configuration ==========
+    backend_id = fields.Many2one(
+        'sap.backend',
+        string='SAP Backend',
+        required=True,
+        default=lambda self: self.env['sap.backend'].search([('active', '=', True)], limit=1)
+    )
+    
+    # ========== Migration Options ==========
+    stage1_uom_groups = fields.Boolean(
+        string='Stage 1: Import UoM Groups',
+        default=True,
+        help="Import Unit of Measure Groups with conversion factors (e.g., 1kg = 1000g)"
+    )
+    stage2_products = fields.Boolean(
+        string='Stage 2: Import Products',
+        default=True,
+        help="Import products with basic and extended information"
+    )
+    stage3_pricelists = fields.Boolean(
+        string='Stage 3: Import Pricelists',
+        default=True,
+        help="Import pricelists with UoM-specific pricing"
+    )
+    stage4_warehouse_info = fields.Boolean(
+        string='Stage 4: Import Warehouse Info',
+        default=True,
+        help="Import warehouse information and stock levels"
+    )
+    
+    # ========== Advanced Options ==========
+    product_limit = fields.Integer(
+        string='Product Limit',
+        default=0,
+        help="Maximum number of products to import (0 = unlimited). Example: 10 for testing"
+    )
+    batch_size = fields.Integer(
+        string='Batch Size',
+        default=100,
+        help="Number of records to process per batch"
+    )
+    update_existing = fields.Boolean(
+        string='Update Existing Records',
+        default=True,
+        help="Update existing records or skip them"
+    )
+    skip_errors = fields.Boolean(
+        string='Skip Errors and Continue',
+        default=True,
+        help="Continue migration even if some records fail"
+    )
+    force_enable_sales_pos = fields.Boolean(
+        string='Force Enable Sales & POS',
+        default=True,
+        help="Enable all imported products in Sales and Point of Sale, regardless of SAP settings"
+    )
+    
+    # ========== State ==========
+    state = fields.Selection([
+        ('draft', 'Draft'),
+        ('running', 'Running'),
+        ('done', 'Done'),
+        ('error', 'Error')
+    ], string='State', default='draft', readonly=True)
+    
+    # ========== Progress Tracking ==========
+    progress_percentage = fields.Float(
+        string='Progress (%)',
+        readonly=True,
+        default=0.0,
+        help="Overall migration progress percentage"
+    )
+    current_stage = fields.Char(
+        string='Current Stage',
+        readonly=True,
+        help="Current migration stage being processed"
+    )
+    current_batch = fields.Integer(
+        string='Current Batch',
+        readonly=True,
+        default=0,
+        help="Current batch number being processed"
+    )
+    total_batches = fields.Integer(
+        string='Total Batches',
+        readonly=True,
+        default=0,
+        help="Total number of batches to process"
+    )
+    
+    # ========== Results ==========
+    migration_log = fields.Text(
+        string='Migration Log',
+        readonly=True,
+        help="Detailed log of the migration process"
+    )
+    
+    start_time = fields.Datetime(string='Start Time', readonly=True)
+    end_time = fields.Datetime(string='End Time', readonly=True)
+    duration_seconds = fields.Integer(string='Duration (seconds)', readonly=True, compute='_compute_duration')
+    
+    # Statistics
+    total_uom_groups = fields.Integer(string='UoM Groups', readonly=True)
+    total_products = fields.Integer(string='Products Imported', readonly=True)
+    total_pricelists = fields.Integer(string='Pricelists Created', readonly=True)
+    total_prices = fields.Integer(string='Price Records', readonly=True)
+    total_warehouses = fields.Integer(string='Warehouse Records', readonly=True)
+    
+    errors_count = fields.Integer(string='Errors', readonly=True)
+    errors_log = fields.Text(
+        string='Errors Log',
+        readonly=True,
+        help="Detailed log of errors encountered"
+    )
+    
+    # ========== Computed ==========
+    @api.depends('start_time', 'end_time')
+    def _compute_duration(self):
+        for record in self:
+            if record.start_time and record.end_time:
+                delta = record.end_time - record.start_time
+                record.duration_seconds = int(delta.total_seconds())
+            else:
+                record.duration_seconds = 0
+    
+    # ========== Progress Update Helper ==========
+    def _update_progress(self, percentage, stage, batch=0, total_batches=0, log_msg=None):
+        """Update progress and log"""
+        vals = {
+            'progress_percentage': percentage,
+            'current_stage': stage,
+            'current_batch': batch,
+            'total_batches': total_batches,
+        }
+        
+        if log_msg:
+            current_log = self.migration_log or ''
+            vals['migration_log'] = current_log + '\n' + log_msg
+        
+        self.write(vals)
+        self.env.cr.commit()
+        
+        # Send notification to UI
+        self.env['bus.bus']._sendone(
+            self.env.user.partner_id,
+            'sap_migration_progress',
+            {
+                'wizard_id': self.id,
+                'progress': percentage,
+                'stage': stage,
+                'batch': batch,
+                'total_batches': total_batches,
+            }
+        )
+    
+    def _log_error(self, error_msg, exception=None):
+        """Log error to errors_log"""
+        current_errors = self.errors_log or ''
+        timestamp = fields.Datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        error_entry = f"\n[{timestamp}] {error_msg}"
+        if exception:
+            import traceback
+            error_entry += f"\nTraceback: {traceback.format_exc()}"
+        
+        self.write({
+            'errors_log': current_errors + error_entry,
+            'errors_count': self.errors_count + 1
+        })
+        self.env.cr.commit()
+    
+    # ========== Main Migration Method ==========
+    def run_complete_migration(self):
+        """Run the complete migration process"""
+        self.ensure_one()
+        
+        try:
+            # Initialize
+            self.write({
+                'state': 'running',
+                'start_time': fields.Datetime.now(),
+                'migration_log': '',
+                'errors_log': '',
+                'progress_percentage': 0.0,
+                'current_stage': 'Initializing...',
+            })
+            self.env.cr.commit()  # حفظ الحالة فوراً
+            
+            log = []
+            log.append("=" * 80)
+            log.append(f"SAP Product Complete Migration Started")
+            log.append(f"Backend: {self.backend_id.name}")
+            log.append(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            log.append(f"Batch Size: {self.batch_size}")
+            log.append("=" * 80)
+            log.append("")
+            
+            # عرض في الـ wizard فوراً
+            self.write({'migration_log': "\n".join(log)})
+            self.env.cr.commit()
+            
+            # Stage 1: UoM Groups
+            if self.stage1_uom_groups:
+                log.append("\n" + "=" * 80)
+                log.append("STAGE 1: UoM Groups Migration")
+                log.append("=" * 80)
+                self._update_progress(10, 'Stage 1: UoM Groups', 0, 1, "\n".join(log))
+                
+                try:
+                    stage1_result = self._stage1_import_uom_groups()
+                    log.extend(stage1_result['log'])
+                    self.total_uom_groups = stage1_result.get('imported', 0)
+                    log.append(f"\n✅ Stage 1 Complete: {self.total_uom_groups} UoM groups imported")
+                    
+                    self.write({
+                        'migration_log': "\n".join(log),
+                        'total_uom_groups': self.total_uom_groups
+                    })
+                    self._update_progress(25, 'Stage 1: Completed', 1, 1)
+                except Exception as e:
+                    error_msg = f"❌ Stage 1 Error: {str(e)}"
+                    log.append(error_msg)
+                    self._log_error(error_msg, e)
+                    _logger.error(f"Stage 1 failed: {str(e)}", exc_info=True)
+                    if not self.skip_errors:
+                        raise
+                
+                self.env.cr.commit()
+            
+            # Stage 2: Products
+            if self.stage2_products:
+                log.append("\n\n" + "=" * 80)
+                log.append("STAGE 2: Products Migration")
+                log.append("=" * 80)
+                self._update_progress(30, 'Stage 2: Products', 0, 0, "\n".join(log))
+                
+                try:
+                    stage2_result = self._stage2_import_products()
+                    log.extend(stage2_result['log'])
+                    self.total_products = stage2_result.get('imported', 0)
+                    log.append(f"\n✅ Stage 2 Complete: {self.total_products} products imported")
+                    
+                    self.write({
+                        'migration_log': "\n".join(log),
+                        'total_products': self.total_products
+                    })
+                    self._update_progress(60, 'Stage 2: Completed')
+                except Exception as e:
+                    error_msg = f"❌ Stage 2 Error: {str(e)}"
+                    log.append(error_msg)
+                    self._log_error(error_msg, e)
+                    _logger.error(f"Stage 2 failed: {str(e)}", exc_info=True)
+                    if not self.skip_errors:
+                        raise
+                
+                self.env.cr.commit()
+            
+            # Stage 3: Pricelists
+            if self.stage3_pricelists:
+                log.append("\n\n" + "=" * 80)
+                log.append("STAGE 3: Pricelists Migration")
+                log.append("=" * 80)
+                self._update_progress(65, 'Stage 3: Pricelists', 0, 0, "\n".join(log))
+                
+                try:
+                    stage3_result = self._stage3_import_pricelists()
+                    log.extend(stage3_result['log'])
+                    self.total_pricelists = stage3_result.get('pricelists', 0)
+                    self.total_prices = stage3_result.get('prices', 0)
+                    log.append(f"\n✅ Stage 3 Complete: {self.total_pricelists} pricelists, {self.total_prices} price records")
+                    self._update_progress(80, 'Stage 3: Completed')
+                except Exception as e:
+                    error_msg = f"❌ Stage 3 Error: {str(e)}"
+                    log.append(error_msg)
+                    self._log_error(error_msg, e)
+                    _logger.error(f"Stage 3 failed: {str(e)}", exc_info=True)
+                    if not self.skip_errors:
+                        raise
+            
+            # Stage 4: Warehouse Info
+            if self.stage4_warehouse_info:
+                log.append("\n\n" + "=" * 80)
+                log.append("STAGE 4: Warehouse Information Migration")
+                log.append("=" * 80)
+                self._update_progress(85, 'Stage 4: Warehouse Info', 0, 0, "\n".join(log))
+                
+                try:
+                    stage4_result = self._stage4_import_warehouse_info()
+                    log.extend(stage4_result['log'])
+                    self.total_warehouses = stage4_result.get('warehouses', 0)
+                    log.append(f"\n✅ Stage 4 Complete: {self.total_warehouses} warehouse records")
+                    self._update_progress(95, 'Stage 4: Completed')
+                except Exception as e:
+                    error_msg = f"❌ Stage 4 Error: {str(e)}"
+                    log.append(error_msg)
+                    self._log_error(error_msg, e)
+                    _logger.error(f"Stage 4 failed: {str(e)}", exc_info=True)
+                    if not self.skip_errors:
+                        raise
+            
+            # Final step: Activate products in Sales and POS if requested
+            if self.force_enable_sales_pos:
+                log.append("\n\n" + "=" * 80)
+                log.append("FINAL STEP: Activating Products in Sales & POS")
+                log.append("=" * 80)
+                self._update_progress(98, 'Final: Activating Products', 0, 0, "\n".join(log))
+                
+                try:
+                    # Find all products imported in this migration (products with default_code)
+                    products = self.env['product.product'].search([
+                        ('active', '=', True),
+                        ('default_code', '!=', False)
+                    ])
+                    
+                    if products:
+                        log.append(f"🔄 Activating {len(products)} products in Sales and POS...")
+                        self.write({'migration_log': "\n".join(log)})
+                        self.env.cr.commit()
+                        
+                        # Update in batches to avoid timeout
+                        batch_size = 500
+                        activated_count = 0
+                        
+                        for i in range(0, len(products), batch_size):
+                            batch = products[i:i + batch_size]
+                            batch.write({
+                                'sale_ok': True,
+                                'available_in_pos': True,
+                            })
+                            activated_count += len(batch)
+                            self.env.cr.commit()
+                            
+                            if (i // batch_size + 1) % 5 == 0:
+                                log.append(f"  ✓ Activated {activated_count}/{len(products)} products...")
+                                self.write({'migration_log': "\n".join(log)})
+                                self.env.cr.commit()
+                        
+                        log.append(f"✅ Activated {activated_count} products in Sales and POS")
+                        self.write({'migration_log': "\n".join(log)})
+                        self.env.cr.commit()
+                    else:
+                        log.append("⚠️  No products found to activate")
+                        
+                except Exception as e:
+                    error_msg = f"❌ Error activating products: {str(e)}"
+                    log.append(error_msg)
+                    self._log_error(error_msg, e)
+                    _logger.error(f"Error activating products: {str(e)}", exc_info=True)
+                    if not self.skip_errors:
+                        raise
+            
+            # Final Report
+            log.append("\n\n" + "=" * 80)
+            log.append("MIGRATION COMPLETE! ✅")
+            log.append("=" * 80)
+            log.append(f"UoM Groups Imported: {self.total_uom_groups}")
+            log.append(f"Products Imported: {self.total_products}")
+            log.append(f"Pricelists Created: {self.total_pricelists}")
+            log.append(f"Price Records: {self.total_prices}")
+            log.append(f"Warehouse Records: {self.total_warehouses}")
+            if self.force_enable_sales_pos:
+                log.append(f"✅ Products activated in Sales & POS: Yes")
+            log.append(f"Errors: {self.errors_count}")
+            log.append("=" * 80)
+            
+            # Update state
+            self.write({
+                'state': 'done',
+                'end_time': fields.Datetime.now(),
+                'migration_log': "\n".join(log),
+                'progress_percentage': 100.0,
+                'current_stage': 'Completed ✅',
+            })
+            
+            # Show notification
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'Migration Complete! ✅',
+                    'message': f'Successfully imported {self.total_products} products with all data',
+                    'type': 'success',
+                    'sticky': True,
+                }
+            }
+            
+        except Exception as e:
+            error_msg = f"Migration failed: {str(e)}"
+            _logger.error(error_msg, exc_info=True)
+            
+            self.write({
+                'state': 'error',
+                'end_time': fields.Datetime.now(),
+                'migration_log': self.migration_log + f"\n\n❌ ERROR: {error_msg}"
+            })
+            
+            raise UserError(error_msg)
+    
+    # ========== Stage 1: UoM Groups ==========
+    def _stage1_import_uom_groups(self):
+        """Stage 1: Import UoM Groups from SAP"""
+        log = []
+        try:
+            log.append("🔄 Starting UoM Groups import...")
+            log.append(f"Backend: {self.backend_id.name}")
+            log.append("")
+            
+            # Update wizard log in real-time
+            self.write({'migration_log': "\n".join(log)})
+            self.env.cr.commit()
+            
+            # Import UoM Groups
+            log.append("Connecting to SAP...")
+            self.write({'migration_log': "\n".join(log)})
+            self.env.cr.commit()
+            
+            uom_sync = self.env['sap.uom.sync']
+            result = uom_sync.import_all_uoms_from_sap(self.backend_id)
+            
+            log.append(f"✓ Imported {result} UoMs from SAP")
+            
+            # Get some examples
+            recent_uoms = self.env['sap.uom.sync'].search([
+                ('backend_id', '=', self.backend_id.id),
+                ('sync_status', '=', 'success')
+            ], order='last_sync desc', limit=5)
+            
+            if recent_uoms:
+                log.append("")
+                log.append("Sample UoMs:")
+                for uom in recent_uoms:
+                    try:
+                        log.append(f"  - {uom.sap_uom_id} -> {uom.odoo_uom_id.name}")
+                    except:
+                        log.append(f"  - {uom.sap_uom_id} -> Error")
+            
+            # Final update
+            self.write({'migration_log': "\n".join(log)})
+            self.env.cr.commit()
+            
+            return {
+                'success': True,
+                'imported': result,
+                'log': log
+            }
+            
+        except Exception as e:
+            log.append(f"❌ Error: {str(e)}")
+            self.write({'migration_log': "\n".join(log)})
+            self.env.cr.commit()
+            _logger.error(f"Stage 1 error: {str(e)}", exc_info=True)
+            if not self.skip_errors:
+                raise
+            return {'success': False, 'imported': 0, 'log': log}
+    
+    # ========== Stage 2: Products ==========
+    def _stage2_import_products(self):
+        """Stage 2: Import Products with Extended Info"""
+        log = []
+        try:
+            log.append("🔄 Starting Products import...")
+            log.append(f"Batch size: {self.batch_size}")
+            if self.product_limit > 0:
+                log.append(f"Product limit: {self.product_limit} products")
+            else:
+                log.append("Product limit: Unlimited")
+            log.append("")
+            
+            # Update wizard display
+            self.write({'migration_log': "\n".join(log)})
+            self.env.cr.commit()
+            
+            connection = self.backend_id.get_connection()
+            
+            # Import with $expand to get all data at once
+            skip = 0
+            total_imported = 0
+            total_errors = 0
+            batch_number = 0
+            consecutive_empty_batches = 0
+            max_empty_batches = 3  # Stop after 3 consecutive empty batches
+            processed_item_codes = set()  # Track processed items to prevent duplicates
+            
+            # Log initial configuration
+            if self.product_limit > 0:
+                log.append(f"⚠️  Product Limit: {self.product_limit} products (will stop at this limit)")
+            else:
+                log.append(f"✅ Product Limit: UNLIMITED (will import all products from SAP)")
+            log.append("")
+            self.write({'migration_log': "\n".join(log)})
+            self.env.cr.commit()
+            
+            while True:
+                # Check if we reached the product limit
+                if self.product_limit > 0 and total_imported >= self.product_limit:
+                    log.append(f"✓ Reached product limit ({self.product_limit}), stopping import")
+                    break
+                
+                # Adjust batch size if approaching limit
+                current_batch_size = self.batch_size
+                if self.product_limit > 0:
+                    remaining = self.product_limit - total_imported
+                    if remaining <= 0:
+                        break
+                    current_batch_size = min(self.batch_size, remaining)
+                
+                params = {
+                    '$top': current_batch_size,
+                    '$skip': skip,
+                    '$orderby': 'ItemCode'
+                }
+                
+                log.append(f"📥 Fetching batch from SAP (skip={skip}, top={current_batch_size})...")
+                self.write({'migration_log': "\n".join(log)})
+                self.env.cr.commit()
+                
+                # Retry logic for SAP API calls
+                max_retries = 3
+                items_data = None
+                for retry in range(max_retries):
+                    try:
+                        items_data = connection.get('Items', params)
+                        break
+                    except Exception as e:
+                        if retry < max_retries - 1:
+                            log.append(f"⚠️  Retry {retry + 1}/{max_retries} after error: {str(e)[:100]}")
+                            self.write({'migration_log': "\n".join(log)})
+                            self.env.cr.commit()
+                            import time
+                            time.sleep(2)  # Wait 2 seconds before retry
+                        else:
+                            error_msg = f"❌ Failed to fetch batch after {max_retries} retries: {str(e)}"
+                            log.append(error_msg)
+                            self._log_error(error_msg, e)
+                            raise
+                
+                if not items_data:
+                    log.append("❌ No data returned from SAP API")
+                    break
+                
+                batch = items_data.get('value', [])
+                
+                # Check for empty batch
+                if not batch:
+                    consecutive_empty_batches += 1
+                    log.append(f"⚠️  Empty batch received (consecutive empty: {consecutive_empty_batches}/{max_empty_batches})")
+                    
+                    if consecutive_empty_batches >= max_empty_batches:
+                        log.append(f"✓ No more products to fetch (received {max_empty_batches} consecutive empty batches)")
+                        break
+                    
+                    # Try to continue with next batch
+                    skip += current_batch_size
+                    continue
+                
+                # Reset empty batch counter on successful batch
+                consecutive_empty_batches = 0
+                
+                batch_number += 1
+                log.append(f"")
+                log.append(f"📦 Batch {batch_number}: Processing {len(batch)} products (from {skip + 1} to {skip + len(batch)})")
+                
+                # Calculate progress within Stage 2 (30% to 60%)
+                # Estimate total batches if not known
+                if not self.total_batches:
+                    # Rough estimate based on current batch and items
+                    estimated_total = max(batch_number + 10, 75)
+                    self.total_batches = estimated_total
+                
+                batch_progress = 30 + ((batch_number / max(self.total_batches, 1)) * 30)
+                self._update_progress(
+                    min(batch_progress, 59),  # Cap at 59% to reserve 60% for completion
+                    f'Stage 2: Batch {batch_number}/{self.total_batches}',
+                    batch_number,
+                    self.total_batches,
+                    "\n".join(log)
+                )
+                
+                for item_data in batch:
+                    item_code = None
+                    try:
+                        item_code = item_data.get('ItemCode')
+                        item_name = item_data.get('ItemName', item_code)
+                        
+                        # Skip products without ItemCode to prevent duplicates
+                        if not item_code or not str(item_code).strip():
+                            _logger.warning(f"Skipping product without ItemCode: {item_name}")
+                            continue
+                        
+                        # Normalize item_code (remove whitespace)
+                        item_code = str(item_code).strip()
+                        
+                        # Check if this item was already processed in this sync session
+                        if item_code in processed_item_codes:
+                            _logger.warning(f"Duplicate ItemCode detected in batch: {item_code} - {item_name}. Skipping to prevent duplicate.")
+                            continue
+                        
+                        processed_item_codes.add(item_code)
+                        
+                        # Import basic product
+                        product = self._import_single_product(item_data)
+                        
+                        if not product:
+                            _logger.warning(f"Product {item_code} could not be created/found")
+                            total_errors += 1
+                            continue
+                        
+                        # Sync alternative barcodes (sub-unit barcodes)
+                        try:
+                            self._sync_alternative_barcodes(product, item_data, connection)
+                        except Exception as barcode_error:
+                            _logger.warning(f"Could not sync alternative barcodes for {item_code}: {str(barcode_error)}")
+                            # Don't fail the whole import for barcode sync issues
+                        
+                        # Import extended info (in separate try/catch to isolate errors)
+                        try:
+                            extended = self.env['sap.product.extended'].create_or_update_from_sap(
+                                product, self.backend_id, item_data
+                            )
+                            total_imported += 1
+                            
+                            # Update progress every 5 products
+                            if total_imported % 5 == 0:
+                                log.append(f"  ✓ Progress: {total_imported} products imported, {total_errors} errors")
+                                self.write({
+                                    'migration_log': "\n".join(log),
+                                    'total_products': total_imported,
+                                    'errors_count': total_errors,
+                                })
+                                self.env.cr.commit()
+                                
+                        except Exception as ext_error:
+                            error_msg = f"❌ Error creating extended info for {item_code}: {str(ext_error)[:100]}"
+                            _logger.error(error_msg)
+                            log.append(f"  {error_msg}")
+                            try:
+                                self._log_error(error_msg, ext_error)
+                            except:
+                                pass  # Don't fail if logging fails
+                            total_errors += 1
+                            # Continue with next product - don't rollback
+                            if not self.skip_errors:
+                                raise
+                        
+                    except Exception as e:
+                        error_msg = f"❌ Error importing product {item_code}: {str(e)[:100]}"
+                        _logger.error(error_msg)
+                        log.append(f"  {error_msg}")
+                        try:
+                            self._log_error(error_msg, e)
+                        except:
+                            pass  # Don't fail if logging fails
+                        total_errors += 1
+                        # Continue with next product - commit what we have and continue
+                        try:
+                            self.env.cr.commit()  # Save progress so far
+                        except:
+                            pass  # If commit fails, just continue
+                        if not self.skip_errors:
+                            raise
+                
+                skip += len(batch)
+                
+                # Update progress after each batch
+                log.append(f"  ✓ Batch {batch_number} complete: {len(batch)} items processed")
+                if self.product_limit > 0:
+                    remaining = self.product_limit - total_imported
+                    log.append(f"  📊 Total so far: {total_imported}/{self.product_limit} imported ({remaining} remaining), {total_errors} errors")
+                else:
+                    log.append(f"  📊 Total so far: {total_imported} imported (unlimited), {total_errors} errors")
+                log.append(f"  📍 Next batch will start from skip={skip + len(batch)}")
+                self.write({
+                    'migration_log': "\n".join(log),
+                    'total_products': total_imported,
+                    'errors_count': total_errors,
+                })
+                self.env.cr.commit()
+            
+            # Final summary
+            log.append(f"")
+            log.append(f"✅ Stage 2 Complete!")
+            log.append(f"  Total Imported: {total_imported} products")
+            if total_errors > 0:
+                log.append(f"  Errors: {total_errors}")
+            
+            self.write({
+                'migration_log': "\n".join(log),
+                'total_products': total_imported,
+                'errors_count': total_errors,
+            })
+            self.env.cr.commit()
+            
+            self.errors_count += total_errors
+            
+            return {
+                'success': True,
+                'imported': total_imported,
+                'errors': total_errors,
+                'log': log
+            }
+            
+        except Exception as e:
+            log.append(f"❌ Error: {str(e)}")
+            _logger.error(f"Stage 2 error: {str(e)}", exc_info=True)
+            if not self.skip_errors:
+                raise
+            return {'success': False, 'imported': 0, 'log': log}
+    
+    def _import_single_product(self, item_data):
+        """Import or update a single product with all SAP fields"""
+        item_code = item_data.get('ItemCode')
+        
+        # Validate item_code to prevent duplicates
+        if not item_code or not str(item_code).strip():
+            raise UserError(f"Product ItemCode is empty or invalid. Cannot import product without ItemCode.")
+        
+        # Normalize item_code (remove whitespace)
+        item_code = str(item_code).strip()
+        
+        # Validate required fields
+        item_name = (item_data.get('ItemName') or '').strip()
+        foreign_name = (item_data.get('ForeignName') or '').strip()
+        
+        # Use ForeignName if ItemName is empty
+        if not item_name and foreign_name:
+            item_name = foreign_name
+        elif not item_name:
+            item_name = f"Product {item_code}"
+            _logger.warning(f"Item {item_code} has no name, using: {item_name}")
+        
+        # Search for existing (using normalized item_code)
+        # IMPORTANT: Search for EXACT match (strip whitespace) and prefer active products
+        product = self.env['product.product'].search([
+            ('default_code', '=', item_code),
+            ('active', 'in', [True, False])  # Search in both active and archived
+        ], order='active desc, id desc', limit=1)
+        
+        # Double-check: if multiple products with same code exist, log warning
+        duplicate_count = self.env['product.product'].search_count([
+            ('default_code', '=', item_code),
+            ('active', 'in', [True, False])
+        ])
+        if duplicate_count > 1:
+            _logger.warning(f"⚠️ Found {duplicate_count} products with code '{item_code}'. Using most recent active one.")
+        
+        # ========== Get and Map UoMs ==========
+        sales_unit = item_data.get('SalesUnit')
+        purchase_unit = item_data.get('PurchaseUnit')
+        inventory_uom = item_data.get('InventoryUoM')
+        
+        # Map to Odoo UoMs
+        sales_uom_id = self._map_sap_uom_to_odoo(sales_unit) if sales_unit else None
+        purchase_uom_id = self._map_sap_uom_to_odoo(purchase_unit) if purchase_unit else None
+        inventory_uom_id = self._map_sap_uom_to_odoo(inventory_uom) if inventory_uom else None
+        
+        # Use sales UoM as default, fallback to inventory or purchase
+        default_uom_id = sales_uom_id or inventory_uom_id or purchase_uom_id
+        
+        # ========== Prepare basic values ==========
+        # Active flag from SAP (Frozen = tYES => inactive)
+        is_active = (item_data.get('Frozen') or 'tNO') != 'tYES'
+
+        # Normalize SalesItem / PurchaseItem from SAP to robust booleans
+        def _to_bool_flag(value, default_true=True):
+            """
+            Convert SAP Y/N / tYES/tNO / True/False style flags to boolean.
+            If value is empty and default_true=True, treat as True.
+            """
+            if value is None or value == '':
+                return bool(default_true)
+            if isinstance(value, bool):
+                return value
+            v = str(value).strip().upper()
+            return v in ('Y', 'YES', 'TYES', '1', 'TRUE')
+
+        is_sales_item = _to_bool_flag(item_data.get('SalesItem'), default_true=True)
+        is_purchase_item = _to_bool_flag(item_data.get('PurchaseItem'), default_true=True)
+        
+        # Handle prices safely (in case they are None)
+        sales_price = item_data.get('SalesUnitPrice', 0) or 0
+        purchase_price = item_data.get('PurchaseUnitPrice', 0) or 0
+        
+        # Determine if product should be enabled in Sales and POS
+        # If force_enable_sales_pos is True, enable all active products
+        if self.force_enable_sales_pos:
+            enable_sales = is_active
+            enable_pos = is_active
+        else:
+            enable_sales = is_active and is_sales_item
+            enable_pos = is_active and is_sales_item
+        
+        vals = {
+            'name': item_name,
+            'default_code': item_code,  # Already normalized (no whitespace)
+            'list_price': float(sales_price),  # سعر البيع من SAP
+            'standard_price': float(purchase_price),  # سعر الشراء من SAP
+            'type': 'consu',  # Consumable = Storable products (displayed as "Goods" in UI)
+            'tracking': 'none',  # Enable inventory tracking
+            'is_storable': True,  # Enable "Track Inventory" checkbox in UI
+            'active': is_active,
+            # Enable Sales and POS based on configuration
+            'sale_ok': enable_sales,
+            'purchase_ok': is_active and is_purchase_item,
+            'available_in_pos': enable_pos,  # Add to POS if active
+        }
+        
+        # ========== Add UoMs ==========
+        if default_uom_id:
+            vals['uom_id'] = default_uom_id
+        # Note: uom_po_id removed in Odoo 19.0
+        # Purchase UoM is now handled through product supplier info
+        
+        # ========== Add optional fields ==========
+        if item_data.get('BarCode'):
+            vals['barcode'] = item_data['BarCode']
+        
+        if item_data.get('Weight'):
+            try:
+                vals['weight'] = float(item_data['Weight'])
+            except (ValueError, TypeError):
+                pass
+        
+        if item_data.get('Volume'):
+            try:
+                vals['volume'] = float(item_data['Volume'])
+            except (ValueError, TypeError):
+                pass
+        
+        # Description fields
+        if item_data.get('UserText'):
+            vals['description'] = item_data['UserText']
+        if item_data.get('Remarks'):
+            vals['description_sale'] = item_data['Remarks']
+        
+        # Create or update product
+        if product and self.update_existing:
+            product.write(vals)
+            _logger.info(f"✏️ Updated product: {item_code} - {item_name}")
+        elif not product:
+            product = self.env['product.product'].create(vals)
+            _logger.info(f"✅ Created product: {item_code} - {item_name}")
+        else:
+            _logger.info(f"⏭️ Skipped update for: {item_code} (update_existing=False)")
+        
+        return product
+    
+    def _sync_alternative_barcodes(self, product, item_data, connection):
+        """
+        Sync alternative barcodes from SAP to Odoo.
+        SAP B1 does not return ItemBarCodeCollection in batch requests, so we
+        fetch the full item individually using $expand to get all barcodes.
+        UoM is resolved via sap.uom.sync (by UoMEntry) with fallback to name search.
+        """
+        if not product or not item_data:
+            return
+
+        item_code = item_data.get('ItemCode')
+        if not item_code or not str(item_code).strip():
+            return
+
+        item_code = str(item_code).strip()
+
+        try:
+            AltBarcode = self.env['product.barcode.alternative']
+
+            # ItemBarCodeCollection is never present in batch responses from SAP B1.
+            # $expand=ItemBarCodeCollection is NOT supported in all SAP B1 versions.
+            # Fetch the full item directly without $expand.
+            barcodes_collection = item_data.get('ItemBarCodeCollection', [])
+
+            if not barcodes_collection:
+                try:
+                    full_item = connection.get(f"Items('{item_code}')")
+                    barcodes_collection = full_item.get('ItemBarCodeCollection', [])
+                except Exception:
+                    pass
+
+            if not barcodes_collection:
+                return
+
+            # Delete and recreate to stay in sync with SAP
+            existing = AltBarcode.search([('product_id', '=', product.id)])
+            if existing:
+                existing.unlink()
+
+            main_barcode = product.barcode
+            synced_count = 0
+
+            for bc_entry in barcodes_collection:
+                barcode_val = bc_entry.get('Barcode') or bc_entry.get('BarcodeValue')
+
+                if not barcode_val or barcode_val == main_barcode:
+                    continue
+
+                uom_entry = bc_entry.get('UoMEntry') or bc_entry.get('UomEntry')
+                free_text = bc_entry.get('FreeText') or bc_entry.get('UoMName', '')
+
+                # Resolve UoM: prefer sap.uom.sync lookup by UoMEntry (most accurate),
+                # then fall back to name search
+                uom_id = None
+                if uom_entry:
+                    uom_sync = self.env['sap.uom.sync'].search([
+                        ('backend_id', '=', self.backend_id.id),
+                        ('sap_uom_entry', '=', uom_entry),
+                    ], limit=1)
+                    if uom_sync and uom_sync.odoo_uom_id:
+                        uom_id = uom_sync.odoo_uom_id.id
+
+                if not uom_id and free_text:
+                    odoo_uom = self.env['uom.uom'].search([
+                        ('name', '=ilike', free_text)
+                    ], limit=1)
+                    if odoo_uom:
+                        uom_id = odoo_uom.id
+
+                AltBarcode.create({
+                    'product_id': product.id,
+                    'barcode': barcode_val,
+                    'uom_name': free_text,
+                    'uom_id': uom_id,
+                    'sap_uom_entry': uom_entry,
+                    'active': True,
+                    'last_sync': fields.Datetime.now(),
+                })
+                synced_count += 1
+
+            if synced_count > 0:
+                _logger.info(f"Synced {synced_count} alternative barcode(s) for product {item_code}")
+
+        except Exception as e:
+            _logger.warning(f"Could not sync alternative barcodes for {item_code}: {str(e)}")
+            # Non-critical — do not interrupt the migration
+    
+    def _map_sap_uom_to_odoo(self, sap_uom_code):
+        """Map SAP UoM code to Odoo UoM ID"""
+        if not sap_uom_code:
+            return None
+        
+        # Search for existing mapping
+        uom_sync = self.env['sap.uom.sync'].search([
+            ('backend_id', '=', self.backend_id.id),
+            ('sap_uom_id', '=', sap_uom_code)
+        ], limit=1)
+        
+        if uom_sync and uom_sync.odoo_uom_id:
+            return uom_sync.odoo_uom_id.id
+        
+        # Fallback: search by name
+        uom = self.env['uom.uom'].search([
+            ('name', '=ilike', sap_uom_code)
+        ], limit=1)
+        
+        return uom.id if uom else None
+    
+    # ========== Stage 3: Pricelists ==========
+    def _stage3_import_pricelists(self):
+        """Stage 3: Import Pricelists"""
+        log = []
+        try:
+            log.append("🔄 Starting Pricelists import...")
+            log.append("⚡ This will UPDATE existing prices and CREATE new ones")
+            log.append("")
+            
+            # Import all pricelists
+            pricelist_sync = self.env['sap.product.pricelist.sync']
+            result = pricelist_sync.import_all_pricelists_from_sap(
+                self.backend_id, self.batch_size
+            )
+            
+            log.append(f"✓ Processed {result['total_products']} products")
+            log.append(f"✅ CREATED {result['created_prices']} NEW price records")
+            log.append(f"✏️  UPDATED {result['updated_prices']} EXISTING price records")
+            log.append(f"✓ Successful: {result['successful_products']} products")
+            
+            if result['failed_products'] > 0:
+                log.append(f"⚠ Failed: {result['failed_products']} products")
+            
+            # Count pricelists created
+            pricelists = self.env['product.pricelist'].search([
+                ('name', 'like', 'SAP Price List')
+            ])
+            
+            self.errors_count += result['failed_products']
+            
+            return {
+                'success': True,
+                'pricelists': len(pricelists),
+                'prices': result['created_prices'],
+                'log': log
+            }
+            
+        except Exception as e:
+            log.append(f"❌ Error: {str(e)}")
+            _logger.error(f"Stage 3 error: {str(e)}", exc_info=True)
+            if not self.skip_errors:
+                raise
+            return {'success': False, 'pricelists': 0, 'prices': 0, 'log': log}
+    
+    # ========== Stage 4: Warehouse Info ==========
+    def _stage4_import_warehouse_info(self):
+        """Stage 4: Import Warehouse Information"""
+        log = []
+        try:
+            log.append("Starting Warehouse Info import...")
+            log.append("")
+            
+            # Import all warehouse info
+            warehouse_info = self.env['sap.product.warehouse.info']
+            result = warehouse_info.import_all_warehouse_info_from_sap(
+                self.backend_id, self.batch_size
+            )
+            
+            log.append(f"✓ Processed {result['total_products']} products")
+            log.append(f"✓ Created/updated {result['created_records']} warehouse records")
+            log.append(f"✓ Stock updated in Odoo for products")
+            log.append(f"✓ Reorder rules created where applicable")
+            
+            if result['failed_products'] > 0:
+                log.append(f"⚠ Failed: {result['failed_products']} products")
+            
+            self.errors_count += result['failed_products']
+            
+            return {
+                'success': True,
+                'warehouses': result['created_records'],
+                'log': log
+            }
+            
+        except Exception as e:
+            log.append(f"❌ Error: {str(e)}")
+            _logger.error(f"Stage 4 error: {str(e)}", exc_info=True)
+            if not self.skip_errors:
+                raise
+            return {'success': False, 'warehouses': 0, 'log': log}
+    
+    # ========== Actions ==========
+    def action_view_imported_products(self):
+        """View imported products"""
+        return {
+            'type': 'ir.actions.act_window',
+            'name': 'Imported Products',
+            'res_model': 'product.product',
+            'view_mode': 'list,form',
+            'domain': [('default_code', '!=', False)],
+            'context': {'create': False}
+        }
+    
+    def action_view_pricelists(self):
+        """View created pricelists"""
+        return {
+            'type': 'ir.actions.act_window',
+            'name': 'SAP Pricelists',
+            'res_model': 'product.pricelist',
+            'view_mode': 'list,form',
+            'domain': [('name', 'like', 'SAP Price List')],
+        }
+    
+    def action_view_extended_info(self):
+        """View extended product info"""
+        return {
+            'type': 'ir.actions.act_window',
+            'name': 'Extended Product Info',
+            'res_model': 'sap.product.extended',
+            'view_mode': 'list,form',
+            'domain': [('backend_id', '=', self.backend_id.id)],
+        }
+

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="res_config_settings_view_form_fragrantica" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.inherit.fragrantica</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                <app string="Fragrantica" name="lugal_fragrantica_settings">
+                    <block title="Fragrantica Integration">
+                        <setting string="Auto scraping" help="Enable automatic scraping of Fragrantica perfumes from pending requests.">
+                            <field name="fragrantica_auto_scraping_enabled"/>
+                        </setting>
+                        <setting string="Scraping method" help="Choose the method for scraping Fragrantica perfumes.">
+                            <field name="fragrantica_scraping_method"/>
+                        </setting>
+                        <setting string="Interval (minutes)" help="Interval in minutes for automatic scraping.">
+                            <field name="fragrantica_auto_scraping_interval"/>
+                        </setting>
+                        <setting string="Batch size" help="Number of perfumes to scrape in each batch.">
+                            <field name="fragrantica_batch_size"/>
+                        </setting>
+                        <setting string="API key" help="API key for Fragrantica integration (if available).">
+                            <field name="fragrantica_api_key" password="True"/>
+                        </setting>
+                        <setting string="Max retries" help="Maximum number of retries for failed scraping attempts.">
+                            <field name="fragrantica_max_retries"/>
+                        </setting>
+                    </block>
+                </app>
+            </xpath>
+        </field>
+    </record>
+</odoo>

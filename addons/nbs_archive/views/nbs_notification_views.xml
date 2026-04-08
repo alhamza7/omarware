@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_nbs_notification_tree" model="ir.ui.view">
+        <field name="name">nbs.notification.tree</field>
+        <field name="model">nbs.notification</field>
+        <field name="arch" type="xml">
+            <tree string="Notifications">
+                <field name="user_id"/>
+                <field name="title"/>
+                <field name="notification_type"/>
+                <field name="is_read"/>
+                <field name="created_date"/>
+            </tree>
+        </field>
+    </record>
+
+    <record id="action_nbs_notification" model="ir.actions.act_window">
+        <field name="name">Notifications</field>
+        <field name="res_model">nbs.notification</field>
+        <field name="view_mode">tree,form</field>
+    </record>
+
+    <menuitem id="menu_nbs_notification"
+              name="Notifications"
+              parent="menu_nbs_documents"
+              action="action_nbs_notification"
+              sequence="30"/>
+</odoo>
+
+
