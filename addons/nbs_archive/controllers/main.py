@@ -83,12 +83,12 @@ class NBSMainController(http.Controller):
         from ._auth import _verify_jwt_token
         return _verify_jwt_token()
     
-    @http.route('/api/<path:path>', type='http', auth='none', methods=['OPTIONS'], csrf=False)
-    def handle_preflight(self, **kwargs):
-        """Handle CORS preflight requests"""
-        headers = self._set_cors_headers()
-        return Response('', status=200, headers=headers)
-    
+    # NOTE: A catch-all OPTIONS route for `/api/<path:path>` matched every API URL and
+    # caused Werkzeug to return 405 METHOD NOT ALLOWED for GET/POST on paths like
+    # `/api/pos_perfume/v1/*` (only OPTIONS was allowed on that rule). CORS preflight
+    # for `/api/crm/*` and `/api/pos_perfume/*` is handled in lugal_crm `cors_controller`;
+    # nbs_archive JSON/HTTP routes use `cors='*'` where needed.
+
     @http.route('/api/health', type='http', auth='none', methods=['GET'], csrf=False)
     def health_check(self):
         """Health check endpoint"""

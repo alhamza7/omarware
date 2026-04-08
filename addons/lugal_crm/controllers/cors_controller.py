@@ -54,5 +54,10 @@ class CorsController(http.Controller):
         save_session=False,
     )
     def options_handler(self, subpath, **kwargs):
-        """Respond to CORS preflight (OPTIONS) for all API routes."""
+        """Respond to CORS preflight (OPTIONS) for CRM and lugal auth routes.
+
+        Do not register a catch-all OPTIONS for `/api/pos_perfume/...`: it would
+        match before GET and cause 405. POS REST routes use `cors='*'` on each
+        handler so Odoo can answer preflight for those URLs.
+        """
         return _cors_response(200)
