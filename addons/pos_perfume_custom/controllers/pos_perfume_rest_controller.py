@@ -2,8 +2,10 @@
 """REST API `/api/pos_perfume/v1/*` for external SPAs (Bearer optional; session `auth='user'`)."""
 import json
 import logging
+import re
+from datetime import timedelta
 
-from odoo import http
+from odoo import fields, http
 from odoo.http import request, Response
 
 from .pos_perfume_controller import PosPerfumeController
@@ -34,20 +36,395 @@ class PosPerfumeRestController(http.Controller):
         return _json({"success": False, "error": error, "data": None}, status=status)
 
     def _pos_rest_auth(self):
-        """Logged-in session (e.g. Vite proxy + cookie) or ``Authorization: Bearer <API key>`` (rpc scope)."""
-        if request.session.uid:
-            return True
+        """Session cookie, ``Bearer`` JWT (lugal_auth), or ``Bearer`` API key (rpc scope).
+
+        With ``auth='none'``, Odoo does not bind ``request.env`` to ``session.uid`` automatically.
+        Without ``update_env``, ``request.env.user`` is empty and ORM ``search()`` raises
+        ``ValueError: Expected singleton: res.users()`` during access checks.
+        """
+        session_uid = getattr(request.session, "uid", None)
+        if session_uid:
+            request.update_env(user=session_uid)
+            if request.env.user and request.env.user.exists():
+                return True
         auth = (request.httprequest.headers.get("Authorization") or "").strip()
         if not auth.lower().startswith("bearer "):
             return False
-        key = auth[7:].strip()
-        if not key:
+        token = auth[7:].strip()
+        if not token:
             return False
-        uid = request.env["res.users.apikeys"].sudo()._check_credentials(scope="rpc", key=key)
+        try:
+            from odoo.addons.lugal_auth.controllers._auth import ensure_jwt_user_id
+
+            jwt_uid = ensure_jwt_user_id()
+            if jwt_uid:
+                return True
+        except Exception:
+            pass
+        uid = request.env["res.users.apikeys"].sudo()._check_credentials(scope="rpc", key=token)
         if not uid:
             return False
         request.update_env(user=uid)
+        if not request.env.user or not request.env.user.exists():
+            return False
         return True
+
+    def _rest_pos_ui_default_pricelist(self):
+        """
+        Same default as Odoo POS screen ``loadPricelists()`` (pos_perfume_screen.js):
+        active pricelists ordered by id asc; prefer name containing ``list 1`` (case-insensitive);
+        if several, pick the one with the most pricelist items where fixed_price > 0;
+        otherwise first active pricelist (lowest id).
+        """
+        Pl = request.env["product.pricelist"].sudo()
+        Item = request.env["product.pricelist.item"].sudo()
+        pricelists = Pl.search([("active", "=", True)], order="id asc", limit=100)
+        if not pricelists:
+            return Pl.browse()
+        candidates = pricelists.filtered(
+            lambda p: p.name and "list 1" in p.name.lower()
+        )
+        chosen = Pl.browse()
+        if len(candidates) == 1:
+            chosen = candidates
+        elif len(candidates) > 1:
+            best = candidates[0]
+            best_n = Item.search_count(
+                [("pricelist_id", "=", best.id), ("fixed_price", ">", 0)]
+            )
+            for p in candidates[1:]:
+                n = Item.search_count(
+                    [("pricelist_id", "=", p.id), ("fixed_price", ">", 0)]
+                )
+                if n > best_n:
+                    best = p
+                    best_n = n
+            chosen = best
+        if not chosen:
+            chosen = pricelists[:1]
+        return chosen
+
+    def _rest_default_pricelist(self):
+        """Pricelist used by REST catalog when ``pricelist_id`` is omitted — matches POS UI."""
+        return self._rest_pos_ui_default_pricelist()
+
+    def _rest_price_uom(self, product, get_arg):
+        """UoM used for pricing: uom_id / uom query params, else product.uom_id."""
+        uid = get_arg("uom_id")
+        if uid:
+            try:
+                u = request.env["uom.uom"].sudo().browse(int(uid))
+                if u.exists():
+                    return u
+            except (TypeError, ValueError):
+                pass
+        raw = (get_arg("uom") or "").strip()
+        if not raw:
+            return product.uom_id
+        Uom = request.env["uom.uom"].sudo()
+        u = Uom.search([("name", "ilike", raw)], limit=1)
+        if u:
+            return u
+        low = raw.lower()
+        if low in ("kg", "kilo", "kilogram", "kgs"):
+            u = Uom.search(
+                ["|", "|", ("name", "ilike", "كغم"), ("name", "ilike", "كيلو"), ("name", "ilike", "KG")],
+                limit=1,
+            )
+            if u:
+                return u
+        if low in ("g", "gram", "grams"):
+            u = Uom.search(["|", ("name", "ilike", "غرام"), ("name", "ilike", "gram")], limit=1)
+            if u:
+                return u
+        return product.uom_id
+
+    def _rest_price_first_applicable_rule(self, product, pl_rec, price_uom, quantity=1.0):
+        """Same rule chain as product.pricelist._compute_price_rule (incl. category / global lines)."""
+        if not pl_rec or not product:
+            return 0.0
+        pu = price_uom or product.uom_id
+        if not pu:
+            return 0.0
+        date = fields.Datetime.now()
+        cur = pl_rec.currency_id
+        product_uom = product.uom_id
+        if pu != product_uom:
+            qty_in_product_uom = pu._compute_quantity(
+                quantity, product_uom, raise_if_failure=False
+            )
+            if qty_in_product_uom is False:
+                qty_in_product_uom = quantity
+        else:
+            qty_in_product_uom = quantity
+        rules = pl_rec._get_applicable_rules(product, date)
+        for rule in rules:
+            if not rule._is_applicable_for(product, qty_in_product_uom):
+                continue
+            try:
+                return float(
+                    rule._compute_price(product, quantity, pu, date=date, currency=cur)
+                )
+            except Exception:
+                continue
+        return 0.0
+
+    def _rest_product_unit_price(self, product, pl_rec, price_uom):
+        """
+        Match ``product.product.search_products_for_pos`` (right panel): use Odoo
+        ``pricelist._get_product_price`` first on sudo records so API users without
+        ``product.pricelist.item`` read rights still get the same numbers as the UI.
+
+        Then fall back to POS UoM-group / packaging mapping (``get_product_data`` path)
+        and rule chain when the standard engine returns 0.
+        """
+        prod = product.sudo()
+        pu = price_uom or prod.uom_id
+        pl = pl_rec.sudo() if pl_rec else False
+        company_partner = request.env.company.sudo().partner_id
+
+        if pl:
+            try:
+                p = pl._get_product_price(prod, 1.0, uom=pu)
+                if p and p > 0:
+                    return float(p)
+            except TypeError:
+                pass
+            except Exception as ex:
+                _logger.debug("REST _get_product_price: %s", ex)
+            try:
+                p = pl._get_product_price(prod, 1.0, uom=pu, partner=company_partner)
+                if p and p > 0:
+                    return float(p)
+            except Exception as ex:
+                _logger.debug("REST _get_product_price (partner): %s", ex)
+
+        ctrl = PosPerfumeController()
+        uoms = ctrl._get_uoms_from_pricelist(prod, pl)
+        target_id = pu.id if pu else None
+        price = ctrl._get_default_price_from_uoms(uoms, target_id)
+        if price and price > 0:
+            return float(price)
+
+        price = self._rest_price_first_applicable_rule(prod, pl, pu)
+        if price and price > 0:
+            return float(price)
+        if pu and prod.uom_id and pu.id != prod.uom_id.id:
+            price = self._rest_price_first_applicable_rule(prod, pl, prod.uom_id)
+            if price and price > 0:
+                return float(price)
+
+        if pl:
+            try:
+                p = pl._get_product_price(prod, 1.0, uom=pu, partner=company_partner)
+                if p and p > 0:
+                    return float(p)
+            except TypeError:
+                pass
+            except Exception as ex:
+                _logger.debug("REST late _get_product_price (partner): %s", ex)
+            try:
+                p = pl._get_product_price(prod, 1.0, uom=pu)
+                if p and p > 0:
+                    return float(p)
+            except Exception as ex:
+                _logger.debug("REST late _get_product_price: %s", ex)
+
+        return float(prod.list_price or 0.0)
+
+    def _strict_pricelist_flag(self, get_arg):
+        v = (get_arg("strict_pricelist") or "").strip().lower()
+        return v in ("1", "true", "yes", "on")
+
+    def _rest_catalog_unit_price(self, product, pl_rec, price_uom, strict=False):
+        """
+        Catalog price: use ``pl_rec``; if price is 0 and not ``strict``, retry once with
+        the POS UI default pricelist when it is a different record (mirrors omitting
+        ``pricelist_id`` so ``pricelist_id=1`` does not stick on "Default" with no rules).
+        Returns ``(price, pricelist_id_used)``; ``pricelist_id_used`` is None if ``pl_rec`` is empty.
+        """
+        if not pl_rec:
+            p = self._rest_product_unit_price(product, pl_rec, price_uom)
+            return float(p or 0.0), None
+        p = float(self._rest_product_unit_price(product, pl_rec, price_uom) or 0.0)
+        used_id = pl_rec.id
+        if strict or p > 0:
+            return p, used_id
+        alt = self._rest_default_pricelist()
+        if alt and alt.id != pl_rec.id:
+            p2 = float(self._rest_product_unit_price(product, alt, price_uom) or 0.0)
+            if p2 > 0:
+                return p2, alt.id
+        return p, used_id
+
+    def _rest_foreign_name(self, prod):
+        fn = getattr(prod, "foreign_name", None) or ""
+        if not fn and prod.product_tmpl_id:
+            fn = getattr(prod.product_tmpl_id, "foreign_name", None) or ""
+        return fn or ""
+
+    def _rest_category_type_payload(self, prod, ext):
+        """Shape used by the development mobile catalog (fragrances + properties)."""
+        cap = ((ext.capacity or "").strip()) if ext else ""
+        size_ml = None
+        if cap:
+            m = re.search(r"(\d+(?:\.\d+)?)\s*ML", cap.upper())
+            if m:
+                try:
+                    size_ml = float(m.group(1))
+                except ValueError:
+                    pass
+        size_kg = None
+        if cap:
+            m2 = re.search(r"(\d+(?:\.\d+)?)\s*KG", cap.upper())
+            if m2:
+                try:
+                    size_kg = float(m2.group(1))
+                except ValueError:
+                    pass
+        is_bulk = False
+        if prod.uom_id:
+            un = (prod.uom_id.name or "").lower()
+            is_bulk = ("كغم" in un or "kg" in un or "كيلو" in un) and (prod.uom_id.factor or 0) >= 0.5
+        gender = "Unisex"
+        if ext and ext.sap_classification_1:
+            g = (ext.sap_classification_1 or "").lower()
+            if any(x in g for x in ("men", "رجال", "male", "man")):
+                gender = "Men"
+            elif any(x in g for x in ("women", "نساء", "female", "ladies", "woman")):
+                gender = "Women"
+        return {
+            "type": "fragrances",
+            "name": "Fragrances",
+            "name_ar": "عطور",
+            "properties": {
+                "size_ml": size_ml,
+                "size_kg": size_kg,
+                "is_bulk": is_bulk,
+                "concentration": (ext.sap_classification_2 if ext else None) or None,
+                "gender": gender,
+                "season": None,
+                "longevity": None,
+                "sillage": None,
+            },
+        }
+
+    def _rest_product_catalog_row(self, prod, pl_rec, price_uom, strict_pl, pl_used_id):
+        """
+        One product record matching the legacy **development** catalog JSON shape
+        (rich UoMs, warehouses, brand, category_type, has_price, etc.).
+
+        ``list_price`` prefers the **pricelist-resolved** unit price (same as the slim
+        API clients already use); if that is zero, falls back to Odoo ``lst_price``.
+        """
+        catalog_price, priced_pl_id = self._rest_catalog_unit_price(
+            prod, pl_rec, price_uom, strict=strict_pl
+        )
+        Pl = request.env["product.pricelist"].sudo()
+        pl_uom = pl_rec
+        if priced_pl_id:
+            cand = Pl.browse(priced_pl_id).exists()
+            if cand:
+                pl_uom = cand
+
+        ctrl = PosPerfumeController()
+        raw_uoms = ctrl._get_uoms_from_pricelist(prod, pl_uom)
+        available_uoms = [
+            {"id": u["id"], "name": u["name"], "price": float(u.get("price") or 0.0)}
+            for u in raw_uoms
+        ]
+
+        lst_odoo = float(prod.lst_price or 0.0)
+        cat = float(catalog_price or 0.0)
+        list_price = cat if cat > 0 else lst_odoo
+        has_price = bool(list_price > 0) or any(
+            (u.get("price") or 0) > 0 for u in available_uoms
+        )
+
+        warehouses = ctrl._get_warehouses_simple(prod.id)
+        foreign_name = self._rest_foreign_name(prod)
+        _, color_class, badge_text = prod._get_product_priority_and_color(prod.default_code)
+        categ_name = prod.categ_id.name if prod.categ_id else ""
+        brand = {
+            "key": color_class or "",
+            "name": categ_name,
+            "code": badge_text or "",
+        }
+
+        ext = False
+        if "sap.product.extended" in request.env:
+            ext = request.env["sap.product.extended"].sudo().search(
+                [("product_id", "=", prod.id)], limit=1
+            )
+        items_group_code = int(ext.items_group_code or 0) if ext else 0
+        items_group_name = (ext.items_group_name or "") if ext else ""
+
+        category_type = self._rest_category_type_payload(prod, ext)
+
+        created_at = prod.create_date.isoformat() if prod.create_date else None
+        is_new = False
+        if prod.create_date:
+            is_new = (fields.Datetime.now() - prod.create_date) <= timedelta(days=45)
+
+        pu = price_uom or prod.uom_id
+        uom_payload = {"id": pu.id, "name": pu.name or ""} if pu else {"id": None, "name": ""}
+        categ_payload = (
+            {"id": prod.categ_id.id, "name": prod.categ_id.name or ""}
+            if prod.categ_id
+            else {"id": None, "name": ""}
+        )
+
+        row = {
+            "id": prod.id,
+            "name": prod.name or "",
+            "default_code": prod.default_code or "",
+            "foreign_name": foreign_name,
+            "uom_id": uom_payload,
+            "uom_name": (pu.name or "") if pu else "",
+            "list_price": list_price,
+            "qty_available": float(prod.qty_available),
+            "color_class": color_class or "",
+            "badge_text": badge_text or "",
+            "active": bool(prod.active),
+            "sale_ok": bool(prod.sale_ok),
+            "categ_id": categ_payload,
+            "items_group_code": items_group_code,
+            "items_group_name": items_group_name,
+            "brand": brand,
+            "category_type": category_type,
+            "available_uoms": available_uoms,
+            "has_price": has_price,
+            "warehouses": warehouses,
+            "created_at": created_at,
+            "is_new": is_new,
+        }
+        if (
+            priced_pl_id is not None
+            and pl_used_id is not None
+            and priced_pl_id != pl_used_id
+        ):
+            row["priced_pricelist_id"] = priced_pl_id
+        return row
+
+    def _rest_products_query_params(self):
+        """Merge query string with optional JSON body (POST) for SPA clients."""
+        args = request.httprequest.args
+        extra = {}
+        if request.httprequest.method == "POST" and (request.httprequest.data or b"").strip():
+            try:
+                extra = json.loads(request.httprequest.data.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                extra = {}
+        if not isinstance(extra, dict):
+            extra = {}
+
+        def pget(key, default=None):
+            v = extra.get(key)
+            if v is not None and v != "":
+                return v
+            return args.get(key, default)
+
+        return pget
 
     # --- bootstrap ---------------------------------------------------------
 
@@ -104,7 +481,7 @@ class PosPerfumeRestController(http.Controller):
         if not self._pos_rest_auth():
             return self._fail("Unauthorized", 401)
         env = request.env
-        pls = env["product.pricelist"].search([("active", "=", True)])
+        pls = env["product.pricelist"].search([("active", "=", True)], order="id asc", limit=100)
         whs = env["stock.warehouse"].search([])
         users = env["res.users"].search([("share", "=", False), ("active", "=", True)])
         sel = env["pos.perfume.order"]._fields["invoice_type"].selection
@@ -112,7 +489,7 @@ class PosPerfumeRestController(http.Controller):
             sel = sel(env["pos.perfume.order"])
         invoice_types = [{"key": k, "label": v} for k, v in sel]
         rate = env["pos.perfume.order"].sudo().get_exchange_rate_from_db()
-        default_pl = pls[:1]
+        default_pl = self._rest_pos_ui_default_pricelist()
         return self._ok(
             {
                 "pricelists": [{"id": p.id, "name": p.name, "currency_id": p.currency_id.id} for p in pls],
@@ -168,7 +545,10 @@ class PosPerfumeRestController(http.Controller):
     def pricelists(self, **kwargs):
         if not self._pos_rest_auth():
             return self._fail("Unauthorized", 401)
-        pls = request.env["product.pricelist"].search([("active", "=", True)])
+        pls = request.env["product.pricelist"].search(
+            [("active", "=", True)], order="id asc", limit=100
+        )
+        default_pl = self._rest_pos_ui_default_pricelist()
         items = [
             {
                 "id": p.id,
@@ -178,7 +558,13 @@ class PosPerfumeRestController(http.Controller):
             }
             for p in pls
         ]
-        return self._ok({"items": items, "total": len(items)})
+        return self._ok(
+            {
+                "items": items,
+                "total": len(items),
+                "default_pricelist_id": default_pl.id if default_pl else None,
+            }
+        )
 
     @http.route(f"{_PREFIX}/warehouses", type="http", auth="none", methods=list(_READ), csrf=False, cors="*")
     def warehouses(self, **kwargs):
@@ -286,48 +672,61 @@ class PosPerfumeRestController(http.Controller):
     def products(self, **kwargs):
         if not self._pos_rest_auth():
             return self._fail("Unauthorized", 401)
-        Product = request.env["product.product"]
-        q = request.httprequest.args.get("query") or ""
-        limit = min(int(request.httprequest.args.get("limit") or 80), 500)
-        offset = int(request.httprequest.args.get("offset") or 0)
-        pl_id = request.httprequest.args.get("pricelist_id")
+        Product = request.env["product.product"].sudo()
+        pget = self._rest_products_query_params()
+        q = pget("query") or ""
+        limit = min(int(pget("limit") or 80), 500)
+        offset = int(pget("offset") or 0)
+        pl_id = pget("pricelist_id")
         domain = [("sale_ok", "=", True), ("active", "=", True)]
         if q:
-            domain = (
-                ["&"]
-                + domain
-                + [
-                    "|",
-                    "|",
-                    ("name", "ilike", q),
-                    ("default_code", "ilike", q),
-                    ("barcode", "ilike", q),
-                ]
-            )
+            or_terms = [
+                ("name", "ilike", q),
+                ("default_code", "ilike", q),
+                ("barcode", "ilike", q),
+            ]
+            if "foreign_name" in Product._fields:
+                or_terms.append(("foreign_name", "ilike", q))
+            domain = ["&"] + domain + (["|"] * (len(or_terms) - 1)) + or_terms
+        categ_raw = pget("categ_id") or pget("category_id")
+        if categ_raw:
+            try:
+                cid = int(categ_raw)
+            except (TypeError, ValueError):
+                cid = None
+            if cid is not None:
+                # ``child_of`` on ``product.product`` can trigger hierarchy resolution that
+                # raises MissingError (HTML 404) if the category id is missing or blocked
+                # for the current user. Resolve subtree with sudo, then filter by ``in``.
+                Cat = request.env["product.category"].sudo().with_context(active_test=False)
+                root = Cat.browse(cid)
+                if not root.exists():
+                    return self._fail(
+                        "Unknown product category for categ_id / category_id.",
+                        404,
+                    )
+                subtree = Cat.search([("id", "child_of", root.ids)])
+                domain = ["&"] + domain + [("categ_id", "in", subtree.ids)]
         total = Product.search_count(domain)
         recs = Product.search(domain, limit=limit, offset=offset, order="name")
-        items = []
         pl_rec = False
         if pl_id:
             try:
-                pl_rec = request.env["product.pricelist"].browse(int(pl_id)).exists()
+                pl_rec = request.env["product.pricelist"].sudo().browse(int(pl_id)).exists()
             except (TypeError, ValueError):
                 pl_rec = False
+        if not pl_rec:
+            pl_rec = self._rest_default_pricelist()
+        pl_used_id = pl_rec.id if pl_rec else None
+        strict_pl = self._strict_pricelist_flag(pget)
+        items = []
         for prod in recs:
-            price = prod.list_price
-            if pl_rec:
-                price = pl_rec._get_product_price(prod, 1.0, uom=prod.uom_id)
-            items.append(
-                {
-                    "id": prod.id,
-                    "name": prod.name,
-                    "default_code": prod.default_code or "",
-                    "list_price": price,
-                    "uom_id": prod.uom_id.id,
-                    "uom_name": prod.uom_id.name,
-                }
+            price_uom = self._rest_price_uom(prod, pget)
+            row = self._rest_product_catalog_row(
+                prod, pl_rec, price_uom, strict_pl, pl_used_id
             )
-        return self._ok({"items": items, "total": total})
+            items.append(row)
+        return self._ok({"items": items, "total": total, "pricelist_id": pl_used_id})
 
     @http.route(
         f"{_PREFIX}/products/<int:product_id>",
@@ -340,28 +739,26 @@ class PosPerfumeRestController(http.Controller):
     def product_one(self, product_id, **kwargs):
         if not self._pos_rest_auth():
             return self._fail("Unauthorized", 401)
-        prod = request.env["product.product"].browse(product_id).exists()
+        prod = request.env["product.product"].sudo().browse(product_id).exists()
         if not prod:
             return self._fail("Product not found", 404)
-        pl_id = request.httprequest.args.get("pricelist_id")
-        price = prod.list_price
+        pget = self._rest_products_query_params()
+        pl_id = pget("pricelist_id")
+        pl_rec = False
         if pl_id:
             try:
-                pl_rec = request.env["product.pricelist"].browse(int(pl_id)).exists()
-                if pl_rec:
-                    price = pl_rec._get_product_price(prod, 1.0, uom=prod.uom_id)
+                pl_rec = request.env["product.pricelist"].sudo().browse(int(pl_id)).exists()
             except (TypeError, ValueError):
-                pass
-        return self._ok(
-            {
-                "id": prod.id,
-                "name": prod.name,
-                "default_code": prod.default_code or "",
-                "list_price": price,
-                "uom_id": prod.uom_id.id,
-                "uom_name": prod.uom_id.name,
-            }
+                pl_rec = False
+        if not pl_rec:
+            pl_rec = self._rest_default_pricelist()
+        price_uom = self._rest_price_uom(prod, pget)
+        strict_pl = self._strict_pricelist_flag(pget)
+        pl_used_id = pl_rec.id if pl_rec else None
+        payload = self._rest_product_catalog_row(
+            prod, pl_rec, price_uom, strict_pl, pl_used_id
         )
+        return self._ok(payload)
 
     @http.route(f"{_PREFIX}/products/data", type="http", auth="none", methods=["POST"], csrf=False, cors="*")
     def product_data(self, **kwargs):

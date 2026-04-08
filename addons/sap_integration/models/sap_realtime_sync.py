@@ -319,6 +319,36 @@ class SapRealtimeSync(models.Model):
 
         return list(merged.values())
 
+    def _resolve_item_prices_payload(self, connection, sap_item):
+        """
+        OData list queries for Items often omit ``ItemPrices`` or return it empty.
+        Re-fetch a single item by ItemCode (same pattern as bulk pricelist import) so
+        nested ``UoMPrices`` are present when SAP provides them.
+        """
+        sap_prices = sap_item.get('ItemPrices') or []
+        if sap_prices:
+            return sap_prices
+        code = sap_item.get('ItemCode')
+        if not code:
+            return []
+        esc = str(code).replace("'", "''")
+        try:
+            response = connection.get(
+                'Items',
+                {'$filter': f"ItemCode eq '{esc}'", '$top': 1},
+            )
+        except Exception as exc:
+            _logger.warning(
+                'SAP Realtime Sync: could not refetch ItemPrices for %s: %s',
+                code,
+                exc,
+            )
+            return []
+        rows = (response or {}).get('value') or []
+        if not rows:
+            return []
+        return rows[0].get('ItemPrices') or []
+
     def _fetch_changed_business_partners(self, connection, since_dt):
         """
         Fetch SAP BusinessPartners changed since since_dt.
@@ -518,10 +548,14 @@ class SapRealtimeSync(models.Model):
         PricelistSync = self.env['sap.product.pricelist.sync']
         Product = self.env['product.product']
         updated = 0
+        connection = backend.get_connection()
+        if not connection:
+            _logger.warning('SAP Realtime Sync: no SAP connection, skipping price sync')
+            return 0
 
         for sap_item in sap_items:
             item_code = sap_item.get('ItemCode')
-            sap_prices = sap_item.get('ItemPrices', [])
+            sap_prices = self._resolve_item_prices_payload(connection, sap_item)
             if not item_code or not sap_prices:
                 continue
             try:

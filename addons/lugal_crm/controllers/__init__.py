@@ -8,6 +8,7 @@ from . import analytics_controller
 from . import knowledge_controller
 from . import branch_controller
 from . import channel_controller
+from . import chat_controller
 from . import supply_controller
 from . import pos_bridge_controller
 from . import price_list_controller

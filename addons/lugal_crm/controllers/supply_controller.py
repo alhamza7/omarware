@@ -476,3 +476,123 @@ class SupplyController(http.Controller):
             return {'success': True, 'data': _container_to_dict(c)}
         except Exception as e:
             return crm_error(e, 'container_mark_clearance_delivered')
+
+    # --- Supply notifications (lugal.crm.supply.notification) -----------------
+
+    def _supply_notif_to_dict(self, n):
+        return {
+            'id': n.id,
+            'type': n.notif_type,
+            'title': n.title or '',
+            'body': n.body or '',
+            'related_id': n.related_id or None,
+            'related_type': n.related_model or '',
+            'is_read': n.is_read,
+            'created_at': n.create_date.isoformat() if n.create_date else None,
+        }
+
+    @http.route('/api/crm/supply/notifications/list', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_notifications_list(self, page=1, per_page=20, is_read=None, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized'}
+            uid = request.env.uid
+            domain = [('user_id', '=', uid)]
+            if is_read is not None:
+                domain.append(('is_read', '=', bool(is_read)))
+            Notif = request.env['lugal.crm.supply.notification']
+            total = Notif.search_count(domain)
+            unread_count = Notif.search_count([('user_id', '=', uid), ('is_read', '=', False)])
+            page = max(1, int(page or 1))
+            per_page = max(1, min(int(per_page or 20), 100))
+            offset = (page - 1) * per_page
+            recs = Notif.search(domain, limit=per_page, offset=offset, order='create_date desc, id desc')
+            return {
+                'success': True,
+                'data': {
+                    'items': [self._supply_notif_to_dict(n) for n in recs],
+                    'total': total,
+                    'unread_count': unread_count,
+                    'page': page,
+                    'per_page': per_page,
+                },
+            }
+        except Exception as e:
+            return crm_error(e, 'supply_notifications_list')
+
+    @http.route('/api/crm/supply/notifications/create', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_notifications_create(
+        self, user_id=None, notif_type='general', title=None, body=None,
+        related_id=None, related_type=None, **kwargs
+    ):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized'}
+            if not title:
+                return {'success': False, 'error': 'title is required'}
+            target_uid = int(user_id) if user_id else request.env.uid
+            vals = {
+                'user_id': target_uid,
+                'notif_type': notif_type or 'general',
+                'title': title,
+                'body': body or '',
+                'related_model': related_type or '',
+            }
+            if related_id is not None:
+                vals['related_id'] = int(related_id)
+            n = request.env['lugal.crm.supply.notification'].create(vals)
+            return {'success': True, 'data': self._supply_notif_to_dict(n)}
+        except Exception as e:
+            return crm_error(e, 'supply_notifications_create')
+
+    @http.route(
+        '/api/crm/supply/notifications/<int:notif_id>/mark_read',
+        type='jsonrpc',
+        auth='none',
+        csrf=False,
+        methods=['POST'],
+    )
+    def supply_notifications_mark_read(self, notif_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized'}
+            n = request.env['lugal.crm.supply.notification'].browse(notif_id)
+            if not n.exists() or n.user_id.id != request.env.uid:
+                return {'success': False, 'error': 'Notification not found'}
+            n.write({'is_read': True})
+            return {'success': True, 'data': self._supply_notif_to_dict(n)}
+        except Exception as e:
+            return crm_error(e, 'supply_notifications_mark_read')
+
+    @http.route('/api/crm/supply/notifications/mark_all_read', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_notifications_mark_all_read(self, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized'}
+            Notif = request.env['lugal.crm.supply.notification']
+            recs = Notif.search([('user_id', '=', request.env.uid), ('is_read', '=', False)])
+            n = len(recs)
+            if recs:
+                recs.write({'is_read': True})
+            return {'success': True, 'data': {'marked': n}}
+        except Exception as e:
+            return crm_error(e, 'supply_notifications_mark_all_read')
+
+    @http.route(
+        '/api/crm/supply/notifications/<int:notif_id>/delete',
+        type='jsonrpc',
+        auth='none',
+        csrf=False,
+        methods=['POST'],
+    )
+    def supply_notifications_delete(self, notif_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized'}
+            n = request.env['lugal.crm.supply.notification'].browse(notif_id)
+            if not n.exists() or n.user_id.id != request.env.uid:
+                return {'success': False, 'error': 'Notification not found'}
+            n.unlink()
+            return {'success': True}
+        except Exception as e:
+            return crm_error(e, 'supply_notifications_delete')

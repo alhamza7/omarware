@@ -180,13 +180,11 @@ class SapProductPricelistSync(models.Model):
                     # Extract price information
                     pricelist_num = int(price_data.get('PriceList', 0))
                     
-                    # Handle None price - skip if price is None
                     price_value = price_data.get('Price')
                     if price_value is None or price_value == '':
-                        _logger.warning(f"Skipping price for {product.name} in pricelist {pricelist_num}: Price is None")
-                        continue
-                    
-                    price = float(price_value)
+                        price = None
+                    else:
+                        price = float(price_value)
                     currency_code = price_data.get('Currency', self.env.company.currency_id.name)
                     uom_code = price_data.get('UoMCode', '')
                     
@@ -203,6 +201,20 @@ class SapProductPricelistSync(models.Model):
                     if not resolved_uom:
                         resolved_uom = self._get_sales_uom_for_product(product, backend)
 
+                    if price is None or price <= 0:
+                        lifted = self._price_from_uom_prices_fallback(
+                            price_data, backend, resolved_uom
+                        )
+                        if lifted is not None and lifted > 0:
+                            price = lifted
+                    if price is None:
+                        _logger.warning(
+                            "Skipping price for %s in pricelist %s: Price missing and no UoMPrices",
+                            product.name,
+                            pricelist_num,
+                        )
+                        continue
+
                     # Search for existing sync record
                     sync_domain = [
                         ('product_id', '=', product.id),
@@ -215,9 +227,14 @@ class SapProductPricelistSync(models.Model):
                         sync_domain += [('uom_id', '=', resolved_uom.id if resolved_uom else False)]
                     sync_record = self.search(sync_domain, limit=1)
                     
-                    # Prepare values
+                    # Prepare values (use resolved price so sync row matches pricelist item)
                     vals = self._prepare_sync_values(
-                        product, backend, odoo_pricelist, price_data, resolved_uom
+                        product,
+                        backend,
+                        odoo_pricelist,
+                        price_data,
+                        resolved_uom,
+                        sync_price=price,
                     )
                     
                     if sync_record:
@@ -317,7 +334,42 @@ class SapProductPricelistSync(models.Model):
             _logger.error(f"Error syncing product prices: {str(e)}")
             raise
     
-    def _prepare_sync_values(self, product, backend, odoo_pricelist, price_data, uom=None):
+    def _price_from_uom_prices_fallback(self, price_data, backend, resolved_uom):
+        """
+        SAP often sends ItemPrice.Price = 0 (or omits it) while the real amount is only under
+        UoMPrices. Pick a positive row, preferring the Odoo UoM that matches ``resolved_uom``.
+        """
+        rows = price_data.get('UoMPrices') or []
+        if not rows:
+            return None
+        UomSync = self.env['sap.uom.sync'].sudo()
+        candidates = []
+        for row in rows:
+            uom_entry = row.get('UoMEntry')
+            raw = row.get('Price')
+            if uom_entry is None or raw is None or raw == '':
+                continue
+            try:
+                val = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if val <= 0:
+                continue
+            uom_sync = UomSync.search(
+                [('backend_id', '=', backend.id), ('sap_uom_entry', '=', uom_entry)],
+                limit=1,
+            )
+            od_u = uom_sync.odoo_uom_id if uom_sync else None
+            candidates.append((val, od_u))
+        if not candidates:
+            return None
+        if resolved_uom:
+            for val, od_u in candidates:
+                if od_u and od_u.id == resolved_uom.id:
+                    return val
+        return max(c[0] for c in candidates)
+    
+    def _prepare_sync_values(self, product, backend, odoo_pricelist, price_data, uom=None, sync_price=None):
         """Prepare values for sync record"""
         currency = self.env['res.currency'].search([
             ('name', '=', price_data.get('Currency', self.env.company.currency_id.name))
@@ -326,9 +378,11 @@ class SapProductPricelistSync(models.Model):
         if not currency:
             currency = self.env.company.currency_id
         
-        # Handle None price safely
-        price_value = price_data.get('Price', 0.0)
-        price = 0.0 if price_value is None else float(price_value)
+        if sync_price is not None:
+            price = float(sync_price)
+        else:
+            price_value = price_data.get('Price', 0.0)
+            price = 0.0 if price_value is None else float(price_value)
         
         return {
             'product_id': product.id,

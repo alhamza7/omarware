@@ -19,6 +19,7 @@ from . import crm_kb_article
 from . import crm_kb_notification
 from . import crm_supply_po
 from . import crm_supply_po_line
+from . import crm_supply_notification
 from . import crm_requested_item
 from . import crm_shift
 from . import crm_attendance

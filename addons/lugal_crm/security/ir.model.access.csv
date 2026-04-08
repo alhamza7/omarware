@@ -17,6 +17,7 @@ access_lugal_crm_kb_article_user,lugal.crm.kb.article.user,model_lugal_crm_kb_ar
 access_lugal_crm_kb_notification_user,lugal.crm.kb.notification.user,model_lugal_crm_kb_notification,base.group_user,1,1,1,1
 access_lugal_crm_supply_po_user,lugal.crm.supply.po.user,model_lugal_crm_supply_po,base.group_user,1,1,1,1
 access_lugal_crm_supply_po_line_user,lugal.crm.supply.po.line.user,model_lugal_crm_supply_po_line,base.group_user,1,1,1,1
+access_lugal_crm_supply_notification_user,lugal.crm.supply.notification.user,model_lugal_crm_supply_notification,base.group_user,1,1,1,1
 access_lugal_crm_requested_item_user,lugal.crm.requested.item.user,model_lugal_crm_requested_item,base.group_user,1,1,1,1
 access_lugal_crm_shift_user,lugal.crm.shift.user,model_lugal_crm_shift,base.group_user,1,1,1,0
 access_lugal_crm_attendance_user,lugal.crm.attendance.user,model_lugal_crm_attendance,base.group_user,1,1,1,1

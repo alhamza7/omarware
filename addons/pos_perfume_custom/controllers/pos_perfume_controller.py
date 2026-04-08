@@ -120,7 +120,7 @@ class PosPerfumeController(http.Controller):
 
         # Step 1: Get available UoMs from SAP UoM Group
         available_uom_ids = []
-        extended_info = request.env['sap.product.extended'].search(
+        extended_info = request.env['sap.product.extended'].sudo().search(
             [('product_id', '=', product.id)], limit=1
         )
         if extended_info and extended_info.sap_uom_group_id:
@@ -129,7 +129,7 @@ class PosPerfumeController(http.Controller):
             _logger.info(f"[POS] UoM Group: {extended_info.sap_uom_group_id.name}, UoMs: {available_uom_ids}")
 
         # Step 2: Get pricelist items for this product
-        items = request.env['product.pricelist.item'].search([
+        items = request.env['product.pricelist.item'].sudo().search([
             ('pricelist_id', '=', pricelist.id),
             ('product_tmpl_id', '=', product.product_tmpl_id.id),
             '|', ('product_id', '=', False), ('product_id', '=', product.id),

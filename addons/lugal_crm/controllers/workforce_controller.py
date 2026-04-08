@@ -377,3 +377,28 @@ class WorkforceController(http.Controller):
             return {'success': True, 'data': {'rendered': rendered, 'rendered_ar': rendered_ar}}
         except Exception as e:
             return crm_error(e, 'template_render')
+
+    @http.route('/api/crm/employees/list', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def employees_list(self, **kwargs):
+        """Internal active users (CRM / supply assignment pickers)."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized'}
+            users = request.env['res.users'].search(
+                [('share', '=', False), ('active', '=', True)],
+                order='name asc',
+                limit=500,
+            )
+            items = []
+            for u in users:
+                items.append({
+                    'id': u.id,
+                    'name': u.name or '',
+                    'email': u.email or '',
+                    'login': u.login or '',
+                    'job_position': u.partner_id.function or '',
+                    'avatar': f'/web/image/res.users/{u.id}/avatar_128',
+                })
+            return {'success': True, 'data': {'items': items, 'total': len(items)}}
+        except Exception as e:
+            return crm_error(e, 'employees_list')
