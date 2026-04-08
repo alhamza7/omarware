@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+
+        <!-- Ticket auto-numbering sequence (e.g. TKT-00001). Prefix and padding reset from Settings. -->
+        <record id="seq_lugal_crm_ticket" model="ir.sequence">
+            <field name="name">Lugal CRM Ticket</field>
+            <field name="code">lugal.crm.ticket</field>
+            <field name="prefix">TKT-</field>
+            <field name="padding">5</field>
+            <field name="number_next">1</field>
+            <field name="number_increment">1</field>
+            <field name="use_date_range">False</field>
+        </record>
+
+        <!-- QA Review auto-numbering sequence (e.g. QA-00001) -->
+        <record id="seq_lugal_crm_qa_review" model="ir.sequence">
+            <field name="name">Lugal CRM QA Review</field>
+            <field name="code">lugal.crm.qa.review</field>
+            <field name="prefix">QA-</field>
+            <field name="padding">5</field>
+            <field name="number_next">1</field>
+            <field name="number_increment">1</field>
+            <field name="use_date_range">False</field>
+        </record>
+
+    </data>
+</odoo>

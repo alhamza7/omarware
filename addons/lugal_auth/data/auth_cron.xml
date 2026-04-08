@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Purge expired JWT blacklist rows — runs daily at 02:00 -->
+    <record id="cron_purge_jwt_blacklist" model="ir.cron">
+        <field name="name">Lugal Auth: Purge Expired Blacklist Entries</field>
+        <field name="model_id" ref="lugal_auth.model_lugal_jwt_blacklist"/>
+        <field name="state">code</field>
+        <field name="code">model.action_purge_expired_entries()</field>
+        <field name="interval_number">1</field>
+        <field name="interval_type">days</field>
+        <field name="active">True</field>
+    </record>
+
+    <!-- Purge stale rate-limit records — runs every 6 hours -->
+    <record id="cron_purge_rate_limits" model="ir.cron">
+        <field name="name">Lugal Auth: Purge Stale Rate Limit Records</field>
+        <field name="model_id" ref="lugal_auth.model_lugal_auth_rate_limit"/>
+        <field name="state">code</field>
+        <field name="code">model.action_purge_old_entries()</field>
+        <field name="interval_number">6</field>
+        <field name="interval_type">hours</field>
+        <field name="active">True</field>
+    </record>
+</odoo>
