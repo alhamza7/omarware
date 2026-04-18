@@ -372,7 +372,7 @@ class PriceListController(http.Controller):
                         }
                     domain.append(('id', 'in', list(disc)))
 
-            Product = request.env['product.product']
+            Product = request.env['product.product'].sudo()
             total = Product.search_count(domain)
 
             try:
