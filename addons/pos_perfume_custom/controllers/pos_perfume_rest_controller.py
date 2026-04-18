@@ -139,6 +139,77 @@ class PosPerfumeRestController(http.Controller):
                 return u
         return product.uom_id
 
+    def _rest_resolve_catalog_uom(self, pget):
+        """Resolve ``uom`` / ``uom_id`` query keys to ``uom.uom`` (no product fallback)."""
+        uid = pget("uom_id")
+        if uid not in (None, ""):
+            try:
+                u = request.env["uom.uom"].sudo().browse(int(uid))
+                if u.exists():
+                    return u
+            except (TypeError, ValueError):
+                pass
+        raw = (pget("uom") or "").strip()
+        if not raw:
+            return request.env["uom.uom"].browse()
+        Uom = request.env["uom.uom"].sudo()
+        u = Uom.search([("name", "ilike", raw)], limit=1)
+        if u:
+            return u
+        low = raw.lower()
+        if low in ("kg", "kilo", "kilogram", "kgs"):
+            u = Uom.search(
+                [
+                    "|",
+                    "|",
+                    ("name", "ilike", "كغم"),
+                    ("name", "ilike", "كيلو"),
+                    ("name", "ilike", "KG"),
+                ],
+                limit=1,
+            )
+            if u:
+                return u
+        if low in ("g", "gram", "grams"):
+            u = Uom.search(["|", ("name", "ilike", "غرام"), ("name", "ilike", "gram")], limit=1)
+            if u:
+                return u
+        return request.env["uom.uom"].browse()
+
+    def _rest_product_ids_for_uom_filter(self, env, uom_id, align_sap_sales_unit):
+        """
+        Variant ids for catalog restriction by UoM — same rules as CRM
+        ``/api/crm/pricelist/products`` (``uom_align_sap_sales_unit`` on ``lugal_crm``).
+        """
+        if not align_sap_sales_unit or "sap.product.extended" not in env:
+            Extended = env["sap.product.extended"].sudo()
+            Product = env["product.product"].sudo()
+            ext_pids = Extended.search([("sales_uom_id", "=", uom_id)]).mapped("product_id").ids
+            tpl_ids = Product.search([("uom_id", "=", uom_id)]).ids
+            return list(set(tpl_ids) | set(ext_pids))
+        Extended = env["sap.product.extended"].sudo()
+        Product = env["product.product"].sudo()
+        ids_sales = set(
+            Extended.search([("sales_uom_id", "=", uom_id)]).mapped("product_id").ids
+        )
+        tpl_products = Product.search([("uom_id", "=", uom_id)])
+        if not tpl_products:
+            return list(ids_sales)
+        ext_by_pid = {
+            e.product_id.id: e
+            for e in Extended.search([("product_id", "in", tpl_products.ids)])
+        }
+        ids_tpl_ok = set()
+        for p in tpl_products:
+            ext = ext_by_pid.get(p.id)
+            if ext is None:
+                ids_tpl_ok.add(p.id)
+            else:
+                su = ext.sales_unit
+                if su and str(su).strip():
+                    ids_tpl_ok.add(p.id)
+        return list(ids_sales | ids_tpl_ok)
+
     def _rest_price_first_applicable_rule(self, product, pl_rec, price_uom, quantity=1.0):
         """Same rule chain as product.pricelist._compute_price_rule (incl. category / global lines)."""
         if not pl_rec or not product:
@@ -818,6 +889,19 @@ class PosPerfumeRestController(http.Controller):
             if not pref.endswith("%"):
                 pref = pref + "%"
             domain = ["&"] + domain + [("default_code", "ilike", pref)]
+
+        if self._rest_query_bool(pget, "uom_filter_catalog", False):
+            uom_rec = self._rest_resolve_catalog_uom(pget)
+            if not uom_rec or not uom_rec.exists():
+                return self._fail(
+                    "uom_filter_catalog=1 requires a resolvable uom or uom_id (e.g. uom=kg).",
+                    400,
+                )
+            align = self._rest_query_bool(pget, "uom_align_sap_sales_unit", True)
+            narrowed = self._rest_product_ids_for_uom_filter(
+                request.env, uom_rec.id, align_sap_sales_unit=align
+            )
+            domain = ["&"] + domain + [("id", "in", narrowed)]
 
         brand_raw = (pget("brand") or "").strip()
         cat_type_raw = (pget("category_type") or "").strip()
