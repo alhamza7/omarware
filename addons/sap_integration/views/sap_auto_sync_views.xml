@@ -51,6 +51,7 @@
                                 <field name="sync_products"/>
                                 <field name="sync_commercial_flags"/>
                                 <field name="force_enable_sales_pos"/>
+                                <field name="deactivate_odoo_not_in_sap"/>
                             </group>
                             <group>
                                 <field name="sync_pricelists"/>

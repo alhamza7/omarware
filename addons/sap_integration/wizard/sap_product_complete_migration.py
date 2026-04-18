@@ -13,7 +13,7 @@ This includes:
 - Warehouse information with stock levels
 """
 
-from odoo import models, fields, api
+from odoo import _, api, fields, models
 from odoo.exceptions import UserError
 import logging
 from datetime import datetime
@@ -83,7 +83,14 @@ class SapProductCompleteMigration(models.TransientModel):
         help="If enabled: all active SAP items get sale_ok and POS regardless of SalesItem. "
              "If disabled (recommended): sale_ok / POS follow SAP SalesItem; purchase_ok follows PurchaseItem."
     )
-    
+    deactivate_odoo_not_in_sap = fields.Boolean(
+        string='Deactivate Odoo-only products (no SAP Item)',
+        default=False,
+        help="After applying SAP flags: archive every product template whose default_code is not "
+             "present in the SAP Items catalog (ItemCode). Use only when Odoo must mirror SAP 1:1. "
+             "Local-only products will be archived.",
+    )
+
     # ========== State ==========
     state = fields.Selection([
         ('draft', 'Draft'),
@@ -253,8 +260,10 @@ class SapProductCompleteMigration(models.TransientModel):
         updated = 0
         not_in_odoo = 0
         errors = 0
+        deactivated = 0
         Product = self.env['product.product'].sudo()
         sap_rows_seen = 0
+        sap_codes = set()
         try:
             while True:
                 if self.product_limit > 0 and sap_rows_seen >= self.product_limit:
@@ -281,26 +290,33 @@ class SapProductCompleteMigration(models.TransientModel):
                     item_code = (item_data.get('ItemCode') or '').strip()
                     if not item_code:
                         continue
-                    product = Product.search(
+                    sap_codes.add(item_code)
+                    products = Product.search(
                         [('default_code', '=', item_code), ('active', 'in', [True, False])],
                         order='active desc, id desc',
-                        limit=1,
                     )
-                    if not product:
+                    if not products:
                         not_in_odoo += 1
                         continue
                     try:
                         flags = self._sap_commercial_flags_from_item(
                             item_data, self.force_enable_sales_pos
                         )
-                        tmpl = product.product_tmpl_id.sudo()
-                        tmpl.write({
+                        write_vals = {
                             'active': flags['active'],
                             'sale_ok': flags['sale_ok'],
                             'purchase_ok': flags['purchase_ok'],
                             'available_in_pos': flags['available_in_pos'],
-                        })
-                        updated += 1
+                        }
+                        seen_tpl = set()
+                        for product in products:
+                            tmpl = product.product_tmpl_id.sudo()
+                            tid = tmpl.id
+                            if tid in seen_tpl:
+                                continue
+                            seen_tpl.add(tid)
+                            tmpl.write(write_vals)
+                            updated += 1
                     except Exception:
                         errors += 1
                         _logger.exception(
@@ -308,16 +324,73 @@ class SapProductCompleteMigration(models.TransientModel):
                         )
                 skip += len(batch)
                 self.env.cr.commit()
+            if self.deactivate_odoo_not_in_sap and sap_codes:
+                seen_tmpl = set()
+                orphans = Product.search(
+                    [('default_code', '!=', False), ('default_code', '!=', '')]
+                )
+                for prod in orphans:
+                    code = (prod.default_code or '').strip()
+                    if not code or code in sap_codes:
+                        continue
+                    tmpl = prod.product_tmpl_id.sudo()
+                    tid = tmpl.id
+                    if tid in seen_tmpl:
+                        continue
+                    seen_tmpl.add(tid)
+                    try:
+                        tmpl.write({
+                            'active': False,
+                            'sale_ok': False,
+                            'purchase_ok': False,
+                            'available_in_pos': False,
+                        })
+                        deactivated += 1
+                    except Exception:
+                        errors += 1
+                        _logger.exception(
+                            'sync_commercial_flags: deactivate orphan failed for %s', code
+                        )
+                self.env.cr.commit()
         finally:
             connection.close_session()
         _logger.info(
-            'SAP commercial flags sync done: updated=%s not_in_odoo=%s errors=%s',
-            updated, not_in_odoo, errors,
+            'SAP commercial flags sync done: updated=%s not_in_odoo=%s errors=%s deactivated=%s',
+            updated, not_in_odoo, errors, deactivated,
         )
         return {
             'updated': updated,
             'not_in_odoo': not_in_odoo,
             'errors': errors,
+            'deactivated_not_in_sap': deactivated,
+        }
+
+    def action_sync_commercial_flags_only(self):
+        """Button: SAP Items → Odoo template flags (Valid/Frozen/SalesItem) only."""
+        self.ensure_one()
+        if not self.backend_id:
+            raise UserError(_('SAP Backend is required.'))
+        res = self.sync_commercial_flags_from_sap()
+        msg = _(
+            'SAP→Odoo commercial sync finished.\n'
+            '• Templates updated from SAP: %(upd)s\n'
+            '• SAP ItemCodes with no Odoo product: %(miss)s\n'
+            '• Odoo-only templates deactivated: %(dea)s\n'
+            '• Errors: %(err)s',
+            upd=res.get('updated', 0),
+            miss=res.get('not_in_odoo', 0),
+            dea=res.get('deactivated_not_in_sap', 0),
+            err=res.get('errors', 0),
+        )
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': _('SAP / Odoo commercial alignment'),
+                'message': msg,
+                'type': 'success' if not res.get('errors') else 'warning',
+                'sticky': True,
+            },
         }
 
     def _log_error(self, error_msg, exception=None):
