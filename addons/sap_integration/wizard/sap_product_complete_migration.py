@@ -79,8 +79,9 @@ class SapProductCompleteMigration(models.TransientModel):
     )
     force_enable_sales_pos = fields.Boolean(
         string='Force Enable Sales & POS',
-        default=True,
-        help="Enable all imported products in Sales and Point of Sale, regardless of SAP settings"
+        default=False,
+        help="If enabled: all active SAP items get sale_ok and POS regardless of SalesItem. "
+             "If disabled (recommended): sale_ok / POS follow SAP SalesItem; purchase_ok follows PurchaseItem."
     )
     
     # ========== State ==========
@@ -181,6 +182,144 @@ class SapProductCompleteMigration(models.TransientModel):
             }
         )
     
+    @staticmethod
+    def _sap_bool_flag(value, default_true=True):
+        """SAP tYES/tNO, Y/N, bool → bool."""
+        if value is None or value == '':
+            return bool(default_true)
+        if isinstance(value, bool):
+            return value
+        v = str(value).strip().upper()
+        return v in ('Y', 'YES', 'TYES', '1', 'TRUE')
+
+    @api.model
+    def _sap_item_is_frozen(self, item_data):
+        """SAP Frozen = tYES / True → item is inactive (not offered)."""
+        v = item_data.get('Frozen')
+        if v is True:
+            return True
+        if v is False:
+            return False
+        if v is None or v == '':
+            return False
+        sv = str(v).strip().upper()
+        return sv in ('TYES', 'YES', 'Y', '1', 'TRUE', 'T')
+
+    @api.model
+    def _sap_item_is_active_for_odoo(self, item_data):
+        """
+        Odoo product.template active ↔ SAP Item: not Frozen and Valid (when present).
+        - Frozen tYES: archived in Odoo.
+        - Valid tNO / N: archived in Odoo; if Valid omitted, only Frozen applies.
+        """
+        if self._sap_item_is_frozen(item_data):
+            return False
+        if 'Valid' in item_data and item_data.get('Valid') is not None and item_data.get('Valid') != '':
+            return self._sap_bool_flag(item_data.get('Valid'), default_true=True)
+        return True
+
+    @api.model
+    def _sap_commercial_flags_from_item(self, item_data, force_enable_sales_pos):
+        """
+        Map SAP Items row → Odoo template flags (Sales, Purchase, POS).
+        Mirrors SAP Business One: Valid, Frozen, SalesItem, PurchaseItem.
+        """
+        is_active = self._sap_item_is_active_for_odoo(item_data)
+        is_sales_item = self._sap_bool_flag(item_data.get('SalesItem'), default_true=True)
+        is_purchase_item = self._sap_bool_flag(item_data.get('PurchaseItem'), default_true=True)
+        if force_enable_sales_pos:
+            enable_sales = is_active
+            enable_pos = is_active
+        else:
+            enable_sales = is_active and is_sales_item
+            enable_pos = is_active and is_sales_item
+        return {
+            'active': is_active,
+            'sale_ok': enable_sales,
+            'purchase_ok': is_active and is_purchase_item,
+            'available_in_pos': enable_pos,
+        }
+
+    def sync_commercial_flags_from_sap(self):
+        """
+        Scan all SAP Items and update only active / sale_ok / purchase_ok / available_in_pos
+        on matching Odoo products (by ItemCode = default_code). Active follows SAP Valid + Frozen.
+        """
+        self.ensure_one()
+        if not self.backend_id:
+            raise UserError('SAP Backend is required.')
+        connection = self.backend_id.get_connection()
+        skip = 0
+        updated = 0
+        not_in_odoo = 0
+        errors = 0
+        Product = self.env['product.product'].sudo()
+        sap_rows_seen = 0
+        try:
+            while True:
+                if self.product_limit > 0 and sap_rows_seen >= self.product_limit:
+                    break
+                current_batch_size = self.batch_size
+                if self.product_limit > 0:
+                    remaining = self.product_limit - sap_rows_seen
+                    if remaining <= 0:
+                        break
+                    current_batch_size = min(self.batch_size, max(remaining, 1))
+                params = {
+                    '$top': current_batch_size,
+                    '$skip': skip,
+                    '$orderby': 'ItemCode',
+                }
+                items_data = connection.get('Items', params)
+                batch = (items_data or {}).get('value') or []
+                if not batch:
+                    break
+                for item_data in batch:
+                    if self.product_limit > 0 and sap_rows_seen >= self.product_limit:
+                        break
+                    sap_rows_seen += 1
+                    item_code = (item_data.get('ItemCode') or '').strip()
+                    if not item_code:
+                        continue
+                    product = Product.search(
+                        [('default_code', '=', item_code), ('active', 'in', [True, False])],
+                        order='active desc, id desc',
+                        limit=1,
+                    )
+                    if not product:
+                        not_in_odoo += 1
+                        continue
+                    try:
+                        flags = self._sap_commercial_flags_from_item(
+                            item_data, self.force_enable_sales_pos
+                        )
+                        tmpl = product.product_tmpl_id.sudo()
+                        tmpl.write({
+                            'active': flags['active'],
+                            'sale_ok': flags['sale_ok'],
+                            'purchase_ok': flags['purchase_ok'],
+                            'available_in_pos': flags['available_in_pos'],
+                        })
+                        updated += 1
+                    except Exception:
+                        errors += 1
+                        _logger.exception(
+                            'sync_commercial_flags: failed for %s', item_code
+                        )
+                skip += len(batch)
+                self.env.cr.commit()
+        finally:
+            connection.close_session()
+        _logger.info(
+            'SAP commercial flags sync done: updated=%s not_in_odoo=%s errors=%s',
+            updated, not_in_odoo, errors,
+        )
+        return {
+            'updated': updated,
+            'not_in_odoo': not_in_odoo,
+            'errors': errors,
+        }
+
     def _log_error(self, error_msg, exception=None):
         """Log error to errors_log"""
         current_errors = self.errors_log or ''
@@ -785,38 +924,12 @@ class SapProductCompleteMigration(models.TransientModel):
         default_uom_id = sales_uom_id or inventory_uom_id or purchase_uom_id
         
         # ========== Prepare basic values ==========
-        # Active flag from SAP (Frozen = tYES => inactive)
-        is_active = (item_data.get('Frozen') or 'tNO') != 'tYES'
+        flags = self._sap_commercial_flags_from_item(item_data, self.force_enable_sales_pos)
 
-        # Normalize SalesItem / PurchaseItem from SAP to robust booleans
-        def _to_bool_flag(value, default_true=True):
-            """
-            Convert SAP Y/N / tYES/tNO / True/False style flags to boolean.
-            If value is empty and default_true=True, treat as True.
-            """
-            if value is None or value == '':
-                return bool(default_true)
-            if isinstance(value, bool):
-                return value
-            v = str(value).strip().upper()
-            return v in ('Y', 'YES', 'TYES', '1', 'TRUE')
-
-        is_sales_item = _to_bool_flag(item_data.get('SalesItem'), default_true=True)
-        is_purchase_item = _to_bool_flag(item_data.get('PurchaseItem'), default_true=True)
-        
         # Handle prices safely (in case they are None)
         sales_price = item_data.get('SalesUnitPrice', 0) or 0
         purchase_price = item_data.get('PurchaseUnitPrice', 0) or 0
-        
-        # Determine if product should be enabled in Sales and POS
-        # If force_enable_sales_pos is True, enable all active products
-        if self.force_enable_sales_pos:
-            enable_sales = is_active
-            enable_pos = is_active
-        else:
-            enable_sales = is_active and is_sales_item
-            enable_pos = is_active and is_sales_item
-        
+
         vals = {
             'name': item_name,
             'default_code': item_code,  # Already normalized (no whitespace)
@@ -825,11 +938,10 @@ class SapProductCompleteMigration(models.TransientModel):
             'type': 'consu',  # Consumable = Storable products (displayed as "Goods" in UI)
             'tracking': 'none',  # Enable inventory tracking
             'is_storable': True,  # Enable "Track Inventory" checkbox in UI
-            'active': is_active,
-            # Enable Sales and POS based on configuration
-            'sale_ok': enable_sales,
-            'purchase_ok': is_active and is_purchase_item,
-            'available_in_pos': enable_pos,  # Add to POS if active
+            'active': flags['active'],
+            'sale_ok': flags['sale_ok'],
+            'purchase_ok': flags['purchase_ok'],
+            'available_in_pos': flags['available_in_pos'],
         }
         
         # ========== Add UoMs ==========

@@ -8,13 +8,30 @@ export function useProducts(branchId?: number) {
 
   const fetchProducts = useCallback(async () => {
     store.setLoading(true);
+    const rawCat = store.category?.trim();
+    const categoryId =
+      rawCat && /^\d+$/.test(rawCat) ? Number(rawCat) : undefined;
+    const q = store.search?.trim() || undefined;
     const [prodRes, priceRes] = await Promise.all([
-      productService.listProducts({ search: store.search || undefined, category: store.category ?? undefined }),
-      productService.getPriceList(branchId),
+      productService.listProducts({
+        search: q,
+        category_id: categoryId ?? null,
+        fetch_all: true,
+      }),
+      productService.getPriceList({
+        branchId,
+        search: q,
+        categoryId,
+        fetchAll: true,
+      }),
     ]);
-    if (prodRes.success && prodRes.data)   store.setProducts(prodRes.data.items ?? [], prodRes.data.total ?? 0);
-    /** pricelist returns { data: { items: [] } } — extract the array */
-    if (priceRes.success && priceRes.data) store.setPriceList(priceRes.data.items ?? []);
+    if (prodRes.success) {
+      const d = prodRes.data;
+      store.setProducts(d?.items ?? [], d?.total ?? 0);
+    }
+    if (priceRes.success) {
+      store.setPriceList(priceRes.data?.items ?? []);
+    }
     if (!prodRes.success) store.setError(prodRes.error ?? 'Failed to load products');
     else store.setLoading(false);
   }, [store.search, store.category, branchId]);

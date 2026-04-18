@@ -76,6 +76,11 @@ class LugalSupplyContainer(models.Model):
         'container_id', 'attachment_id',
         string='Attachments / المرفقات',
     )
+    penalty_ids = fields.One2many(
+        'lugal.supply.container.penalty',
+        'container_id',
+        string='Penalties / الغرامات',
+    )
 
     notes = fields.Text(string='Notes / ملاحظات', tracking=True)
     active = fields.Boolean(string='Active', default=True)

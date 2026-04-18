@@ -19,6 +19,17 @@ class SapAutoSync(models.Model):
     sync_pricelists = fields.Boolean(string='Sync Pricelists', default=True)
     sync_warehouse = fields.Boolean(string='Sync Warehouse Info', default=False)
     sync_uom_groups = fields.Boolean(string='Sync UoM Groups', default=False)
+    sync_commercial_flags = fields.Boolean(
+        string='Sync Sales/Purchase/POS flags (cron)',
+        default=True,
+        help="When enabled, the scheduled job updates active, sale_ok, purchase_ok, "
+             "and available_in_pos from SAP Items (Valid, Frozen, SalesItem, PurchaseItem)."
+    )
+    force_enable_sales_pos = fields.Boolean(
+        string='Force Sales & POS for all active items',
+        default=False,
+        help="If set, ignores SAP SalesItem for sale_ok/POS during auto-sync and flag sync."
+    )
     
     # Batch Settings
     batch_size = fields.Integer(string='Batch Size', default=100)
@@ -57,6 +68,37 @@ class SapAutoSync(models.Model):
         _logger.info("=" * 80)
         _logger.info("✅ SAP Daily Auto-Sync Completed")
         _logger.info("=" * 80)
+
+    @api.model
+    def run_commercial_flags_sync(self):
+        """Cron: refresh Odoo product flags from SAP Items for each active config."""
+        configs = self.search([('active', '=', True), ('sync_commercial_flags', '=', True)])
+        if not configs:
+            _logger.info("SAP commercial flags cron: no active configs with sync_commercial_flags.")
+            return
+        Migration = self.env['sap.product.complete.migration']
+        for config in configs:
+            try:
+                wiz = Migration.create({
+                    'backend_id': config.backend_id.id,
+                    'batch_size': max(config.batch_size, 1),
+                    'product_limit': config.product_limit,
+                    'force_enable_sales_pos': config.force_enable_sales_pos,
+                })
+                res = wiz.sync_commercial_flags_from_sap()
+                _logger.info(
+                    "SAP commercial flags [%s]: updated=%s not_in_odoo=%s errors=%s",
+                    config.name,
+                    res.get('updated'),
+                    res.get('not_in_odoo'),
+                    res.get('errors'),
+                )
+            except Exception:
+                _logger.exception(
+                    "SAP commercial flags cron failed for config %s", config.name
+                )
+            finally:
+                self.env.cr.commit()
 
     def execute_sync(self):
         """Execute synchronization for this configuration"""
@@ -105,10 +147,11 @@ class SapAutoSync(models.Model):
                         'backend_id': self.backend_id.id,
                         'batch_size': self.batch_size,
                         'product_limit': self.product_limit,
-                        'import_uom_groups': False,  # Already done if needed
-                        'import_products': True,
-                        'import_pricelists': False,  # Will do separately
-                        'import_warehouse_info': False,
+                        'stage1_uom_groups': False,
+                        'stage2_products': True,
+                        'stage3_pricelists': False,
+                        'stage4_warehouse_info': False,
+                        'force_enable_sales_pos': self.force_enable_sales_pos,
                     })
                     
                     # Run stages

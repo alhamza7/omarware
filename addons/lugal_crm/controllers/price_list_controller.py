@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 
 import logging
-from odoo import http
+from datetime import timedelta
+
+from odoo import http, fields
 from odoo.http import request
+from odoo.osv import expression
+
 from ._auth import ensure_jwt_user_id
 from ._error import crm_error
 
@@ -128,6 +132,63 @@ def _resolve_pricelist(pricelist_id):
     return request.env['product.pricelist'].search([('active', '=', True)], limit=1)
 
 
+def _variant_ids_with_percentage_discount(env, pricelist):
+    """
+    Return:
+      None — a global percentage rule exists (every product may be discounted).
+      set() — no matching rules.
+      non-empty set — variant ids explicitly covered by template/variant/category rules.
+    """
+    items = env['product.pricelist.item'].search([
+        ('pricelist_id', '=', pricelist.id),
+        ('compute_price', '=', 'percentage'),
+        ('percent_price', '>', 0),
+    ])
+    if not items:
+        return set()
+    variant_ids = set()
+    Product = env['product.product'].sudo()
+    for rule in items:
+        if rule.applied_on == '3_global':
+            return None
+        if rule.applied_on == '0_product_variant' and rule.product_id:
+            variant_ids.add(rule.product_id.id)
+        elif rule.applied_on == '1_product' and rule.product_tmpl_id:
+            variant_ids.update(rule.product_tmpl_id.product_variant_ids.ids)
+        elif rule.applied_on == '2_product_category' and rule.categ_id:
+            categ_ids = env['product.category'].sudo().search([('id', 'child_of', rule.categ_id.id)]).ids
+            if categ_ids:
+                prods = Product.search([('categ_id', 'in', categ_ids)])
+                variant_ids.update(prods.ids)
+    return variant_ids
+
+
+def _normalize_int_list(raw, max_len=100):
+    if not raw:
+        return []
+    if isinstance(raw, (list, tuple, set)):
+        seq = list(raw)
+    else:
+        seq = [raw]
+    out = []
+    for x in seq[:max_len]:
+        try:
+            out.append(int(x))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _normalize_str_list(raw, max_len=500):
+    if not raw:
+        return []
+    if isinstance(raw, (list, tuple, set)):
+        seq = list(raw)
+    else:
+        seq = [raw]
+    return [str(x).strip() for x in seq[:max_len] if x and str(x).strip()]
+
+
 class PriceListController(http.Controller):
 
     @http.route('/api/crm/pricelist/categories', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
@@ -149,12 +210,42 @@ class PriceListController(http.Controller):
             return crm_error(e, 'list_categories')
 
     @http.route('/api/crm/pricelist/products', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
-    def list_products(self, page=1, per_page=50, search=None, category_id=None,
-                      uom_id=None, pricelist_id=None, new_releases_only=False,
-                      discount_only=False, **kwargs):
+    def list_products(
+        self,
+        page=1,
+        per_page=50,
+        search=None,
+        query=None,
+        category_id=None,
+        category_ids=None,
+        uom_id=None,
+        pricelist_id=None,
+        new_releases_only=False,
+        new_within_days=60,
+        discount_only=False,
+        fetch_all=False,
+        include_inactive=False,
+        sale_ok=True,
+        item_codes=None,
+        default_code_prefix=None,
+        product_ids=None,
+        branch_id=None,
+        **kwargs,
+    ):
         """
-        List products for the CRM price-list view.
-        Supports filters: category (brand), UoM, search, new releases, discount flag.
+        List products for the CRM price-list view with optional strong server-side filters.
+
+        Pagination:
+          - Default ``per_page=50`` (backward compatible).
+          - ``fetch_all=True`` or ``per_page=0`` returns every matching row (no server-side row cap).
+
+        Text search: pass ``search`` or ``query`` (both accepted).
+
+        ``branch_id`` is reserved for future branch-specific pricelist mapping (currently ignored).
+
+        Extra filters: ``category_ids`` (list[int]), ``item_codes`` (exact default_code list),
+        ``default_code_prefix``, ``product_ids`` (variant ids), ``include_inactive``,
+        ``sale_ok`` (bool, default True).
         """
         try:
             if not ensure_jwt_user_id():
@@ -162,32 +253,109 @@ class PriceListController(http.Controller):
 
             pricelist = _resolve_pricelist(pricelist_id)
 
-            domain = [('active', '=', True), ('sale_ok', '=', True)]
-            if category_id:
-                domain.append(('categ_id', '=', category_id))
-            if search:
-                if request.env['product.product']._fields.get('foreign_name'):
+            text = (search or query or '').strip()
+            domain = []
+
+            if not include_inactive:
+                domain.append(('active', '=', True))
+            if sale_ok is not False and sale_ok is not None:
+                domain.append(('sale_ok', '=', True))
+
+            cat_ids = _normalize_int_list(category_ids, max_len=200)
+            if cat_ids:
+                domain.append(('categ_id', 'in', cat_ids))
+            elif category_id:
+                try:
+                    domain.append(('categ_id', '=', int(category_id)))
+                except (TypeError, ValueError):
+                    pass
+
+            codes = _normalize_str_list(item_codes, max_len=500)
+            if codes:
+                domain.append(('default_code', 'in', codes))
+
+            if default_code_prefix:
+                pref = str(default_code_prefix).strip()
+                if pref:
+                    if not pref.endswith('%'):
+                        pref = pref + '%'
+                    domain.append(('default_code', 'ilike', pref))
+
+            pids = _normalize_int_list(product_ids, max_len=2000)
+            if pids:
+                domain.append(('id', 'in', pids))
+
+            if text:
+                ProductMeta = request.env['product.product']
+                if ProductMeta._fields.get('foreign_name'):
                     domain += ['|', '|',
-                               ('name', 'ilike', search),
-                               ('default_code', 'ilike', search),
-                               ('foreign_name', 'ilike', search)]
+                               ('name', 'ilike', text),
+                               ('default_code', 'ilike', text),
+                               ('foreign_name', 'ilike', text)]
                 else:
-                    domain += ['|', ('name', 'ilike', search), ('default_code', 'ilike', search)]
+                    domain += ['|', ('name', 'ilike', text), ('default_code', 'ilike', text)]
+
+            if new_releases_only:
+                try:
+                    days = max(1, int(new_within_days))
+                except (TypeError, ValueError):
+                    days = 60
+                since = fields.Datetime.now() - timedelta(days=days)
+                domain.append(('create_date', '>=', since))
+
+            if uom_id:
+                try:
+                    uid = int(uom_id)
+                except (TypeError, ValueError):
+                    uid = None
+                if uid:
+                    ext_pids = request.env['sap.product.extended'].sudo().search([
+                        ('sales_uom_id', '=', uid),
+                    ]).mapped('product_id').ids
+                    if ext_pids:
+                        uom_domain = ['|', ('uom_id', '=', uid), ('id', 'in', ext_pids)]
+                    else:
+                        uom_domain = [('uom_id', '=', uid)]
+                    domain = expression.AND([domain, uom_domain]) if domain else uom_domain
+
+            if discount_only and pricelist:
+                disc = _variant_ids_with_percentage_discount(request.env, pricelist)
+                if disc is not None:
+                    if not disc:
+                        return {
+                            'success': True,
+                            'data': {
+                                'items': [],
+                                'total': 0,
+                                'page': int(page) if page else 1,
+                                'per_page': int(per_page) if per_page else 0,
+                                'returned': 0,
+                            },
+                        }
+                    domain.append(('id', 'in', list(disc)))
 
             Product = request.env['product.product']
             total = Product.search_count(domain)
-            offset = (page - 1) * per_page
-            products = Product.search(domain, limit=per_page, offset=offset, order='name asc')
 
-            # If discount_only → filter to products appearing in a discounted pricelist
-            if discount_only and pricelist:
-                discounted_ids = request.env['product.pricelist.item'].search([
-                    ('pricelist_id', '=', pricelist.id),
-                    ('compute_price', '=', 'percentage'),
-                    ('percent_price', '>', 0),
-                ]).mapped('product_id').ids
-                products = products.filtered(lambda p: p.id in discounted_ids)
-                total = len(products)
+            try:
+                page_n = max(1, int(page or 1))
+            except (TypeError, ValueError):
+                page_n = 1
+
+            fetch_all_flag = bool(fetch_all) or kwargs.get('fetch_all') is True
+            try:
+                per_n = int(per_page) if per_page is not None else 50
+            except (TypeError, ValueError):
+                per_n = 50
+
+            if fetch_all_flag or per_n <= 0:
+                products = Product.search(domain, order='name asc') if total else Product.browse()
+                per_out = 0
+            else:
+                per_n = max(per_n, 1)
+                offset = (page_n - 1) * per_n
+                products = Product.search(domain, limit=per_n, offset=offset, order='name asc')
+                per_out = per_n
 
             items = []
             for p in products:
@@ -196,7 +364,13 @@ class PriceListController(http.Controller):
 
             return {
                 'success': True,
-                'data': {'items': items, 'total': total, 'page': page, 'per_page': per_page},
+                'data': {
+                    'items': items,
+                    'total': total,
+                    'page': page_n,
+                    'per_page': per_out,
+                    'returned': len(items),
+                },
             }
         except Exception as e:
             return crm_error(e, 'list_products')

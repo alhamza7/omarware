@@ -14,6 +14,19 @@
             <field name="active" eval="True"/>
             <field name="priority">5</field>
         </record>
+
+        <!-- SAP commercial flags + archive (Valid/Frozen, sale_ok / purchase_ok / POS) — every 6 hours -->
+        <record id="ir_cron_sap_commercial_flags_sync" model="ir.cron">
+            <field name="name">SAP Commercial Flags Sync (Sales / Purchase / POS)</field>
+            <field name="model_id" ref="model_sap_auto_sync"/>
+            <field name="state">code</field>
+            <field name="code">model.run_commercial_flags_sync()</field>
+            <field name="interval_number">6</field>
+            <field name="interval_type">hours</field>
+            <field name="nextcall" eval="(datetime.now() + timedelta(hours=1)).replace(minute=5, second=0)"/>
+            <field name="active" eval="True"/>
+            <field name="priority">15</field>
+        </record>
         
         <!-- SAP Alert Check Cron Job -->
         <record id="ir_cron_sap_alert_check" model="ir.cron">

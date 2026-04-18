@@ -426,6 +426,98 @@ class PosPerfumeRestController(http.Controller):
 
         return pget
 
+    def _rest_query_bool(self, pget, key, default=False):
+        v = pget(key)
+        if v is None or v == "":
+            return default
+        s = str(v).strip().lower()
+        return s in ("1", "true", "yes", "on")
+
+    def _rest_int_param(self, pget, key, default=None):
+        """Parse integer query param; ``default`` when missing or blank."""
+        v = pget(key)
+        if v is None or v == "":
+            return default
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return default
+
+    _REST_BRAND_ALIASES = {
+        "robertet": "royal",
+        "amour_de_fleurs": "adf",
+        "euro": "european",
+    }
+
+    _REST_CATEGORY_TYPE_HINTS = {
+        "fragrances": ("عطر", "frag", "perfume", "parfum", "givaudan", "robertet", "essence"),
+        "glass": ("زجاج", "glass", "crystal"),
+        "samples": ("عينه", "sample", "samples"),
+        "pack": ("pack", "set", "طقم"),
+        "packaging": ("علب", "packaging", "box", "كرتون", "carton"),
+        "alcohol": ("كحول", "alcohol"),
+        "accessories": ("اكسسو", "accessory"),
+        "devices": ("جهاز", "device"),
+        "incense": ("بخور", "incense"),
+    }
+
+    def _rest_product_matches_brand_param(self, prod, brand_raw):
+        """Align with POS screen brand rules (prefix / special cases)."""
+        if not brand_raw:
+            return True
+        b = str(brand_raw).strip().lower()
+        b = self._REST_BRAND_ALIASES.get(b, b)
+        sku = (prod.default_code or "").upper()
+        name = (prod.name or "").upper()
+        if b in ("adf",):
+            return sku.startswith("ADF")
+        if b in ("royal", "roy"):
+            return (
+                (sku.startswith("R") and not sku.startswith("ADF") and not sku.startswith("G") and not sku.startswith("EURO"))
+                or sku.startswith("ROYAL")
+                or sku.startswith("ROY")
+            )
+        if b in ("givaudan", "giv"):
+            return (
+                (sku.startswith("G") and not sku.startswith("ADF") and not sku.startswith("R") and not sku.startswith("EURO"))
+                or sku.startswith("GIVAUDAN")
+                or sku.startswith("GIV")
+            )
+        if b in ("european", "euro"):
+            return "N1" in sku or sku.startswith("EURO") or "EURO" in name
+        if b in ("florchem", "fl"):
+            return "FLOR" in name or sku.startswith("FL")
+        prefix = b.replace(" ", "_").upper()
+        return sku.startswith(prefix) or name.startswith(prefix)
+
+    def _rest_product_matches_category_type_param(self, prod, cat_raw):
+        """Loose match on category path + product name (no strict SAP taxonomy)."""
+        if not cat_raw:
+            return True
+        k = str(cat_raw).strip().lower()
+        hints = self._REST_CATEGORY_TYPE_HINTS.get(k)
+        if not hints:
+            return True
+        hay = " ".join(
+            [
+                (prod.categ_id.complete_name or "") if prod.categ_id else "",
+                prod.name or "",
+            ]
+        ).lower()
+        return any(h.lower() in hay for h in hints)
+
+    def _rest_products_domain_item_codes(self, domain, Product, pget):
+        raw = pget("item_codes")
+        if not raw:
+            return domain
+        if isinstance(raw, (list, tuple)):
+            codes = [str(x).strip() for x in raw if str(x).strip()][:500]
+        else:
+            codes = [s.strip() for s in str(raw).split(",") if s.strip()][:500]
+        if not codes:
+            return domain
+        return ["&"] + domain + [("default_code", "in", codes)]
+
     # --- bootstrap ---------------------------------------------------------
 
     @http.route(f"{_PREFIX}/sections", type="http", auth="none", methods=list(_READ), csrf=False, cors="*")
@@ -674,11 +766,25 @@ class PosPerfumeRestController(http.Controller):
             return self._fail("Unauthorized", 401)
         Product = request.env["product.product"].sudo()
         pget = self._rest_products_query_params()
-        q = pget("query") or ""
-        limit = min(int(pget("limit") or 80), 500)
-        offset = int(pget("offset") or 0)
+        q = (pget("query") or "").strip()
+
+        lim_raw = self._rest_int_param(pget, "limit", None)
+        if lim_raw is None:
+            lim_raw = 80
+        fetch_all = self._rest_query_bool(pget, "fetch_all", False) or lim_raw == 0
+        if fetch_all:
+            limit = None
+        else:
+            limit = max(int(lim_raw), 1)
+        offset = max(self._rest_int_param(pget, "offset", 0) or 0, 0)
+
         pl_id = pget("pricelist_id")
-        domain = [("sale_ok", "=", True), ("active", "=", True)]
+        domain = []
+        if not self._rest_query_bool(pget, "include_inactive", False):
+            domain.append(("active", "=", True))
+        if not self._rest_query_bool(pget, "include_non_sale", False):
+            domain.append(("sale_ok", "=", True))
+
         if q:
             or_terms = [
                 ("name", "ilike", q),
@@ -688,6 +794,7 @@ class PosPerfumeRestController(http.Controller):
             if "foreign_name" in Product._fields:
                 or_terms.append(("foreign_name", "ilike", q))
             domain = ["&"] + domain + (["|"] * (len(or_terms) - 1)) + or_terms
+
         categ_raw = pget("categ_id") or pget("category_id")
         if categ_raw:
             try:
@@ -695,9 +802,6 @@ class PosPerfumeRestController(http.Controller):
             except (TypeError, ValueError):
                 cid = None
             if cid is not None:
-                # ``child_of`` on ``product.product`` can trigger hierarchy resolution that
-                # raises MissingError (HTML 404) if the category id is missing or blocked
-                # for the current user. Resolve subtree with sudo, then filter by ``in``.
                 Cat = request.env["product.category"].sudo().with_context(active_test=False)
                 root = Cat.browse(cid)
                 if not root.exists():
@@ -707,8 +811,21 @@ class PosPerfumeRestController(http.Controller):
                     )
                 subtree = Cat.search([("id", "child_of", root.ids)])
                 domain = ["&"] + domain + [("categ_id", "in", subtree.ids)]
-        total = Product.search_count(domain)
-        recs = Product.search(domain, limit=limit, offset=offset, order="name")
+
+        domain = self._rest_products_domain_item_codes(domain, Product, pget)
+        pref = (pget("default_code_prefix") or "").strip()
+        if pref:
+            if not pref.endswith("%"):
+                pref = pref + "%"
+            domain = ["&"] + domain + [("default_code", "ilike", pref)]
+
+        brand_raw = (pget("brand") or "").strip()
+        cat_type_raw = (pget("category_type") or "").strip()
+        has_price_only = self._rest_query_bool(pget, "has_price_only", False) or str(
+            pget("has_price_only") or ""
+        ).strip() == "1"
+        use_python_filters = bool(brand_raw or cat_type_raw or has_price_only)
+
         pl_rec = False
         if pl_id:
             try:
@@ -719,14 +836,64 @@ class PosPerfumeRestController(http.Controller):
             pl_rec = self._rest_default_pricelist()
         pl_used_id = pl_rec.id if pl_rec else None
         strict_pl = self._strict_pricelist_flag(pget)
-        items = []
-        for prod in recs:
-            price_uom = self._rest_price_uom(prod, pget)
-            row = self._rest_product_catalog_row(
-                prod, pl_rec, price_uom, strict_pl, pl_used_id
-            )
-            items.append(row)
-        return self._ok({"items": items, "total": total, "pricelist_id": pl_used_id})
+
+        def _rows_for_products(prod_recs):
+            out = []
+            for prod in prod_recs:
+                price_uom = self._rest_price_uom(prod, pget)
+                row = self._rest_product_catalog_row(
+                    prod, pl_rec, price_uom, strict_pl, pl_used_id
+                )
+                out.append(row)
+            return out
+
+        if use_python_filters:
+            all_recs = Product.search(domain, order="name")
+            seq_prods = []
+            for prod in all_recs:
+                if brand_raw and not self._rest_product_matches_brand_param(prod, brand_raw):
+                    continue
+                if cat_type_raw and not self._rest_product_matches_category_type_param(
+                    prod, cat_type_raw
+                ):
+                    continue
+                seq_prods.append(prod)
+            rows = _rows_for_products(seq_prods)
+            if has_price_only:
+                rows = [r for r in rows if r.get("has_price")]
+            total = len(rows)
+            if limit is None:
+                items = rows
+                offset_out = 0
+                limit_out = 0
+            else:
+                items = rows[offset : offset + limit]
+                offset_out = offset
+                limit_out = limit
+        else:
+            total = Product.search_count(domain)
+            if limit is None:
+                recs = Product.search(domain, order="name")
+                items = _rows_for_products(recs)
+                offset_out = 0
+                limit_out = 0
+            else:
+                recs = Product.search(domain, limit=limit, offset=offset, order="name")
+                items = _rows_for_products(recs)
+                offset_out = offset
+                limit_out = limit
+
+        return self._ok(
+            {
+                "items": items,
+                "total": total,
+                "offset": offset_out,
+                "limit": limit_out,
+                "returned": len(items),
+                "fetch_all": bool(limit is None),
+                "pricelist_id": pl_used_id,
+            }
+        )
 
     @http.route(
         f"{_PREFIX}/products/<int:product_id>",

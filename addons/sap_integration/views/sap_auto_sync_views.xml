@@ -49,6 +49,8 @@
                             <group>
                                 <field name="sync_uom_groups"/>
                                 <field name="sync_products"/>
+                                <field name="sync_commercial_flags"/>
+                                <field name="force_enable_sales_pos"/>
                             </group>
                             <group>
                                 <field name="sync_pricelists"/>

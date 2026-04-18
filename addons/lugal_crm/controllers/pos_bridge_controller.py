@@ -153,19 +153,90 @@ class PosBridgeController(http.Controller):
             return crm_error(e, 'invoice_context')
 
     @http.route('/api/crm/pos/products', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
-    def products(self, query='', pricelist_id=None, limit=80, offset=0, **kwargs):
-        """Product search for POS (product.product)."""
+    def products(
+        self,
+        query='',
+        search=None,
+        pricelist_id=None,
+        limit=80,
+        offset=0,
+        page=None,
+        per_page=None,
+        fetch_all=False,
+        category_id=None,
+        include_inactive=False,
+        sale_ok=True,
+        **kwargs,
+    ):
+        """Product search for POS (product.product). Supports pagination, fetch_all, category_id.
+
+        ``search`` is an alias for ``query`` (CRM historically used ``search`` on the client).
+        ``page`` / ``per_page`` override ``offset`` / ``limit`` when provided.
+        """
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            domain = [('sale_ok', '=', True), ('active', '=', True)]
-            if query:
+            text = (search if search not in (None, False) else None) or query or ''
+            text = (text or '').strip()
+
+            domain = []
+            if not include_inactive:
+                domain.append(('active', '=', True))
+            if sale_ok is not False and sale_ok is not None:
+                domain.append(('sale_ok', '=', True))
+            if category_id:
+                try:
+                    domain.append(('categ_id', '=', int(category_id)))
+                except (TypeError, ValueError):
+                    pass
+            if text:
                 if hasattr(request.env['product.product'], 'foreign_name'):
-                    domain += ['|', '|', ('name', 'ilike', query), ('default_code', 'ilike', query), ('foreign_name', 'ilike', query)]
+                    domain += ['|', '|', ('name', 'ilike', text), ('default_code', 'ilike', text), ('foreign_name', 'ilike', text)]
                 else:
-                    domain += ['|', ('name', 'ilike', query), ('default_code', 'ilike', query)]
-            products = request.env['product.product'].search(domain, limit=limit, offset=offset, order='name asc')
-            total = request.env['product.product'].search_count(domain)
+                    domain += ['|', ('name', 'ilike', text), ('default_code', 'ilike', text)]
+
+            Product = request.env['product.product']
+            total = Product.search_count(domain)
+
+            fetch_all_flag = bool(fetch_all) or kwargs.get('fetch_all') is True
+
+            if page is not None or per_page is not None:
+                try:
+                    page_n = max(1, int(page or 1))
+                except (TypeError, ValueError):
+                    page_n = 1
+                try:
+                    per_n = int(per_page) if per_page is not None else int(limit or 80)
+                except (TypeError, ValueError):
+                    per_n = 80
+                if fetch_all_flag or per_n <= 0:
+                    products = Product.search(domain, order='name asc') if total else Product.browse()
+                    offset_out = 0
+                    limit_out = 0
+                else:
+                    per_n = max(per_n, 1)
+                    offset_calc = (page_n - 1) * per_n
+                    products = Product.search(domain, limit=per_n, offset=offset_calc, order='name asc')
+                    offset_out = offset_calc
+                    limit_out = per_n
+            elif fetch_all_flag or int(limit or 0) <= 0:
+                products = Product.search(domain, order='name asc') if total else Product.browse()
+                offset_out = 0
+                limit_out = 0
+            else:
+                try:
+                    lim = int(limit or 80)
+                except (TypeError, ValueError):
+                    lim = 80
+                lim = max(lim, 1)
+                try:
+                    off = int(offset or 0)
+                except (TypeError, ValueError):
+                    off = 0
+                products = Product.search(domain, limit=lim, offset=off, order='name asc')
+                offset_out = off
+                limit_out = lim
+
             items = []
             for p in products:
                 foreign_name = getattr(p, 'foreign_name', '') or ''
@@ -179,7 +250,16 @@ class PosBridgeController(http.Controller):
                     'list_price': p.list_price,
                     'qty_available': p.qty_available,
                 })
-            return {'success': True, 'data': {'total': total, 'offset': offset, 'limit': limit, 'items': items}}
+            return {
+                'success': True,
+                'data': {
+                    'total': total,
+                    'offset': offset_out,
+                    'limit': limit_out,
+                    'returned': len(items),
+                    'items': items,
+                },
+            }
         except Exception as e:
             return crm_error(e, 'products')
 

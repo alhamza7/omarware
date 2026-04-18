@@ -2,20 +2,50 @@ import { apiPost } from '../../../shared/services/apiClient';
 import type { ApiResult } from '../../../shared/services/apiClient';
 import type { Product, PriceItem, RequestedItem, InvoicePayload, InvoiceResult } from '../types';
 
+export type { Product, PriceItem, PriceListEntry, RequestedItem, InvoicePayload, InvoiceResult } from '../types';
+
+export type CreateInvoicePayload = InvoicePayload;
+
 /**
  * POST /api/crm/pos/products
- * Fetch POS products with optional search query.
+ * Fetch POS products. ``search`` is sent as ``search`` + ``query`` so Odoo accepts either.
  */
 async function listProducts(params: {
   query?: string;
+  search?: string;
   pricelist_id?: number;
+  /** Legacy offset pagination */
   limit?: number;
-} = {}): Promise<ApiResult<Product[]>> {
-  return apiPost('/api/crm/pos/products', {
-    query:        params.query        ?? '',
+  offset?: number;
+  page?: number;
+  per_page?: number;
+  fetch_all?: boolean;
+  category_id?: number | null;
+  include_inactive?: boolean;
+  sale_ok?: boolean;
+} = {}): Promise<ApiResult<{ items: Product[]; total: number; returned?: number }>> {
+  const searchText = (params.search ?? params.query ?? '').trim();
+  const body: Record<string, unknown> = {
+    search: searchText,
+    query: searchText,
     pricelist_id: params.pricelist_id ?? null,
-    limit:        params.limit        ?? 80,
-  });
+    category_id: params.category_id ?? null,
+    include_inactive: params.include_inactive ?? false,
+    sale_ok: params.sale_ok ?? true,
+  };
+  if (params.fetch_all) {
+    body.fetch_all = true;
+    body.limit = 0;
+  } else if (params.page != null || params.per_page != null) {
+    body.fetch_all = false;
+    body.page = params.page ?? 1;
+    body.per_page = params.per_page ?? 80;
+  } else {
+    body.fetch_all = false;
+    body.limit = params.limit ?? 80;
+    body.offset = params.offset ?? 0;
+  }
+  return apiPost('/api/crm/pos/products', body);
 }
 
 /**
@@ -47,15 +77,58 @@ async function getUomPrice(
 
 /**
  * POST /api/crm/pricelist/products
- * Fetch pricelist-specific product list.
+ * Fetch pricelist-specific product list (with optional server-side filters).
+ * Use ``fetch_all: true`` (default in ``useProducts``) to load the full catalog (server-capped).
  */
-async function getPriceList(
-  branchId?: number,
-  pricelistId?: number,
-): Promise<ApiResult<PriceItem[]>> {
+async function getPriceList(params: {
+  branchId?: number;
+  pricelistId?: number;
+  search?: string;
+  query?: string;
+  categoryId?: number | null;
+  categoryIds?: number[];
+  page?: number;
+  perPage?: number;
+  fetchAll?: boolean;
+  uomId?: number | null;
+  newReleasesOnly?: boolean;
+  newWithinDays?: number;
+  discountOnly?: boolean;
+  itemCodes?: string[];
+  defaultCodePrefix?: string;
+  productIds?: number[];
+  includeInactive?: boolean;
+  saleOk?: boolean;
+} = {}): Promise<
+  ApiResult<{
+    items: PriceItem[];
+    total: number;
+    page?: number;
+    per_page?: number;
+    returned?: number;
+  }>
+> {
+  const text = (params.search ?? params.query ?? '').trim();
+  const fetchAll = params.fetchAll !== false;
   return apiPost('/api/crm/pricelist/products', {
-    branch_id:    branchId    ?? null,
-    pricelist_id: pricelistId ?? null,
+    branch_id: params.branchId ?? null,
+    pricelist_id: params.pricelistId ?? null,
+    search: text || null,
+    query: text || null,
+    category_id: params.categoryId ?? null,
+    category_ids: params.categoryIds?.length ? params.categoryIds : null,
+    page: params.page ?? 1,
+    per_page: fetchAll ? 0 : (params.perPage ?? 50),
+    fetch_all: fetchAll,
+    uom_id: params.uomId ?? null,
+    new_releases_only: params.newReleasesOnly ?? false,
+    new_within_days: params.newWithinDays ?? 60,
+    discount_only: params.discountOnly ?? false,
+    item_codes: params.itemCodes?.length ? params.itemCodes : null,
+    default_code_prefix: params.defaultCodePrefix ?? null,
+    product_ids: params.productIds?.length ? params.productIds : null,
+    include_inactive: params.includeInactive ?? false,
+    sale_ok: params.saleOk !== false,
   });
 }
 
@@ -82,6 +155,10 @@ async function createInvoice(payload: InvoicePayload): Promise<ApiResult<Invoice
     order_lines:   payload.order_lines  ?? [],
     exchange_rate: payload.exchange_rate ?? null,
   });
+}
+
+async function createInvoiceFromCall(callId: number, payload: CreateInvoicePayload): Promise<ApiResult<InvoiceResult>> {
+  return createInvoice({ ...payload, call_id: callId });
 }
 
 /**
@@ -119,6 +196,7 @@ export const productService = {
   listPricelists,
   listCategories,
   createInvoice,
+  createInvoiceFromCall,
   getInvoiceContext,
   listRequestedItems,
   createRequestedItem,

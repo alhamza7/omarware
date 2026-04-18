@@ -103,9 +103,10 @@ class SapProductDirectImport(models.TransientModel):
                 category = self._get_or_create_category(product_data['ItemsGroupCode'])
                 product_vals['categ_id'] = category.id
             
-            # Active status
-            if 'Valid' in product_data:
-                product_vals['active'] = product_data['Valid'] == 'Y'
+            # Active: SAP Valid + Frozen (same rules as migration wizard)
+            product_vals['active'] = self.env['sap.product.complete.migration']._sap_item_is_active_for_odoo(
+                product_data
+            )
             
             # Barcode
             if product_data.get('BarCode'):

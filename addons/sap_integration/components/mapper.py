@@ -205,18 +205,17 @@ class SapProductImportMapper(Component):
         return {'type': 'consu'}
     
     @mapping
-    def sale_ok(self, record):
-        return {'sale_ok': True}
-    
-    @mapping
-    def purchase_ok(self, record):
-        return {'purchase_ok': True}
-    
-    @mapping
-    def available_in_pos(self, record):
-        """Make products available in Point of Sale by default"""
-        return {'available_in_pos': True}
-    
+    def sap_commercial_flags(self, record):
+        """Align with wizard: Valid, Frozen, SalesItem, PurchaseItem (no force-enable)."""
+        Migration = self.env['sap.product.complete.migration']
+        flags = Migration._sap_commercial_flags_from_item(record, False)
+        return {
+            'active': flags['active'],
+            'sale_ok': flags['sale_ok'],
+            'purchase_ok': flags['purchase_ok'],
+            'available_in_pos': flags['available_in_pos'],
+        }
+
     @mapping
     def tracking(self, record):
         """Enable inventory tracking for all products"""
@@ -226,20 +225,6 @@ class SapProductImportMapper(Component):
     def is_storable(self, record):
         """Enable Track Inventory checkbox in UI"""
         return {'is_storable': True}
-    
-    @mapping
-    def active(self, record):
-        # Normalize various possible SAP 'Valid' representations
-        valid_value = record.get('Valid', 'Y')
-        if isinstance(valid_value, str):
-            normalized = valid_value.strip().upper()
-            return {'active': normalized in ('Y', 'YES', 'TRUE', '1')}
-        if isinstance(valid_value, (int, float)):
-            return {'active': bool(valid_value)}
-        if isinstance(valid_value, bool):
-            return {'active': valid_value}
-        # Default to active when unknown
-        return {'active': True}
     
     @mapping
     def description(self, record):

@@ -174,7 +174,7 @@ class SapProductSync(models.Model):
             'description': sap_data.get('UserText', ''),
             'description_sale': sap_data.get('UserText', ''),
             'description_purchase': sap_data.get('UserText', ''),
-            'active': sap_data.get('Valid', 'Y') == 'Y',
+            'active': self.env['sap.product.complete.migration']._sap_item_is_active_for_odoo(sap_data),
         }
     
     def _prepare_product_data_for_sap(self):
