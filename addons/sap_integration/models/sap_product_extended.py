@@ -486,7 +486,80 @@ class SapProductExtended(models.Model):
                 record.total_volume = record.length1 * record.width1 * record.height1
             else:
                 record.total_volume = 0.0
-    
+
+    # ========== Catalog / API UoM filter (CRM + POS) ==========
+    @api.model
+    def _filter_uom_display_name_flat_lower(self, uom):
+        """Flatten translated ``uom.uom`` names for simple substring checks."""
+        if not uom:
+            return ''
+        n = uom.name
+        if isinstance(n, dict):
+            return ' '.join(str(v) for v in n.values() if v).lower()
+        return (n or '').lower()
+
+    @api.model
+    def _extended_inventory_implies_filter_uom(self, ext, filter_uom):
+        """
+        SAP often leaves ``SalesUnit`` empty while ``InventoryUOM`` is ``كغم`` / kg.
+        When the API filters by a kg-class Odoo UoM, treat those rows as aligned.
+        """
+        if not ext or not filter_uom:
+            return False
+        if ext.inventory_uom_id and ext.inventory_uom_id == filter_uom:
+            return True
+        inv_raw = (ext.inventory_uom or '').strip()
+        if not inv_raw:
+            return False
+        inv_low = inv_raw.lower()
+        tgt = self._filter_uom_display_name_flat_lower(filter_uom)
+        filter_is_kg_class = 'كغم' in tgt or 'kg' in tgt or 'كيلو' in tgt
+        if not filter_is_kg_class:
+            return False
+        return 'كغم' in inv_raw or inv_low in ('kg', 'kgs', 'kilogram', 'kilograms')
+
+    @api.model
+    def product_variant_ids_matching_filtered_uom(self, uom_id, align_sap_sales_unit=True):
+        """
+        Return ``product.product`` ids matching a catalog UoM filter.
+
+        * ``align_sap_sales_unit=False``: legacy OR (template ``uom_id`` OR ``sales_uom_id``).
+        * ``align_sap_sales_unit=True``: same OR, but template-only matches require either a
+          non-empty SAP ``sales_unit`` **or** inventory UoM evidence (mapped id or ``كغم``/kg
+          text on ``inventory_uom``) when the filter UoM is kg-class — closes gaps vs SAP
+          reports that use Inventory UOM when Sales Unit is blank.
+        """
+        Product = self.env['product.product'].sudo()
+        Extended = self.sudo()
+        if not align_sap_sales_unit:
+            ext_pids = Extended.search([('sales_uom_id', '=', uom_id)]).mapped('product_id').ids
+            tpl_ids = Product.search([('uom_id', '=', uom_id)]).ids
+            return list(set(tpl_ids) | set(ext_pids))
+        Uom = self.env['uom.uom'].sudo()
+        filter_uom = Uom.browse(uom_id)
+        if not filter_uom.exists():
+            return []
+        ids_sales = set(Extended.search([('sales_uom_id', '=', uom_id)]).mapped('product_id').ids)
+        tpl_products = Product.search([('uom_id', '=', uom_id)])
+        if not tpl_products:
+            return list(ids_sales)
+        ext_by_pid = {
+            e.product_id.id: e
+            for e in Extended.search([('product_id', 'in', tpl_products.ids)])
+        }
+        ids_tpl_ok = set()
+        for p in tpl_products:
+            ext = ext_by_pid.get(p.id)
+            if ext is None:
+                ids_tpl_ok.add(p.id)
+            else:
+                su = ext.sales_unit
+                if su and str(su).strip():
+                    ids_tpl_ok.add(p.id)
+                elif self._extended_inventory_implies_filter_uom(ext, filter_uom):
+                    ids_tpl_ok.add(p.id)
+        return list(ids_sales | ids_tpl_ok)
+
     # ========== CRUD Methods ==========
     @api.model
     def create_or_update_from_sap(self, product, backend, sap_data):

@@ -178,37 +178,16 @@ class PosPerfumeRestController(http.Controller):
 
     def _rest_product_ids_for_uom_filter(self, env, uom_id, align_sap_sales_unit):
         """
-        Variant ids for catalog restriction by UoM — same rules as CRM
-        ``/api/crm/pricelist/products`` (``uom_align_sap_sales_unit`` on ``lugal_crm``).
+        Variant ids for catalog restriction by UoM — same rules as CRM pricelist API
+        (implemented on ``sap.product.extended``).
         """
-        if not align_sap_sales_unit or "sap.product.extended" not in env:
-            Extended = env["sap.product.extended"].sudo()
+        if "sap.product.extended" not in env:
             Product = env["product.product"].sudo()
-            ext_pids = Extended.search([("sales_uom_id", "=", uom_id)]).mapped("product_id").ids
-            tpl_ids = Product.search([("uom_id", "=", uom_id)]).ids
-            return list(set(tpl_ids) | set(ext_pids))
-        Extended = env["sap.product.extended"].sudo()
-        Product = env["product.product"].sudo()
-        ids_sales = set(
-            Extended.search([("sales_uom_id", "=", uom_id)]).mapped("product_id").ids
+            return Product.search([("uom_id", "=", uom_id)]).ids
+        return env["sap.product.extended"].sudo().product_variant_ids_matching_filtered_uom(
+            uom_id,
+            align_sap_sales_unit=bool(align_sap_sales_unit),
         )
-        tpl_products = Product.search([("uom_id", "=", uom_id)])
-        if not tpl_products:
-            return list(ids_sales)
-        ext_by_pid = {
-            e.product_id.id: e
-            for e in Extended.search([("product_id", "in", tpl_products.ids)])
-        }
-        ids_tpl_ok = set()
-        for p in tpl_products:
-            ext = ext_by_pid.get(p.id)
-            if ext is None:
-                ids_tpl_ok.add(p.id)
-            else:
-                su = ext.sales_unit
-                if su and str(su).strip():
-                    ids_tpl_ok.add(p.id)
-        return list(ids_sales | ids_tpl_ok)
 
     def _rest_price_first_applicable_rule(self, product, pl_rec, price_uom, quantity=1.0):
         """Same rule chain as product.pricelist._compute_price_rule (incl. category / global lines)."""

@@ -205,37 +205,15 @@ def _truthy_api_param(value, default=True):
 
 def _product_ids_for_uom_filter(env, uom_id, align_sap_sales_unit):
     """
-    Variant ids matching a pricelist ``uom_id`` filter.
-
-    When *align_sap_sales_unit* is True and ``sap.product.extended`` exists, exclude the
-    common SAP/Odoo drift case: template ``uom_id`` is kg but SAP ``SalesUnit`` was empty
-    on the Item (stored as blank ``sales_unit`` on extended) while ``sales_uom_id`` was
-    never mapped — SAP reports that filter on SalesUnit text under-count vs Odoo.
-
-    Always keep rows where ``extended.sales_uom_id`` matches (explicit SAP sales UoM map).
+    Delegate to ``sap.product.extended.product_variant_ids_matching_filtered_uom`` when
+    SAP alignment is enabled (see module ``sap_integration`` for inventory UOM handling).
     """
     if not align_sap_sales_unit or 'sap.product.extended' not in env:
         return None
-    Extended = env['sap.product.extended'].sudo()
-    Product = env['product.product'].sudo()
-    ids_sales = set(Extended.search([('sales_uom_id', '=', uom_id)]).mapped('product_id').ids)
-    tpl_products = Product.search([('uom_id', '=', uom_id)])
-    if not tpl_products:
-        return list(ids_sales)
-    ext_by_pid = {
-        e.product_id.id: e
-        for e in Extended.search([('product_id', 'in', tpl_products.ids)])
-    }
-    ids_tpl_ok = set()
-    for p in tpl_products:
-        ext = ext_by_pid.get(p.id)
-        if ext is None:
-            ids_tpl_ok.add(p.id)
-        else:
-            su = ext.sales_unit
-            if su and str(su).strip():
-                ids_tpl_ok.add(p.id)
-    return list(ids_sales | ids_tpl_ok)
+    return env['sap.product.extended'].sudo().product_variant_ids_matching_filtered_uom(
+        uom_id,
+        align_sap_sales_unit=True,
+    )
 
 
 class PriceListController(http.Controller):
