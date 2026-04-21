@@ -1,0 +1,458 @@
+# -*- coding: utf-8 -*-
+"""
+Supply Stories API  (WhatsApp-style status/stories)
+
+Routes
+------
+  POST /api/crm/supply/stories/feed        — fetch active stories feed
+  POST /api/crm/supply/stories/create      — post a new story (text / media)
+  POST /api/crm/supply/stories/<id>/view   — record that current user viewed it
+  POST /api/crm/supply/stories/<id>/delete — soft-expire (author only)
+  POST /api/crm/supply/stories/upload      — upload media for a story (multipart)
+
+All routes use JSON-RPC 2.0 envelope with JWT Bearer auth,
+except /upload which is multipart HTTP.
+"""
+
+import base64
+import datetime as _dt
+import json
+import logging
+import mimetypes
+import uuid
+
+from odoo import http
+from odoo.http import request, Response
+
+from ._auth import ensure_jwt_user_id
+from ._error import crm_error
+from .upload_controller import _build_attachment_url
+
+_logger = logging.getLogger(__name__)
+
+# Stories expire after 24 h by default
+STORY_TTL_HOURS = 24
+
+# Allowed MIME types for story media
+STORY_IMAGE_MIMES = frozenset({
+    'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+})
+STORY_VIDEO_MIMES = frozenset({
+    'video/mp4', 'video/webm', 'video/quicktime',
+})
+STORY_AUDIO_MIMES = frozenset({
+    'audio/mpeg', 'audio/mp4', 'audio/ogg', 'audio/webm',
+    'audio/wav', 'audio/x-wav', 'audio/aac', 'audio/x-m4a',
+})
+STORY_ALL_MIMES = STORY_IMAGE_MIMES | STORY_VIDEO_MIMES | STORY_AUDIO_MIMES
+
+STORY_MAX_MB        = 50   # video/audio
+STORY_MAX_IMAGE_MB  = 10
+
+
+def _now_utc():
+    return _dt.datetime.utcnow().replace(microsecond=0)
+
+
+def _serialize_story(story, viewer_uid):
+    """Return dict representation of a story record."""
+    att = story.attachment_id
+    media_url = None
+    if att and att.exists():
+        token = att.access_token or ''
+        media_url = f'/web/content/{att.id}?access_token={token}'
+
+    return {
+        'id':               story.id,
+        'author_id':        story.author_id.id if story.author_id else None,
+        'author_name':      story.author_id.name if story.author_id else '',
+        'author_avatar':    f'/web/image/res.users/{story.author_id.id}/avatar_128'
+                            if story.author_id else None,
+        'kind':             story.kind,
+        'content':          story.content or '',
+        'caption':          story.caption or '',
+        'bg_color':         story.bg_color or '#128C7E',
+        'font_size':        int(story.font_size or 18),
+        'media_url':        media_url,
+        'attachment_id':    att.id if att and att.exists() else None,
+        'duration_seconds': float(story.duration_seconds or 0),
+        'expires_at':       story.expires_at.isoformat() if story.expires_at else None,
+        'viewed':           viewer_uid in story.viewer_ids.ids,
+        'view_count':       len(story.viewer_ids),
+        'viewer_ids':       story.viewer_ids.ids,
+        'is_mine':          story.author_id.id == viewer_uid,
+        'created_at':       story.create_date.isoformat() if story.create_date else None,
+    }
+
+
+def _active_domain():
+    """Domain that filters out expired stories."""
+    return [
+        '|',
+        ('expires_at', '=', False),
+        ('expires_at', '>', _dt.datetime.utcnow()),
+    ]
+
+
+class SupplyStoriesController(http.Controller):
+
+    # -------------------------------------------------------------------------
+    # POST /api/crm/supply/stories/feed
+    # -------------------------------------------------------------------------
+
+    @http.route('/api/crm/supply/stories/feed',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def stories_feed(self, **kwargs):
+        """
+        Return active stories grouped by author.
+
+        Optional params:
+          include_mine (bool, default true)  — include the caller's own stories
+          limit        (int,  default 100)   — max stories to return
+
+        Response:
+          {
+            "success": true,
+            "data": {
+              "stories": [<story>],        // flat list, sorted newest first per author
+              "by_author": {               // grouped: { "2": [story, ...], ... }
+                "<author_id>": [<story>]
+              },
+              "total": <int>
+            }
+          }
+        """
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+
+            include_mine = kwargs.get('include_mine', True)
+            if isinstance(include_mine, str):
+                include_mine = include_mine.lower() not in ('false', '0', 'no')
+            limit = min(int(kwargs.get('limit', 100) or 100), 500)
+
+            Story = request.env['lugal.supply.story'].sudo()
+            domain = _active_domain()
+            if not include_mine:
+                domain.append(('author_id', '!=', uid))
+
+            stories = Story.search(domain, order='create_date desc', limit=limit)
+            serialized = [_serialize_story(s, uid) for s in stories]
+
+            # Group by author
+            by_author = {}
+            for s in serialized:
+                key = str(s['author_id'])
+                by_author.setdefault(key, []).append(s)
+
+            return {
+                'success': True,
+                'data': {
+                    'stories':   serialized,
+                    'by_author': by_author,
+                    'total':     len(serialized),
+                },
+            }
+        except Exception as e:
+            return crm_error(e, 'stories_feed')
+
+    # -------------------------------------------------------------------------
+    # POST /api/crm/supply/stories/create
+    # -------------------------------------------------------------------------
+
+    @http.route('/api/crm/supply/stories/create',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def stories_create(self, kind='text', content=None, caption=None,
+                       bg_color=None, font_size=None,
+                       attachment_id=None, duration_seconds=None,
+                       ttl_hours=None, **kwargs):
+        """
+        Post a new story.
+
+        Body params:
+          kind             (str)  'text'|'image'|'video'|'audio'
+          content          (str)  Text for text stories
+          caption          (str)  Optional caption on media stories
+          bg_color         (str)  CSS colour for text stories (default '#128C7E')
+          font_size        (int)  Font size for text stories (default 18)
+          attachment_id    (int)  ID from /stories/upload — required for media stories
+          duration_seconds (float) Length of audio/video in seconds
+          ttl_hours        (int)  Override expiry window (default 24, max 48)
+
+        Response:
+          { "success": true, "data": <story> }
+        """
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+
+            kind = (kind or 'text').strip().lower()
+            if kind not in ('text', 'image', 'video', 'audio'):
+                return {'success': False, 'error': f'Invalid kind: {kind}'}
+
+            if kind == 'text' and not (content or '').strip():
+                return {'success': False, 'error': 'content required for text stories'}
+
+            if kind in ('image', 'video', 'audio') and not attachment_id:
+                return {'success': False, 'error': 'attachment_id required for media stories'}
+
+            # Validate attachment belongs to this user if provided
+            att = None
+            if attachment_id:
+                Att = request.env['ir.attachment'].sudo()
+                att = Att.browse(int(attachment_id)).exists()
+                if not att:
+                    return {'success': False, 'error': 'Attachment not found'}
+
+            ttl = max(1, min(int(ttl_hours or STORY_TTL_HOURS), 48))
+            expires_at = _dt.datetime.utcnow() + _dt.timedelta(hours=ttl)
+
+            Story = request.env['lugal.supply.story'].sudo()
+            vals = {
+                'author_id':        uid,
+                'kind':             kind,
+                'content':          (content or '').strip() or None,
+                'caption':          (caption or '').strip() or None,
+                'bg_color':         (bg_color or '#128C7E').strip(),
+                'font_size':        int(font_size or 18),
+                'expires_at':       expires_at,
+                'duration_seconds': float(duration_seconds or 0),
+            }
+            if att:
+                vals['attachment_id'] = att.id
+
+            story = Story.create(vals)
+
+            # Broadcast to all supply users via bus
+            try:
+                request.env['bus.bus'].sudo()._sendone(
+                    'supply_stories',
+                    'supply.story.new',
+                    _serialize_story(story, uid),
+                )
+            except Exception as bus_exc:
+                _logger.debug('stories bus error: %s', bus_exc)
+
+            return {'success': True, 'data': _serialize_story(story, uid)}
+        except Exception as e:
+            return crm_error(e, 'stories_create')
+
+    # -------------------------------------------------------------------------
+    # POST /api/crm/supply/stories/<id>/view
+    # -------------------------------------------------------------------------
+
+    @http.route('/api/crm/supply/stories/<int:story_id>/view',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def stories_view(self, story_id, **kwargs):
+        """
+        Record that the current user has viewed story <id>.
+        Idempotent — calling multiple times is safe.
+
+        Response:
+          { "success": true, "data": { "story_id": <id>, "view_count": <int> } }
+        """
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+
+            Story = request.env['lugal.supply.story'].sudo()
+            story = Story.browse(story_id).exists()
+            if not story:
+                return {'success': False, 'error': 'Story not found'}
+
+            # Authors don't count as viewers of their own story
+            if story.author_id.id != uid and uid not in story.viewer_ids.ids:
+                story.write({'viewer_ids': [(4, uid)]})
+
+                # Notify the author
+                try:
+                    viewer = request.env['res.users'].sudo().browse(uid)
+                    request.env['bus.bus'].sudo()._sendone(
+                        f'supply_user.{story.author_id.id}',
+                        'supply.story.viewed',
+                        {
+                            'story_id':    story.id,
+                            'viewer_id':   uid,
+                            'viewer_name': viewer.name if viewer.exists() else '',
+                            'view_count':  len(story.viewer_ids) + 1,
+                        },
+                    )
+                except Exception as bus_exc:
+                    _logger.debug('story view bus error: %s', bus_exc)
+
+            return {
+                'success': True,
+                'data': {
+                    'story_id':   story.id,
+                    'view_count': len(story.viewer_ids),
+                },
+            }
+        except Exception as e:
+            return crm_error(e, 'stories_view')
+
+    # -------------------------------------------------------------------------
+    # POST /api/crm/supply/stories/<id>/delete
+    # -------------------------------------------------------------------------
+
+    @http.route('/api/crm/supply/stories/<int:story_id>/delete',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def stories_delete(self, story_id, **kwargs):
+        """
+        Expire a story immediately (author only).
+
+        Response:
+          { "success": true }
+        """
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+
+            Story = request.env['lugal.supply.story'].sudo()
+            story = Story.browse(story_id).exists()
+            if not story:
+                return {'success': False, 'error': 'Story not found'}
+            if story.author_id.id != uid:
+                return {'success': False, 'error': 'Forbidden'}
+
+            # Expire immediately instead of hard-delete
+            story.write({'expires_at': _dt.datetime.utcnow()})
+
+            try:
+                request.env['bus.bus'].sudo()._sendone(
+                    'supply_stories',
+                    'supply.story.deleted',
+                    {'story_id': story.id, 'author_id': uid},
+                )
+            except Exception as bus_exc:
+                _logger.debug('story delete bus error: %s', bus_exc)
+
+            return {'success': True}
+        except Exception as e:
+            return crm_error(e, 'stories_delete')
+
+    # -------------------------------------------------------------------------
+    # POST /api/crm/supply/stories/upload  (multipart/form-data)
+    # -------------------------------------------------------------------------
+
+    @http.route('/api/crm/supply/stories/upload',
+                type='http', auth='none', csrf=False,
+                methods=['POST', 'OPTIONS'], cors='*')
+    def stories_upload(self, **kwargs):
+        """
+        Upload media for a story before calling /stories/create.
+
+        Form fields:
+          file             — binary file (image, video, or audio)
+          kind             — optional hint: 'image'|'video'|'audio'
+          duration_seconds — for audio/video
+
+        Response:
+          {
+            "success": true,
+            "data": {
+              "attachment_id": <int>,
+              "url": "<str>",
+              "kind": "image"|"video"|"audio",
+              "mimetype": "<str>",
+              "size": <bytes>,
+              "duration_seconds": <float>
+            }
+          }
+        """
+        def _json(payload, status=200):
+            return Response(
+                json.dumps(payload), status=status,
+                headers=[('Content-Type', 'application/json')],
+            )
+
+        if request.httprequest.method == 'OPTIONS':
+            return Response(status=204, headers=[
+                ('Access-Control-Allow-Origin', '*'),
+                ('Access-Control-Allow-Methods', 'POST, OPTIONS'),
+                ('Access-Control-Allow-Headers', 'Authorization, Content-Type'),
+            ])
+
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return _json({'success': False, 'error': 'Unauthorized'}, 401)
+
+            files = (
+                request.httprequest.files.getlist('files[]')
+                or request.httprequest.files.getlist('files')
+                or request.httprequest.files.getlist('file')
+            )
+            if not files:
+                return _json({'success': False, 'error': 'No file provided'}, 400)
+
+            f = files[0]  # stories: single file per upload
+            data = f.read()
+            mime = f.mimetype or mimetypes.guess_type(f.filename or '')[0] or ''
+
+            if mime not in STORY_ALL_MIMES:
+                return _json({'success': False, 'error': f'Unsupported type: {mime}'}, 400)
+
+            # Size limits
+            is_image = mime in STORY_IMAGE_MIMES
+            max_bytes = (STORY_MAX_IMAGE_MB if is_image else STORY_MAX_MB) * 1024 * 1024
+            if len(data) > max_bytes:
+                limit = STORY_MAX_IMAGE_MB if is_image else STORY_MAX_MB
+                return _json({'success': False, 'error': f'File exceeds {limit} MB'}, 400)
+
+            # Determine kind
+            kind_hint = (kwargs.get('kind') or request.httprequest.form.get('kind') or '').lower()
+            if kind_hint in ('image', 'video', 'audio'):
+                kind = kind_hint
+            elif mime in STORY_IMAGE_MIMES:
+                kind = 'image'
+            elif mime in STORY_VIDEO_MIMES:
+                kind = 'video'
+            else:
+                kind = 'audio'
+
+            try:
+                duration = float(
+                    kwargs.get('duration_seconds')
+                    or request.httprequest.form.get('duration_seconds')
+                    or 0
+                )
+            except (ValueError, TypeError):
+                duration = 0.0
+
+            token = uuid.uuid4().hex
+            Att = request.env['ir.attachment'].sudo()
+            att = Att.create({
+                'name':         f.filename or f'story_{kind}',
+                'mimetype':     mime,
+                'datas':        base64.b64encode(data).decode('utf-8'),
+                'type':         'binary',
+                'res_model':    'lugal.supply.story',
+                'res_id':       False,
+                'access_token': token,
+            })
+            att.flush_recordset(['access_token'])
+
+            url = _build_attachment_url(att)
+
+            return _json({
+                'success': True,
+                'data': {
+                    'attachment_id':    att.id,
+                    'url':              url,
+                    'kind':             kind,
+                    'mimetype':         mime,
+                    'size':             len(data),
+                    'duration_seconds': duration,
+                },
+            })
+        except Exception as e:
+            _logger.exception('stories_upload')
+            try:
+                request.env.cr.rollback()
+            except Exception:
+                pass
+            return _json({'success': False, 'error': str(e)}, 500)

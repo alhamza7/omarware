@@ -21,6 +21,10 @@ from . import crm_requested_item
 from . import crm_shift
 from . import crm_supply_po
 from . import crm_supply_po_line
+from . import crm_supply_conversation
+from . import crm_supply_message
+from . import crm_supply_story
+from . import crm_supply_typing
 from . import crm_tag
 from . import crm_task
 from . import crm_ticket
