@@ -15,11 +15,27 @@ from ._error import crm_error
 
 _logger = logging.getLogger(__name__)
 
-# Allowed MIME types
+# Allowed MIME types (explicit set + any other image/* via is_allowed_crm_image_mime)
 ALLOWED_IMAGE_MIMES = {
-    'image/jpeg', 'image/png', 'image/gif', 'image/webp',
-    'image/svg+xml', 'image/bmp',
+    'image/jpeg', 'image/jpg', 'image/pjpeg',
+    'image/png', 'image/apng',
+    'image/gif', 'image/webp',
+    'image/avif', 'image/heic', 'image/heif', 'image/heic-sequence',
+    'image/tiff', 'image/x-tiff', 'image/bmp', 'image/x-ms-bmp',
+    'image/svg+xml',
+    'image/x-icon', 'image/vnd.microsoft.icon',
+    'image/jp2', 'image/jpx', 'image/jpm',
+    'image/x-adobe-dng',
 }
+
+
+def is_allowed_crm_image_mime(mime: str) -> bool:
+    """True for known raster/vector images or any non-empty image/* subtype."""
+    if not mime:
+        return False
+    if mime in ALLOWED_IMAGE_MIMES:
+        return True
+    return mime.startswith('image/')
 ALLOWED_DOC_MIMES = {
     'application/pdf',
     'image/jpeg', 'image/png', 'image/webp',
@@ -153,8 +169,8 @@ class CrmUploadController(http.Controller):
 
                 # MIME check
                 mime = f.mimetype or mimetypes.guess_type(f.filename or '')[0] or ''
-                if mime not in ALLOWED_IMAGE_MIMES:
-                    return _json({'success': False, 'error': f'{f.filename}: unsupported image type ({mime}). Allowed: jpeg, png, gif, webp, svg, bmp'}, 400)
+                if not is_allowed_crm_image_mime(mime):
+                    return _json({'success': False, 'error': f'{f.filename}: unsupported image type ({mime})'}, 400)
 
                 attachment = _create_attachment(
                     filename=f.filename or 'upload',
@@ -258,8 +274,8 @@ class CrmUploadController(http.Controller):
                 return _json({'success': False, 'error': f'File exceeds {MAX_DOC_SIZE_MB} MB limit'}, 400)
 
             mime = f.mimetype or mimetypes.guess_type(f.filename or '')[0] or ''
-            if mime not in ALLOWED_DOC_MIMES:
-                return _json({'success': False, 'error': f'Unsupported file type ({mime}). Allowed: pdf, jpeg, png, webp, doc, docx, xls, xlsx'}, 400)
+            if mime not in ALLOWED_DOC_MIMES and not is_allowed_crm_image_mime(mime):
+                return _json({'success': False, 'error': f'Unsupported file type ({mime}). Allowed: pdf, images, doc, docx, xls, xlsx'}, 400)
 
             attachment = _create_attachment(
                 filename=f.filename or doc_name,

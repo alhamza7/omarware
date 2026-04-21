@@ -33,10 +33,7 @@ _logger = logging.getLogger(__name__)
 # Stories expire after 24 h by default
 STORY_TTL_HOURS = 24
 
-# Allowed MIME types for story media
-STORY_IMAGE_MIMES = frozenset({
-    'image/jpeg', 'image/png', 'image/webp', 'image/gif',
-})
+# Allowed MIME types for story media (images: any image/*; video/audio: explicit lists)
 STORY_VIDEO_MIMES = frozenset({
     'video/mp4', 'video/webm', 'video/quicktime',
 })
@@ -44,7 +41,18 @@ STORY_AUDIO_MIMES = frozenset({
     'audio/mpeg', 'audio/mp4', 'audio/ogg', 'audio/webm',
     'audio/wav', 'audio/x-wav', 'audio/aac', 'audio/x-m4a',
 })
-STORY_ALL_MIMES = STORY_IMAGE_MIMES | STORY_VIDEO_MIMES | STORY_AUDIO_MIMES
+
+
+def _story_upload_mime_allowed(mime: str) -> bool:
+    if not mime:
+        return False
+    if mime.startswith('image/'):
+        return True
+    if mime in STORY_VIDEO_MIMES:
+        return True
+    if mime in STORY_AUDIO_MIMES:
+        return True
+    return False
 
 STORY_MAX_MB        = 50   # video/audio
 STORY_MAX_IMAGE_MB  = 10
@@ -127,10 +135,17 @@ class SupplyStoriesController(http.Controller):
             if not uid:
                 return {'success': False, 'error': 'Unauthorized'}
 
+            if 'lugal.supply.story' not in request.env:
+                return {'success': False, 'error': 'Stories are not available (module not loaded)'}
+
             include_mine = kwargs.get('include_mine', True)
             if isinstance(include_mine, str):
                 include_mine = include_mine.lower() not in ('false', '0', 'no')
-            limit = min(int(kwargs.get('limit', 100) or 100), 500)
+            try:
+                limit = int(kwargs.get('limit', 100) or 100)
+            except (TypeError, ValueError):
+                limit = 100
+            limit = min(max(limit, 1), 500)
 
             Story = request.env['lugal.supply.story'].sudo()
             domain = _active_domain()
@@ -187,6 +202,9 @@ class SupplyStoriesController(http.Controller):
             uid = ensure_jwt_user_id()
             if not uid:
                 return {'success': False, 'error': 'Unauthorized'}
+
+            if 'lugal.supply.story' not in request.env:
+                return {'success': False, 'error': 'Stories are not available (module not loaded)'}
 
             kind = (kind or 'text').strip().lower()
             if kind not in ('text', 'image', 'video', 'audio'):
@@ -393,11 +411,11 @@ class SupplyStoriesController(http.Controller):
             data = f.read()
             mime = f.mimetype or mimetypes.guess_type(f.filename or '')[0] or ''
 
-            if mime not in STORY_ALL_MIMES:
+            if not _story_upload_mime_allowed(mime):
                 return _json({'success': False, 'error': f'Unsupported type: {mime}'}, 400)
 
             # Size limits
-            is_image = mime in STORY_IMAGE_MIMES
+            is_image = mime.startswith('image/')
             max_bytes = (STORY_MAX_IMAGE_MB if is_image else STORY_MAX_MB) * 1024 * 1024
             if len(data) > max_bytes:
                 limit = STORY_MAX_IMAGE_MB if is_image else STORY_MAX_MB
@@ -407,7 +425,7 @@ class SupplyStoriesController(http.Controller):
             kind_hint = (kwargs.get('kind') or request.httprequest.form.get('kind') or '').lower()
             if kind_hint in ('image', 'video', 'audio'):
                 kind = kind_hint
-            elif mime in STORY_IMAGE_MIMES:
+            elif mime.startswith('image/'):
                 kind = 'image'
             elif mime in STORY_VIDEO_MIMES:
                 kind = 'video'

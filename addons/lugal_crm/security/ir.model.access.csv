@@ -26,3 +26,4 @@ access_lugal_crm_ticket_user,lugal.crm.ticket user,model_lugal_crm_ticket,base.g
 access_lugal_supply_conversation_user,lugal.supply.conversation user,model_lugal_supply_conversation,base.group_user,1,1,1,1
 access_lugal_supply_message_user,lugal.supply.message user,model_lugal_supply_message,base.group_user,1,1,1,1
 access_lugal_supply_typing_user,lugal.supply.typing user,model_lugal_supply_typing,base.group_user,1,1,1,1
+access_lugal_supply_story_user,lugal.supply.story user,model_lugal_supply_story,base.group_user,1,1,1,1

@@ -17,6 +17,7 @@ from .upload_controller import (
     ALLOWED_IMAGE_MIMES,
     _build_attachment_url,
     _create_attachment,
+    is_allowed_crm_image_mime,
 )
 
 _logger = logging.getLogger(__name__)
@@ -54,7 +55,15 @@ MAX_SUPPLY_CHAT_VIDEO_MB  = 100
 
 AUDIO_MIMES = frozenset(m for m in ALLOWED_SUPPLY_CHAT_MIMES if m.startswith('audio/'))
 VIDEO_MIMES  = frozenset(m for m in ALLOWED_SUPPLY_CHAT_MIMES if m.startswith('video/'))
-IMAGE_MIMES  = frozenset(ALLOWED_IMAGE_MIMES)
+
+
+def _supply_chat_mime_allowed(mime: str) -> bool:
+    """Chat attachments: allowlisted docs/audio/video plus any image/* subtype."""
+    if not mime:
+        return False
+    if mime in ALLOWED_SUPPLY_CHAT_MIMES:
+        return True
+    return is_allowed_crm_image_mime(mime)
 
 
 def _create_supply_chat_attachment(filename, mimetype, data_bytes, res_model=False, res_id=False):
@@ -348,7 +357,7 @@ class CrmSupplyController(http.Controller):
                         {'success': False, 'error': f'{f.filename or "file"}: exceeds {limit_mb} MB'},
                         400,
                     )
-                if mime not in ALLOWED_SUPPLY_CHAT_MIMES:
+                if not _supply_chat_mime_allowed(mime):
                     return _json(
                         {'success': False, 'error': f'{f.filename or "file"}: unsupported type ({mime})'},
                         400,
@@ -375,7 +384,7 @@ class CrmSupplyController(http.Controller):
                     kind = 'voice' if 'voice' in (f.filename or '').lower() else 'audio'
                 elif mime in VIDEO_MIMES:
                     kind = 'video'
-                elif mime in IMAGE_MIMES:
+                elif is_allowed_crm_image_mime(mime):
                     kind = 'image'
                 else:
                     kind = 'file'
