@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <menuitem
+        id="menu_lugal_localsend_root"
+        name="LocalSend"
+        parent="base.menu_administration"
+        sequence="80"
+        groups="lugal_localsend.group_lugal_localsend_user,lugal_localsend.group_lugal_localsend_manager"/>
+
+    <menuitem
+        id="menu_lugal_localsend_device"
+        name="Devices"
+        parent="menu_lugal_localsend_root"
+        action="action_lugal_localsend_device"
+        sequence="10"
+        groups="lugal_localsend.group_lugal_localsend_user,lugal_localsend.group_lugal_localsend_manager"/>
+
+    <menuitem
+        id="menu_lugal_localsend_transfer"
+        name="Transfers"
+        parent="menu_lugal_localsend_root"
+        action="action_lugal_localsend_transfer"
+        sequence="20"
+        groups="lugal_localsend.group_lugal_localsend_user,lugal_localsend.group_lugal_localsend_manager"/>
+</odoo>

@@ -26,6 +26,7 @@ status
 # odoo filestore
 odoo/filestore
 filestore_local/
+filestore_ws/
 
 # Python virtual environments
 venv/
@@ -35,6 +36,8 @@ ENV/
 # Local development files
 odoo_local.conf
 odoo_local.log
+odoo_ws_nohup.out
+odoo_ws.log
 
 # maintenance migration scripts
 odoo/addons/base/maintenance

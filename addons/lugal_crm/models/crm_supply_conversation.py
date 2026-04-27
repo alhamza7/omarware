@@ -40,6 +40,32 @@ class LugalSupplyConversation(models.Model):
         ondelete='set null', index=True,
     )
 
+    # ── Group roles ──────────────────────────────────────────────────────────
+    # The creator is always the primary admin. Extra admins can be assigned.
+    group_admin_ids = fields.Many2many(
+        'res.users',
+        'lugal_supply_conv_admin_rel',
+        'conversation_id', 'user_id',
+        string='Group Admins',
+    )
+
+    # Supervisors can add members but cannot remove them or delete the group
+    group_supervisor_ids = fields.Many2many(
+        'res.users',
+        'lugal_supply_conv_supervisor_rel',
+        'conversation_id', 'user_id',
+        string='Group Supervisors',
+    )
+
+    # WhatsApp-style: when True only admins can send messages
+    only_admins_can_send = fields.Boolean(
+        string='Only Admins Can Send',
+        default=False,
+    )
+
+    # Group description / info
+    group_description = fields.Text(string='Group Description')
+
     last_activity = fields.Datetime(string='Last Activity', index=True)
     is_archived   = fields.Boolean(string='Archived', default=False, index=True)
     active        = fields.Boolean(default=True)

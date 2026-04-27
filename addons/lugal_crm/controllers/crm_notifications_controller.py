@@ -13,6 +13,7 @@ Routes:
 
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 
 from odoo import http
 from odoo.http import request, Response
@@ -21,6 +22,19 @@ from ._auth import ensure_jwt_user_id
 from ._error import crm_error
 
 _logger = logging.getLogger(__name__)
+
+# Riyadh = UTC+3, no DST
+_RIYADH_TZ = timezone(timedelta(hours=3))
+
+
+def _to_riyadh_iso(dt):
+    """Convert a naive-UTC Odoo datetime to ISO 8601 with +03:00 (Riyadh) offset.
+    Odoo returns False (not None) for unset Datetime fields, so we guard for both."""
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(_RIYADH_TZ).isoformat(timespec='seconds')
 
 
 def _json_response(data, status=200):
@@ -96,7 +110,6 @@ class CrmNotificationsController(http.Controller):
             since_str = params.get('since', '')
             limit     = min(int(params.get('limit', 20) or 20), 50)
 
-            import datetime as _dt
             since_dt = None
             if since_str:
                 try:
@@ -159,7 +172,7 @@ class CrmNotificationsController(http.Controller):
                             'type':          conv.type,
                             'unread_count':  count,
                             'last_message':  preview,
-                            'last_activity': conv.last_activity.isoformat() if conv.last_activity else None,
+                            'last_activity': _to_riyadh_iso(conv.last_activity),
                         })
 
                 # Sort by most unread first
@@ -194,10 +207,10 @@ class CrmNotificationsController(http.Controller):
                             'subject':      m.subject or '(no subject)',
                             'from_name':    m.from_name or '',
                             'from_address': m.from_address or '',
-                            'date':         m.date.isoformat() if m.date else None,
+                            'date':         _to_riyadh_iso(m.date),
                         })
 
-            checked_at = _dt.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
+            checked_at = datetime.now(tz=_RIYADH_TZ).strftime('%Y-%m-%dT%H:%M:%S+03:00')
 
             return _json_response({
                 'success': True,

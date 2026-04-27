@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="0">
+        <!--
+            Always enable WebSocket rollout.
+            Using set_param() (upsert) so re-installs never fail with
+            a unique-constraint error if the key already exists in the DB.
+        -->
+        <function model="ir.config_parameter" name="set_param">
+            <value eval="'ws.rollout.enabled'"/>
+            <value eval="'True'"/>
+        </function>
+    </data>
+</odoo>

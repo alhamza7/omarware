@@ -2,8 +2,10 @@
 <odoo>
     <data noupdate="1">
         <!--
-            Background IMAP inbox sync — runs every minute, pulls new messages
-            for all active email accounts that have a password configured.
+            Background IMAP inbox sync — fallback poller (1 minute).
+            IMAP IDLE watcher is the primary real-time path; this cron is a safety net.
+            Note: Odoo ir.cron does NOT support 'seconds' as interval_type.
+            Minimum granularity is 1 minute.
         -->
         <record id="ir_cron_lugal_email_imap_sync" model="ir.cron">
             <field name="name">Lugal Email: IMAP Inbox Sync</field>
@@ -12,7 +14,21 @@
             <field name="code">model.action_sync_all_accounts()</field>
             <field name="interval_number">1</field>
             <field name="interval_type">minutes</field>
-            <field name="numbercall">-1</field>
+            <field name="active">True</field>
+            <field name="priority">5</field>
+        </record>
+
+        <!--
+            IMAP IDLE supervisor — restarts crashed watcher threads (1 minute).
+            In-process watchdog thread (5s interval) handles new accounts faster.
+        -->
+        <record id="ir_cron_lugal_email_idle_supervisor" model="ir.cron">
+            <field name="name">Lugal Email: IMAP IDLE Supervisor</field>
+            <field name="model_id" ref="lugal_email.model_lugal_email_idle_watcher"/>
+            <field name="state">code</field>
+            <field name="code">model.start_all()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">minutes</field>
             <field name="active">True</field>
             <field name="priority">5</field>
         </record>

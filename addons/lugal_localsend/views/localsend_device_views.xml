@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_lugal_localsend_device_list" model="ir.ui.view">
+        <field name="name">lugal.localsend.device.list</field>
+        <field name="model">lugal.localsend.device</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="name"/>
+                <field name="device_uid"/>
+                <field name="protocol"/>
+                <field name="ip_address"/>
+                <field name="port"/>
+                <field name="user_id"/>
+                <field name="is_online"/>
+                <field name="last_seen"/>
+                <field name="active"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_lugal_localsend_device_form" model="ir.ui.view">
+        <field name="name">lugal.localsend.device.form</field>
+        <field name="model">lugal.localsend.device</field>
+        <field name="arch" type="xml">
+            <form>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="name"/>
+                            <field name="device_uid"/>
+                            <field name="user_id"/>
+                            <field name="active"/>
+                        </group>
+                        <group>
+                            <field name="protocol"/>
+                            <field name="ip_address"/>
+                            <field name="port"/>
+                            <field name="is_online"/>
+                            <field name="last_seen"/>
+                        </group>
+                    </group>
+                    <group>
+                        <field name="require_pin"/>
+                        <field name="pin_code" invisible="not require_pin"/>
+                        <field name="note"/>
+                    </group>
+                    <notebook>
+                        <page string="Transfers Sent">
+                            <field name="transfer_sent_ids" readonly="1">
+                                <list>
+                                    <field name="name"/>
+                                    <field name="target_device_id"/>
+                                    <field name="status"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Transfers Received">
+                            <field name="transfer_received_ids" readonly="1">
+                                <list>
+                                    <field name="name"/>
+                                    <field name="source_device_id"/>
+                                    <field name="status"/>
+                                </list>
+                            </field>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_lugal_localsend_device" model="ir.actions.act_window">
+        <field name="name">LocalSend Devices</field>
+        <field name="res_model">lugal.localsend.device</field>
+        <field name="view_mode">list,form</field>
+    </record>
+</odoo>

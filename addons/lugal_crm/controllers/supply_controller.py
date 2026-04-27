@@ -22,12 +22,21 @@ from .upload_controller import (
 
 _logger = logging.getLogger(__name__)
 
-# Multipart chat uploads — images, docs, audio, video
+# Multipart chat uploads — images, docs, audio, video, archives
 ALLOWED_SUPPLY_CHAT_MIMES = set(ALLOWED_IMAGE_MIMES) | set(ALLOWED_DOC_MIMES) | {
     'text/plain',
     'text/csv',
+    # Archives
     'application/zip',
     'application/x-zip-compressed',
+    'application/x-rar-compressed',  # .rar (legacy MIME)
+    'application/vnd.rar',           # .rar (official MIME)
+    'application/x-rar',             # .rar (some systems)
+    'application/x-7z-compressed',   # .7z
+    'application/x-tar',             # .tar
+    'application/gzip',              # .gz
+    'application/x-bzip2',           # .bz2
+    'application/x-xz',              # .xz
     # Audio — voice notes and audio messages
     'audio/mpeg',           # .mp3
     'audio/mp4',            # .m4a (AAC in MP4)
@@ -49,9 +58,9 @@ ALLOWED_SUPPLY_CHAT_MIMES = set(ALLOWED_IMAGE_MIMES) | set(ALLOWED_DOC_MIMES) | 
     'video/x-matroska',     # .mkv
 }
 
-# Standard uploads (docs, images, audio) up to 25 MB; video up to 100 MB
-MAX_SUPPLY_CHAT_UPLOAD_MB = 25
-MAX_SUPPLY_CHAT_VIDEO_MB  = 100
+# All uploads up to 1 GB (images, audio, docs, video)
+MAX_SUPPLY_CHAT_UPLOAD_MB = 1024
+MAX_SUPPLY_CHAT_VIDEO_MB  = 1024
 
 AUDIO_MIMES = frozenset(m for m in ALLOWED_SUPPLY_CHAT_MIMES if m.startswith('audio/'))
 VIDEO_MIMES  = frozenset(m for m in ALLOWED_SUPPLY_CHAT_MIMES if m.startswith('video/'))
@@ -91,7 +100,8 @@ def _serialize_attachment(att):
         'name': att.name or '',
         'mimetype': att.mimetype or 'application/octet-stream',
         'size': int(att.file_size or 0),
-        'url': f'/web/content/{att.id}?download=true',
+        'url': _build_attachment_url(att),
+        'file_url': _build_attachment_url(att),
         'uploaded_by_name': att.create_uid.name if att.create_uid else '',
         'created_at': att.create_date.isoformat() if att.create_date else '',
     }
@@ -245,6 +255,21 @@ class CrmSupplyController(http.Controller):
                 'content': '[This message was deleted]',
                 'attachments_json': '[]',
             })
+            # Notify all conversation participants in real-time
+            try:
+                request.env['bus.bus'].sudo()._sendone(
+                    f'supply_chat.{conv.id}',
+                    'supply.chat.message.deleted',
+                    {
+                        'message_id': msg.id,
+                        'conversation_id': conv.id,
+                        'deleted_by': uid,
+                        'scope': 'for_everyone',
+                    },
+                )
+            except Exception as _bus_exc:
+                import logging as _lg
+                _lg.getLogger(__name__).debug('delete bus publish error: %s', _bus_exc)
             return {'success': True, 'data': {'id': msg.id, 'deleted': True, 'scope': 'for_everyone'}}
         except Exception as e:
             return crm_error(e, 'supply_message_delete')
@@ -257,6 +282,10 @@ class CrmSupplyController(http.Controller):
         csrf=False,
         save_session=False,
         cors='*',
+        # Odoo's http.py sets DEFAULT_MAX_CONTENT_LENGTH = 128 MiB on every request.
+        # This per-route override raises the ceiling to 1 GB so large files (RAR, ZIP,
+        # video, etc.) are not rejected by Werkzeug before reaching our controller.
+        max_content_length=1073741824,
     )
     def supply_chat_upload(self, **kwargs):
         """

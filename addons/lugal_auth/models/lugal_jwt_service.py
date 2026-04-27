@@ -92,15 +92,21 @@ class LugalJwtService(models.AbstractModel):
         return jwt.encode(payload, self._get_secret_key(), algorithm='HS256')
 
     @api.model
-    def generate_refresh_token(self, user_id):
-        """Sign and return a new JWT refresh token for *user_id*."""
+    def generate_refresh_token(self, user_id, remember_me=False):
+        """
+        Sign and return a new JWT refresh token for *user_id*.
+
+        remember_me=True extends the lifetime to 30 days (instead of the
+        configured default, typically 7 days) so the user stays logged in
+        across browser sessions.
+        """
         user = self.env['res.users'].sudo().browse(user_id)
         if not user.exists():
             raise ValidationError('User not found')
 
-        expire = datetime.utcnow() + timedelta(
-            days=self._get_refresh_token_expire_days()
-        )
+        default_days = self._get_refresh_token_expire_days()
+        expire_days  = 30 if remember_me else default_days
+        expire = datetime.utcnow() + timedelta(days=expire_days)
         payload = {
             'jti':      str(uuid.uuid4()),
             'user_id':  user.id,
@@ -195,33 +201,61 @@ class LugalJwtService(models.AbstractModel):
     # ------------------------------------------------------------------
 
     @api.model
-    def authenticate_user(self, username, password):
+    def authenticate_user(self, username, password, remember_me=False):
         """
         Validate credentials and return tokens + basic user info.
+
+        We bypass res.users.authenticate() / _login() deliberately.
+        Odoo 19's _login() calls _assert_can_auth() which:
+          1. Tracks failed attempts per IP in worker memory
+          2. Blocks ALL logins from an IP after N failures — regardless of user
+          3. Raises AccessDenied at the Odoo HTTP dispatch level, bypassing
+             our own try/except
+
+        We have our own rate limiter (lugal.auth.rate.limit) so we call
+        _check_credentials() directly instead, which only verifies the
+        password hash and never touches request.session.
+
+        This also eliminates the single-session-per-browser bug: because
+        _login() writes back to request.session and the WS session bridge
+        sets a session_id cookie, calling authenticate() while another user's
+        session cookie is present causes a cross-user session conflict.
+
+        remember_me=True issues a longer-lived refresh token (30 days instead
+        of the configured default, typically 7 days).
 
         Returns a response dict on success or None on failure.
         """
         try:
-            credential = {
-                'type':     'password',
-                'login':    username,
-                'password': password,
-            }
-            auth_info = self.env['res.users'].sudo().authenticate(
-                credential, user_agent_env={}
-            )
-            uid = auth_info.get('uid') if auth_info else None
-            if not uid:
+            Users = self.env['res.users'].sudo()
+
+            # Look up active user by login — no session interaction
+            user = Users.search([
+                ('login', '=', username),
+                ('active', '=', True),
+            ], limit=1)
+
+            if not user:
                 return None
 
-            user = self.env['res.users'].sudo().browse(uid)
+            # Verify the password hash directly — no _assert_can_auth cooldown,
+            # no request.session modification, no cross-session conflict.
+            # Must use with_user(user).sudo() so that _check_credentials reads
+            # the correct user's password hash via self.env.user.id (Odoo 19).
+            user.with_user(user).sudo()._check_credentials(
+                {'type': 'password', 'login': username, 'password': password},
+                {'interactive': True},
+            )
+
+            uid = user.id
             access_token  = self.generate_access_token(uid)
-            refresh_token = self.generate_refresh_token(uid)
+            refresh_token = self.generate_refresh_token(uid, remember_me=remember_me)
 
             return {
                 'access_token':  access_token,
                 'refresh_token': refresh_token,
                 'token_type':    'bearer',
+                'remember_me':   bool(remember_me),
                 'user': {
                     'id':       user.id,
                     'name':     user.name,
@@ -230,7 +264,7 @@ class LugalJwtService(models.AbstractModel):
                 },
             }
         except Exception as exc:
-            _logger.error('lugal_auth: authentication failed — %s', exc)
+            _logger.info('lugal_auth: credential check failed for %s — %s', username, exc)
             return None
 
     @api.model

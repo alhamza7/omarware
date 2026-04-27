@@ -54,6 +54,10 @@ class LugalEmailMessage(models.Model):
     is_starred = fields.Boolean(string='Starred', default=False)
     is_draft   = fields.Boolean(string='Draft',   default=False)
 
+    # Timestamp set the first time this message is marked as read.
+    # Null for messages that have never been opened.
+    read_at    = fields.Datetime(string='Read At', readonly=False)
+
     # ── CRM Links (generic — no direct Many2one to avoid circular deps) ───────
     linked_model       = fields.Char(string='Linked Model', index=True)
     linked_record_id   = fields.Integer(string='Linked Record ID', index=True)
@@ -86,3 +90,12 @@ class LugalEmailMessage(models.Model):
     # ── Soft delete ───────────────────────────────────────────────────────────
     active     = fields.Boolean(default=True)
     is_deleted = fields.Boolean(default=False, index=True)
+
+    def write(self, vals):
+        # Auto-stamp read_at the first time is_read transitions to True.
+        if vals.get('is_read') and not vals.get('read_at'):
+            for rec in self:
+                if not rec.is_read and not rec.read_at:
+                    vals = dict(vals, read_at=fields.Datetime.now())
+                    break
+        return super().write(vals)

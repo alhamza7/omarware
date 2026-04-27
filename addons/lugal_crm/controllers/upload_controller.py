@@ -56,10 +56,14 @@ VALID_DOC_TYPES = {
 
 
 def _build_attachment_url(attachment):
-    """Return a stable public URL for an ir.attachment record."""
-    base_url = request.env['ir.config_parameter'].sudo().get_param('web.base.url', '')
+    """Return a stable relative path for an ir.attachment record.
+
+    Using a relative path (no hostname) ensures the URL works correctly for every
+    client regardless of which IP/hostname they use to access the app, and lets the
+    Vite dev-server proxy (or Nginx in production) resolve it correctly.
+    """
     token = attachment.access_token or ''
-    return f"{base_url}/web/content/{attachment.id}?access_token={token}"
+    return f"/web/content/{attachment.id}?access_token={token}"
 
 
 def _create_attachment(filename, mimetype, data_bytes, res_model='lugal.crm.customer', res_id=None):

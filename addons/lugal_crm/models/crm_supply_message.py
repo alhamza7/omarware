@@ -62,9 +62,19 @@ class LugalSupplyMessage(models.Model):
 
     # Reactions stored as JSON: {"👍": [1, 5, 9], "❤️": [2]}
     reactions_json = fields.Text(string='Reactions (JSON)', default='{}')
+    # Read receipts: {"user_id": "ISO-datetime"} — records WHEN each user read this message
+    read_receipts_json = fields.Text(string='Read Receipts (JSON)', default='{}')
 
     edited_at  = fields.Datetime(string='Edited At')
     is_deleted = fields.Boolean(string='Deleted', default=False, index=True)
+    is_pinned  = fields.Boolean(string='Pinned', default=False, index=True)
+    pinned_at  = fields.Datetime(string='Pinned At')
+    pinned_by_id = fields.Many2one('res.users', string='Pinned By', ondelete='set null')
+
+    # Deduplication key set by the FE sender — echoed back in the WS push so the
+    # sender can match the server-confirmed message against their optimistic temp entry
+    # without relying on a negative temp ID.
+    client_message_id = fields.Char(string='Client Message ID', index=True)
 
     # Track which users have read this message (per-user read receipts)
     read_user_ids = fields.Many2many(
