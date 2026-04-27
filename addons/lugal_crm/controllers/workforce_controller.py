@@ -47,6 +47,27 @@ def _build_employee_dict(user):
     mobile = user.partner_id.mobile or ''
     job_title = user.partner_id.function or ''
 
+    # Registered email accounts (for SMS / messaging compose From: dropdown)
+    registered_emails = []
+    try:
+        if 'lugal.email.account' in request.env:
+            email_accounts = request.env['lugal.email.account'].sudo().search([
+                ('user_id', '=', user.id),
+                ('is_active', '=', True),
+                ('is_deleted', '=', False),
+            ])
+            registered_emails = [
+                {
+                    'id':      acc.id,
+                    'name':    acc.display_name_field or acc.name or acc.email_address or '',
+                    'address': acc.email_address or '',
+                }
+                for acc in email_accounts
+                if acc.email_address
+            ]
+    except Exception:
+        pass
+
     return {
         # Core identity
         'id':          user.id,
@@ -71,6 +92,8 @@ def _build_employee_dict(user):
         'branch_name': first_branch.name if first_branch else '',
         'branch_ids':  branches.ids,
         'branch_names': [b.name for b in branches],
+        # Registered email accounts for compose From: dropdown
+        'registered_emails': registered_emails,
     }
 
 
@@ -530,17 +553,75 @@ class WorkforceController(http.Controller):
         except Exception as e:
             return crm_error(e, 'employee_detail')
 
+    # ─── Check username availability ──────────────────────────────────────────
+
+    @http.route('/api/crm/employees/check-username', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def check_username(self, username=None, **kwargs):
+        """Check whether a username (login) is available. Returns {'available': bool}."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized'}
+            if not username or not str(username).strip():
+                return {'success': False, 'error': 'username is required'}
+            uname = str(username).strip().lower()
+            existing = request.env['res.users'].sudo().search(
+                [('login', '=', uname)], limit=1
+            )
+            return {'success': True, 'data': {'available': not bool(existing), 'username': uname}}
+        except Exception as e:
+            return crm_error(e, 'check_username')
+
+    # ─── Test email connection (without saving account) ────────────────────────
+
+    @http.route('/api/crm/employees/email/test-connection', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def test_email_connection(self, imap_host=None, imap_port=None, imap_use_ssl=True,
+                               email_address=None, password=None, **kwargs):
+        """
+        Test IMAP connectivity with the provided credentials, without persisting
+        any email account. Used from the Employee form during creation.
+
+        Params:
+          - imap_host: IMAP server hostname
+          - imap_port: port (int, default 993 for SSL, 143 otherwise)
+          - imap_use_ssl: bool
+          - email_address: the email address / username for IMAP login
+          - password: the IMAP / app password
+        """
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+            if not imap_host or not email_address or not password:
+                return {'success': False, 'error': 'imap_host, email_address and password are required'}
+            import imaplib
+            use_ssl = bool(imap_use_ssl)
+            port = int(imap_port) if imap_port else (993 if use_ssl else 143)
+            conn_cls = imaplib.IMAP4_SSL if use_ssl else imaplib.IMAP4
+            conn = conn_cls(str(imap_host), port)
+            conn.login(str(email_address), str(password))
+            conn.logout()
+            return {'success': True, 'data': {'status': 'ok', 'message': 'Connection successful'}}
+        except Exception as e:
+            return {'success': False, 'data': {'status': 'error', 'message': str(e)}, 'error': str(e)}
+
     # ─── Create employee ──────────────────────────────────────────────────────
 
     @http.route('/api/crm/employees/create', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def employee_create(self, name, email, password=None, role='agent', branch_id=None,
                         phone=None, job_title=None, lang='en_US', tz='UTC',
-                        avatar_128=None, **kwargs):
+                        avatar_128=None, username=None,
+                        imap_host=None, imap_port=None, imap_use_ssl=None,
+                        smtp_host=None, smtp_port=None, smtp_use_tls=None,
+                        email_account_password=None,
+                        **kwargs):
         """
         Create a new CRM employee (Odoo res.users + assign to CRM group + branch).
 
         Required: name, email
-        Optional: password, role (agent|supervisor), branch_id, phone, job_title, lang, tz
+        Optional: password, role (agent|supervisor), branch_id, phone, job_title, lang, tz,
+                  username (custom login — defaults to email if not provided),
+                  imap_host, imap_port, imap_use_ssl, smtp_host, smtp_port, smtp_use_tls,
+                  email_account_password (password for the email account, defaults to login password)
         """
         try:
             uid = ensure_jwt_user_id()
@@ -549,18 +630,64 @@ class WorkforceController(http.Controller):
             if not name or not email:
                 return {'success': False, 'error': 'name and email are required'}
 
-            # Check email uniqueness
-            existing = request.env['res.users'].sudo().search([('login', '=', email)], limit=1)
+            # Use custom username as login if provided, otherwise fall back to email
+            login = str(username).strip().lower() if username and str(username).strip() else email
+
+            # Check username/email uniqueness
+            existing = request.env['res.users'].sudo().search([('login', '=', login)], limit=1)
             if existing:
-                return {'success': False, 'error': f'A user with email {email} already exists'}
+                return {'success': False, 'error': f'The username "{login}" is already taken'}
+            # Also check email if different from login
+            if login != email:
+                existing_email = request.env['res.users'].sudo().search([('login', '=', email)], limit=1)
+                if existing_email:
+                    return {'success': False, 'error': f'A user with email {email} already exists'}
+
+            # Validate and resolve language code — if the requested lang is not installed,
+            # fall back to en_US to avoid "language not found" errors.
+            requested_lang = (lang or 'en_US').strip()
+            # Normalise common language names/aliases the FE might send
+            _LANG_ALIAS = {
+                'arabic':     'ar_001',
+                'arabic_001': 'ar_001',
+                'arab':       'ar_001',
+                'ar':         'ar_001',
+                'english':    'en_US',
+                'en':         'en_US',
+                'french':     'fr_FR',
+                'fr':         'fr_FR',
+                'spanish':    'es_ES',
+                'es':         'es_ES',
+                'turkish':    'tr_TR',
+                'tr':         'tr_TR',
+                'persian':    'fa_IR',
+                'farsi':      'fa_IR',
+                'urdu':       'ur_PK',
+                'hindi':      'hi_IN',
+                'chinese':    'zh_CN',
+            }
+            resolved_lang = _LANG_ALIAS.get(requested_lang.lower(), requested_lang)
+            # Check if the language is activated in this Odoo instance
+            Lang = request.env['res.lang'].sudo()
+            if not Lang.search([('code', '=', resolved_lang)], limit=1):
+                # Try to activate the language
+                try:
+                    request.env['base.language.install'].sudo().create({
+                        'lang_ids': Lang.search([('code', '=', resolved_lang)]),
+                    }).lang_install()
+                except Exception:
+                    pass
+                # Final fallback — if still not found use en_US
+                if not Lang.search([('code', '=', resolved_lang)], limit=1):
+                    resolved_lang = 'en_US'
 
             # Build user vals — in Odoo 19 the internal user group is assigned via group_ids
             group_user = request.env.ref('base.group_user', raise_if_not_found=False)
             vals = {
                 'name':   name,
-                'login':  email,
+                'login':  login,
                 'email':  email,
-                'lang':   lang or 'en_US',
+                'lang':   resolved_lang,
                 'tz':     tz   or 'UTC',
                 'active': True,
             }
@@ -602,13 +729,13 @@ class WorkforceController(http.Controller):
                         'name':          name,
                         'email_address': email,
                         'username':      email,
-                        'password':      password or '',
-                        'imap_host':     'mail.nooralnibras.com',
-                        'imap_port':     993,
-                        'imap_use_ssl':  True,
-                        'smtp_host':     'mail.nooralnibras.com',
-                        'smtp_port':     465,
-                        'smtp_use_tls':  False,
+                        'password':      email_account_password or password or '',
+                        'imap_host':     imap_host  or 'mail.nooralnibras.com',
+                        'imap_port':     int(imap_port or 993),
+                        'imap_use_ssl':  bool(imap_use_ssl) if imap_use_ssl is not None else True,
+                        'smtp_host':     smtp_host  or 'mail.nooralnibras.com',
+                        'smtp_port':     int(smtp_port or 465),
+                        'smtp_use_tls':  bool(smtp_use_tls) if smtp_use_tls is not None else False,
                         'is_default':    True,
                         'is_active':     True,
                         'sync_status':   'never',
@@ -627,14 +754,31 @@ class WorkforceController(http.Controller):
 
     @http.route('/api/crm/employees/<int:employee_id>/update', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def employee_update(self, employee_id, name=None, phone=None, job_title=None,
-                        role=None, branch_id=None, lang=None, tz=None, avatar_128=None, **kwargs):
-        """Update a CRM employee's profile fields."""
+                        role=None, branch_id=None, lang=None, tz=None, avatar_128=None,
+                        password=None, current_password=None, **kwargs):
+        """Update a CRM employee's profile fields.
+
+        Password rules:
+          - Admin (general_manager / system) can set any user's password by sending
+            ``password`` in the payload. No ``current_password`` required.
+          - A non-admin user can change their OWN password by sending both
+            ``current_password`` (for verification) and ``password`` (new value).
+          - A non-admin user cannot change another user's password.
+        """
         try:
-            if not ensure_jwt_user_id():
+            requester_uid = ensure_jwt_user_id()
+            if not requester_uid:
                 return {'success': False, 'error': 'Unauthorized'}
+
             user = request.env['res.users'].sudo().browse(employee_id)
             if not user.exists():
                 return {'success': False, 'error': 'Employee not found'}
+
+            requester = request.env['res.users'].sudo().browse(requester_uid)
+            is_admin = (
+                requester._has_group('base.group_system')
+                or requester._has_group('lugal_crm.group_lugal_crm_general_manager')
+            )
 
             vals = {}
             if name:
@@ -644,13 +788,47 @@ class WorkforceController(http.Controller):
             if job_title is not None:
                 vals['function'] = job_title
             if lang:
-                vals['lang'] = lang
+                _LANG_ALIAS_UPDATE = {
+                    'arabic': 'ar_001', 'arab': 'ar_001', 'ar': 'ar_001',
+                    'english': 'en_US', 'en': 'en_US',
+                    'french': 'fr_FR', 'fr': 'fr_FR',
+                }
+                resolved = _LANG_ALIAS_UPDATE.get(lang.strip().lower(), lang.strip())
+                Lang = request.env['res.lang'].sudo()
+                if Lang.search([('code', '=', resolved)], limit=1):
+                    vals['lang'] = resolved
+                else:
+                    vals['lang'] = 'en_US'
             if tz:
                 vals['tz'] = tz
             if vals:
                 user.write(vals)
 
-            # Save avatar separately (image field)
+            # ── Password change ──────────────────────────────────────────────
+            if password:
+                new_pw = password.strip()
+                if len(new_pw) < 6:
+                    return {'success': False, 'error': 'Password must be at least 6 characters'}
+
+                if is_admin:
+                    # Admin can set any user's password directly
+                    user.write({'password': new_pw})
+                elif requester_uid == employee_id:
+                    # Non-admin updating their own password — verify current first
+                    if not current_password:
+                        return {'success': False, 'error': 'current_password is required to change your own password'}
+                    try:
+                        request.env['res.users'].sudo()._check_credentials(
+                            current_password, {'interactive': False}
+                        )
+                    except Exception:
+                        # _check_credentials raises on wrong password
+                        return {'success': False, 'error': 'Current password is incorrect'}
+                    user.write({'password': new_pw})
+                else:
+                    return {'success': False, 'error': 'You do not have permission to change another user\'s password'}
+
+            # ── Avatar ───────────────────────────────────────────────────────
             if avatar_128:
                 try:
                     user.sudo().write({'image_128': avatar_128})
@@ -661,7 +839,6 @@ class WorkforceController(http.Controller):
                 _assign_crm_role(user, role)
 
             if branch_id is not None:
-                # Remove from all branches first, then assign new one
                 all_branches = request.env['lugal.crm.branch'].sudo().search(
                     [('user_ids', 'in', user.id)]
                 )

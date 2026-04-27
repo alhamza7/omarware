@@ -1,0 +1,5 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_lugal_localsend_device_user,lugal.localsend.device.user,model_lugal_localsend_device,lugal_localsend.group_lugal_localsend_user,1,1,1,1
+access_lugal_localsend_transfer_user,lugal.localsend.transfer.user,model_lugal_localsend_transfer,lugal_localsend.group_lugal_localsend_user,1,1,1,1
+access_lugal_localsend_device_manager,lugal.localsend.device.manager,model_lugal_localsend_device,lugal_localsend.group_lugal_localsend_manager,1,1,1,1
+access_lugal_localsend_transfer_manager,lugal.localsend.transfer.manager,model_lugal_localsend_transfer,lugal_localsend.group_lugal_localsend_manager,1,1,1,1

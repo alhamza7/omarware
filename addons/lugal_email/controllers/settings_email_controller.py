@@ -5,11 +5,23 @@ User-facing CRUD for email account configuration (JSON-RPC).
 """
 
 import logging
+from datetime import timedelta, timezone
 from odoo import http
 from odoo.http import request
 from odoo.addons.lugal_auth.controllers._auth import ensure_jwt_user_id
 
 _logger = logging.getLogger(__name__)
+
+_RIYADH_TZ = timezone(timedelta(hours=3))
+
+
+def _to_riyadh_iso(dt):
+    """Convert a naive-UTC Odoo datetime to ISO 8601 with +03:00 (Riyadh) offset."""
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(_RIYADH_TZ).isoformat(timespec='seconds')
 
 
 def _crm_error(exc, handler=''):
@@ -36,7 +48,7 @@ def _acc_to_dict(acc):
         'is_default':     acc.is_default,
         'is_active':      acc.is_active,
         'sync_status':    acc.sync_status or 'never',
-        'last_sync_date': acc.last_sync_date.isoformat() if acc.last_sync_date else None,
+        'last_sync_date': _to_riyadh_iso(acc.last_sync_date),
         'unread_count':   acc.unread_count,
     }
 
@@ -84,6 +96,16 @@ class SettingsEmailController(http.Controller):
             })
             if is_default:
                 acc.action_set_default()
+            # Trigger IDLE watcher immediately so the new account does not have
+            # to wait up to 1 minute for the next supervisor cron run.
+            # Also do an initial IMAP sync right now so existing inbox messages
+            # are imported and the WS notification fires without delay.
+            if (password or '').strip():
+                try:
+                    acc.action_sync()
+                except Exception:
+                    _logger.warning('add_account: initial sync failed for account %s', acc.id, exc_info=True)
+                acc._schedule_idle_start()
             return {'success': True, 'data': _acc_to_dict(acc)}
         except Exception as exc:
             return _crm_error(exc, 'add_account')

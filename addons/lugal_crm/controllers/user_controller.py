@@ -188,6 +188,77 @@ class UserController(http.Controller):
         except Exception as e:
             return crm_error(e, 'update_preferences')
 
+    # ─── Update own profile ───────────────────────────────────────────────────
+
+    @http.route('/api/crm/users/me/update', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def update_me(self, name=None, phone=None, mobile=None, email=None,
+                  lang=None, tz=None, signature=None, avatar_128=None, **kwargs):
+        """
+        Update the currently authenticated user's own profile.
+
+        Accepted fields (all optional — only supplied fields are changed):
+          name        — display name
+          phone       — work phone
+          mobile      — mobile number
+          email       — email address
+          lang        — language code  e.g. 'en_US', 'ar_001'
+          tz          — timezone       e.g. 'Asia/Riyadh'
+          signature   — email signature HTML
+          avatar_128  — base64-encoded profile picture
+        """
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+
+            user = request.env['res.users'].sudo().browse(uid)
+            if not user.exists():
+                return {'success': False, 'error': 'User not found'}
+
+            user_vals    = {}
+            partner_vals = {}
+
+            if name is not None:
+                user_vals['name'] = name.strip()
+            if lang is not None:
+                user_vals['lang'] = lang
+            if tz is not None:
+                user_vals['tz'] = tz
+            if signature is not None:
+                user_vals['signature'] = signature
+            if avatar_128 is not None:
+                try:
+                    import base64 as _b64
+                    raw = avatar_128
+                    # Strip data-URL prefix if present: "data:image/jpeg;base64,<data>"
+                    if isinstance(raw, str) and ',' in raw:
+                        raw = raw.split(',', 1)[1]
+                    # Odoo image fields expect a plain base64 string (not bytes)
+                    if isinstance(raw, bytes):
+                        raw = raw.decode('ascii')
+                    # Validate it is actually base64
+                    _b64.b64decode(raw, validate=True)
+                    # image_128 is the real stored field; avatar_128 is computed/read-only
+                    user_vals['image_128'] = raw
+                except Exception:
+                    return {'success': False, 'error': 'Invalid avatar_128 — must be a base64 or data-URL encoded image'}
+
+            if phone is not None:
+                partner_vals['phone'] = phone
+            if mobile is not None:
+                partner_vals['mobile'] = mobile
+            if email is not None:
+                partner_vals['email'] = email.strip().lower()
+
+            if user_vals:
+                user.write(user_vals)
+            if partner_vals:
+                user.partner_id.write(partner_vals)
+
+            return {'success': True, 'data': _user_to_dict(user)}
+        except Exception as e:
+            return crm_error(e, 'update_me')
+
     # ─── Single user detail ───────────────────────────────────────────────────
 
     @http.route('/api/crm/users/<int:user_id>', type='jsonrpc', auth='none', csrf=False, methods=['POST'])

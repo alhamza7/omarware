@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="0">
+        <record id="group_lugal_localsend_user" model="res.groups">
+            <field name="name">LocalSend User</field>
+            <field name="sequence">70</field>
+            <field name="comment">Can manage own devices and own transfers.</field>
+        </record>
+
+        <record id="group_lugal_localsend_manager" model="res.groups">
+            <field name="name">LocalSend Manager</field>
+            <field name="sequence">71</field>
+            <field name="implied_ids" eval="[(4, ref('group_lugal_localsend_user'))]"/>
+            <field name="comment">Can access all LocalSend devices and transfers.</field>
+        </record>
+
+        <!-- Read: own device always + other users' devices while online (needed to resolve send target). -->
+        <record id="rule_lugal_localsend_device_own_user" model="ir.rule">
+            <field name="name">LocalSend devices: read own or peer online</field>
+            <field name="model_id" ref="model_lugal_localsend_device"/>
+            <field name="groups" eval="[(4, ref('group_lugal_localsend_user'))]"/>
+            <field name="domain_force">['|', ('user_id', '=', user.id), '&amp;', ('active', '=', True), ('is_online', '=', True)]</field>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="False"/>
+            <field name="perm_create" eval="False"/>
+            <field name="perm_unlink" eval="False"/>
+        </record>
+        <!-- Mutations: only the owner's row (no editing other users' devices). -->
+        <record id="rule_lugal_localsend_device_user_mutate" model="ir.rule">
+            <field name="name">LocalSend devices: write/create/delete own only</field>
+            <field name="model_id" ref="model_lugal_localsend_device"/>
+            <field name="groups" eval="[(4, ref('group_lugal_localsend_user'))]"/>
+            <field name="domain_force">[('user_id', '=', user.id)]</field>
+            <field name="perm_read" eval="False"/>
+            <field name="perm_write" eval="True"/>
+            <field name="perm_create" eval="True"/>
+            <field name="perm_unlink" eval="True"/>
+        </record>
+
+        <record id="rule_lugal_localsend_device_manager_all" model="ir.rule">
+            <field name="name">LocalSend devices: manager full</field>
+            <field name="model_id" ref="model_lugal_localsend_device"/>
+            <field name="groups" eval="[(4, ref('group_lugal_localsend_manager'))]"/>
+            <field name="domain_force">[(1, '=', 1)]</field>
+        </record>
+
+        <record id="rule_lugal_localsend_transfer_own_user" model="ir.rule">
+            <field name="name">LocalSend transfers: sender/receiver only</field>
+            <field name="model_id" ref="model_lugal_localsend_transfer"/>
+            <field name="groups" eval="[(4, ref('group_lugal_localsend_user'))]"/>
+            <field name="domain_force">['|', ('source_user_id', '=', user.id), ('target_user_id', '=', user.id)]</field>
+        </record>
+
+        <record id="rule_lugal_localsend_transfer_manager_all" model="ir.rule">
+            <field name="name">LocalSend transfers: manager full</field>
+            <field name="model_id" ref="model_lugal_localsend_transfer"/>
+            <field name="groups" eval="[(4, ref('group_lugal_localsend_manager'))]"/>
+            <field name="domain_force">[(1, '=', 1)]</field>
+        </record>
+    </data>
+</odoo>

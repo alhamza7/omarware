@@ -1,3 +1,4 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_lugal_email_account_user,lugal.email.account user,model_lugal_email_account,base.group_user,1,1,1,1
 access_lugal_email_message_user,lugal.email.message user,model_lugal_email_message,base.group_user,1,1,1,1
+access_lugal_email_idle_watcher_user,lugal.email.idle.watcher user,model_lugal_email_idle_watcher,base.group_user,1,0,0,0

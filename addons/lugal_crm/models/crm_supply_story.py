@@ -107,3 +107,19 @@ class LugalSupplyStory(models.Model):
     def _compute_view_count(self):
         for story in self:
             story.view_count = len(story.viewer_ids)
+
+
+class LugalSupplyStoryViewReceipt(models.Model):
+    """Stores exactly when each user viewed a story (for WhatsApp-style 'seen' with timestamp)."""
+    _name        = 'lugal.supply.story.view.receipt'
+    _description = 'Story View Receipt'
+    _order       = 'viewed_at desc'
+    _rec_name    = 'story_id'
+
+    story_id  = fields.Many2one('lugal.supply.story', required=True, ondelete='cascade', index=True)
+    user_id   = fields.Many2one('res.users',          required=True, ondelete='cascade', index=True)
+    viewed_at = fields.Datetime(string='Viewed At', required=True)
+
+    _sql_constraints = [
+        ('unique_story_user', 'UNIQUE(story_id, user_id)', 'A user can only have one view receipt per story'),
+    ]

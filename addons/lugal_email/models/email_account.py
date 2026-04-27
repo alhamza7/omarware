@@ -72,6 +72,17 @@ class LugalEmailAccount(models.Model):
 
     # ── Constraints ───────────────────────────────────────────────────────────
 
+    @api.model_create_multi
+    def create(self, vals_list):
+        records = super().create(vals_list)
+        for rec in records:
+            if (rec.password or '').strip():
+                # Start the IDLE watcher for this account as soon as the
+                # transaction commits, without waiting for the 1-minute cron.
+                rec_id = rec.id
+                rec._schedule_idle_start()
+        return records
+
     @api.constrains('is_default', 'user_id')
     def _check_single_default(self):
         """Enforce at most one default account per user."""
@@ -92,7 +103,12 @@ class LugalEmailAccount(models.Model):
         self.write({'is_default': True})
 
     def action_test_connection(self):
-        """Test IMAP connection and update sync_status accordingly."""
+        """Test IMAP connection and update sync_status accordingly.
+
+        On success, the IDLE supervisor is triggered immediately so the new
+        account starts receiving live notifications without waiting for the
+        next supervisor cron run (which fires every minute).
+        """
         self.ensure_one()
         try:
             import imaplib
@@ -101,10 +117,41 @@ class LugalEmailAccount(models.Model):
             conn.login(self.username or self.email_address, self.password or '')
             conn.logout()
             self.write({'sync_status': 'ok', 'sync_error_msg': False})
+            # Trigger the IDLE supervisor in the background so the new account
+            # gets its watcher thread immediately (within the owning process).
+            self._schedule_idle_start()
             return {'status': 'ok', 'message': 'Connection successful'}
         except Exception as exc:
             self.write({'sync_status': 'error', 'sync_error_msg': str(exc)})
             return {'status': 'error', 'message': str(exc)}
+
+    def _schedule_idle_start(self):
+        """
+        Spawn a one-shot background thread that clears any backoff for this
+        account's credential group and calls start_all() so the IDLE supervisor
+        picks it up immediately.
+
+        If the current OS process is not the IDLE supervisor owner, start_all()
+        returns 0 (skips) and the account will be picked up by the owning
+        process on its next cron run (≤ 1 minute).
+        """
+        import threading
+        db_name = self.env.cr.dbname
+        acc_id  = self.id
+
+        def _trigger():
+            import time
+            time.sleep(0.5)   # give the write() commit time to propagate
+            try:
+                from odoo.modules.registry import Registry as _Registry
+                import odoo as _odoo
+                with _Registry(db_name).cursor() as cr:
+                    env = _odoo.api.Environment(cr, _odoo.SUPERUSER_ID, {})
+                    env['lugal.email.idle.watcher'].clear_backoff_for_account(acc_id)
+            except Exception:
+                pass   # cron will catch it within 1 minute
+
+        threading.Thread(target=_trigger, daemon=True, name='idle-on-test').start()
 
     def _imap_connect(self):
         """Return a logged-in IMAP connection."""
@@ -113,6 +160,205 @@ class LugalEmailAccount(models.Model):
         conn = conn_cls(self.imap_host, self.imap_port)
         conn.login(self.username or self.email_address, self.password or '')
         return conn
+
+    # ── Bidirectional IMAP sync helpers ──────────────────────────────────────
+
+    def _get_server_folder_name(self, purpose):
+        """Return the IMAP server folder name for a logical purpose.
+
+        purpose: 'trash' | 'archive' | 'sent' | 'drafts' | 'spam'
+
+        Detects per-account folder names via IMAP LIST on first call, then caches
+        in ir.config_parameter so subsequent calls are instant (no extra connection).
+        """
+        self.ensure_one()
+        import re as _re
+
+        cache_key = f'lugal.email.folder.{self.id}.{purpose}'
+        ICP = self.env['ir.config_parameter'].sudo()
+        cached = ICP.get_param(cache_key, '')
+        if cached:
+            return cached
+
+        # Provider-aware defaults (avoids an extra IMAP LIST round-trip for known hosts)
+        host = (self.imap_host or '').lower()
+        if 'gmail.com' in host:
+            defaults = {
+                'trash': '[Gmail]/Trash', 'archive': '[Gmail]/All Mail',
+                'sent': '[Gmail]/Sent Mail', 'drafts': '[Gmail]/Drafts',
+                'spam': '[Gmail]/Spam',
+            }
+        else:
+            defaults = {
+                'trash': 'Trash', 'archive': 'Archive',
+                'sent': 'Sent', 'drafts': 'Drafts', 'spam': 'Spam',
+            }
+
+        # Attempt auto-discovery via IMAP LIST
+        # LIST response format: (flags) "delimiter" folder_name
+        # e.g. (\HasNoChildren \Trash) "." INBOX.Trash
+        #      (\Trash) "/" "[Gmail]/Trash"
+        keywords = {
+            'trash':   ['trash', 'deleted'],
+            'archive': ['archive'],
+            'sent':    ['sent'],
+            'drafts':  ['draft'],
+            'spam':    ['spam', 'junk'],
+        }
+        try:
+            conn = self._imap_connect()
+            typ, listing = conn.list()
+            conn.logout()
+            if typ == 'OK' and listing:
+                for entry in listing:
+                    if not entry:
+                        continue
+                    raw = entry.decode('utf-8', errors='replace') if isinstance(entry, bytes) else str(entry)
+                    # Strip the flags section "(...)" and delimiter, get the folder name
+                    # Handles both: (\Flags) "." INBOX.Trash
+                    #           and (\Flags) "/" "[Gmail]/Trash"
+                    m = _re.search(r'\(.*?\)\s+"[^"]+"\s+"?(.+?)"?\s*$', raw)
+                    if not m:
+                        m = _re.search(r'\(.*?\)\s+\S+\s+"?(.+?)"?\s*$', raw)
+                    folder_raw = m.group(1).strip().strip('"') if m else ''
+                    if not folder_raw:
+                        continue
+                    for kw in keywords.get(purpose, []):
+                        if kw in folder_raw.lower():
+                            ICP.set_param(cache_key, folder_raw)
+                            return folder_raw
+        except Exception:
+            pass  # fall through to defaults
+
+        result = defaults.get(purpose, purpose.capitalize())
+        ICP.set_param(cache_key, result)
+        return result
+
+    def _imap_store_async(self, imap_uid, imap_folder, add_flags=None, remove_flags=None):
+        """Push flag changes to the IMAP server in a background thread (fire-and-forget).
+
+        Called after local DB updates so API responses are never blocked by IMAP latency.
+        Failures are logged as warnings — the local DB state is always authoritative.
+        """
+        self.ensure_one()
+        if not imap_uid or not (add_flags or remove_flags):
+            return
+
+        import threading
+        acc_id  = self.id
+        db_name = self.env.cr.dbname
+
+        def _do_store():
+            try:
+                from odoo.modules.registry import Registry as _Registry
+                import odoo as _odoo
+                with _Registry(db_name).cursor() as cr:
+                    env = _odoo.api.Environment(cr, _odoo.SUPERUSER_ID, {})
+                    acc = env['lugal.email.account'].browse(acc_id)
+                    conn = acc._imap_connect()
+                    conn.select(imap_folder, readonly=False)
+                    uid_str = str(imap_uid)
+                    if add_flags:
+                        conn.uid('store', uid_str, '+FLAGS', '(' + ' '.join(add_flags) + ')')
+                    if remove_flags:
+                        conn.uid('store', uid_str, '-FLAGS', '(' + ' '.join(remove_flags) + ')')
+                    conn.logout()
+                    _logger.info(
+                        'IMAP flags pushed for acc=%s uid=%s folder=%s +%s -%s',
+                        acc_id, imap_uid, imap_folder, add_flags, remove_flags,
+                    )
+            except Exception as exc:
+                _logger.warning(
+                    'IMAP flag push failed for acc=%s uid=%s folder=%s: %s',
+                    acc_id, imap_uid, imap_folder, exc,
+                )
+
+        threading.Thread(target=_do_store, daemon=True,
+                         name=f'imap-store-{imap_uid}').start()
+
+    def _imap_move_async(self, imap_uid, from_folder, to_folder_purpose):
+        """Move a message between IMAP folders in a background thread.
+
+        Uses the MOVE extension (RFC 6851, supported by Dovecot and cPanel/WHM).
+        Falls back to COPY + STORE(\\Deleted) + EXPUNGE if MOVE is unavailable.
+
+        to_folder_purpose: logical name ('trash'|'archive'|'inbox'|'sent'|'drafts')
+        """
+        self.ensure_one()
+        if not imap_uid:
+            return
+
+        import threading
+        acc_id  = self.id
+        db_name = self.env.cr.dbname
+
+        def _do_move():
+            try:
+                from odoo.modules.registry import Registry as _Registry
+                import odoo as _odoo
+                with _Registry(db_name).cursor() as cr:
+                    env = _odoo.api.Environment(cr, _odoo.SUPERUSER_ID, {})
+                    acc = env['lugal.email.account'].browse(acc_id)
+
+                    if to_folder_purpose == 'inbox':
+                        dest_folder = 'INBOX'
+                    else:
+                        dest_folder = acc._get_server_folder_name(to_folder_purpose)
+
+                    conn = acc._imap_connect()
+                    conn.select(from_folder, readonly=False)
+                    uid_str = str(imap_uid)
+
+                    # Prefer MOVE (atomic, server-side)
+                    typ, data = conn.uid('move', uid_str, dest_folder)
+                    if typ != 'OK':
+                        # Fall back: COPY + mark deleted + EXPUNGE
+                        conn.uid('copy', uid_str, dest_folder)
+                        conn.uid('store', uid_str, '+FLAGS', '(\\Deleted)')
+                        conn.expunge()
+
+                    conn.logout()
+                    _logger.info(
+                        'IMAP move acc=%s uid=%s %s → %s',
+                        acc_id, imap_uid, from_folder, dest_folder,
+                    )
+            except Exception as exc:
+                _logger.warning(
+                    'IMAP move failed acc=%s uid=%s: %s',
+                    acc_id, imap_uid, exc,
+                )
+
+        threading.Thread(target=_do_move, daemon=True,
+                         name=f'imap-move-{imap_uid}').start()
+
+    def _imap_expunge_async(self, imap_uid, imap_folder):
+        """Mark a message \\Deleted on the server and EXPUNGE it (permanent delete)."""
+        self.ensure_one()
+        if not imap_uid:
+            return
+
+        import threading
+        acc_id  = self.id
+        db_name = self.env.cr.dbname
+
+        def _do_expunge():
+            try:
+                from odoo.modules.registry import Registry as _Registry
+                import odoo as _odoo
+                with _Registry(db_name).cursor() as cr:
+                    env = _odoo.api.Environment(cr, _odoo.SUPERUSER_ID, {})
+                    acc = env['lugal.email.account'].browse(acc_id)
+                    conn = acc._imap_connect()
+                    conn.select(imap_folder, readonly=False)
+                    conn.uid('store', str(imap_uid), '+FLAGS', '(\\Deleted)')
+                    conn.expunge()
+                    conn.logout()
+                    _logger.info('IMAP expunge acc=%s uid=%s folder=%s', acc_id, imap_uid, imap_folder)
+            except Exception as exc:
+                _logger.warning('IMAP expunge failed acc=%s uid=%s: %s', acc_id, imap_uid, exc)
+
+        threading.Thread(target=_do_expunge, daemon=True,
+                         name=f'imap-expunge-{imap_uid}').start()
 
     @staticmethod
     def _decode_mime_header(value):
@@ -354,7 +600,7 @@ class LugalEmailAccount(models.Model):
                     if typ == 'OK' and data_list:
                         _upsert_batch(_parse_batch_fetch(data_list), min_uid=max_uid_cursor, headers_only=True)
                 elif todo:
-                    # Full body for new messages — few messages, fast.
+                    # Full body for new messages — few messages, typically fast.
                     uid_set = ','.join(str(u) for u in todo)
                     typ, data_list = conn.uid('fetch', uid_set, BODY_FETCH)
                     if typ == 'OK' and data_list:

@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_lugal_localsend_transfer_list" model="ir.ui.view">
+        <field name="name">lugal.localsend.transfer.list</field>
+        <field name="model">lugal.localsend.transfer</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="name"/>
+                <field name="source_user_id"/>
+                <field name="target_user_id"/>
+                <field name="source_device_id"/>
+                <field name="target_device_id"/>
+                <field name="attachment_id"/>
+                <field name="status"/>
+                <field name="localsend_session_id"/>
+                <field name="create_date"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_lugal_localsend_transfer_form" model="ir.ui.view">
+        <field name="name">lugal.localsend.transfer.form</field>
+        <field name="model">lugal.localsend.transfer</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button name="action_queue" type="object" string="Queue" class="btn-primary" invisible="status != 'draft'"/>
+                    <button name="action_send_now" type="object" string="Send Now" class="btn-primary" invisible="status in ['sending','sent','cancelled']"/>
+                    <button name="action_mark_sent" type="object" string="Mark Sent" class="btn-success" invisible="status in ['sent','failed','cancelled']"/>
+                    <button name="action_mark_failed" type="object" string="Mark Failed" class="btn-secondary" invisible="status in ['sent','failed','cancelled']"/>
+                    <button name="action_cancel" type="object" string="Cancel" invisible="status in ['sent','failed','cancelled']"/>
+                    <field name="status" widget="statusbar"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="name"/>
+                            <field name="source_user_id"/>
+                            <field name="target_user_id"/>
+                            <field name="attachment_id"/>
+                        </group>
+                        <group>
+                            <field name="source_device_id"/>
+                            <field name="target_device_id"/>
+                            <field name="started_at"/>
+                            <field name="finished_at"/>
+                        </group>
+                    </group>
+                    <group>
+                        <field name="file_size" readonly="1"/>
+                        <field name="mime_type" readonly="1"/>
+                        <field name="localsend_session_id" readonly="1"/>
+                        <field name="error_message"/>
+                    </group>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_lugal_localsend_transfer" model="ir.actions.act_window">
+        <field name="name">LocalSend Transfers</field>
+        <field name="res_model">lugal.localsend.transfer</field>
+        <field name="view_mode">list,form</field>
+    </record>
+</odoo>

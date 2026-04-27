@@ -9,17 +9,34 @@ No CRM-specific logic. All endpoints return JSON directly (not JSON-RPC envelope
 import json
 import logging
 import threading
+from datetime import timedelta, timezone
 from odoo import http
 from odoo.http import request, Response
 from odoo.addons.lugal_auth.controllers._auth import ensure_jwt_user_id
 
 _logger = logging.getLogger(__name__)
 
+# Saudi Arabia timezone — UTC+3, no DST
+_RIYADH_TZ = timezone(timedelta(hours=3))
+
+
+def _to_riyadh_iso(dt):
+    """Convert a naive-UTC Odoo datetime to ISO 8601 with +03:00 (Riyadh) offset.
+    Odoo returns False (not None) for unset Datetime fields."""
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(_RIYADH_TZ).isoformat(timespec='seconds')
+
 ALLOWED_LINK_MODELS = {
     'lugal.crm.customer',
     'lugal.crm.ticket',
     'lugal.crm.interaction',
 }
+
+# HTML signatures may include inline data: URLs; keep a generous cap.
+_MAX_EMAIL_SIGNATURE_LEN = 5 * 1024 * 1024
 
 
 def _norm_addr_list(raw):
@@ -135,7 +152,7 @@ def _account_to_dict(acc):
         'is_default':          acc.is_default,
         'is_active':           acc.is_active,
         'sync_status':         acc.sync_status or 'never',
-        'last_sync_date':      acc.last_sync_date.isoformat() if acc.last_sync_date else None,
+        'last_sync_date':      _to_riyadh_iso(acc.last_sync_date),
         'unread_count':        acc.unread_count,
         # password_set lets the FE know whether the app password has been entered
         # without ever exposing the actual credential value.
@@ -153,7 +170,11 @@ def _message_to_dict(msg, full=False):
         'from_address':   msg.from_address or '',
         'to_addresses':   msg.to_addresses or '[]',
         'cc_addresses':   msg.cc_addresses or '[]',
-        'date':           msg.date.isoformat() if msg.date else None,
+        'date':           _to_riyadh_iso(msg.date),
+        # received_at: when Odoo first imported this message (create_date = Saudi TZ)
+        'received_at':    _to_riyadh_iso(msg.create_date),
+        # read_at: first time the message was opened/marked-read (null if never read)
+        'read_at':        _to_riyadh_iso(msg.read_at) if msg.read_at else None,
         'is_read':        msg.is_read,
         'is_starred':     msg.is_starred,
         'is_draft':       msg.is_draft,
@@ -383,6 +404,154 @@ class LugalEmailController(http.Controller):
         except Exception as exc:
             return _json_response({'success': False, 'error': str(exc)}, 500)
 
+    @http.route('/api/lugal/email/signature', type='http', auth='none', csrf=False,
+                methods=['GET', 'PATCH', 'PUT', 'OPTIONS'])
+    def user_email_signature(self, **kwargs):
+        """Read or replace the JWT user's HTML email signature (``res.users.signature``)."""
+        if request.httprequest.method == 'OPTIONS':
+            return _json_response({})
+        uid = ensure_jwt_user_id()
+        if not uid:
+            return _unauthorized()
+        try:
+            user = request.env['res.users'].sudo().browse(uid)
+            if not user.exists():
+                return _not_found('User not found')
+
+            method = request.httprequest.method
+            if method == 'GET':
+                return _json_response({
+                    'success': True,
+                    'data': {'signature': user.signature or ''},
+                })
+
+            raw = request.httprequest.data or b'{}'
+            body = json.loads(raw)
+            if 'signature' not in body:
+                return _json_response(
+                    {'success': False, 'error': 'signature field is required'},
+                    400,
+                )
+            sig = body.get('signature')
+            if sig is not None and not isinstance(sig, str):
+                return _json_response(
+                    {'success': False, 'error': 'signature must be a string or null'},
+                    400,
+                )
+            sig = '' if sig is None else sig
+            if len(sig) > _MAX_EMAIL_SIGNATURE_LEN:
+                return _json_response(
+                    {'success': False, 'error': 'signature exceeds maximum length'},
+                    400,
+                )
+            user.write({'signature': sig})
+            return _json_response({
+                'success': True,
+                'data': {'signature': user.signature or ''},
+            })
+        except json.JSONDecodeError:
+            return _json_response({'success': False, 'error': 'Invalid JSON body'}, 400)
+        except Exception as exc:
+            _logger.exception('user_email_signature error')
+            return _json_response({'success': False, 'error': str(exc)}, 500)
+
+    # ── Push-webhook: instant notify without waiting for cron ─────────────────
+    #
+    # External services (Microsoft Graph, Gmail Pub/Sub, Mailgun, custom SMTP
+    # forwarders, etc.) can POST to this endpoint the moment a new email lands
+    # in a mailbox.  The sync runs synchronously inside the current request so
+    # no extra DB connections are opened and the WS push event fires before
+    # this response is returned.
+    #
+    # Authentication: callers MUST send a shared secret in the
+    # X-Lugal-Webhook-Token header OR as a `token` query / body parameter.
+    # Set the secret once via System Parameters:
+    #   lugal.email.webhook.token = <random-string>
+    # If the parameter is missing or empty the endpoint is disabled (401).
+    #
+    # Request body (JSON, all fields optional):
+    #   { "email": "user@domain.com",   # narrow sync to one account
+    #     "account_id": 3 }             # OR by internal account id
+    # If neither is provided all active accounts are synced sequentially.
+
+    @http.route('/api/lugal/email/webhook/notify',
+                type='http', auth='none', csrf=False, methods=['POST', 'OPTIONS'])
+    def email_push_notify(self, **kwargs):
+        if request.httprequest.method == 'OPTIONS':
+            return _json_response({})
+
+        # Validate shared secret
+        cfg_secret = request.env['ir.config_parameter'].sudo().get_param(
+            'lugal.email.webhook.token', ''
+        ).strip()
+        if not cfg_secret:
+            return _json_response({'success': False, 'error': 'Webhook not configured'}, 401)
+
+        incoming_token = (
+            request.httprequest.headers.get('X-Lugal-Webhook-Token', '')
+            or kwargs.get('token', '')
+        ).strip()
+        if incoming_token != cfg_secret:
+            return _json_response({'success': False, 'error': 'Invalid token'}, 401)
+
+        try:
+            import json as _json_mod
+            body_bytes = request.httprequest.get_data(cache=False)
+            payload = {}
+            if body_bytes:
+                try:
+                    payload = _json_mod.loads(body_bytes)
+                except Exception:
+                    pass
+
+            email_addr = payload.get('email', '').strip().lower()
+            account_id = payload.get('account_id')
+
+            Acc = request.env['lugal.email.account'].sudo()
+            if account_id:
+                accs = Acc.browse(int(account_id)).filtered(
+                    lambda a: a.exists() and (a.password or '').strip()
+                )
+            elif email_addr:
+                accs = Acc.search([
+                    ('email_address', '=ilike', email_addr),
+                    ('is_active', '=', True),
+                    ('is_deleted', '=', False),
+                ])
+            else:
+                accs = Acc.search([
+                    ('is_active', '=', True),
+                    ('is_deleted', '=', False),
+                ])
+
+            synced = []
+            for acc in accs:
+                if not (acc.password or '').strip():
+                    continue
+                # Run synchronously inside this request's existing DB cursor —
+                # no extra pool connections are opened, and the WS bus event
+                # fires (and commits) before we return the response.
+                try:
+                    result = acc.action_sync()
+                    request.env.cr.commit()
+                    synced.append({
+                        'account_id': acc.id,
+                        'sync_ok': True,
+                        'imported': (result or {}).get('imported', 0),
+                    })
+                except Exception as exc_inner:
+                    _logger.exception('email_push_notify: sync failed for account %s', acc.id)
+                    synced.append({'account_id': acc.id, 'sync_ok': False, 'error': str(exc_inner)})
+
+            return _json_response({
+                'success': True,
+                'message': 'Sync complete',
+                'accounts': synced,
+            })
+        except Exception as exc:
+            _logger.exception('email_push_notify failed')
+            return _json_response({'success': False, 'error': str(exc)}, 500)
+
     # ── Messages / Mailbox ────────────────────────────────────────────────────
 
     @http.route([
@@ -477,7 +646,12 @@ class LugalEmailController(http.Controller):
             if not msg.exists() or msg.is_deleted or msg.account_id.user_id.id != uid:
                 return _not_found()
             if request.httprequest.method == 'DELETE':
+                prev_folder = msg.folder
                 msg.write({'folder': 'trash'})
+                # Push move to IMAP server (fire-and-forget)
+                if msg.imap_uid:
+                    imap_from = 'INBOX' if prev_folder == 'inbox' else prev_folder.upper()
+                    msg.account_id.sudo()._imap_move_async(msg.imap_uid, imap_from, 'trash')
                 return _json_response({'success': True})
             # Lazy-fetch full body if this message was imported headers-only.
             if msg.folder == 'inbox' and not msg.body_fetched and msg.imap_uid:
@@ -489,6 +663,11 @@ class LugalEmailController(http.Controller):
             # Auto mark as read on GET
             if not msg.is_read:
                 msg.write({'is_read': True})
+                # Push \Seen flag to IMAP server
+                if msg.imap_uid and msg.folder == 'inbox':
+                    msg.account_id.sudo()._imap_store_async(
+                        msg.imap_uid, 'INBOX', add_flags=['\\Seen']
+                    )
                 # Decrement unread counter
                 if msg.folder == 'inbox':
                     msg.account_id.sudo().write({
@@ -496,6 +675,90 @@ class LugalEmailController(http.Controller):
                     })
             return _json_response({'success': True, 'data': _message_to_dict(msg, full=True)})
         except Exception as exc:
+            return _json_response({'success': False, 'error': str(exc)}, 500)
+
+    @http.route('/api/lugal/email/messages/details', type='http', auth='none', csrf=False,
+                methods=['POST', 'OPTIONS'])
+    def message_details_bulk(self, **kwargs):
+        """Return full body + attachments for a batch of message IDs in one call.
+
+        Request body (JSON):
+          { "message_ids": [1337, 1338, 1339] }   — max 50 IDs per call.
+
+        Response:
+          {
+            "success": true,
+            "data": {
+              "items": [
+                { "id": 1337, "body_html": "...", "body_text": "...", "attachments": [] }
+              ],
+              "missing_ids": [1339]   // IDs not found / not owned by caller / deleted
+            }
+          }
+        """
+        if request.httprequest.method == 'OPTIONS':
+            return _json_response({})
+        uid = ensure_jwt_user_id()
+        if not uid:
+            return _unauthorized()
+        try:
+            body = json.loads(request.httprequest.data or '{}')
+            message_ids = body.get('message_ids')
+            if not isinstance(message_ids, list) or not message_ids:
+                return _json_response(
+                    {'success': False, 'error': 'message_ids must be a non-empty array'},
+                    400,
+                )
+            if len(message_ids) > 50:
+                return _json_response(
+                    {'success': False, 'error': 'message_ids may not exceed 50 items per request'},
+                    400,
+                )
+            if not all(isinstance(i, int) for i in message_ids):
+                return _json_response(
+                    {'success': False, 'error': 'message_ids must be an array of integers'},
+                    400,
+                )
+
+            user_accounts = _get_user_accounts(uid)
+            account_ids   = user_accounts.ids
+
+            Msg  = request.env['lugal.email.message'].sudo()
+            msgs = Msg.browse(message_ids).filtered(
+                lambda m: m.exists() and not m.is_deleted and m.account_id.id in account_ids
+            )
+            found_ids = set(msgs.ids)
+            missing_ids = [i for i in message_ids if i not in found_ids]
+
+            # Lazy-fetch bodies that were imported as headers-only
+            for msg in msgs:
+                if msg.folder == 'inbox' and not msg.body_fetched and msg.imap_uid:
+                    try:
+                        msg.account_id.sudo().fetch_message_body(msg.id)
+                        msg.invalidate_recordset()
+                    except Exception:
+                        _logger.exception('Bulk lazy body fetch failed for message %s', msg.id)
+
+            items = []
+            for msg in msgs:
+                items.append({
+                    'id':          msg.id,
+                    'body_html':   msg.body_html or '',
+                    'body_text':   msg.body_text or '',
+                    'attachments': [],
+                })
+
+            return _json_response({
+                'success': True,
+                'data': {
+                    'items':       items,
+                    'missing_ids': missing_ids,
+                },
+            })
+        except json.JSONDecodeError:
+            return _json_response({'success': False, 'error': 'Invalid JSON body'}, 400)
+        except Exception as exc:
+            _logger.exception('message_details_bulk error')
             return _json_response({'success': False, 'error': str(exc)}, 500)
 
     # ── Notifications & Unread ────────────────────────────────────────────────
@@ -531,7 +794,7 @@ class LugalEmailController(http.Controller):
                     'name':         acc.name,
                     'unread_count': unread,
                     'sync_status':  acc.sync_status or 'never',
-                    'last_sync_date': acc.last_sync_date.isoformat() if acc.last_sync_date else None,
+                    'last_sync_date': _to_riyadh_iso(acc.last_sync_date),
                 })
 
             # Per-folder unread totals across all accounts
@@ -549,7 +812,7 @@ class LugalEmailController(http.Controller):
             if accs:
                 dates = [a.last_sync_date for a in accs if a.last_sync_date]
                 if dates:
-                    last_sync = max(dates).isoformat()
+                    last_sync = _to_riyadh_iso(max(dates))
 
             Msg = request.env['lugal.email.message'].sudo()
 
@@ -580,7 +843,7 @@ class LugalEmailController(http.Controller):
                     'subject':      m.subject or '(no subject)',
                     'from_name':    m.from_name or '',
                     'from_address': m.from_address or '',
-                    'date':         m.date.isoformat() if m.date else None,
+                    'date':         _to_riyadh_iso(m.date),
                     'is_read':      m.is_read,
                 }
                 for m in new_inbox
@@ -597,7 +860,7 @@ class LugalEmailController(http.Controller):
                 {
                     'id':             m.id,
                     'subject':        m.subject or '',
-                    'date':           m.date.isoformat() if m.date else None,
+                    'date':           _to_riyadh_iso(m.date),
                     'to_addresses':   m.to_addresses or '[]',
                     'smtp_delivered': m.smtp_delivered,
                     'smtp_error':     m.smtp_error or None,
@@ -605,7 +868,7 @@ class LugalEmailController(http.Controller):
                 for m in recent_sent
             ]
 
-            import datetime as _dt
+            from datetime import datetime as _nowdt
             return _json_response({
                 'success': True,
                 'data': {
@@ -617,7 +880,7 @@ class LugalEmailController(http.Controller):
                     'sync_status':        accs[0].sync_status if accs else 'never',
                     'last_sync_date':     last_sync,
                     # Use this value as the `?since=` param on your next poll.
-                    'checked_at':         _dt.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S'),
+                    'checked_at':         _nowdt.now(tz=_RIYADH_TZ).strftime('%Y-%m-%dT%H:%M:%S+03:00'),
                     'new_messages':       new_messages,
                     'recently_sent':      sent_status,
                 },
@@ -847,7 +1110,21 @@ class LugalEmailController(http.Controller):
             body     = json.loads(request.httprequest.data or '{}')
             is_read  = body.get('is_read', True)
             msg.write({'is_read': is_read})
-            return _json_response({'success': True, 'data': {'is_read': is_read}})
+            # Push \Seen / -\Seen flag to IMAP server
+            if msg.imap_uid:
+                imap_folder = 'INBOX' if msg.folder == 'inbox' else msg.folder.upper()
+                if is_read:
+                    msg.account_id.sudo()._imap_store_async(
+                        msg.imap_uid, imap_folder, add_flags=['\\Seen']
+                    )
+                else:
+                    msg.account_id.sudo()._imap_store_async(
+                        msg.imap_uid, imap_folder, remove_flags=['\\Seen']
+                    )
+            return _json_response({'success': True, 'data': {
+                'is_read': is_read,
+                'read_at': _to_riyadh_iso(msg.read_at) if msg.read_at else None,
+            }})
         except Exception as exc:
             return _json_response({'success': False, 'error': str(exc)}, 500)
 
@@ -863,7 +1140,19 @@ class LugalEmailController(http.Controller):
             msg = request.env['lugal.email.message'].sudo().browse(message_id)
             if not msg.exists() or msg.account_id.user_id.id != uid:
                 return _not_found()
-            msg.write({'is_starred': not msg.is_starred})
+            new_starred = not msg.is_starred
+            msg.write({'is_starred': new_starred})
+            # Push \Flagged / -\Flagged to IMAP server
+            if msg.imap_uid:
+                imap_folder = 'INBOX' if msg.folder == 'inbox' else msg.folder.upper()
+                if new_starred:
+                    msg.account_id.sudo()._imap_store_async(
+                        msg.imap_uid, imap_folder, add_flags=['\\Flagged']
+                    )
+                else:
+                    msg.account_id.sudo()._imap_store_async(
+                        msg.imap_uid, imap_folder, remove_flags=['\\Flagged']
+                    )
             return _json_response({'success': True, 'data': {'is_starred': msg.is_starred}})
         except Exception as exc:
             return _json_response({'success': False, 'error': str(exc)}, 500)
@@ -880,7 +1169,12 @@ class LugalEmailController(http.Controller):
             msg = request.env['lugal.email.message'].sudo().browse(message_id)
             if not msg.exists() or msg.account_id.user_id.id != uid:
                 return _not_found()
+            prev_folder = msg.folder
             msg.write({'folder': 'inbox'})
+            # Move back to INBOX on the IMAP server
+            if msg.imap_uid:
+                imap_from = 'INBOX' if prev_folder == 'inbox' else prev_folder.upper()
+                msg.account_id.sudo()._imap_move_async(msg.imap_uid, imap_from, 'inbox')
             return _json_response({'success': True})
         except Exception as exc:
             return _json_response({'success': False, 'error': str(exc)}, 500)
@@ -897,9 +1191,123 @@ class LugalEmailController(http.Controller):
             msg = request.env['lugal.email.message'].sudo().browse(message_id)
             if not msg.exists() or msg.account_id.user_id.id != uid:
                 return _not_found()
+            prev_folder = msg.folder
             msg.write({'folder': 'archive'})
+            # Move to Archive folder on the IMAP server
+            if msg.imap_uid:
+                imap_from = 'INBOX' if prev_folder == 'inbox' else prev_folder.upper()
+                msg.account_id.sudo()._imap_move_async(msg.imap_uid, imap_from, 'archive')
             return _json_response({'success': True})
         except Exception as exc:
+            return _json_response({'success': False, 'error': str(exc)}, 500)
+
+    @http.route('/api/lugal/email/messages/<int:message_id>/permanent', type='http', auth='none', csrf=False,
+                methods=['DELETE', 'OPTIONS'])
+    def message_permanent_delete(self, message_id, **kwargs):
+        """Hard-delete a single message from the DB.
+
+        The message MUST be in the 'trash' folder; attempting to permanently
+        delete a message that is still in any other folder returns 409 so the
+        FE can show a "move to trash first" hint.
+
+        On success the record is gone from the DB — no recovery possible.
+        """
+        if request.httprequest.method == 'OPTIONS':
+            return _json_response({})
+        uid = ensure_jwt_user_id()
+        if not uid:
+            return _unauthorized()
+        try:
+            msg = request.env['lugal.email.message'].sudo().browse(message_id)
+            if not msg.exists() or msg.is_deleted or msg.account_id.user_id.id != uid:
+                return _not_found()
+            if msg.folder != 'trash':
+                return _json_response(
+                    {'success': False, 'error': 'Message must be in trash before permanent deletion'},
+                    409,
+                )
+            imap_uid = msg.imap_uid
+            acc      = msg.account_id.sudo()
+            msg.sudo().unlink()
+            # Expunge from IMAP Trash folder so webmail also removes it permanently
+            if imap_uid:
+                trash_folder = acc._get_server_folder_name('trash')
+                acc._imap_expunge_async(imap_uid, trash_folder)
+            return _json_response({'success': True, 'deleted_id': message_id})
+        except Exception as exc:
+            _logger.exception('message_permanent_delete error')
+            return _json_response({'success': False, 'error': str(exc)}, 500)
+
+    @http.route('/api/lugal/email/messages/bulk_delete', type='http', auth='none', csrf=False,
+                methods=['POST', 'OPTIONS'])
+    def message_bulk_permanent_delete(self, **kwargs):
+        """Hard-delete multiple messages in one call.
+
+        All messages must be in the 'trash' folder and owned by the caller.
+        Messages that are not in trash, not found, or belong to another user
+        are silently skipped and reported in 'skipped_ids'.
+
+        Request body (JSON):
+          { "message_ids": [1, 2, 3] }   — max 50 IDs per call.
+
+        Response:
+          {
+            "success": true,
+            "data": {
+              "deleted_ids": [1, 2],
+              "skipped_ids": [3]
+            }
+          }
+        """
+        if request.httprequest.method == 'OPTIONS':
+            return _json_response({})
+        uid = ensure_jwt_user_id()
+        if not uid:
+            return _unauthorized()
+        try:
+            body = json.loads(request.httprequest.data or '{}')
+            message_ids = body.get('message_ids')
+            if not isinstance(message_ids, list) or not message_ids:
+                return _json_response(
+                    {'success': False, 'error': 'message_ids must be a non-empty array'},
+                    400,
+                )
+            if len(message_ids) > 50:
+                return _json_response(
+                    {'success': False, 'error': 'message_ids may not exceed 50 per request'},
+                    400,
+                )
+            if not all(isinstance(i, int) for i in message_ids):
+                return _json_response(
+                    {'success': False, 'error': 'message_ids must be an array of integers'},
+                    400,
+                )
+
+            user_account_ids = _get_user_accounts(uid).ids
+            Msg = request.env['lugal.email.message'].sudo()
+            msgs = Msg.browse(message_ids)
+
+            to_delete = msgs.filtered(
+                lambda m: m.exists()
+                and not m.is_deleted
+                and m.account_id.id in user_account_ids
+                and m.folder == 'trash'
+            )
+            deleted_ids  = to_delete.ids
+            skipped_ids  = [i for i in message_ids if i not in deleted_ids]
+            to_delete.unlink()
+
+            return _json_response({
+                'success': True,
+                'data': {
+                    'deleted_ids': deleted_ids,
+                    'skipped_ids': skipped_ids,
+                },
+            })
+        except json.JSONDecodeError:
+            return _json_response({'success': False, 'error': 'Invalid JSON body'}, 400)
+        except Exception as exc:
+            _logger.exception('message_bulk_permanent_delete error')
             return _json_response({'success': False, 'error': str(exc)}, 500)
 
     # ── Record Linking ────────────────────────────────────────────────────────
@@ -1005,7 +1413,7 @@ class LugalEmailController(http.Controller):
             if not files:
                 return _json_response({'success': False, 'error': 'No files provided'}, 400)
 
-            MAX_MB = 25
+            MAX_MB = 1024  # 1 GB
             max_bytes = MAX_MB * 1024 * 1024
 
             results = []
@@ -1021,21 +1429,26 @@ class LugalEmailController(http.Controller):
                 mime = f.mimetype or _mimetypes.guess_type(f.filename or '')[0] or 'application/octet-stream'
                 filename = f.filename or 'attachment'
 
+                import uuid as _uuid
+                att_token = _uuid.uuid4().hex
                 att = Attachment.create({
                     'name': filename,
                     'mimetype': mime,
                     'datas': base64.b64encode(data).decode('utf-8'),
                     'type': 'binary',
                     'res_model': 'lugal.email.message',
+                    'access_token': att_token,
                 })
-                att.flush_recordset(['datas'])
+                att.flush_recordset(['access_token'])
 
+                att_url = f"/web/content/{att.id}?access_token={att_token}"
                 results.append({
                     'id': att.id,
                     'name': att.name or filename,
                     'mimetype': mime,
                     'size': len(data),
-                    'url': f'/web/content/{att.id}?download=true',
+                    'url': att_url,
+                    'file_url': att_url,
                 })
 
             return _json_response({'success': True, 'data': {'attachments': results}})

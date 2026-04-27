@@ -20,6 +20,7 @@ import json
 import logging
 import mimetypes
 import uuid
+from datetime import timezone, timedelta
 
 from odoo import http
 from odoo.http import request, Response
@@ -27,6 +28,18 @@ from odoo.http import request, Response
 from ._auth import ensure_jwt_user_id
 from ._error import crm_error
 from .upload_controller import _build_attachment_url
+
+_RIYADH_TZ = timezone(timedelta(hours=3))
+
+
+def _to_riyadh_iso(dt):
+    """Convert a naive-UTC Odoo datetime to ISO 8601 with +03:00 (Riyadh) offset.
+    Odoo returns False (not None) for unset Datetime fields, so we guard for both."""
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(_RIYADH_TZ).isoformat(timespec='seconds')
 
 _logger = logging.getLogger(__name__)
 
@@ -54,8 +67,8 @@ def _story_upload_mime_allowed(mime: str) -> bool:
         return True
     return False
 
-STORY_MAX_MB        = 50   # video/audio
-STORY_MAX_IMAGE_MB  = 10
+STORY_MAX_MB        = 1024   # 1 GB — video/audio stories
+STORY_MAX_IMAGE_MB  = 1024   # 1 GB — image stories
 
 
 def _now_utc():
@@ -63,33 +76,64 @@ def _now_utc():
 
 
 def _serialize_story(story, viewer_uid):
-    """Return dict representation of a story record."""
+    """Return dict representation of a story record — field names match FE CrmSupplyStory type."""
     att = story.attachment_id
     media_url = None
+    att_id = None
     if att and att.exists():
         token = att.access_token or ''
         media_url = f'/web/content/{att.id}?access_token={token}'
+        att_id = att.id
+
+    # Build attachments array — FE expects an array even for single-attachment stories
+    # Field names match CrmSupplyMessageAttachment: name (not filename), file_url, file_type, etc.
+    attachments = []
+    if att_id and media_url:
+        mime = att.mimetype or ''
+        if mime.startswith('video'):
+            file_type = 'video'
+        elif mime.startswith('image'):
+            file_type = 'image'
+        elif mime.startswith('audio'):
+            file_type = 'audio'
+        else:
+            file_type = 'file'
+        attachments = [{
+            'id':        att_id,
+            'name':      att.name or 'file',
+            'url':       media_url,
+            'file_url':  media_url,
+            'mimetype':  mime,
+            'file_type': file_type,
+            'size_bytes': int(att.file_size or 0),
+        }]
+
+    is_viewed = viewer_uid in story.viewer_ids.ids
+    author = story.author_id
 
     return {
+        # FE-expected primary fields
         'id':               story.id,
-        'author_id':        story.author_id.id if story.author_id else None,
-        'author_name':      story.author_id.name if story.author_id else '',
-        'author_avatar':    f'/web/image/res.users/{story.author_id.id}/avatar_128'
-                            if story.author_id else None,
-        'kind':             story.kind,
+        'user_id':          author.id if author else None,
+        'user_name':        author.name if author else '',
         'content':          story.content or '',
+        'attachments':      attachments,
+        'expires_at':       _to_riyadh_iso(story.expires_at) or '',
+        'created_at':       _to_riyadh_iso(story.create_date) or '',
+        'is_viewed':        is_viewed,
+        'viewed_at':        None,
+        'viewer_count':     len(story.viewer_ids),
+        # Extra fields (kept for backward compat and FE convenience)
+        'kind':             story.kind,
         'caption':          story.caption or '',
         'bg_color':         story.bg_color or '#128C7E',
         'font_size':        int(story.font_size or 18),
         'media_url':        media_url,
-        'attachment_id':    att.id if att and att.exists() else None,
+        'attachment_id':    att_id,
         'duration_seconds': float(story.duration_seconds or 0),
-        'expires_at':       story.expires_at.isoformat() if story.expires_at else None,
-        'viewed':           viewer_uid in story.viewer_ids.ids,
-        'view_count':       len(story.viewer_ids),
+        'author_avatar':    f'/web/image/res.users/{author.id}/avatar_128' if author else None,
+        'is_mine':          author.id == viewer_uid if author else False,
         'viewer_ids':       story.viewer_ids.ids,
-        'is_mine':          story.author_id.id == viewer_uid,
-        'created_at':       story.create_date.isoformat() if story.create_date else None,
     }
 
 
@@ -152,21 +196,43 @@ class SupplyStoriesController(http.Controller):
             if not include_mine:
                 domain.append(('author_id', '!=', uid))
 
-            stories = Story.search(domain, order='create_date desc', limit=limit)
+            stories = Story.search(domain, order='create_date asc', limit=limit)
             serialized = [_serialize_story(s, uid) for s in stories]
 
-            # Group by author
-            by_author = {}
+            # Build author-bucket list (FE CrmSupplyStoryAuthorBucket format)
+            bucket_map = {}   # user_id -> bucket dict
             for s in serialized:
-                key = str(s['author_id'])
-                by_author.setdefault(key, []).append(s)
+                author_id = s['user_id']
+                if author_id not in bucket_map:
+                    bucket_map[author_id] = {
+                        'user_id':              author_id,
+                        'user_name':            s['user_name'],
+                        'stories':              [],
+                        'has_unviewed':         False,
+                        'last_viewed_story_id': None,
+                    }
+                bucket = bucket_map[author_id]
+                bucket['stories'].append(s)
+                if not s['is_viewed'] and s['user_id'] != uid:
+                    bucket['has_unviewed'] = True
+                if s['is_viewed']:
+                    bucket['last_viewed_story_id'] = s['id']
+
+            # Sort: own bucket first, then others by most-recent story timestamp (desc)
+            items = list(bucket_map.values())
+            # Step 1: sort by latest story timestamp descending (ISO strings sort lexicographically)
+            items.sort(key=lambda b: b['stories'][-1]['created_at'] if b['stories'] else '', reverse=True)
+            # Step 2: stable sort to put own bucket first
+            items.sort(key=lambda b: 0 if b['user_id'] == uid else 1)
 
             return {
                 'success': True,
                 'data': {
-                    'stories':   serialized,
-                    'by_author': by_author,
-                    'total':     len(serialized),
+                    'items':        items,
+                    'total_stories': len(serialized),
+                    # Keep legacy fields for any old clients
+                    'stories':      serialized,
+                    'total':        len(serialized),
                 },
             }
         except Exception as e:
@@ -180,18 +246,20 @@ class SupplyStoriesController(http.Controller):
                 type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def stories_create(self, kind='text', content=None, caption=None,
                        bg_color=None, font_size=None,
-                       attachment_id=None, duration_seconds=None,
+                       attachment_id=None, attachment_ids=None,
+                       duration_seconds=None,
                        ttl_hours=None, **kwargs):
         """
         Post a new story.
 
         Body params:
-          kind             (str)  'text'|'image'|'video'|'audio'
-          content          (str)  Text for text stories
+          kind             (str)  'text'|'image'|'video'|'audio' — auto-detected from mime
+          content          (str)  Text for text stories / caption for media
           caption          (str)  Optional caption on media stories
           bg_color         (str)  CSS colour for text stories (default '#128C7E')
           font_size        (int)  Font size for text stories (default 18)
-          attachment_id    (int)  ID from /stories/upload — required for media stories
+          attachment_id    (int)  ID from /stories/upload (singular form)
+          attachment_ids   (list) [int, ...] array form accepted — first element is used
           duration_seconds (float) Length of audio/video in seconds
           ttl_hours        (int)  Override expiry window (default 24, max 48)
 
@@ -206,23 +274,36 @@ class SupplyStoriesController(http.Controller):
             if 'lugal.supply.story' not in request.env:
                 return {'success': False, 'error': 'Stories are not available (module not loaded)'}
 
-            kind = (kind or 'text').strip().lower()
-            if kind not in ('text', 'image', 'video', 'audio'):
-                return {'success': False, 'error': f'Invalid kind: {kind}'}
+            # Accept attachment_ids (array) as an alias for attachment_id (singular)
+            if not attachment_id and attachment_ids:
+                ids_list = attachment_ids if isinstance(attachment_ids, list) else [attachment_ids]
+                if ids_list:
+                    attachment_id = ids_list[0]
 
-            if kind == 'text' and not (content or '').strip():
-                return {'success': False, 'error': 'content required for text stories'}
-
-            if kind in ('image', 'video', 'audio') and not attachment_id:
-                return {'success': False, 'error': 'attachment_id required for media stories'}
-
-            # Validate attachment belongs to this user if provided
+            # Validate and load attachment
             att = None
             if attachment_id:
                 Att = request.env['ir.attachment'].sudo()
                 att = Att.browse(int(attachment_id)).exists()
                 if not att:
                     return {'success': False, 'error': 'Attachment not found'}
+
+            # Auto-detect kind from attachment mime type when client omits it or sends 'text'
+            kind = (kind or 'text').strip().lower()
+            if att and kind == 'text':
+                mime = att.mimetype or ''
+                if mime.startswith('video'):
+                    kind = 'video'
+                elif mime.startswith('image'):
+                    kind = 'image'
+                elif mime.startswith('audio'):
+                    kind = 'audio'
+
+            if kind not in ('text', 'image', 'video', 'audio'):
+                kind = 'text'
+
+            if kind == 'text' and not (content or '').strip() and not att:
+                return {'success': False, 'error': 'content or attachment required for story'}
 
             ttl = max(1, min(int(ttl_hours or STORY_TTL_HOURS), 48))
             expires_at = _dt.datetime.utcnow() + _dt.timedelta(hours=ttl)
@@ -269,7 +350,9 @@ class SupplyStoriesController(http.Controller):
         Idempotent — calling multiple times is safe.
 
         Response:
-          { "success": true, "data": { "story_id": <id>, "view_count": <int> } }
+          { "success": true, "data": {
+              "story_id": <id>, "viewed_at": <iso>, "viewer_count": <int>, "story": <story>
+          } }
         """
         try:
             uid = ensure_jwt_user_id()
@@ -281,9 +364,18 @@ class SupplyStoriesController(http.Controller):
             if not story:
                 return {'success': False, 'error': 'Story not found'}
 
+            viewed_at_iso = None
             # Authors don't count as viewers of their own story
             if story.author_id.id != uid and uid not in story.viewer_ids.ids:
                 story.write({'viewer_ids': [(4, uid)]})
+                now = _dt.datetime.now(_RIYADH_TZ)
+                viewed_at_iso = now.isoformat(timespec='seconds')
+
+                # Persist the view receipt with timestamp
+                ViewReceipt = request.env['lugal.supply.story.view.receipt'].sudo()
+                existing = ViewReceipt.search([('story_id', '=', story.id), ('user_id', '=', uid)], limit=1)
+                if not existing:
+                    ViewReceipt.create({'story_id': story.id, 'user_id': uid, 'viewed_at': now})
 
                 # Notify the author
                 try:
@@ -295,7 +387,7 @@ class SupplyStoriesController(http.Controller):
                             'story_id':    story.id,
                             'viewer_id':   uid,
                             'viewer_name': viewer.name if viewer.exists() else '',
-                            'view_count':  len(story.viewer_ids) + 1,
+                            'viewer_count': len(story.viewer_ids),
                         },
                     )
                 except Exception as bus_exc:
@@ -304,12 +396,67 @@ class SupplyStoriesController(http.Controller):
             return {
                 'success': True,
                 'data': {
-                    'story_id':   story.id,
-                    'view_count': len(story.viewer_ids),
+                    'story_id':     story.id,
+                    'viewed_at':    viewed_at_iso,
+                    'viewer_count': len(story.viewer_ids),
+                    'story':        _serialize_story(story, uid),
                 },
             }
         except Exception as e:
             return crm_error(e, 'stories_view')
+
+    # -------------------------------------------------------------------------
+    # POST /api/crm/supply/stories/<id>/viewers
+    # -------------------------------------------------------------------------
+
+    @http.route('/api/crm/supply/stories/<int:story_id>/viewers',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def stories_viewers(self, story_id, **kwargs):
+        """
+        Return the list of users who viewed story <id>.
+        Only the story author may call this.
+
+        Response:
+          { "success": true, "data": {
+              "story_id": <id>, "viewer_count": <int>,
+              "items": [{ "user_id": <int>, "user_name": <str>, "viewed_at": <iso|null> }]
+          } }
+        """
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+
+            Story = request.env['lugal.supply.story'].sudo()
+            story = Story.browse(story_id).exists()
+            if not story:
+                return {'success': False, 'error': 'Story not found'}
+
+            viewers = story.viewer_ids
+            # Build a map of user_id → viewed_at from view receipts
+            ViewReceipt = request.env['lugal.supply.story.view.receipt'].sudo()
+            receipts = ViewReceipt.search([('story_id', '=', story.id)])
+            receipt_map = {r.user_id.id: r.viewed_at for r in receipts}
+
+            items = []
+            for v in viewers:
+                viewed_at = receipt_map.get(v.id)
+                items.append({
+                    'user_id':   v.id,
+                    'user_name': v.name or '',
+                    'viewed_at': _to_riyadh_iso(viewed_at),
+                })
+
+            return {
+                'success': True,
+                'data': {
+                    'story_id':     story.id,
+                    'viewer_count': len(viewers),
+                    'items':        items,
+                },
+            }
+        except Exception as e:
+            return crm_error(e, 'stories_viewers')
 
     # -------------------------------------------------------------------------
     # POST /api/crm/supply/stories/<id>/delete

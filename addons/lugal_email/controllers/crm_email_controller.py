@@ -5,11 +5,24 @@ CRM-context wrappers around the email engine (JSON-RPC format).
 """
 
 import logging
+from datetime import timedelta, timezone
 from odoo import http
 from odoo.http import request
 from odoo.addons.lugal_auth.controllers._auth import ensure_jwt_user_id
 
 _logger = logging.getLogger(__name__)
+
+_RIYADH_TZ = timezone(timedelta(hours=3))
+
+
+def _to_riyadh_iso(dt):
+    """Convert a naive-UTC Odoo datetime to ISO 8601 with +03:00 (Riyadh) offset.
+    Odoo returns False (not None) for unset Datetime fields, so we guard for both."""
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(_RIYADH_TZ).isoformat(timespec='seconds')
 
 
 def _crm_error(exc, handler=''):
@@ -31,7 +44,7 @@ def _msg_to_dict(msg, full=False):
         'from_name':    msg.from_name or '',
         'from_address': msg.from_address or '',
         'to_addresses': msg.to_addresses or '[]',
-        'date':         msg.date.isoformat() if msg.date else None,
+        'date':         _to_riyadh_iso(msg.date),
         'is_read':      msg.is_read,
         'is_starred':   msg.is_starred,
         'crm_links': {
@@ -255,6 +268,113 @@ class CrmEmailController(http.Controller):
             return {'success': True, 'updated': len(msgs)}
         except Exception as exc:
             return _crm_error(exc, 'bulk_trash')
+
+    @http.route('/api/crm/email/subscribe',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def subscribe(self, **kwargs):
+        """Ensure the IMAP IDLE worker is running for all of this user's accounts.
+
+        The FE calls this once after the WebSocket connects (fire-and-forget).
+        It is idempotent — calling it multiple times has no side-effect.
+
+        Response:
+          {
+            "subscribed": true,
+            "accounts": ["user@domain.com", ...],
+            "polling_interval_seconds": 30
+          }
+
+        The IMAP IDLE threads are persistent daemons owned by a single Odoo worker
+        process. This endpoint wakes the supervisor immediately (instead of waiting
+        up to 5 s for the background watchdog) so notifications start instantly.
+        """
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+
+            # Wake the IDLE supervisor immediately for this user's accounts.
+            # start_all() is idempotent — it only starts threads that are not
+            # already running and skips credential groups in backoff windows.
+            try:
+                request.env['lugal.email.idle.watcher'].sudo().start_all()
+            except Exception as exc:
+                _logger.warning('subscribe: start_all() failed: %s', exc)
+
+            # Return which accounts are being monitored for this user.
+            accounts = request.env['lugal.email.account'].sudo().search([
+                ('user_id', '=', uid),
+                ('is_active', '=', True),
+                ('is_deleted', '=', False),
+            ])
+            monitored = [
+                acc.email_address
+                for acc in accounts
+                if (acc.password or '').strip()
+            ]
+
+            return {
+                'success': True,
+                'subscribed': True,
+                'accounts': monitored,
+                'polling_interval_seconds': 30,
+            }
+        except Exception as exc:
+            return _crm_error(exc, 'subscribe')
+
+    @http.route('/api/crm/email/messages/bulk_delete',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def bulk_permanent_delete(self, message_ids=None, **kwargs):
+        """Hard-delete messages that are already in the trash folder.
+
+        Only messages owned by the caller that are in the 'trash' folder are
+        deleted. Messages in any other folder, or belonging to another user,
+        are skipped (reported in skipped_ids) without raising an error.
+
+        Params (JSON-RPC):
+          message_ids: list[int]  — max 50 per call, required.
+
+        Response:
+          { "success": true, "data": { "deleted_ids": [...], "skipped_ids": [...] } }
+        """
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+            if not message_ids or not isinstance(message_ids, list):
+                return {'success': False, 'error': 'message_ids must be a non-empty list'}
+            if len(message_ids) > 50:
+                return {'success': False, 'error': 'message_ids may not exceed 50 per request'}
+
+            user_accounts = request.env['lugal.email.account'].sudo().search([
+                ('user_id', '=', uid),
+                ('is_deleted', '=', False),
+                ('is_active', '=', True),
+            ])
+            user_account_ids = user_accounts.ids
+
+            Msg = request.env['lugal.email.message'].sudo()
+            msgs = Msg.browse(message_ids)
+
+            to_delete = msgs.filtered(
+                lambda m: m.exists()
+                and not m.is_deleted
+                and m.account_id.id in user_account_ids
+                and m.folder == 'trash'
+            )
+            deleted_ids = to_delete.ids
+            skipped_ids = [i for i in message_ids if i not in deleted_ids]
+            to_delete.unlink()
+
+            return {
+                'success': True,
+                'data': {
+                    'deleted_ids': deleted_ids,
+                    'skipped_ids': skipped_ids,
+                },
+            }
+        except Exception as exc:
+            return _crm_error(exc, 'bulk_permanent_delete')
 
     # ── Stats ─────────────────────────────────────────────────────────────────
 
