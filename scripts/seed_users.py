@@ -195,12 +195,12 @@ def migrate_users(src_conn, tgt_conn, dry_run=False):
                     (name, email, phone, mobile, lang, tz, active,
                      street, street2, city, zip, comment,
                      customer_rank, supplier_rank, is_company,
-                     type)
+                     type, autopost_bills, group_rfq, group_on)
                 VALUES
                     (%s,%s,%s,%s,%s,%s,true,
                      %s,%s,%s,%s,%s,
                      0, 0, false,
-                     'contact')
+                     'contact', 'ask', 'default', 'default')
                 RETURNING id
             """, (
                 u["name"], u["email"], u["phone"], u["mobile"],
