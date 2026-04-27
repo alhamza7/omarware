@@ -40,7 +40,9 @@ Response envelope (all REST routes in this controller):
 | `category_type` | string | — | Loose match on category path + name (`fragrances`, `glass`, `packaging`, …). |
 | `has_price_only` | `1` / `true` | `false` | Keep only rows where **`has_price`** is true (after pricelist resolution). |
 | `strict_pricelist` | bool | `false` | Passed through to pricing logic (see controller). |
-| `uom_id` / `uom` | — | Optional UoM hint for pricing. |
+| `uom_id` / `uom` | — | **Pricing hint** for each row: which UoM to use when resolving `list_price` / rules. For `uom=kg` the server picks a **base** kilogram UoM (prefers Arabic «كغم» over English-only `kg` or packaging names like «500 كغم») so catalog filters do not collapse to zero. **Does not filter** which products appear unless `uom_filter_catalog` is set. |
+| `uom_filter_catalog` | bool | `false` | If **`true`**, restrict the catalog to variants whose UoM matches `uom` / `uom_id` (same semantics as CRM pricelist API). Requires a resolvable `uom` or `uom_id`; otherwise **400**. |
+| `uom_align_sap_sales_unit` | bool | `true` | Only when **`uom_filter_catalog=true`**: **SAP-aligned** filter (uses `sales_unit`, and when that is empty uses **SAP inventory UOM** on `sap.product.extended` — `inventory_uom` / `inventory_uom_id` — for kg-class filters). Set **`false`** for legacy OR-only `(template uom) OR (extended.sales_uom_id)`. |
 
 ### Response `data` fields
 
@@ -68,7 +70,15 @@ GET /api/pos_perfume/v1/products?limit=0&pricelist_id=2
 
 # Brand + pricelist + page on filtered set
 GET /api/pos_perfume/v1/products?brand=givaudan&pricelist_id=2&limit=40&offset=0
+
+# Category 22 + prices in kg + SAP-aligned catalog filter (only products whose UoM matches kg rules)
+GET /api/pos_perfume/v1/products?query=&limit=80&offset=0&pricelist_id=2&fetch_all=1&categ_id=22&uom=kg&uom_filter_catalog=1
+
+# Same, but include legacy “template kg only” rows where SAP SalesUnit was never stored on extended
+GET /api/pos_perfume/v1/products?query=&limit=80&offset=0&pricelist_id=2&fetch_all=1&categ_id=22&uom=kg&uom_filter_catalog=1&uom_align_sap_sales_unit=false
 ```
+
+`category_id` and `categ_id` are aliases — either works.
 
 ### Performance note
 

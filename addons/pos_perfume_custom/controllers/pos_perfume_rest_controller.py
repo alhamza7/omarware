@@ -108,6 +108,60 @@ class PosPerfumeRestController(http.Controller):
         """Pricelist used by REST catalog when ``pricelist_id`` is omitted — matches POS UI."""
         return self._rest_pos_ui_default_pricelist()
 
+    def _rest_pick_base_mass_uom(self, Uom, low: str):
+        """
+        Map ``uom=kg`` / kilo synonyms to a **base** kilogram UoM.
+
+        A naive ``name ilike 'kg'`` can hit ``uom`` id 15 (English ``kg``) first while the
+        catalog uses Arabic **كغم** (e.g. id 34); the SAP-aligned id filter then returns
+        **zero** rows. We rank candidates so exact ``كغم`` / ``kg`` beats ``500 كغم``, etc.
+        """
+        if low not in ("kg", "kilo", "kilogram", "kgs"):
+            return Uom.browse()
+        cand = Uom.search(
+            [
+                "|",
+                "|",
+                ("name", "ilike", "كغم"),
+                ("name", "ilike", "كيلو"),
+                ("name", "ilike", "KG"),
+            ]
+        )
+
+        def _texts(rec):
+            n = rec.name
+            if isinstance(n, dict):
+                for v in n.values():
+                    if v:
+                        yield str(v).strip().lower()
+            elif n:
+                yield str(n).strip().lower()
+
+        def _score(rec):
+            best = 99
+            for t in _texts(rec):
+                if t in ("كغم", "kg", "kgs", "kilogram", "kilograms", "kilo"):
+                    best = min(best, 0)
+                elif any(x in t for x in ("0.25", "500", "1000", "250", "100")):
+                    best = min(best, 30)
+                elif "كغم" in t:
+                    best = min(best, 10)
+                elif "kg" in t:
+                    best = min(best, 5)
+            return best
+
+        def _sort_key(rec):
+            """Among equal scores prefer Arabic **كغم** over ASCII-only ``kg`` (DB bulk default)."""
+            sc = _score(rec)
+            texts = list(_texts(rec))
+            has_ar = any("كغم" in t for t in texts)
+            return (sc, 0 if has_ar else 1, rec.id)
+
+        if not cand:
+            return Uom.browse()
+        ranked = sorted(cand, key=_sort_key)
+        return Uom.browse(ranked[0].id)
+
     def _rest_price_uom(self, product, get_arg):
         """UoM used for pricing: uom_id / uom query params, else product.uom_id."""
         uid = get_arg("uom_id")
@@ -121,23 +175,59 @@ class PosPerfumeRestController(http.Controller):
         raw = (get_arg("uom") or "").strip()
         if not raw:
             return product.uom_id
+        low = raw.lower()
         Uom = request.env["uom.uom"].sudo()
-        u = Uom.search([("name", "ilike", raw)], limit=1)
+        u = self._rest_pick_base_mass_uom(Uom, low)
         if u:
             return u
-        low = raw.lower()
-        if low in ("kg", "kilo", "kilogram", "kgs"):
-            u = Uom.search(
-                ["|", "|", ("name", "ilike", "كغم"), ("name", "ilike", "كيلو"), ("name", "ilike", "KG")],
-                limit=1,
-            )
-            if u:
-                return u
         if low in ("g", "gram", "grams"):
             u = Uom.search(["|", ("name", "ilike", "غرام"), ("name", "ilike", "gram")], limit=1)
             if u:
                 return u
+        u = Uom.search([("name", "ilike", raw)], limit=1)
+        if u:
+            return u
         return product.uom_id
+
+    def _rest_resolve_catalog_uom(self, pget):
+        """Resolve ``uom`` / ``uom_id`` query keys to ``uom.uom`` (no product fallback)."""
+        uid = pget("uom_id")
+        if uid not in (None, ""):
+            try:
+                u = request.env["uom.uom"].sudo().browse(int(uid))
+                if u.exists():
+                    return u
+            except (TypeError, ValueError):
+                pass
+        raw = (pget("uom") or "").strip()
+        if not raw:
+            return request.env["uom.uom"].browse()
+        low = raw.lower()
+        Uom = request.env["uom.uom"].sudo()
+        u = self._rest_pick_base_mass_uom(Uom, low)
+        if u:
+            return u
+        if low in ("g", "gram", "grams"):
+            u = Uom.search(["|", ("name", "ilike", "غرام"), ("name", "ilike", "gram")], limit=1)
+            if u:
+                return u
+        u = Uom.search([("name", "ilike", raw)], limit=1)
+        if u:
+            return u
+        return request.env["uom.uom"].browse()
+
+    def _rest_product_ids_for_uom_filter(self, env, uom_id, align_sap_sales_unit):
+        """
+        Variant ids for catalog restriction by UoM — same rules as CRM pricelist API
+        (implemented on ``sap.product.extended``).
+        """
+        if "sap.product.extended" not in env:
+            Product = env["product.product"].sudo()
+            return Product.search([("uom_id", "=", uom_id)]).ids
+        return env["sap.product.extended"].sudo().product_variant_ids_matching_filtered_uom(
+            uom_id,
+            align_sap_sales_unit=bool(align_sap_sales_unit),
+        )
 
     def _rest_price_first_applicable_rule(self, product, pl_rec, price_uom, quantity=1.0):
         """Same rule chain as product.pricelist._compute_price_rule (incl. category / global lines)."""
@@ -818,6 +908,19 @@ class PosPerfumeRestController(http.Controller):
             if not pref.endswith("%"):
                 pref = pref + "%"
             domain = ["&"] + domain + [("default_code", "ilike", pref)]
+
+        if self._rest_query_bool(pget, "uom_filter_catalog", False):
+            uom_rec = self._rest_resolve_catalog_uom(pget)
+            if not uom_rec or not uom_rec.exists():
+                return self._fail(
+                    "uom_filter_catalog=1 requires a resolvable uom or uom_id (e.g. uom=kg).",
+                    400,
+                )
+            align = self._rest_query_bool(pget, "uom_align_sap_sales_unit", True)
+            narrowed = self._rest_product_ids_for_uom_filter(
+                request.env, uom_rec.id, align_sap_sales_unit=align
+            )
+            domain = ["&"] + domain + [("id", "in", narrowed)]
 
         brand_raw = (pget("brand") or "").strip()
         cat_type_raw = (pget("category_type") or "").strip()

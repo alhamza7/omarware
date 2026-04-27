@@ -91,6 +91,8 @@ async function getPriceList(params: {
   perPage?: number;
   fetchAll?: boolean;
   uomId?: number | null;
+  /** When set with ``uomId``: ``true`` = SAP-aligned UoM filter (default on server). ``false`` = legacy OR-only match. */
+  uomAlignSapSalesUnit?: boolean;
   newReleasesOnly?: boolean;
   newWithinDays?: number;
   discountOnly?: boolean;
@@ -121,6 +123,9 @@ async function getPriceList(params: {
     per_page: fetchAll ? 0 : (params.perPage ?? 50),
     fetch_all: fetchAll,
     uom_id: params.uomId ?? null,
+    ...(params.uomAlignSapSalesUnit !== undefined
+      ? { uom_align_sap_sales_unit: params.uomAlignSapSalesUnit }
+      : {}),
     new_releases_only: params.newReleasesOnly ?? false,
     new_within_days: params.newWithinDays ?? 60,
     discount_only: params.discountOnly ?? false,

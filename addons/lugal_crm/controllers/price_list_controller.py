@@ -189,6 +189,33 @@ def _normalize_str_list(raw, max_len=500):
     return [str(x).strip() for x in seq[:max_len] if x and str(x).strip()]
 
 
+def _truthy_api_param(value, default=True):
+    """JSON-RPC often sends booleans as strings; treat missing as *default*."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    s = str(value).strip().lower()
+    if s in ('0', 'false', 'no', 'off', ''):
+        return False
+    if s in ('1', 'true', 'yes', 'on'):
+        return True
+    return default
+
+
+def _product_ids_for_uom_filter(env, uom_id, align_sap_sales_unit):
+    """
+    Delegate to ``sap.product.extended.product_variant_ids_matching_filtered_uom`` when
+    SAP alignment is enabled (see module ``sap_integration`` for inventory UOM handling).
+    """
+    if not align_sap_sales_unit or 'sap.product.extended' not in env:
+        return None
+    return env['sap.product.extended'].sudo().product_variant_ids_matching_filtered_uom(
+        uom_id,
+        align_sap_sales_unit=True,
+    )
+
+
 class PriceListController(http.Controller):
 
     @http.route('/api/crm/pricelist/categories', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
@@ -230,6 +257,7 @@ class PriceListController(http.Controller):
         default_code_prefix=None,
         product_ids=None,
         branch_id=None,
+        uom_align_sap_sales_unit=True,
         **kwargs,
     ):
         """
@@ -246,6 +274,11 @@ class PriceListController(http.Controller):
         Extra filters: ``category_ids`` (list[int]), ``item_codes`` (exact default_code list),
         ``default_code_prefix``, ``product_ids`` (variant ids), ``include_inactive``,
         ``sale_ok`` (bool, default True).
+
+        ``uom_align_sap_sales_unit`` (bool, default True): when ``uom_id`` is set, restrict
+        matches so template UoM alone does not count if ``sap.product.extended`` exists with
+        an empty SAP ``sales_unit`` (SalesUnit not set in SAP). Set to False for the legacy
+        ``(uom_id = X) OR (extended.sales_uom_id = X)`` behaviour without that guard.
         """
         try:
             if not ensure_jwt_user_id():
@@ -309,14 +342,19 @@ class PriceListController(http.Controller):
                 except (TypeError, ValueError):
                     uid = None
                 if uid:
-                    ext_pids = request.env['sap.product.extended'].sudo().search([
-                        ('sales_uom_id', '=', uid),
-                    ]).mapped('product_id').ids
-                    if ext_pids:
-                        uom_domain = ['|', ('uom_id', '=', uid), ('id', 'in', ext_pids)]
+                    align = _truthy_api_param(uom_align_sap_sales_unit, default=True)
+                    narrowed = _product_ids_for_uom_filter(request.env, uid, align)
+                    if narrowed is not None:
+                        domain = expression.AND([domain, [('id', 'in', narrowed)]]) if domain else [('id', 'in', narrowed)]
                     else:
-                        uom_domain = [('uom_id', '=', uid)]
-                    domain = expression.AND([domain, uom_domain]) if domain else uom_domain
+                        ext_pids = request.env['sap.product.extended'].sudo().search([
+                            ('sales_uom_id', '=', uid),
+                        ]).mapped('product_id').ids
+                        if ext_pids:
+                            uom_domain = ['|', ('uom_id', '=', uid), ('id', 'in', ext_pids)]
+                        else:
+                            uom_domain = [('uom_id', '=', uid)]
+                        domain = expression.AND([domain, uom_domain]) if domain else uom_domain
 
             if discount_only and pricelist:
                 disc = _variant_ids_with_percentage_discount(request.env, pricelist)
@@ -334,7 +372,7 @@ class PriceListController(http.Controller):
                         }
                     domain.append(('id', 'in', list(disc)))
 
-            Product = request.env['product.product']
+            Product = request.env['product.product'].sudo()
             total = Product.search_count(domain)
 
             try:

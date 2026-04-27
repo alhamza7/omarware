@@ -30,7 +30,13 @@ class SapAutoSync(models.Model):
         default=False,
         help="If set, ignores SAP SalesItem for sale_ok/POS during auto-sync and flag sync."
     )
-    
+    deactivate_odoo_not_in_sap = fields.Boolean(
+        string='Deactivate Odoo-only products (cron)',
+        default=False,
+        help="When commercial flags sync runs: also archive templates whose default_code is not "
+             "an SAP ItemCode. Dangerous for local-only products; leave off unless Odoo must mirror SAP only.",
+    )
+
     # Batch Settings
     batch_size = fields.Integer(string='Batch Size', default=100)
     product_limit = fields.Integer(string='Product Limit', default=0, help="0 = No limit")
@@ -84,14 +90,16 @@ class SapAutoSync(models.Model):
                     'batch_size': max(config.batch_size, 1),
                     'product_limit': config.product_limit,
                     'force_enable_sales_pos': config.force_enable_sales_pos,
+                    'deactivate_odoo_not_in_sap': config.deactivate_odoo_not_in_sap,
                 })
                 res = wiz.sync_commercial_flags_from_sap()
                 _logger.info(
-                    "SAP commercial flags [%s]: updated=%s not_in_odoo=%s errors=%s",
+                    "SAP commercial flags [%s]: updated=%s not_in_odoo=%s errors=%s deactivated=%s",
                     config.name,
                     res.get('updated'),
                     res.get('not_in_odoo'),
                     res.get('errors'),
+                    res.get('deactivated_not_in_sap'),
                 )
             except Exception:
                 _logger.exception(

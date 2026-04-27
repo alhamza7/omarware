@@ -45,6 +45,7 @@
                                 <field name="skip_errors"/>
                                 <field name="force_enable_sales_pos" 
                                        help="Enable all imported products in Sales and Point of Sale, regardless of SAP settings"/>
+                                <field name="deactivate_odoo_not_in_sap"/>
                             </group>
                         </group>
                         
@@ -156,6 +157,11 @@
                     </sheet>
                     
                     <footer>
+                        <button name="action_sync_commercial_flags_only"
+                                string="Sync SAP commercial flags only"
+                                type="object"
+                                class="btn-secondary"
+                                invisible="state != 'draft'"/>
                         <button name="run_complete_migration" 
                                 string="Run Migration" 
                                 type="object" 
