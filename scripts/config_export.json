@@ -1,0 +1,55 @@
+{
+  "_meta": {
+    "description": "Lugal system config parameters — apply with apply_config.py",
+    "note_web_base_url": "CHANGE web.base.url to match your server domain/IP before applying",
+    "note_frontend_url": "CHANGE lugal.frontend.base.url to match your frontend domain/IP",
+    "note_vapid_email": "CHANGE lugal.push.vapid.email to your admin email"
+  },
+  "params": [
+    {
+      "key": "ws.rollout.enabled",
+      "value": "True",
+      "note": "Enables WebSocket realtime — keep True"
+    },
+    {
+      "key": "lugal.jwt.access_ttl_hours",
+      "value": "2",
+      "note": "JWT access token lifetime in hours"
+    },
+    {
+      "key": "lugal.push.vapid.public_key",
+      "value": "BMAm3VUUAX0o3sC8G3fcMfqX7s1-9ZDLLPUbrMMZ5ZPERiFX-_KHhSDLtm1n11q1zB3wvMpXkXb0wvR74hyYJ38",
+      "note": "VAPID public key for Web Push — must match private key"
+    },
+    {
+      "key": "lugal.push.vapid.private_key",
+      "value": "-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIB3qFbZyAfy0FrxUswgb6PAvvrq54rjT5AQpOhr5RhhSoAoGCCqGSM49\nAwEHoUQDQgAEwCbdVRQBfSjewLwbd9wx+pfuzX71kMss9Ruswxnlk8RGIVf78oeF\nIMu2bWfXWrXMHfC8yleRdvTC9HviHJgnfw==\n-----END EC PRIVATE KEY-----",
+      "note": "VAPID private key — keep secret"
+    },
+    {
+      "key": "lugal.push.vapid.email",
+      "value": "admin@lugal.app",
+      "note": "CHANGE: admin email used in Web Push VAPID header"
+    },
+    {
+      "key": "lugal.email.webhook.token",
+      "value": "yu6XWvzhDuxRhskwAXdesHVgZ9nHCBVpAXs9rJnctwI",
+      "note": "Webhook token for email integration"
+    },
+    {
+      "key": "lugal.supply.team_conversation_id",
+      "value": "1",
+      "note": "Default team conversation ID"
+    },
+    {
+      "key": "web.base.url",
+      "value": "http://YOUR_SERVER_IP:8075",
+      "note": "CHANGE: your server IP or domain with port"
+    },
+    {
+      "key": "lugal.frontend.base.url",
+      "value": "http://YOUR_SERVER_IP:5174",
+      "note": "CHANGE: your frontend IP or domain with port"
+    }
+  ]
+}
