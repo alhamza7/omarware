@@ -145,6 +145,35 @@ def _serialize_penalty(p, container):
     }
 
 
+def _serialize_container_tracking_view(c):
+    """HTTP GET tracking/view — core container fields plus optional tracking_data JSON."""
+    assigned = c.assigned_user_id
+    payload = c.tracking_data
+    if payload in (False, None):
+        tracking_payload = {}
+    elif isinstance(payload, dict):
+        tracking_payload = payload
+    else:
+        tracking_payload = {'_raw': payload}
+    return {
+        'id': c.id,
+        'name': c.name or '',
+        'container_number': c.container_number or '',
+        'bl_number': c.bl_number or '',
+        'tracking_url': c.tracking_url or '',
+        'status': c.status or '',
+        'division': c.division or '',
+        'clearance_company': c.clearance_company or '',
+        'origin_location': c.origin_location or '',
+        'departure_date': c.departure_date.isoformat() if c.departure_date else None,
+        'eta': c.eta.isoformat() if c.eta else None,
+        'arrived_at': c.arrived_at.isoformat() if c.arrived_at else None,
+        'assigned_user_id': assigned.id if assigned else None,
+        'assigned_user_name': assigned.name if assigned else '',
+        'tracking_data': tracking_payload,
+    }
+
+
 class CrmSupplyController(http.Controller):
     @http.route(
         '/api/crm/supply/containers/<int:container_id>/attachments/list',
@@ -205,6 +234,68 @@ class CrmSupplyController(http.Controller):
             }
         except Exception as e:
             return crm_error(e, 'supply_container_penalties_list')
+
+    @http.route(
+        '/api/crm/supply/containers/tracking/view',
+        type='http',
+        auth='none',
+        methods=['GET', 'OPTIONS'],
+        csrf=False,
+        save_session=False,
+        cors='*',
+    )
+    def supply_container_tracking_view(self, **kwargs):
+        """
+        GET: return container tracking fields and optional JSON snapshot (`tracking_data`).
+        Query string: container_id (required). JWT: Authorization: Bearer <token>.
+        """
+        try:
+            if request.httprequest.method == 'OPTIONS':
+                return request.make_response(
+                    '',
+                    status=204,
+                    headers=[
+                        ('Access-Control-Allow-Origin', '*'),
+                        ('Access-Control-Allow-Methods', 'GET, OPTIONS'),
+                        ('Access-Control-Allow-Headers', 'Authorization, Content-Type, Accept'),
+                        ('Access-Control-Max-Age', '86400'),
+                    ],
+                )
+            if not ensure_jwt_user_id():
+                return request.make_json_response(
+                    {'success': False, 'error': 'Unauthorized', 'data': None},
+                    status=401,
+                )
+            raw = (
+                kwargs.get('container_id')
+                or request.params.get('container_id')
+                or request.httprequest.args.get('container_id')
+            )
+            if raw is None or str(raw).strip() == '':
+                return request.make_json_response(
+                    {'success': False, 'error': 'container_id is required', 'data': None},
+                    status=400,
+                )
+            try:
+                cid = int(raw)
+            except (TypeError, ValueError):
+                return request.make_json_response(
+                    {'success': False, 'error': 'container_id must be a number', 'data': None},
+                    status=400,
+                )
+            Container = request.env['lugal.supply.container'].sudo()
+            c = Container.search([('id', '=', cid), ('is_deleted', '=', False)], limit=1)
+            if not c:
+                return request.make_json_response(
+                    {'success': False, 'error': 'Container not found', 'data': None},
+                    status=404,
+                )
+            return request.make_json_response({
+                'success': True,
+                'data': _serialize_container_tracking_view(c),
+            })
+        except Exception as e:
+            return request.make_json_response(crm_error(e, 'supply_container_tracking_view'), status=500)
 
     @http.route(
         '/api/crm/supply/messages/<int:message_id>/delete',

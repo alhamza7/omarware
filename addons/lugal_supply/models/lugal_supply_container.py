@@ -49,6 +49,11 @@ class LugalSupplyContainer(models.Model):
     )
 
     tracking_url = fields.Char(string='Tracking URL (Searates)', tracking=True)
+    # Optional JSON payload (e.g. carrier API snapshot) — read by GET .../tracking/view, written by tracking/update
+    tracking_data = fields.Json(
+        string='Tracking data (JSON)',
+        default=False,
+    )
 
     # --- Clearance delivery status (highlighted flag in UI) ---
     clearance_info_delivered = fields.Boolean(
