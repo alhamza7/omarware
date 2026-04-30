@@ -1074,6 +1074,150 @@ class PosPerfumeRestController(http.Controller):
                 break
         return self._ok({"price_unit": float(price)})
 
+    @http.route(
+        f"{_PREFIX}/products/by_primary_sales_uom",
+        type="http",
+        auth="none",
+        methods=list(_READ),
+        csrf=False,
+        cors="*",
+    )
+    def products_by_primary_sales_uom(self, **kwargs):
+        """
+        Return products grouped by their primary sales UoM.
+
+        Query params (all optional):
+          pricelist_id    — pricelist to use for pricing (default: POS UI default)
+          categ_id        — filter by product.category id (includes subcategories)
+          fetch_all       — 1 / true → return all products (no limit)
+          limit           — page size (default 80)
+          offset          — pagination offset
+          query           — search term (name / SKU / barcode)
+          include_inactive — 1 to include archived products
+          include_non_sale — 1 to include products with sale_ok=False
+
+        Response shape:
+          {
+            "success": true,
+            "data": {
+              "groups": [
+                {
+                  "uom_id": 5,
+                  "uom_name": "كغم",
+                  "products": [ ...same shape as /products items... ]
+                },
+                ...
+              ],
+              "total": <total products>,
+              "pricelist_id": <id used>
+            }
+          }
+        """
+        if not self._pos_rest_auth():
+            return self._fail("Unauthorized", 401)
+
+        Product = request.env["product.product"].sudo()
+        pget = self._rest_products_query_params()
+        q = (pget("query") or "").strip()
+
+        lim_raw = self._rest_int_param(pget, "limit", None)
+        if lim_raw is None:
+            lim_raw = 80
+        fetch_all = self._rest_query_bool(pget, "fetch_all", False) or lim_raw == 0
+        limit = None if fetch_all else max(int(lim_raw), 1)
+        offset = max(self._rest_int_param(pget, "offset", 0) or 0, 0)
+
+        domain = []
+        if not self._rest_query_bool(pget, "include_inactive", False):
+            domain.append(("active", "=", True))
+        if not self._rest_query_bool(pget, "include_non_sale", False):
+            domain.append(("sale_ok", "=", True))
+
+        if q:
+            or_terms = [
+                ("name", "ilike", q),
+                ("default_code", "ilike", q),
+                ("barcode", "ilike", q),
+            ]
+            if "foreign_name" in Product._fields:
+                or_terms.append(("foreign_name", "ilike", q))
+            domain = ["&"] + domain + (["|"] * (len(or_terms) - 1)) + or_terms
+
+        categ_raw = pget("categ_id") or pget("category_id")
+        if categ_raw:
+            try:
+                cid = int(categ_raw)
+            except (TypeError, ValueError):
+                cid = None
+            if cid is not None:
+                Cat = request.env["product.category"].sudo().with_context(active_test=False)
+                root = Cat.browse(cid)
+                if not root.exists():
+                    return self._fail("Unknown product category for categ_id.", 404)
+                subtree = Cat.search([("id", "child_of", root.ids)])
+                domain = ["&"] + domain + [("categ_id", "in", subtree.ids)]
+
+        domain = self._rest_products_domain_item_codes(domain, Product, pget)
+
+        pl_id = pget("pricelist_id")
+        pl_rec = False
+        if pl_id:
+            try:
+                pl_rec = request.env["product.pricelist"].sudo().browse(int(pl_id)).exists()
+            except (TypeError, ValueError):
+                pl_rec = False
+        if not pl_rec:
+            pl_rec = self._rest_default_pricelist()
+        pl_used_id = pl_rec.id if pl_rec else None
+        strict_pl = self._strict_pricelist_flag(pget)
+
+        total = Product.search_count(domain)
+        if limit is None:
+            recs = Product.search(domain, order="name")
+        else:
+            recs = Product.search(domain, limit=limit, offset=offset, order="name")
+
+        ctrl = PosPerfumeController()
+
+        # Build rows and determine each product's primary sales UoM
+        groups_map = {}  # uom_id -> {"uom_id": int, "uom_name": str, "products": []}
+        uom_order = []   # preserve first-seen order
+
+        for prod in recs:
+            price_uom = self._rest_price_uom(prod, pget)
+            row = self._rest_product_catalog_row(prod, pl_rec, price_uom, strict_pl, pl_used_id)
+
+            # Determine primary sales UoM: prefer SAP sales_uom_id → product uom_id
+            primary_uom = None
+            if "sap.product.extended" in request.env:
+                ext = request.env["sap.product.extended"].sudo().search(
+                    [("product_id", "=", prod.id)], limit=1
+                )
+                if ext and ext.sales_uom_id and ext.sales_uom_id.id:
+                    primary_uom = ext.sales_uom_id
+            if not primary_uom:
+                primary_uom = prod.uom_id
+
+            uom_id = primary_uom.id if primary_uom else 0
+            uom_name = (primary_uom.name or "") if primary_uom else ""
+
+            if uom_id not in groups_map:
+                groups_map[uom_id] = {"uom_id": uom_id, "uom_name": uom_name, "products": []}
+                uom_order.append(uom_id)
+            groups_map[uom_id]["products"].append(row)
+
+        groups = [groups_map[uid] for uid in uom_order]
+
+        return self._ok(
+            {
+                "groups": groups,
+                "total": total,
+                "returned": sum(len(g["products"]) for g in groups),
+                "fetch_all": bool(limit is None),
+                "pricelist_id": pl_used_id,
+            }
+        )
+
     # --- orders (read list + minimal write stubs) --------------------------
 
     @http.route(f"{_PREFIX}/orders", type="http", auth="none", methods=["GET", "POST"], csrf=False, cors="*")

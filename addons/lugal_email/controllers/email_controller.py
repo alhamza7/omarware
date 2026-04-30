@@ -177,6 +177,8 @@ def _message_to_dict(msg, full=False):
         'read_at':        _to_riyadh_iso(msg.read_at) if msg.read_at else None,
         'is_read':        msg.is_read,
         'is_starred':     msg.is_starred,
+        'is_flagged':     msg.is_starred,    # IMAP \Flagged — same underlying field
+        'is_important':   msg.is_important,
         'is_draft':       msg.is_draft,
         'smtp_delivered': msg.smtp_delivered,
         'smtp_error':     msg.smtp_error or None,
@@ -577,6 +579,12 @@ class LugalEmailController(http.Controller):
             offset      = int(params.get('offset', 0))
             auto_sync   = params.get('auto_sync', '1') != '0'
             force_sync  = params.get('force_sync', '0') == '1'
+            # Optional server-side filter params
+            filter_unread         = params.get('unread')
+            filter_flagged        = params.get('flagged')
+            filter_important      = params.get('important')
+            filter_has_attachment = params.get('has_attachments')
+            filter_sent_to_me     = params.get('sent_to_me')
 
             # scope to this user's accounts
             user_accounts = _get_user_accounts(uid)
@@ -614,6 +622,24 @@ class LugalEmailController(http.Controller):
                 domain.append(('is_starred', '=', True))
             if linked_model and linked_id:
                 domain += [('linked_model', '=', linked_model), ('linked_record_id', '=', int(linked_id))]
+            # Optional server-side filters
+            if filter_unread == '1':
+                domain.append(('is_read', '=', False))
+            if filter_flagged == '1':
+                domain.append(('is_starred', '=', True))
+            if filter_important == '1':
+                domain.append(('is_important', '=', True))
+            if filter_sent_to_me == '1':
+                # Filter messages addressed directly to any of the user's email addresses
+                user_emails = [a.email_address for a in user_accounts if a.email_address]
+                if user_emails:
+                    to_clauses = [('to_addresses', 'ilike', e) for e in user_emails]
+                    if len(to_clauses) == 1:
+                        domain += to_clauses
+                    else:
+                        # OR across multiple addresses
+                        or_clause = ['|'] * (len(to_clauses) - 1) + to_clauses
+                        domain += or_clause
 
             Msg   = request.env['lugal.email.message'].sudo()
             total = Msg.search_count(domain)
@@ -634,7 +660,7 @@ class LugalEmailController(http.Controller):
             return _json_response({'success': False, 'error': str(exc)}, 500)
 
     @http.route('/api/lugal/email/messages/<int:message_id>', type='http', auth='none', csrf=False,
-                methods=['GET', 'DELETE', 'OPTIONS'])
+                methods=['GET', 'PATCH', 'DELETE', 'OPTIONS'])
     def message_detail(self, message_id, **kwargs):
         if request.httprequest.method == 'OPTIONS':
             return _json_response({})
@@ -645,6 +671,37 @@ class LugalEmailController(http.Controller):
             msg = request.env['lugal.email.message'].sudo().browse(message_id)
             if not msg.exists() or msg.is_deleted or msg.account_id.user_id.id != uid:
                 return _not_found()
+
+            if request.httprequest.method == 'PATCH':
+                body = json.loads(request.httprequest.data or '{}')
+                vals = {}
+                imap_uid    = msg.imap_uid
+                imap_folder = 'INBOX' if msg.folder == 'inbox' else msg.folder.upper()
+
+                if 'is_flagged' in body:
+                    is_flagged = bool(body['is_flagged'])
+                    vals['is_starred'] = is_flagged
+                    if imap_uid:
+                        if is_flagged:
+                            msg.account_id.sudo()._imap_store_async(
+                                imap_uid, imap_folder, add_flags=['\\Flagged']
+                            )
+                        else:
+                            msg.account_id.sudo()._imap_store_async(
+                                imap_uid, imap_folder, remove_flags=['\\Flagged']
+                            )
+
+                if 'is_important' in body:
+                    vals['is_important'] = bool(body['is_important'])
+
+                if not vals:
+                    return _json_response(
+                        {'success': False, 'error': 'Provide at least one of: is_flagged, is_important'},
+                        400,
+                    )
+                msg.write(vals)
+                return _json_response({'success': True, 'data': _message_to_dict(msg)})
+
             if request.httprequest.method == 'DELETE':
                 prev_folder = msg.folder
                 msg.write({'folder': 'trash'})

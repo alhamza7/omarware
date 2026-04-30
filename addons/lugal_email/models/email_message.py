@@ -50,9 +50,12 @@ class LugalEmailMessage(models.Model):
     body_text = fields.Text(string='Body Text')
 
     # ── Status ────────────────────────────────────────────────────────────────
-    is_read    = fields.Boolean(string='Read',    default=False, index=True)
-    is_starred = fields.Boolean(string='Starred', default=False)
-    is_draft   = fields.Boolean(string='Draft',   default=False)
+    is_read      = fields.Boolean(string='Read',      default=False, index=True)
+    is_starred   = fields.Boolean(string='Starred',   default=False)
+    is_draft     = fields.Boolean(string='Draft',     default=False)
+    # is_flagged is the public API name for is_starred (IMAP \Flagged).
+    # is_important stores the "important" marker (Gmail \Important or manual).
+    is_important = fields.Boolean(string='Important', default=False, index=True)
 
     # Timestamp set the first time this message is marked as read.
     # Null for messages that have never been opened.
