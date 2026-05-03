@@ -4,7 +4,7 @@ Additional supply-chain JSON-RPC routes.
 
 Covers:
   - Container tracking view (POST alias) + tracking update
-  - Negotiations CRUD
+  - Negotiations CRUD (+ offers/list, comments list/add/delete)
   - Item Requests CRUD
   - Clearance Companies CRUD
   - Inventory Min/Max (list / upsert / delete)
@@ -13,6 +13,7 @@ Covers:
 
 from odoo import fields, http
 from odoo.http import request
+from odoo.tools.mail import html2plaintext
 
 from odoo.exceptions import UserError
 
@@ -625,6 +626,113 @@ class CrmSupplyExtraApiController(http.Controller):
             return {'success': True, 'data': _serialize_negotiation_offer(o)}
         except Exception as e:
             return crm_error(e, 'supply_negotiations_offers_add')
+
+    @http.route(
+        '/api/crm/supply/negotiations/<int:neg_id>/offers/list',
+        type='jsonrpc', auth='none', csrf=False, methods=['POST'],
+    )
+    def supply_negotiations_offers_list(self, neg_id, **kwargs):
+        """List price-offer rows for this negotiation (same records as `offer_ids` on GET)."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            n = request.env['lugal.supply.negotiation'].sudo().browse(neg_id).exists()
+            if not n or n.is_deleted:
+                return {'success': False, 'error': 'Negotiation not found', 'data': None}
+            page, per_page, offset = _pagination(kwargs)
+            Offer = request.env['lugal.supply.negotiation.offer'].sudo()
+            domain = [('negotiation_id', '=', n.id)]
+            total = Offer.search_count(domain)
+            rows = Offer.search(domain, order='offer_date desc, id desc', limit=per_page, offset=offset)
+            items = [_serialize_negotiation_offer(o) for o in rows]
+            return {
+                'success': True,
+                'data': {
+                    'total': total,
+                    'page': page,
+                    'per_page': per_page,
+                    'items': items,
+                },
+            }
+        except Exception as e:
+            return crm_error(e, 'supply_negotiations_offers_list')
+
+    @http.route(
+        '/api/crm/supply/negotiations/<int:neg_id>/comments/list',
+        type='jsonrpc', auth='none', csrf=False, methods=['POST'],
+    )
+    def supply_negotiations_comments_list(self, neg_id, **kwargs):
+        """Chatter comments on negotiation (`mail.thread`)."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            n = request.env['lugal.supply.negotiation'].sudo().browse(neg_id).exists()
+            if not n or n.is_deleted:
+                return {'success': False, 'error': 'Negotiation not found', 'data': None}
+            page, per_page, offset = _pagination(kwargs)
+            Message = request.env['mail.message'].sudo()
+            domain = [
+                ('model', '=', n._name),
+                ('res_id', '=', n.id),
+                ('message_type', '=', 'comment'),
+            ]
+            total = Message.search_count(domain)
+            rows = Message.search(domain, order='date desc, id desc', limit=per_page, offset=offset)
+            items = []
+            for m in rows:
+                body_plain = (html2plaintext(m.body or '') or '').strip()
+                auth = m.author_id
+                items.append({
+                    'id': m.id,
+                    'body': body_plain[:4000],
+                    'author_id': auth.id if auth else None,
+                    'author_name': auth.name if auth else '',
+                    'date': m.date.isoformat() if m.date else '',
+                })
+            return {
+                'success': True,
+                'data': {'total': total, 'page': page, 'per_page': per_page, 'items': items},
+            }
+        except Exception as e:
+            return crm_error(e, 'supply_negotiations_comments_list')
+
+    @http.route(
+        '/api/crm/supply/negotiations/<int:neg_id>/comments/add',
+        type='jsonrpc', auth='none', csrf=False, methods=['POST'],
+    )
+    def supply_negotiations_comments_add(self, neg_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            n = request.env['lugal.supply.negotiation'].sudo().browse(neg_id).exists()
+            if not n or n.is_deleted:
+                return {'success': False, 'error': 'Negotiation not found', 'data': None}
+            body = (kwargs.get('body') or kwargs.get('message') or '').strip()
+            if not body:
+                return {'success': False, 'error': 'body is required', 'data': None}
+            n.message_post(body=body, message_type='comment')
+            return {'success': True, 'data': {'posted': True}}
+        except Exception as e:
+            return crm_error(e, 'supply_negotiations_comments_add')
+
+    @http.route(
+        '/api/crm/supply/negotiations/<int:neg_id>/comments/<int:msg_id>/delete',
+        type='jsonrpc', auth='none', csrf=False, methods=['POST'],
+    )
+    def supply_negotiations_comments_delete(self, neg_id, msg_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            n = request.env['lugal.supply.negotiation'].sudo().browse(neg_id).exists()
+            if not n or n.is_deleted:
+                return {'success': False, 'error': 'Negotiation not found', 'data': None}
+            msg = request.env['mail.message'].sudo().browse(msg_id).exists()
+            if not msg or msg.model != n._name or msg.res_id != n.id:
+                return {'success': False, 'error': 'Message not found', 'data': None}
+            msg.unlink()
+            return {'success': True, 'data': {'id': msg_id, 'deleted': True}}
+        except Exception as e:
+            return crm_error(e, 'supply_negotiations_comments_delete')
 
     @http.route(
         '/api/crm/supply/negotiations/<int:neg_id>/attachments/link',
