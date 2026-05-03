@@ -15,11 +15,22 @@ class LugalSupplyContainer(models.Model):
     _rec_name = 'name'
 
     name = fields.Char(string='Container Name / اسم الحاوية', required=True, index=True, tracking=True)
+    shipment_ref = fields.Char(
+        string='Shipment ID',
+        readonly=True,
+        copy=False,
+        index=True,
+        help='Auto-generated shipment reference (e.g. SHP-00001).',
+    )
     container_number = fields.Char(string='Container Number / رقم الحاوية', index=True, tracking=True)
     bl_number = fields.Char(string='B/L Number / رقم بوليصة الشحن', index=True, tracking=True)
     clearance_company = fields.Char(string='Clearance Company / شركة التخليص', tracking=True)
     origin_location = fields.Char(string='Origin / المنشأ', tracking=True)
-    departure_date = fields.Date(string='Departure Date / تاريخ المغادرة', index=True, tracking=True)
+    departure_date = fields.Date(
+        string='ETD (Departure) / تاريخ المغادرة',
+        index=True,
+        tracking=True,
+    )
     eta = fields.Date(string='ETA / الموعد المتوقع', tracking=True)
     arrived_at = fields.Datetime(string='Arrived At / وقت الوصول', tracking=True)
     status = fields.Selection([
@@ -90,6 +101,73 @@ class LugalSupplyContainer(models.Model):
     notes = fields.Text(string='Notes / ملاحظات', tracking=True)
     active = fields.Boolean(string='Active', default=True)
     is_deleted = fields.Boolean(string='Soft Deleted', default=False, index=True)
+
+    # --- Shipment tracking (supply chain workflow; complements legacy status above) ---
+    supplier_id = fields.Many2one(
+        'lugal.supply.vendor',
+        string='Supplier',
+        ondelete='set null',
+        index=True,
+        tracking=True,
+    )
+    agent_id = fields.Many2one(
+        'res.partner',
+        string='Agent',
+        ondelete='set null',
+        index=True,
+        tracking=True,
+    )
+    transport_mode = fields.Selection(
+        [
+            ('sea', 'Sea'),
+            ('air', 'Air'),
+            ('land', 'Land'),
+            ('other', 'Other'),
+        ],
+        string='Shipping Method',
+        tracking=True,
+    )
+    destination_location = fields.Char(string='Destination', tracking=True)
+    shipping_line = fields.Char(
+        string='Shipping Line',
+        help='Carrier / line name (e.g. MSC, COSCO).',
+        tracking=True,
+    )
+    shipment_tracking_state = fields.Selection(
+        [
+            ('pending', 'Pending'),
+            ('in_transit', 'In Transit'),
+            ('transshipment', 'Transshipment'),
+            ('arrived', 'Arrived'),
+        ],
+        string='Shipment Status',
+        default='pending',
+        tracking=True,
+        index=True,
+    )
+    received_date = fields.Date(
+        string='Received Date',
+        help='Actual receipt date (goods arrived).',
+        tracking=True,
+    )
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        seq = self.env['ir.sequence'].sudo()
+        for vals in vals_list:
+            if not vals.get('shipment_ref'):
+                vals['shipment_ref'] = seq.next_by_code('lugal.supply.shipment') or 'SHP-NEW'
+        return super().create(vals_list)
+
+    def init(self):
+        """Backfill Shipment ID for rows created before this field existed (no env in init)."""
+        self._cr.execute(
+            """
+            UPDATE lugal_supply_container
+            SET shipment_ref = 'SHP-L' || lpad(id::text, 6, '0')
+            WHERE shipment_ref IS NULL OR btrim(COALESCE(shipment_ref, '')) = ''
+            """
+        )
 
     def action_mark_clearance_delivered(self):
         """Mark clearance info as delivered to the clearance company, recording who and when."""

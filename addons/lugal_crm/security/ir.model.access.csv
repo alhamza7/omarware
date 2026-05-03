@@ -27,3 +27,4 @@ access_lugal_supply_conversation_user,lugal.supply.conversation user,model_lugal
 access_lugal_supply_message_user,lugal.supply.message user,model_lugal_supply_message,base.group_user,1,1,1,1
 access_lugal_supply_typing_user,lugal.supply.typing user,model_lugal_supply_typing,base.group_user,1,1,1,1
 access_lugal_supply_story_user,lugal.supply.story user,model_lugal_supply_story,base.group_user,1,1,1,1
+access_lugal_supply_payment_user,lugal.supply.payment user,model_lugal_supply_payment,base.group_user,1,1,1,1

@@ -2,3 +2,6 @@ id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_lugal_supply_container_user,lugal.supply.container.user,model_lugal_supply_container,base.group_user,1,1,1,1
 access_lugal_supply_vendor_user,lugal.supply.vendor.user,model_lugal_supply_vendor,base.group_user,1,1,1,1
 access_lugal_supply_container_penalty_user,lugal.supply.container.penalty.user,model_lugal_supply_container_penalty,base.group_user,1,1,1,1
+access_lugal_supply_item_request_user,lugal.supply.item.request user,model_lugal_supply_item_request,base.group_user,1,1,1,1
+access_lugal_supply_negotiation_user,lugal.supply.negotiation user,model_lugal_supply_negotiation,base.group_user,1,1,1,1
+access_lugal_supply_negotiation_offer_user,lugal.supply.negotiation.offer user,model_lugal_supply_negotiation_offer,base.group_user,1,1,1,1

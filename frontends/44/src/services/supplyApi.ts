@@ -226,6 +226,14 @@ export const containerPenaltyDelete = (containerId: number, penaltyId: number) =
 // ═══════════════════════════════════════════════════════════════════════════
 // PURCHASE ORDERS
 // ═══════════════════════════════════════════════════════════════════════════
+/** POST /api/crm/supply/po/suggested — POs with `is_suggested=true` */
+export const poSuggested = (page = 1, per_page = 20, division?: '' | 'europe' | 'china') =>
+  rpc<PoListData>('/api/crm/supply/po/suggested', {
+    page,
+    per_page,
+    ...(division ? { division } : {}),
+  });
+
 export const poList = (filter: PoListFilter = {}) =>
   rpc<PoListData>('/api/crm/supply/po/list', {
     page:               filter.page     ?? 1,
@@ -310,7 +318,7 @@ const supplyApi = {
   containerCommentList, containerCommentAdd, containerCommentDelete,
   containerAddPenalty, containerPenaltiesList, containerPenaltyDelete,
   // purchase orders
-  poList, poGet, poCreate, poUpdate, poDelete,
+  poSuggested, poList, poGet, poCreate, poUpdate, poDelete,
   poConfirm, poShip, poReceive, poCancel, poReopen,
   poLineAdd, poLineUpdate, poLineDelete,
   poAttachList, poAttachUpload, poAttachUploadMultiple, poAttachDelete,

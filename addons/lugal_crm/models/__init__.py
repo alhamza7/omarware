@@ -21,6 +21,11 @@ from . import crm_requested_item
 from . import crm_shift
 from . import crm_supply_po
 from . import crm_supply_po_line
+from . import crm_supply_po_extend
+from . import lugal_supply_payment
+from . import crm_supply_item_request_extend
+from . import crm_supply_negotiation_extend
+from . import crm_supply_container_extend
 from . import crm_supply_conversation
 from . import crm_supply_message
 from . import crm_supply_story

@@ -17,7 +17,10 @@ Lugal Supply
     'website': 'https://nbs.com',
     'license': 'LGPL-3',
     'depends': ['base', 'mail'],
-    'data': ['security/ir.model.access.csv'],
+    'data': [
+        'data/supply_sequences.xml',
+        'security/ir.model.access.csv',
+    ],
     'installable': True,
     'application': False,
     'auto_install': False,

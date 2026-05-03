@@ -76,7 +76,12 @@ export interface PoLine {
   product_name:        string;
   item_code:           string;
   uom:                 string;
+  quantity_pcs?:       number;
+  quantity_carton?:    number;
   quantity:            number;
+  size?:               string;
+  capacity?:           string;
+  packing_pcs_per_carton?: number;
   unit_price:          number;
   total_price:         number;
   currency_id:         number | null;
@@ -99,7 +104,7 @@ export interface PoLineInput {
 }
 
 // ─── Purchase Order ──────────────────────────────────────────
-export type PoStatus = 'draft' | 'confirmed' | 'shipped' | 'received' | 'cancelled';
+export type PoStatus = 'draft' | 'confirmed' | 'cancelled';
 
 export interface Po {
   id:                    number;

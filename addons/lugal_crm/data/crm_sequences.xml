@@ -24,5 +24,25 @@
             <field name="use_date_range">False</field>
         </record>
 
+        <record id="seq_lugal_supply_payment" model="ir.sequence">
+            <field name="name">Supply Payment</field>
+            <field name="code">lugal.supply.payment</field>
+            <field name="prefix">PAY-</field>
+            <field name="padding">5</field>
+            <field name="number_next">1</field>
+            <field name="number_increment">1</field>
+            <field name="use_date_range">False</field>
+        </record>
+
+        <record id="seq_lugal_crm_supply_po" model="ir.sequence">
+            <field name="name">Supply Order (PO)</field>
+            <field name="code">lugal.crm.supply.po</field>
+            <field name="prefix">SO-</field>
+            <field name="padding">5</field>
+            <field name="number_next">1</field>
+            <field name="number_increment">1</field>
+            <field name="use_date_range">False</field>
+        </record>
+
     </data>
 </odoo>

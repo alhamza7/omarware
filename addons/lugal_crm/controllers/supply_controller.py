@@ -174,6 +174,81 @@ def _serialize_container_tracking_view(c):
     }
 
 
+_PO_STATUS_LABELS = {
+    'draft': 'Draft',
+    'confirmed': 'Confirmed',
+    'cancelled': 'Cancelled',
+}
+
+
+def _serialize_supply_po_line(line):
+    """Shape aligned with frontends/44 PoLine."""
+    cur = line.currency_id
+    return {
+        'id': line.id,
+        'sequence': line.sequence or 10,
+        'product_name': line.product_name or '',
+        'item_code': line.item_code or '',
+        'uom': line.uom or '',
+        'quantity_pcs': float(line.quantity_pcs or 0.0),
+        'quantity_carton': float(line.quantity_carton or 0.0),
+        'quantity': float(line.quantity or 0.0),
+        'size': line.size or '',
+        'capacity': line.capacity or '',
+        'packing_pcs_per_carton': float(line.packing_pcs_per_carton or 0.0),
+        'unit_price': float(line.unit_price or 0.0),
+        'total_price': float(line.total_price or 0.0),
+        'currency_id': cur.id if cur else None,
+        'currency_name': cur.name if cur else '',
+        'last_purchase_price': float(line.last_purchase_price or 0.0),
+        'last_purchase_date': line.last_purchase_date.isoformat() if line.last_purchase_date else None,
+        'min_qty': float(line.min_qty or 0.0),
+        'max_qty': float(line.max_qty or 0.0),
+    }
+
+
+def _serialize_supply_po(po):
+    """Shape aligned with frontends/44 Po."""
+    vendor = po.vendor_id
+    partner = vendor.partner_id if vendor else None
+    header_currency = po.currency_id
+    branch = po.branch_id
+    container = po.container_id
+    creator = po.create_uid
+    status_key = po.status or 'draft'
+    vendor_phone = ''
+    if vendor and vendor.phone:
+        vendor_phone = vendor.phone
+    elif partner and partner.phone:
+        vendor_phone = partner.phone
+    return {
+        'id': po.id,
+        'name': po.name or '',
+        'vendor_customer_id': partner.id if partner else None,
+        'vendor_customer_name': (partner.name if partner else (vendor.name if vendor else '')),
+        'vendor_customer_phone': vendor_phone,
+        'vendor_id': vendor.id if vendor else None,
+        'vendor_name': vendor.name if vendor else '',
+        'division': po.division or '',
+        'currency_id': header_currency.id if header_currency else None,
+        'currency_name': header_currency.name if header_currency else '',
+        'container_id': container.id if container else None,
+        'container_name': container.name if container else '',
+        'branch_id': branch.id if branch else None,
+        'branch_name': branch.name if branch else '',
+        'status': status_key,
+        'status_label': _PO_STATUS_LABELS.get(status_key, status_key.title()),
+        'is_suggested': bool(po.is_suggested),
+        'line_count': len(po.line_ids),
+        'total_amount': float(po.total_amount or 0.0),
+        'created_by_id': creator.id if creator else None,
+        'created_by_name': creator.name if creator else '',
+        'created_at': po.create_date.isoformat() if po.create_date else '',
+        'updated_at': po.write_date.isoformat() if po.write_date else '',
+        'lines': [_serialize_supply_po_line(line) for line in po.line_ids],
+    }
+
+
 class CrmSupplyController(http.Controller):
     @http.route(
         '/api/crm/supply/containers/<int:container_id>/attachments/list',
@@ -538,3 +613,52 @@ class CrmSupplyController(http.Controller):
             except Exception:
                 pass
             return _json({'success': False, 'error': str(e)}, 500)
+
+    @http.route(
+        '/api/crm/supply/po/suggested',
+        type='jsonrpc',
+        auth='none',
+        csrf=False,
+        methods=['POST'],
+    )
+    def supply_po_suggested(self, **kwargs):
+        """
+        List purchase orders flagged as suggested (`is_suggested=True`).
+        Optional JSON params: page (default 1), per_page (default 20), division ('europe'|'china').
+        """
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            try:
+                page = max(1, int(kwargs.get('page') or 1))
+            except (TypeError, ValueError):
+                page = 1
+            try:
+                per_page = min(100, max(1, int(kwargs.get('per_page') or 20)))
+            except (TypeError, ValueError):
+                per_page = 20
+            division = (kwargs.get('division') or '').strip().lower()
+            domain = [
+                ('is_suggested', '=', True),
+                ('is_deleted', '=', False),
+                ('active', '=', True),
+            ]
+            if division in ('europe', 'china'):
+                domain.append(('division', '=', division))
+
+            Po = request.env['lugal.crm.supply.po'].sudo()
+            total = Po.search_count(domain)
+            offset = (page - 1) * per_page
+            rows = Po.search(domain, order='write_date desc, id desc', limit=per_page, offset=offset)
+            items = [_serialize_supply_po(po) for po in rows]
+            return {
+                'success': True,
+                'data': {
+                    'items': items,
+                    'total': total,
+                    'page': page,
+                    'per_page': per_page,
+                },
+            }
+        except Exception as e:
+            return crm_error(e, 'supply_po_suggested')

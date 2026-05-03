@@ -14,7 +14,13 @@ class CrmSupplyPo(models.Model):
     _order = 'write_date desc, id desc'
     _rec_name = 'name'
 
-    name = fields.Char(string='PO Name / اسم أمر الشراء', required=True, index=True, tracking=True)
+    name = fields.Char(
+        string='Order ID / اسم أمر الشراء',
+        required=True,
+        index=True,
+        tracking=True,
+        help='Supply order reference; can be auto-generated on create.',
+    )
     vendor_id = fields.Many2one(
         'lugal.supply.vendor',
         string='Vendor / المورد',
@@ -50,8 +56,6 @@ class CrmSupplyPo(models.Model):
     status = fields.Selection([
         ('draft', 'Draft / مسودة'),
         ('confirmed', 'Confirmed / مؤكد'),
-        ('shipped', 'Shipped / مشحون'),
-        ('received', 'Received / مستلم'),
         ('cancelled', 'Cancelled / ملغي'),
     ], string='Status / الحالة', default='draft', required=True, index=True, tracking=True)
     line_ids = fields.One2many(
@@ -74,3 +78,13 @@ class CrmSupplyPo(models.Model):
         """Sum all line totals to get PO grand total."""
         for po in self:
             po.total_amount = sum(line.total_price for line in po.line_ids)
+
+    def init(self):
+        """Legacy statuses shipped/received map to confirmed (upgrade safety)."""
+        self._cr.execute(
+            """
+            UPDATE lugal_crm_supply_po
+            SET status = 'confirmed'
+            WHERE status IN ('shipped', 'received');
+            """
+        )
