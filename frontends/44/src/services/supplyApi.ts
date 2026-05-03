@@ -3,7 +3,7 @@
 // ============================================================
 // All supply chain endpoints use Odoo JSON-RPC format.
 // JWT token stored in localStorage; refreshed on 401.
-// Proxy: Vite forwards /api → http://192.168.116.204:8070
+// With VITE_ODOO_URL empty, fetch('/api/...') hits Vite → proxied to VITE_PROXY_TARGET (see vite.config.ts).
 // ============================================================
 
 import type {
