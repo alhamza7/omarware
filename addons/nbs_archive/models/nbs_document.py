@@ -293,13 +293,19 @@ class NBSDocument(models.Model):
         store=False
     )
     
-    # OCR status
+    # OCR status + extracted content
     ocr_status = fields.Selection([
         ('pending', 'Pending'),
         ('processing', 'Processing'),
         ('completed', 'Completed'),
         ('failed', 'Failed')
     ], string='OCR Status', default='pending', tracking=True, index=True)
+
+    ocr_text = fields.Text(
+        string='OCR Content',
+        readonly=True,
+        help='Full text extracted by Google Vision OCR — used by the search engine.',
+    )
     
     # Search indexing
     indexed_in_search = fields.Boolean(
@@ -463,11 +469,12 @@ class NBSDocument(models.Model):
     
     def unlink(self):
         """Override to allow permanent delete with proper authorization"""
-        # Allow unlink only for documents in trash and with admin permission
-        for document in self:
-            if document.state != 'trash' and not document.is_deleted:
-                raise ValidationError(_('Documents cannot be deleted! Move to trash first.'))
-        
+        # Skip the trash guard when called from folder deletion cascade
+        if not self.env.context.get('force_delete_from_folder'):
+            for document in self:
+                if document.state != 'trash' and not document.is_deleted:
+                    raise ValidationError(_('Documents cannot be deleted! Move to trash first.'))
+
         return super(NBSDocument, self).unlink()
     
     def soft_delete(self, reason=None):
@@ -509,76 +516,174 @@ class NBSDocument(models.Model):
                 pass  # audit failure must not flip success of trash operation
     
     def restore_from_trash(self):
-        """Restore document from trash"""
+        """
+        Restore document(s) from trash.
+
+        For MAIN documents (folder_role == 'main') that were trashed as part
+        of a folder deletion:
+          1. Recreate (or find) the original folder using the snapshot stored
+             in deletion_reason.
+          2. Restore the main document and re-link it to the folder.
+          3. Cascade-restore ALL trashed sub/attachment documents that belong
+             to this main document (identified via parent_document_id).
+             All siblings are also re-linked to the restored folder.
+
+        For sub/attachment documents restored individually, the document is
+        just restored normally without cascading to siblings.
+        """
         for document in self:
             if not document.is_deleted:
                 raise ValidationError(_('المستند ليس في سلة المحذوفات'))
 
-            # Recover the saved company (set when document was trashed).
-            # This is the authoritative value — it survives even if folder_id was cleared.
-            saved_company_id = document.company_id_before_trash.id if document.company_id_before_trash else False
+            # ── Parse folder snapshot ─────────────────────────────────────
+            folder_snapshot = None
+            try:
+                parsed = json.loads(document.deletion_reason or '{}')
+                if isinstance(parsed, dict) and parsed.get('__folder_deleted'):
+                    folder_snapshot = parsed
+            except Exception:
+                pass
 
-            # --- Folder recovery for main documents ---
-            # If the folder was deleted while the document was in trash (legacy behaviour
-            # before the auto-delete was removed), recreate it so the document is not orphaned.
-            folder_restored = False
-            if document.folder_role == 'main' and not document.folder_id:
-                try:
-                    dept_id = document.department_id.id if document.department_id else False
-                    folder_name = document.name or 'Restored Folder'
+            saved_company_id = (
+                document.company_id_before_trash.id
+                if document.company_id_before_trash else False
+            )
+
+            # ── Folder recovery (main documents only) ────────────────────
+            target_folder = None
+            folder_recreated = False
+            is_main = document.folder_role == 'main'
+
+            if is_main and folder_snapshot:
+                original_folder_id = folder_snapshot.get('folder_id')
+                if original_folder_id:
+                    existing = self.env['nbs.document.folder'].sudo().browse(original_folder_id)
+                    if existing.exists():
+                        target_folder = existing
+
+                if not target_folder:
+                    folder_vals = {
+                        'name':          folder_snapshot.get('folder_name') or document.name,
+                        'department_id': (
+                            folder_snapshot.get('folder_department_id')
+                            or (document.department_id.id if document.department_id else False)
+                        ),
+                    }
+                    code = folder_snapshot.get('folder_code')
+                    if code:
+                        folder_vals['code'] = code
+                    desc = folder_snapshot.get('folder_description')
+                    if desc:
+                        folder_vals['description'] = desc
+                    company = folder_snapshot.get('folder_company_id') or saved_company_id
+                    if company:
+                        folder_vals['company_id'] = company
+                    owner = folder_snapshot.get('folder_owner_id')
+                    if owner:
+                        folder_vals['owner_id'] = owner
+
+                    target_folder = self.env['nbs.document.folder'].sudo().create(folder_vals)
+                    folder_recreated = True
                     _logger.info(
-                        f'Document {document.id} has no folder — recreating '
-                        f'"{folder_name}" in department {dept_id}'
-                    )
-                    new_folder = self.env['nbs.document.folder'].sudo().create({
-                        'name': folder_name,
-                        'department_id': dept_id,
-                        'company_id': saved_company_id,  # use saved company
-                    })
-                    # Assign without going through the write() override company logic,
-                    # so we can set both folder_id and company_id atomically below.
-                    document.with_context(skip_company_sync=True).sudo().write({
-                        'folder_id': new_folder.id,
-                    })
-                    folder_restored = True
-                    _logger.info(f'Recreated folder {new_folder.id} for document {document.id}')
-                except Exception as e:
-                    _logger.warning(
-                        f'Could not recreate folder for document {document.id}: {e}'
+                        'Recreated folder %s (%s) while restoring document %s',
+                        target_folder.id, target_folder.name, document.id,
                     )
 
-            # Restore to previous state and always reapply saved company_id so it
-            # is never null after restore, even if the folder had no company set.
+            elif is_main and not document.folder_id:
+                # Fallback: no snapshot but main doc has no folder → create minimal folder
+                target_folder = self.env['nbs.document.folder'].sudo().create({
+                    'name':          document.name,
+                    'department_id': document.department_id.id if document.department_id else False,
+                    'company_id':    saved_company_id or False,
+                })
+                folder_recreated = True
+                _logger.info(
+                    'Created minimal folder %s for orphaned main document %s',
+                    target_folder.id, document.id,
+                )
+
+            # ── Restore the document itself ───────────────────────────────
             old_state = document.state_before_trash or 'active'
             restore_vals = {
-                'state': old_state,
-                'is_deleted': False,
-                'deleted_at': False,
-                'deleted_by': False,
-                'deletion_reason': False,
-                'restore_deadline': False,
-                'state_before_trash': False,
+                'state':                   old_state,
+                'is_deleted':              False,
+                'deleted_at':              False,
+                'deleted_by':              False,
+                'deletion_reason':         False,
+                'restore_deadline':        False,
+                'state_before_trash':      False,
                 'company_id_before_trash': False,
             }
             if saved_company_id:
                 restore_vals['company_id'] = saved_company_id
+            if target_folder:
+                restore_vals['folder_id']  = target_folder.id
+                restore_vals['folder_ids'] = [(4, target_folder.id)]
 
             document.write(restore_vals)
 
-            # Log (non-blocking: do not fail operation if audit create fails)
+            # ── Cascade-restore sub/attachment documents ──────────────────
+            if is_main and target_folder:
+                # Primary: find siblings by restore_group UUID stored in deletion_reason.
+                # Fallback: find by parent_document_id for docs that do have it set.
+                restore_group = folder_snapshot.get('restore_group') if folder_snapshot else None
+                siblings = self.env['nbs.document'].sudo()
+                if restore_group:
+                    # Use LIKE on the text field — trash sets are small, cost is negligible.
+                    siblings = self.env['nbs.document'].sudo().search([
+                        ('id', '!=', document.id),
+                        ('is_deleted', '=', True),
+                        ('deletion_reason', 'like', restore_group),
+                    ])
+                if not siblings:
+                    # Fallback for sub/attachment docs that carry parent_document_id
+                    siblings = self.env['nbs.document'].sudo().search([
+                        ('parent_document_id', '=', document.id),
+                        ('is_deleted', '=', True),
+                    ])
+
+                if siblings:
+                    _logger.info(
+                        'Cascade-restoring %d sibling document(s) for main doc %s into folder %s',
+                        len(siblings), document.id, target_folder.id,
+                    )
+                    for child in siblings:
+                        child_company = (
+                            child.company_id_before_trash.id
+                            if child.company_id_before_trash else saved_company_id or False
+                        )
+                        child_vals = {
+                            'state':                   child.state_before_trash or 'active',
+                            'is_deleted':              False,
+                            'deleted_at':              False,
+                            'deleted_by':              False,
+                            'deletion_reason':         False,
+                            'restore_deadline':        False,
+                            'state_before_trash':      False,
+                            'company_id_before_trash': False,
+                            'folder_id':               target_folder.id,
+                            'folder_ids':              [(4, target_folder.id)],
+                        }
+                        if child_company:
+                            child_vals['company_id'] = child_company
+                        child.sudo().write(child_vals)
+
+            # ── Audit ─────────────────────────────────────────────────────
             try:
                 meta = f'Restored from trash: {document.name}'
-                if folder_restored:
-                    meta += ' (folder was missing and has been recreated)'
+                if folder_recreated and target_folder:
+                    meta += f' (folder recreated: {target_folder.name})'
+                elif target_folder and is_main:
+                    meta += f' (linked to existing folder: {target_folder.name})'
                 self.env['nbs.audit.log'].sudo().create({
-                    'action': 'document_restored',
-                    'document_id': document.id,
-                    'user_id': self.env.user.id,
+                    'action':        'document_restored',
+                    'document_id':   document.id,
+                    'user_id':       self.env.user.id,
                     'department_id': document.department_id.id,
-                    'metadata': meta
+                    'metadata':      meta,
                 })
             except Exception:
-                pass  # audit failure must not flip success of restore operation
+                pass  # audit failure must not flip success of restore
     
     def permanent_delete(self, confirmation):
         """Permanently delete document (admin only)"""

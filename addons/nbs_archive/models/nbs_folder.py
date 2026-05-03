@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+import json
+import uuid
 from odoo import models, fields, api, _
 from odoo.exceptions import ValidationError
 import logging
@@ -399,6 +401,131 @@ class NBSDocumentFolder(models.Model):
         
         return result
     
+    # ── Helpers ──────────────────────────────────────────────────────────────
+
+    def _permanently_delete_docs(self, docs):
+        """
+        Permanently delete a recordset of nbs.document records.
+
+        Steps per document (mirrors nbs_document.permanent_delete but without
+        the 'must-be-in-trash' guard so we can call it directly from folder
+        deletion without a two-phase soft→hard delete):
+          0. Sever folder FK/M2M links (prevents MissingError on folder compute)
+          1. Clear parent_document_id on children
+          2. Clear current_version_id (ondelete=restrict)
+          3. Delete versions
+          4. Delete relations & attachments
+          5. Null out audit-log references
+          6. Unlink the document record itself
+        """
+        Doc = self.env['nbs.document'].sudo()
+        for doc in docs:
+            doc_id   = doc.id
+            doc_name = doc.name   # cache before any deletion step
+            try:
+                # 0. Clear folder references FIRST to avoid Odoo recomputing
+                #    _compute_company_id (depends on folder_id.company_id) on an
+                #    already-deleted record when the parent folder is unlinked.
+                doc.write({
+                    'folder_id': False,
+                    'folder_ids': [(5,)],  # clear M2M
+                })
+
+                # 1. Clear parent references on child documents
+                children = Doc.search([('parent_document_id', '=', doc_id)])
+                if children:
+                    children.write({'parent_document_id': False})
+
+                # 2. Break current_version_id FK before deleting versions
+                if doc.current_version_id:
+                    doc.write({'current_version_id': False})
+
+                # 3. Delete all versions
+                if doc.version_ids:
+                    doc.version_ids.with_context(force_delete_versions=True).sudo().unlink()
+
+                # 4. Delete relations and attachments
+                if doc.relation_ids:
+                    doc.relation_ids.sudo().unlink()
+                if doc.attachment_ids:
+                    doc.attachment_ids.sudo().unlink()
+
+                # 5. Null audit-log references to avoid FK violations
+                self.env.cr.execute(
+                    "UPDATE nbs_audit_log SET document_id = NULL WHERE document_id = %s",
+                    (doc_id,)
+                )
+
+                # 6. Permanently remove the record
+                # Bypass the is_deleted guard in nbs_document.unlink()
+                doc.with_context(force_delete_from_folder=True).sudo().unlink()
+
+                _logger.info('Permanently deleted document %s (%s)', doc_id, doc_name)
+
+            except Exception as exc:
+                _logger.error(
+                    'Failed to permanently delete document %s (%s): %s',
+                    doc_id, doc_name, exc, exc_info=True,
+                )
+                raise
+
+    def _soft_delete_docs(self, docs, folder, reason='Folder deleted'):
+        """
+        Soft-delete (move to trash) a recordset of nbs.document records.
+        Called when a folder is deleted so documents land in the trash bin
+        and can be recovered within 30 days.
+
+        A JSON snapshot of the folder is stored in each document's
+        deletion_reason so that restoring the main document can fully
+        recreate the original folder and bring back all siblings.
+
+        After trashing, folder FK/M2M links are cleared so the docs do not
+        reference a folder that no longer exists.
+        """
+        # restore_group is a UUID shared by ALL docs trashed from this folder so
+        # restore_from_trash can find and restore the entire group atomically.
+        restore_group = str(uuid.uuid4())
+        folder_snapshot = json.dumps({
+            '__folder_deleted':     True,
+            'restore_group':        restore_group,
+            'folder_id':            folder.id,
+            'folder_name':          folder.name or '',
+            'folder_code':          folder.code or '',
+            'folder_description':   folder.description or '',
+            'folder_department_id': folder.department_id.id if folder.department_id else False,
+            'folder_company_id':    folder.company_id.id if folder.company_id else False,
+            'folder_owner_id':      folder.owner_id.id if folder.owner_id else False,
+            'user_reason':          reason,
+        }, ensure_ascii=False)
+
+        for doc in docs:
+            doc_id   = doc.id
+            doc_name = doc.name  # cache before any write
+            try:
+                if doc.state == 'trash' or doc.is_deleted:
+                    # Already trashed — just clear the stale folder link
+                    doc.sudo().write({'folder_id': False, 'folder_ids': [(5,)]})
+                    continue
+
+                # soft_delete() stores folder_snapshot in deletion_reason so
+                # restore_from_trash can recreate the folder and all siblings.
+                doc.sudo().soft_delete(reason=folder_snapshot)
+
+                # Clear folder references so trashed doc doesn't point to a
+                # deleted folder (prevents broken FK after folder is gone).
+                doc.sudo().write({'folder_id': False, 'folder_ids': [(5,)]})
+
+                _logger.info('Moved document %s (%s) to trash (folder deleted)', doc_id, doc_name)
+
+            except Exception as exc:
+                _logger.error(
+                    'Failed to trash document %s (%s): %s',
+                    doc_id, doc_name, exc, exc_info=True,
+                )
+                raise
+
+    # ─────────────────────────────────────────────────────────────────────────
+
     def unlink(self):
         for folder in self:
             # Check if has subfolders first (must delete children before parent)
@@ -407,69 +534,39 @@ class NBSDocumentFolder(models.Model):
                     _('Cannot delete folder "%s" because it contains %d subfolders. '
                       'Please delete the subfolders first.') % (folder.name, folder.child_count)
                 )
-            
-            # SOFT DELETE: Move all documents to trash (do NOT permanently delete)
-            # Get documents via folder_id (Many2one)
-            docs_via_folder_id = self.env['nbs.document'].search([
-                ('folder_id', '=', folder.id)
-            ])
-            
-            # Get documents via Many2many
-            docs_via_many2many = folder.document_ids
-            
-            # Combine both (union to avoid duplicates)
-            all_docs = docs_via_folder_id | docs_via_many2many
-            
+
+            # Collect all documents linked to this folder (both FK and M2M)
+            docs_via_fk  = self.env['nbs.document'].sudo().search([('folder_id', '=', folder.id)])
+            docs_via_m2m = folder.document_ids
+            all_docs     = docs_via_fk | docs_via_m2m
+
+            doc_count = len(all_docs)
             if all_docs:
-                _logger.info(f'Moving {len(all_docs)} documents in folder {folder.name} to trash')
-                
-                # For each document: ONLY move to trash (do NOT permanently delete)
-                failed_docs = []
-                for doc in all_docs:
-                    try:
-                        # Soft delete if not already deleted
-                        if not doc.is_deleted:
-                            _logger.info(f'  Processing doc {doc.id}: {doc.name}, role={doc.folder_role}')
-                            # IMPORTANT: Pass skip_folder_auto_delete=True to prevent infinite recursion
-                            doc.with_context(skip_folder_auto_delete=True).soft_delete(
-                                reason=f'Folder deletion: {folder.name}'
-                            )
-                            _logger.info(f'  ✓ Moved document {doc.id} to trash')
-                        else:
-                            _logger.info(f'  Document {doc.id} already in trash, skipping')
-                    except Exception as e:
-                        _logger.error(f'Error moving document {doc.id} to trash: {str(e)}', exc_info=True)
-                        failed_docs.append(doc.id)
-                        # Continue with other documents
-                
-                if failed_docs:
-                    raise ValidationError(
-                        _('Failed to delete folder because some documents could not be moved to trash: %s') 
-                        % str(failed_docs)
-                    )
-                
-                # CRITICAL: Clear folder_id from all documents to allow folder deletion
-                # Documents are in trash but still reference folder via FK constraint
-                _logger.info(f'Clearing folder_id from {len(all_docs)} documents to allow folder deletion')
-                for doc in all_docs:
-                    try:
-                        doc.sudo().write({'folder_id': False})
-                        _logger.info(f'  Cleared folder_id from doc {doc.id}')
-                    except Exception as e:
-                        _logger.error(f'Failed to clear folder_id from doc {doc.id}: {str(e)}')
-            
-            # Log folder deletion
+                _logger.info(
+                    'Moving %d document(s) in folder "%s" (id=%s) to trash',
+                    doc_count, folder.name, folder.id,
+                )
+                self._soft_delete_docs(
+                    all_docs,
+                    folder=folder,
+                    reason=f'Folder "{folder.name}" was deleted'
+                )
+
+            # Audit
             try:
                 self.env['nbs.audit.log'].sudo().create({
-                    'user_id': self.env.user.id,
-                    'action': 'folder_deleted',
-                    'folder_id': folder.id,  # Track which folder was deleted
+                    'user_id':       self.env.user.id,
+                    'action':        'folder_deleted',
+                    'folder_id':     folder.id,
                     'department_id': folder.department_id.id,
-                    'metadata': f'Deleted folder: {folder.name} with {len(all_docs)} documents'
+                    'metadata':      (
+                        f'Deleted folder: {folder.name} — '
+                        f'{doc_count} document(s) moved to trash'
+                    ),
                 })
             except Exception:
                 pass
-        
+
         return super().unlink()
     
     def action_view_documents(self):

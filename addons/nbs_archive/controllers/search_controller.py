@@ -9,6 +9,29 @@ _logger = logging.getLogger(__name__)
 from ._auth import ensure_jwt_user_id
 
 
+def _ocr_snippet(ocr_text: str, query: str, radius: int = 120) -> str:
+    """
+    Return a short excerpt from ``ocr_text`` centred around the first
+    occurrence of ``query`` (case-insensitive).  Falls back to the first
+    ``radius`` characters if the query is not found.
+    """
+    if not ocr_text:
+        return ''
+    low_text  = ocr_text.lower()
+    low_query = (query or '').lower()
+    pos = low_text.find(low_query) if low_query else -1
+    if pos == -1:
+        return ocr_text[:radius].strip() + ('…' if len(ocr_text) > radius else '')
+    start = max(0, pos - radius // 2)
+    end   = min(len(ocr_text), pos + len(query) + radius // 2)
+    snippet = ocr_text[start:end].strip()
+    if start > 0:
+        snippet = '…' + snippet
+    if end < len(ocr_text):
+        snippet = snippet + '…'
+    return snippet
+
+
 class NBSSearchController(http.Controller):
     """Document search controller"""
     
@@ -39,16 +62,17 @@ class NBSSearchController(http.Controller):
                     'error': 'Search query is required'
                 }
             
-            # Build domain for metadata search (documents)
+            # Build domain for metadata + OCR content search
             domain = [
                 ('state', '=', 'active'),
-                '|', '|', '|', '|', '|',
+                '|', '|', '|', '|', '|', '|',
                 ('name', 'ilike', query),
                 ('barcode', 'ilike', query),
                 ('po_number', 'ilike', query),
                 ('bl_number', 'ilike', query),
                 ('container_number', 'ilike', query),
                 ('invoice_number', 'ilike', query),
+                ('ocr_text', 'ilike', query),
             ]
             
             # Apply filters
@@ -156,18 +180,19 @@ class NBSSearchController(http.Controller):
                     'document_count': getattr(f, 'document_count', None),
                 })
 
-            # Documents
+            # Documents — search metadata AND OCR-extracted content
             Document = request.env['nbs.document'].sudo()
             doc_domain = [
                 ('state', '=', 'active'),
                 ('is_deleted', '=', False),
-                '|', '|', '|', '|', '|',
+                '|', '|', '|', '|', '|', '|',
                 ('name', 'ilike', q),
                 ('barcode', 'ilike', q),
                 ('po_number', 'ilike', q),
                 ('bl_number', 'ilike', q),
                 ('container_number', 'ilike', q),
                 ('invoice_number', 'ilike', q),
+                ('ocr_text', 'ilike', q),
             ]
             documents = Document.search(doc_domain, limit=per_page, order='upload_date desc')
             for doc in documents:
@@ -183,6 +208,8 @@ class NBSSearchController(http.Controller):
                     'upload_date': doc.upload_date.isoformat() if doc.upload_date else None,
                     'parent_document_id': doc.parent_document_id.id if doc.parent_document_id else None,
                     'relation_type': 'attachment' if doc.parent_document_id and doc.is_attachment else ('secondary_document' if doc.parent_document_id else None),
+                    'ocr_status': doc.ocr_status,
+                    'ocr_snippet': _ocr_snippet(doc.ocr_text, q),
                 })
 
             # Attachments

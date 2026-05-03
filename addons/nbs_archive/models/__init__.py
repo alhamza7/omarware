@@ -23,4 +23,5 @@ from . import nbs_advanced_version
 from . import nbs_workflow_advanced
 from . import nbs_ocr_service
 from . import nbs_mobile_api
+from . import res_partner
 

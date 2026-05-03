@@ -261,3 +261,82 @@ class BatchOperationsController(http.Controller):
         except Exception as e:
             _logger.error(f'Batch move folder error: {str(e)}', exc_info=True)
             return {'success': False, 'error': str(e)}
+
+    # ── Trash list ───────────────────────────────────────────────────────────
+    @http.route('/api/documents/trash/list', type='jsonrpc', auth='none', methods=['POST'], csrf=False, cors='*')
+    def list_trash(self, department_id=None, document_type_id=None, search=None,
+                   from_date=None, to_date=None, page=1, per_page=20, **kwargs):
+        """
+        List trashed documents with pagination and optional filters.
+        Identical to POST /api/documents/trash.
+        """
+        try:
+            if not ensure_jwt_user_id():
+                return {
+                    'success': False, 'error': 'Unauthorized',
+                    'data': [], 'pagination': {'total': 0, 'page': 1, 'per_page': 20, 'total_pages': 0}
+                }
+
+            domain = [('state', '=', 'trash'), ('is_deleted', '=', True)]
+            if department_id:
+                domain.append(('department_id', '=', department_id))
+            if document_type_id:
+                domain.append(('document_type_id', '=', document_type_id))
+            if search:
+                domain.append(('name', 'ilike', search))
+            if from_date:
+                domain.append(('deleted_at', '>=', from_date))
+            if to_date:
+                domain.append(('deleted_at', '<=', to_date))
+
+            per_page = int(per_page)
+            page     = int(page)
+            Document  = request.env['nbs.document']
+            docs      = Document.search(domain, limit=per_page, offset=(page - 1) * per_page, order='deleted_at desc')
+            total     = Document.search_count(domain)
+
+            result = []
+            for doc in docs:
+                result.append({
+                    'id':                  doc.id,
+                    'name':                doc.name,
+                    'title':               doc.name,
+                    'document_number':     getattr(doc, 'document_number', None) or doc.barcode,
+                    'department_id':       doc.department_id.id,
+                    'department_name':     doc.department_id.name,
+                    'document_type_id':    doc.document_type_id.id   if doc.document_type_id else None,
+                    'document_type_name':  doc.document_type_id.name if doc.document_type_id else None,
+                    'uploader_id':         doc.uploader_id.id   if doc.uploader_id else None,
+                    'uploader_name':       doc.uploader_id.name if doc.uploader_id else None,
+                    'upload_date':         doc.upload_date.isoformat()      if doc.upload_date      else None,
+                    'deleted_at':          doc.deleted_at.isoformat()       if doc.deleted_at       else None,
+                    'deleted_by':          doc.deleted_by.name              if doc.deleted_by       else None,
+                    'deletion_reason':     doc.deletion_reason,
+                    'restore_deadline':    doc.restore_deadline.isoformat() if doc.restore_deadline else None,
+                    'state_before_trash':  doc.state_before_trash,
+                    'status':              doc.state,
+                    'confidentiality_level': doc.confidentiality_level,
+                    'barcode':             doc.barcode,
+                    'file_name':           doc.current_version_id.file_name if doc.current_version_id else None,
+                    'file_size':           doc.current_version_id.file_size if doc.current_version_id else 0,
+                    'is_main_document':    (doc.folder_role == 'main'),
+                    'document_role':       doc.folder_role or 'other',
+                })
+
+            return {
+                'success': True,
+                'data':    result,
+                'count':   len(result),
+                'pagination': {
+                    'total':       total,
+                    'page':        page,
+                    'per_page':    per_page,
+                    'total_pages': (total + per_page - 1) // per_page if per_page else 1,
+                },
+            }
+        except Exception as e:
+            _logger.error('list_trash error: %s', e, exc_info=True)
+            return {
+                'success': False, 'error': str(e),
+                'data': [], 'pagination': {'total': 0, 'page': 1, 'per_page': 20, 'total_pages': 0}
+            }

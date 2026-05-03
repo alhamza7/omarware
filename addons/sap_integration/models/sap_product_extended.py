@@ -681,6 +681,12 @@ class SapProductExtended(models.Model):
             if uom_sync and uom_sync.odoo_uom_id:
                 vals['inventory_uom_id'] = uom_sync.odoo_uom_id.id
         
+        # Fallback: when SalesUnit is blank in SAP, use InventoryUoM as the
+        # sales_uom_id so catalog filters (which search by sales_uom_id) still
+        # find these products.  Only applied when SalesUnit produced no mapping.
+        if not vals.get('sales_uom_id') and vals.get('inventory_uom_id'):
+            vals['sales_uom_id'] = vals['inventory_uom_id']
+        
         # Manufacturer
         if 'ManufacturerCatalogNo' in sap_data:
             vals['manufacturer_catalog_no'] = sap_data['ManufacturerCatalogNo']

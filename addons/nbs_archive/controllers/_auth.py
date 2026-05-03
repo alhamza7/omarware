@@ -6,16 +6,35 @@ _logger = logging.getLogger(__name__)
 
 
 def _verify_jwt_token():
-    """Verify JWT token from Authorization header"""
+    """
+    Verify JWT token from Authorization header OR ?token= query parameter.
+
+    The query-parameter fallback is intentional for GET endpoints (download,
+    preview) where a browser iframe/embed cannot send custom headers.
+    """
     from odoo.http import request
     try:
-        auth_header = request.httprequest.headers.get('Authorization')
-        if not auth_header or not auth_header.startswith('Bearer '):
+        token = None
+
+        # 1) Prefer Authorization header (API / XHR callers)
+        auth_header = request.httprequest.headers.get('Authorization', '')
+        if auth_header.startswith('Bearer '):
+            token = auth_header.split(' ', 1)[1]
+
+        # 2) Fallback: ?token=<jwt> query param (browser preview / iframe)
+        if not token:
+            token = (
+                request.httprequest.args.get('token')
+                or request.httprequest.args.get('access_token')
+            )
+
+        if not token:
             return None
-        token = auth_header.split(' ')[1]
+
         if not hasattr(request, 'env') or not request.env:
             _logger.warning('Request environment not initialized')
             return None
+
         jwt_service = request.env['nbs.jwt.service'].sudo()
         payload = jwt_service.verify_access_token(token)
         if payload:
