@@ -59,6 +59,16 @@ def _serialize_negotiation(n, include_offers=True):
         'name': n.name or '',
         'item_request_id': item_req.id if item_req else None,
         'item_request_name': item_req.name if item_req else '',
+        'item_request': (
+            None
+            if not item_req
+            else {
+                'id': item_req.id,
+                'name': item_req.name or '',
+                'item_name': item_req.item_name or '',
+                'state': item_req.state or 'draft',
+            }
+        ),
         'vendor_id': vendor.id if vendor else None,
         'vendor_name': vendor.name if vendor else '',
         'agent_id': agent.id if agent else None,
@@ -91,6 +101,22 @@ def _serialize_negotiation(n, include_offers=True):
     if include_offers:
         data['multiple_offers_history'] = [_serialize_negotiation_offer(o) for o in n.offer_ids]
         data['offer_ids'] = data['multiple_offers_history']
+    if 'supply_po_ids' in n._fields:
+        pos = n.supply_po_ids.filtered(lambda p: not getattr(p, 'is_deleted', False))
+        data['order_ids'] = pos.ids
+        data['linked_orders'] = []
+        for po in pos:
+            data['linked_orders'].append({
+                'id': po.id,
+                'name': po.name or '',
+                'status': po.status or '',
+                'total_amount': float(po.total_amount or 0.0),
+                'currency_id': po.currency_id.id if po.currency_id else None,
+                'currency_name': po.currency_id.name if po.currency_id else '',
+            })
+    else:
+        data['order_ids'] = []
+        data['linked_orders'] = []
     return data
 
 
@@ -98,6 +124,20 @@ def _serialize_item_request(r):
     requester = r.requested_by_id
     conf = r.requester_confirm_user_id
     imgs = [_serialize_attachment(a) for a in r.attachment_ids]
+    negs = r.negotiation_ids.filtered(lambda n: not getattr(n, 'is_deleted', False))
+    negotiations_payload = []
+    for n in negs:
+        vn = n.vendor_id
+        negotiations_payload.append({
+            'id': n.id,
+            'name': n.name or '',
+            'state': n.state or 'ongoing',
+            'vendor_id': vn.id if vn else None,
+            'vendor_name': vn.name if vn else '',
+            'final_agreed_price': float(n.final_agreed_price or 0.0),
+            'currency_id': n.currency_id.id if n.currency_id else None,
+            'currency_name': n.currency_id.name if n.currency_id else '',
+        })
     return {
         'id': r.id,
         'request_id': r.name or '',
@@ -123,6 +163,8 @@ def _serialize_item_request(r):
         'requester_confirm_user_id': conf.id if conf else None,
         'requester_confirm_date': r.requester_confirm_date.isoformat() if r.requester_confirm_date else None,
         'negotiation_count': int(r.negotiation_count or 0),
+        'negotiation_ids': negs.ids,
+        'negotiations': negotiations_payload,
         'created_by_id': r.create_uid.id if r.create_uid else None,
         'created_by_name': r.create_uid.name if r.create_uid else '',
         'created_at': r.create_date.isoformat() if r.create_date else '',
@@ -135,6 +177,22 @@ def _serialize_payment(p):
     cur = p.currency_id
     payee = p.payee_partner_id
     rcpts = [_serialize_attachment(a) for a in p.receipt_attachment_ids]
+    item_request_id = None
+    negotiation_id = None
+    container_id = None
+    item_request_name = ''
+    negotiation_name = ''
+    container_name = ''
+    if po:
+        if 'item_request_id' in po._fields and po.item_request_id:
+            item_request_id = po.item_request_id.id
+            item_request_name = po.item_request_id.name or ''
+        if 'negotiation_id' in po._fields and po.negotiation_id:
+            negotiation_id = po.negotiation_id.id
+            negotiation_name = po.negotiation_id.name or ''
+        if 'container_id' in po._fields and po.container_id:
+            container_id = po.container_id.id
+            container_name = po.container_id.name or ''
     return {
         'id': p.id,
         'payment_id': p.name or '',
@@ -142,6 +200,12 @@ def _serialize_payment(p):
         'po_id': po.id if po else None,
         'linked_order_id': po.id if po else None,
         'order_name': po.name if po else '',
+        'item_request_id': item_request_id,
+        'item_request_name': item_request_name,
+        'negotiation_id': negotiation_id,
+        'negotiation_name': negotiation_name,
+        'container_id': container_id,
+        'container_name': container_name,
         'paid_to': p.paid_to or '',
         'payee_partner_id': payee.id if payee else None,
         'payee_name': payee.name if payee else '',
@@ -168,12 +232,23 @@ def _serialize_shipment_container(c):
     linked_pos = []
     if 'purchase_order_ids' in c._fields:
         for po in c.purchase_order_ids:
-            linked_pos.append({
+            row = {
                 'id': po.id,
                 'name': po.name or '',
                 'total_amount': float(po.total_amount or 0.0),
                 'status': po.status or '',
-            })
+                'currency_id': po.currency_id.id if po.currency_id else None,
+                'currency_name': po.currency_id.name if po.currency_id else '',
+            }
+            if 'item_request_id' in po._fields:
+                ir = po.item_request_id
+                row['item_request_id'] = ir.id if ir else None
+                row['item_request_name'] = ir.name if ir else ''
+            if 'negotiation_id' in po._fields:
+                ng = po.negotiation_id
+                row['negotiation_id'] = ng.id if ng else None
+                row['negotiation_name'] = ng.name if ng else ''
+            linked_pos.append(row)
     return {
         'id': c.id,
         'shipment_id': c.shipment_ref or c.name or '',

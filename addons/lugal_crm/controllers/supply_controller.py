@@ -253,9 +253,32 @@ def _serialize_supply_po(po):
     if 'item_request_id' in F:
         ir = po.item_request_id
         out['item_request_id'] = ir.id if ir else None
+        out['item_request_name'] = ir.name if ir else ''
+        out['item_request_item_name'] = ir.item_name if ir else ''
+        out['item_request'] = (
+            None
+            if not ir
+            else {
+                'id': ir.id,
+                'name': ir.name or '',
+                'item_name': ir.item_name or '',
+                'state': ir.state or 'draft',
+            }
+        )
     if 'negotiation_id' in F:
         ng = po.negotiation_id
         out['negotiation_id'] = ng.id if ng else None
+        out['negotiation_name'] = ng.name if ng else ''
+        out['negotiation'] = (
+            None
+            if not ng
+            else {
+                'id': ng.id,
+                'name': ng.name or '',
+                'state': ng.state or 'ongoing',
+                'final_agreed_price': float(ng.final_agreed_price or 0.0),
+            }
+        )
     if 'agent_id' in F:
         ag = po.agent_id
         out['agent_id'] = ag.id if ag else None
@@ -277,6 +300,22 @@ def _serialize_supply_po(po):
         out['order_e_sign_date'] = (
             po.order_confirmed_date.isoformat() if po.order_confirmed_date else None
         )
+    if 'payment_ids' in F:
+        out['payment_state'] = getattr(po, 'payment_state', None) or 'pending'
+        out['amount_paid_total'] = float(getattr(po, 'amount_paid_total', 0.0) or 0.0)
+        out['balance_remaining'] = float(getattr(po, 'balance_remaining', 0.0) or 0.0)
+        out['linked_payments'] = []
+        for p in po.payment_ids:
+            pc = p.currency_id
+            out['linked_payments'].append({
+                'id': p.id,
+                'name': p.name or '',
+                'amount': float(p.amount or 0.0),
+                'payment_type': p.payment_type or '',
+                'payment_date': p.payment_date.isoformat() if p.payment_date else None,
+                'currency_id': pc.id if pc else None,
+                'currency_name': pc.name if pc else '',
+            })
     return out
 
 
