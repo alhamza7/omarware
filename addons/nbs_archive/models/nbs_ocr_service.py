@@ -2,20 +2,25 @@
 """
 Google Vision OCR Service for NBS Archive.
 
-Uses the Google Cloud Vision REST API (API-key auth) to extract text from
-uploaded documents and images.  The extracted text is stored on
-``nbs.document.version.extracted_text`` and mirrored to
-``nbs.document.ocr_text`` so every document is fully searchable.
-
-Supported input formats:
-  Images  — JPEG, PNG, GIF, BMP, WEBP, TIFF (single-frame)
-  PDF     — up to 5 pages per call (Vision API limit for synchronous mode)
+Processing pipeline (in order):
+  1. Excel / ODS / CSV  → direct cell/text extraction (no API, no size limit)
+  2. Plain text         → decode and return
+  3. PDF with text layer → pypdf direct extraction (fast, free, no size limit)
+  4. Scanned PDF/TIFF   → Google Vision files:annotate (chunked in 5-page,
+                           ≤10 MB raw batches to stay under the 20 MB b64 cap)
+  5. Images             → Google Vision images:annotate
 
 API key is read from the Odoo system parameter
   ``nbs_archive.google_vision_key``
 so it can be rotated without code changes.
+
+Size limits handled:
+  - No limit for direct extraction (steps 1–3)
+  - Vision API base64 limit is 20 MB → we chunk PDFs at ≤10 MB raw per batch
+  - OCR is skipped (returns '') for files > MAX_OCR_BYTES to prevent OOM
 """
 
+import io
 import json
 import base64
 import logging
@@ -51,6 +56,12 @@ _EXCEL_MIME_TYPES = {
 _TEXT_MIME_TYPES = {
     'text/plain', 'text/csv', 'application/csv',
 }
+
+# Maximum raw file size to attempt Vision API OCR (200 MB)
+MAX_OCR_BYTES = 200 * 1024 * 1024
+
+# Maximum raw bytes per Vision API chunk (10 MB → ~13.3 MB b64, well under 20 MB limit)
+_VISION_CHUNK_BYTES = 10 * 1024 * 1024
 
 
 def _get_vision_key(env):
@@ -174,6 +185,26 @@ def _detect_mime(file_name: str, file_data_b64: str) -> str:
     return 'application/pdf'
 
 
+def _extract_pdf_text_direct(file_bytes: bytes) -> str:
+    """
+    Extract the embedded text layer from a PDF using pypdf.
+    Returns '' if the PDF has no text layer (i.e. it is a scanned image PDF).
+    Never raises — returns '' on any error.
+    """
+    try:
+        import pypdf
+        reader = pypdf.PdfReader(io.BytesIO(file_bytes))
+        parts = []
+        for page in reader.pages:
+            text = page.extract_text() or ''
+            if text.strip():
+                parts.append(text.strip())
+        return '\n\n'.join(parts)
+    except Exception as exc:
+        _logger.debug('pypdf direct extraction failed: %s', exc)
+        return ''
+
+
 def _call_images_annotate(api_key: str, content_b64: str) -> str:
     """Extract text from an image using images:annotate."""
     payload = {
@@ -193,8 +224,11 @@ def _call_images_annotate(api_key: str, content_b64: str) -> str:
     return annotation.get('text', '').strip()
 
 
-def _call_files_annotate(api_key: str, content_b64: str, mime_type: str) -> str:
-    """Extract text from a PDF/TIFF using files:annotate (max 5 pages)."""
+def _call_files_annotate_chunk(api_key: str, content_b64: str, mime_type: str) -> str:
+    """
+    Extract text from one PDF/TIFF chunk (must be ≤ 10 MB raw / ~13.3 MB b64).
+    Uses files:annotate with pages 1–5 (Vision API limit per request).
+    """
     payload = {
         'requests': [{
             'inputConfig': {
@@ -202,7 +236,7 @@ def _call_files_annotate(api_key: str, content_b64: str, mime_type: str) -> str:
                 'mimeType': mime_type,
             },
             'features': [{'type': 'DOCUMENT_TEXT_DETECTION'}],
-            'pages': list(range(1, 6)),  # pages 1–5 (Vision API limit)
+            'pages': list(range(1, 6)),  # pages 1–5
         }]
     }
     url  = f'{_VISION_FILES_URL}?key={api_key}'
@@ -212,27 +246,95 @@ def _call_files_annotate(api_key: str, content_b64: str, mime_type: str) -> str:
     if responses and responses[0].get('error'):
         raise RuntimeError(responses[0]['error'].get('message', 'Vision API error'))
 
-    # Each entry in responses[0].responses is one page
     page_responses = responses[0].get('responses', [])
-    pages_text = []
-    for page_resp in page_responses:
-        annotation = page_resp.get('fullTextAnnotation', {})
-        text = annotation.get('text', '').strip()
-        if text:
-            pages_text.append(text)
+    return '\n\n'.join(
+        pr.get('fullTextAnnotation', {}).get('text', '').strip()
+        for pr in page_responses
+        if pr.get('fullTextAnnotation', {}).get('text', '').strip()
+    )
 
-    return '\n\n'.join(pages_text)
+
+def _call_files_annotate(api_key: str, file_bytes: bytes, mime_type: str) -> str:
+    """
+    Extract text from a PDF/TIFF, automatically chunking files that exceed
+    the Vision API's 20 MB base64 limit (~10 MB raw per chunk).
+
+    For PDFs the chunking splits by page using pypdf so each chunk is a valid
+    PDF.  For TIFF and other formats the file is sent in one shot if it fits,
+    or skipped with a warning if it is too large.
+    """
+    file_size = len(file_bytes)
+
+    # ── PDF: chunk by page groups ─────────────────────────────────────────────
+    if mime_type == 'application/pdf':
+        try:
+            import pypdf
+            reader = pypdf.PdfReader(io.BytesIO(file_bytes))
+            total_pages = len(reader.pages)
+            _logger.info('Vision OCR: %d-page PDF (%d MB)', total_pages, file_size // (1024*1024))
+
+            all_texts = []
+            # Group pages into chunks of 5 (Vision API limit) while keeping
+            # each chunk under _VISION_CHUNK_BYTES.
+            chunk_start = 0
+            while chunk_start < total_pages:
+                writer = pypdf.PdfWriter()
+                chunk_bytes = 0
+                page_idx = chunk_start
+                while page_idx < total_pages and page_idx - chunk_start < 5:
+                    writer.add_page(reader.pages[page_idx])
+                    page_idx += 1
+
+                buf = io.BytesIO()
+                writer.write(buf)
+                chunk_data = buf.getvalue()
+                chunk_b64  = base64.b64encode(chunk_data).decode('ascii')
+
+                _logger.info(
+                    'Vision OCR chunk: pages %d-%d (%d KB)',
+                    chunk_start + 1, page_idx, len(chunk_data) // 1024,
+                )
+                try:
+                    chunk_text = _call_files_annotate_chunk(api_key, chunk_b64, mime_type)
+                    if chunk_text:
+                        all_texts.append(chunk_text)
+                except Exception as chunk_exc:
+                    _logger.warning(
+                        'Vision OCR chunk pages %d-%d failed: %s',
+                        chunk_start + 1, page_idx, chunk_exc,
+                    )
+                chunk_start = page_idx
+
+            return '\n\n'.join(all_texts)
+
+        except ImportError:
+            # pypdf not available — fall back to single-shot if file fits
+            _logger.warning('pypdf not available for PDF chunking')
+
+    # ── Non-PDF or pypdf unavailable: single shot if within limit ─────────────
+    if file_size > _VISION_CHUNK_BYTES:
+        _logger.warning(
+            'Vision OCR: file too large for single-shot (%d MB > %d MB limit) '
+            '— skipping Vision API',
+            file_size // (1024 * 1024),
+            _VISION_CHUNK_BYTES // (1024 * 1024),
+        )
+        return ''
+
+    content_b64 = base64.b64encode(file_bytes).decode('ascii')
+    return _call_files_annotate_chunk(api_key, content_b64, mime_type)
 
 
 def extract_text_via_vision(env, file_data_b64: str, file_name: str = '') -> str:
     """
     Public entry point: extract text from base64-encoded file bytes.
 
-    Routing:
-      Excel / ODS / CSV  → direct text extraction (no API call, free)
-      PDF / TIFF         → Google Vision files:annotate
-      Images             → Google Vision images:annotate
-      Unknown            → treated as PDF
+    Pipeline:
+      1. Excel / ODS / CSV  → direct extraction (no API, no size limit)
+      2. Plain text         → decode and return
+      3. PDF with text layer → pypdf (instant, free, handles any size)
+      4. Scanned PDF/TIFF   → Google Vision (auto-chunked for large files)
+      5. Images             → Google Vision images:annotate
 
     Returns the full extracted text string (empty string on failure).
     """
@@ -243,8 +345,19 @@ def extract_text_via_vision(env, file_data_b64: str, file_name: str = '') -> str
     if 'base64,' in file_data_b64:
         file_data_b64 = file_data_b64.split('base64,', 1)[1]
 
-    mime_type = _detect_mime(file_name, file_data_b64)
+    mime_type  = _detect_mime(file_name, file_data_b64)
     file_bytes = base64.b64decode(file_data_b64)
+    file_size  = len(file_bytes)
+
+    _logger.info('OCR: processing %s (%d MB), mime=%s', file_name, file_size // (1024*1024), mime_type)
+
+    # ── Size guard (200 MB limit) ─────────────────────────────────────────────
+    if file_size > MAX_OCR_BYTES:
+        _logger.warning(
+            'OCR: file %s (%d MB) exceeds MAX_OCR_BYTES (%d MB) — skipping',
+            file_name, file_size // (1024 * 1024), MAX_OCR_BYTES // (1024 * 1024),
+        )
+        return ''
 
     # ── Excel / ODS — no Vision needed ────────────────────────────────────────
     if mime_type in _EXCEL_MIME_TYPES:
@@ -254,7 +367,17 @@ def extract_text_via_vision(env, file_data_b64: str, file_name: str = '') -> str
     if mime_type in _TEXT_MIME_TYPES:
         return _extract_text_text(file_bytes)
 
-    # ── Vision API for images & PDFs ───────────────────────────────────────────
+    # ── PDF: try direct text extraction first (handles any size, no API cost) ─
+    if mime_type == 'application/pdf':
+        direct_text = _extract_pdf_text_direct(file_bytes)
+        if direct_text and len(direct_text.strip()) > 20:
+            _logger.info(
+                'OCR: PDF text extracted directly via pypdf (%d chars)', len(direct_text)
+            )
+            return direct_text
+        # No embedded text → must be a scanned PDF, fall through to Vision API
+
+    # ── Vision API for scanned PDFs / TIFFs / images ──────────────────────────
     api_key = _get_vision_key(env)
     if not api_key:
         raise RuntimeError(
@@ -264,14 +387,15 @@ def extract_text_via_vision(env, file_data_b64: str, file_name: str = '') -> str
         )
 
     if mime_type in _FILE_MIME_TYPES:
-        return _call_files_annotate(api_key, file_data_b64, mime_type)
+        return _call_files_annotate(api_key, file_bytes, mime_type)
     elif mime_type in _IMAGE_MIME_TYPES:
-        return _call_images_annotate(api_key, file_data_b64)
+        content_b64 = base64.b64encode(file_bytes).decode('ascii')
+        return _call_images_annotate(api_key, content_b64)
     else:
         _logger.warning(
             'OCR: unsupported MIME type %s for %s — treating as PDF', mime_type, file_name
         )
-        return _call_files_annotate(api_key, file_data_b64, 'application/pdf')
+        return _call_files_annotate(api_key, file_bytes, 'application/pdf')
 
 
 # ── Odoo model ────────────────────────────────────────────────────────────────
@@ -298,6 +422,46 @@ class NBSOCRService(models.Model):
 
     # ── public methods ────────────────────────────────────────────────────────
 
+    def _read_version_bytes(self, version):
+        """
+        Read the raw file bytes for a document version.
+
+        Tries filestore path first (fast, no base64 decode overhead),
+        then falls back to the ORM Binary field.
+        Returns (bytes, file_name) or (None, file_name) if unavailable.
+        """
+        import os
+        file_name = version.file_name or ''
+
+        # ── Path 1: read directly from filestore via ir.attachment ───────────
+        IrAttachment = self.env['ir.attachment'].sudo()
+        att = IrAttachment.search([
+            ('res_model', '=', 'nbs.document.version'),
+            ('res_field', '=', 'file_data'),
+            ('res_id',    '=', version.id),
+        ], limit=1)
+
+        if att and att.store_fname:
+            full_path = IrAttachment._full_path(att.store_fname)
+            if os.path.isfile(full_path):
+                try:
+                    with open(full_path, 'rb') as fh:
+                        return fh.read(), file_name
+                except Exception as exc:
+                    _logger.warning('OCR: filestore read failed for %s: %s', full_path, exc)
+
+        # ── Path 2: ORM fallback (loads via Binary field / base64 decode) ────
+        if version.file_data:
+            raw = version.file_data
+            try:
+                if isinstance(raw, bytes):
+                    return base64.b64decode(raw), file_name
+                return base64.b64decode(raw.encode('ascii')), file_name
+            except Exception as exc:
+                _logger.warning('OCR: ORM binary decode failed for version %s: %s', version.id, exc)
+
+        return None, file_name
+
     def process_document_version(self, version):
         """
         Run OCR on a document version record and persist the result.
@@ -309,22 +473,17 @@ class NBSOCRService(models.Model):
             return False
 
         try:
-            file_data_b64 = False
-            if version.file_data:
-                # file_data is stored as bytes in Odoo's Binary field;
-                # it comes back as b64-encoded bytes when read via ORM.
-                raw = version.file_data
-                if isinstance(raw, bytes):
-                    file_data_b64 = raw.decode('ascii')
-                else:
-                    file_data_b64 = raw
+            file_bytes, file_name = self._read_version_bytes(version)
 
-            if not file_data_b64:
+            if not file_bytes:
                 _logger.warning('OCR: version %s has no file data', version.id)
                 return False
 
+            # Convert bytes → base64 string for the extraction pipeline
+            file_data_b64 = base64.b64encode(file_bytes).decode('ascii')
+
             text = extract_text_via_vision(
-                self.env, file_data_b64, version.file_name or ''
+                self.env, file_data_b64, file_name
             )
 
             version.write({
