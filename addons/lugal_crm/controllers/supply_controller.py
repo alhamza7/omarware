@@ -221,9 +221,10 @@ def _serialize_supply_po(po):
         vendor_phone = vendor.phone
     elif partner and partner.phone:
         vendor_phone = partner.phone
-    return {
+    out = {
         'id': po.id,
         'name': po.name or '',
+        'order_id': po.name or '',
         'vendor_customer_id': partner.id if partner else None,
         'vendor_customer_name': (partner.name if partner else (vendor.name if vendor else '')),
         'vendor_customer_phone': vendor_phone,
@@ -237,6 +238,7 @@ def _serialize_supply_po(po):
         'branch_id': branch.id if branch else None,
         'branch_name': branch.name if branch else '',
         'status': status_key,
+        'order_status': status_key,
         'status_label': _PO_STATUS_LABELS.get(status_key, status_key.title()),
         'is_suggested': bool(po.is_suggested),
         'line_count': len(po.line_ids),
@@ -247,6 +249,35 @@ def _serialize_supply_po(po):
         'updated_at': po.write_date.isoformat() if po.write_date else '',
         'lines': [_serialize_supply_po_line(line) for line in po.line_ids],
     }
+    F = po._fields
+    if 'item_request_id' in F:
+        ir = po.item_request_id
+        out['item_request_id'] = ir.id if ir else None
+    if 'negotiation_id' in F:
+        ng = po.negotiation_id
+        out['negotiation_id'] = ng.id if ng else None
+    if 'agent_id' in F:
+        ag = po.agent_id
+        out['agent_id'] = ag.id if ag else None
+        out['agent_name'] = ag.name if ag else ''
+    if 'order_date' in F:
+        out['order_date'] = po.order_date.isoformat() if po.order_date else None
+    if 'production_completion_date' in F:
+        out['production_completion_date'] = (
+            po.production_completion_date.isoformat() if po.production_completion_date else None
+        )
+    if 'payment_term' in F:
+        out['payment_term'] = po.payment_term or ''
+    if 'shipping_method' in F:
+        out['shipping_method'] = po.shipping_method or ''
+    if 'notes' in F:
+        out['notes'] = po.notes or ''
+    if 'order_confirmed_user_id' in F and po.order_confirmed_user_id:
+        out['order_e_sign_user_id'] = po.order_confirmed_user_id.id
+        out['order_e_sign_date'] = (
+            po.order_confirmed_date.isoformat() if po.order_confirmed_date else None
+        )
+    return out
 
 
 class CrmSupplyController(http.Controller):

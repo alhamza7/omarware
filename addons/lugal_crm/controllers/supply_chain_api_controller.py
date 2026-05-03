@@ -492,6 +492,22 @@ class CrmSupplyChainApiController(http.Controller):
             if kwargs.get('branch_id'):
                 vals['branch_id'] = int(kwargs['branch_id'])
             Po = request.env['lugal.crm.supply.po'].sudo()
+            if kwargs.get('item_request_id'):
+                vals['item_request_id'] = int(kwargs['item_request_id'])
+            if kwargs.get('negotiation_id'):
+                vals['negotiation_id'] = int(kwargs['negotiation_id'])
+            if kwargs.get('agent_id'):
+                vals['agent_id'] = int(kwargs['agent_id'])
+            if kwargs.get('order_date'):
+                vals['order_date'] = _parse_date(kwargs['order_date'])
+            if kwargs.get('production_completion_date'):
+                vals['production_completion_date'] = _parse_date(kwargs['production_completion_date'])
+            if kwargs.get('payment_term'):
+                vals['payment_term'] = kwargs['payment_term']
+            if kwargs.get('shipping_method'):
+                vals['shipping_method'] = kwargs['shipping_method']
+            if kwargs.get('notes'):
+                vals['notes'] = kwargs['notes']
             po = Po.create(vals)
             Line = request.env['lugal.crm.supply.po.line'].sudo()
             for line in kwargs.get('lines') or []:
@@ -548,11 +564,39 @@ class CrmSupplyChainApiController(http.Controller):
                 vals['status'] = kwargs['status']
             if 'is_suggested' in kwargs:
                 vals['is_suggested'] = bool(kwargs['is_suggested'])
+            wf_keys = (
+                'item_request_id', 'negotiation_id', 'agent_id',
+                'payment_term', 'shipping_method', 'notes',
+            )
+            for k in wf_keys:
+                if k in kwargs:
+                    vals[k] = kwargs[k] if kwargs[k] not in (False, None, '') else False
+            if 'order_date' in kwargs:
+                vals['order_date'] = _parse_date(kwargs['order_date'])
+            if 'production_completion_date' in kwargs:
+                vals['production_completion_date'] = _parse_date(kwargs['production_completion_date'])
             if vals:
                 po.write(vals)
             return {'success': True, 'data': _serialize_supply_po(po)}
         except Exception as e:
             return crm_error(e, 'supply_po_update')
+
+    @http.route('/api/crm/supply/po/<int:po_id>/order_e_sign', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_po_order_e_sign(self, po_id, **kwargs):
+        """Record order-level confirmation signature on PO (CRM extend model)."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
+            if not po or po.is_deleted:
+                return {'success': False, 'error': 'PO not found', 'data': None}
+            if hasattr(po, 'action_confirm_order_e_sign'):
+                po.action_confirm_order_e_sign()
+            else:
+                return {'success': False, 'error': 'Order e-sign not available', 'data': None}
+            return {'success': True, 'data': _serialize_supply_po(po)}
+        except Exception as e:
+            return crm_error(e, 'supply_po_order_e_sign')
 
     @http.route('/api/crm/supply/po/<int:po_id>/delete', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def supply_po_delete(self, po_id, **kwargs):
@@ -728,6 +772,28 @@ class CrmSupplyChainApiController(http.Controller):
             return {'success': True, 'data': {'po_id': po.id, 'attachments': attachments}}
         except Exception as e:
             return crm_error(e, 'supply_po_attachments_list')
+
+    @http.route(
+        '/api/crm/supply/po/<int:po_id>/attachments/link',
+        type='jsonrpc', auth='none', csrf=False, methods=['POST'],
+    )
+    def supply_po_attachments_link(self, po_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
+            if not po or po.is_deleted:
+                return {'success': False, 'error': 'PO not found', 'data': None}
+            if 'order_attachment_ids' not in po._fields:
+                return {'success': False, 'error': 'Order attachments not available', 'data': None}
+            ids = kwargs.get('attachment_ids') or kwargs.get('ids') or []
+            if not isinstance(ids, (list, tuple)):
+                return {'success': False, 'error': 'attachment_ids must be a list', 'data': None}
+            cmd = [(6, 0, [int(x) for x in ids])] if ids else [(5,)]
+            po.write({'order_attachment_ids': cmd})
+            return {'success': True, 'data': _serialize_supply_po(po)}
+        except Exception as e:
+            return crm_error(e, 'supply_po_attachments_link')
 
     # --- Stubs: mail-thread comments not wired in this iteration ---
     @http.route(

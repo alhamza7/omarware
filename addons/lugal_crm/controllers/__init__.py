@@ -14,6 +14,7 @@ from . import price_list_controller
 from . import qa_controller
 from . import supply_controller
 from . import supply_chain_api_controller
+from . import supply_extra_api_controller
 from . import supply_chat_controller
 from . import supply_stories_controller
 from . import task_controller
