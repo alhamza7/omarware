@@ -326,3 +326,244 @@ class NBSSearchController(http.Controller):
                 'success': False,
                 'error': str(e)
             }
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # POST /api/documents/report
+    # ─────────────────────────────────────────────────────────────────────────
+    @http.route(
+        '/api/documents/report',
+        type='jsonrpc', auth='none', methods=['POST'], csrf=False, cors='*',
+    )
+    def documents_report(
+        self,
+        from_date=None,
+        to_date=None,
+        company_id=None,
+        company_name=None,
+        department_id=None,
+        department_name=None,
+        document_type_id=None,
+        document_type=None,
+        confidentiality_level=None,
+        uploader_id=None,
+        uploader_name=None,
+        folder_id=None,
+        folder_name=None,
+        state=None,
+        page=1,
+        per_page=50,
+        **kwargs,
+    ):
+        """
+        Return a paginated list of documents uploaded within a date range,
+        with optional filters on company, department, document type,
+        confidentiality level, uploader, and folder.
+
+        ── Request body (all fields optional) ──────────────────────────────
+        {
+          "from_date":            "2026-01-01",          // default: earliest upload ever
+          "to_date":              "2026-12-31",          // default: today
+          "company_id":           7436,
+          "company_name":         "ALCAN",               // partial, case-insensitive
+          "department_id":        4,
+          "department_name":      "Supply Chain",        // partial, case-insensitive
+          "document_type_id":     5,
+          "document_type":        "Invoice",             // partial, case-insensitive
+          "confidentiality_level":"internal",            // public|internal|confidential|strict
+          "uploader_id":          2,
+          "uploader_name":        "admin",               // partial, case-insensitive
+          "folder_id":            45,
+          "folder_name":          "ALCAN-386",           // partial, case-insensitive
+          "state":                "active",              // active|archived|all  (default: active)
+          "page":                 1,
+          "per_page":             50
+        }
+
+        ── Response ────────────────────────────────────────────────────────
+        {
+          "success": true,
+          "summary": {
+            "total":        407,
+            "from_date":    "2026-05-03T08:11:31",
+            "to_date":      "2026-05-04T10:33:00",
+            "filters": { "company": "ALCAN", ... }
+          },
+          "data": [
+            {
+              "id":                   123,
+              "name":                 "Invoice April 2026",
+              "barcode":              "NBS000123",
+              "upload_date":          "2026-05-03T09:00:00",
+              "uploader_id":          2,
+              "uploader_name":        "admin",
+              "department_id":        4,
+              "department_name":      "Supply Chain",
+              "document_type_id":     5,
+              "document_type_name":   "Invoice",
+              "company_id":           7436,
+              "company_name":         "ALCAN",
+              "folder_id":            45,
+              "folder_name":          "ALCAN-386",
+              "confidentiality_level":"internal",
+              "state":                "active",
+              "version_count":        2,
+              "ocr_status":           "completed"
+            }
+          ],
+          "pagination": {
+            "page":        1,
+            "per_page":    50,
+            "total":       407,
+            "total_pages": 9
+          }
+        }
+        """
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized'}
+
+            env = request.env
+            Doc = env['nbs.document'].sudo()
+
+            # ── Resolve default date boundaries ──────────────────────────────
+            from odoo.fields import Datetime as OdooDatetime
+            from datetime import datetime, timezone
+
+            # Default from_date: earliest upload_date ever recorded
+            if not from_date:
+                env.cr.execute(
+                    "SELECT MIN(upload_date) FROM nbs_document WHERE upload_date IS NOT NULL"
+                )
+                row = env.cr.fetchone()
+                earliest = row[0] if row and row[0] else None
+                effective_from = earliest.isoformat() if earliest else '2000-01-01T00:00:00'
+            else:
+                effective_from = from_date
+
+            # Default to_date: now (end of day)
+            if not to_date:
+                effective_to = datetime.now(timezone.utc).strftime('%Y-%m-%dT23:59:59')
+            else:
+                # If date only (no time), set to end-of-day
+                effective_to = to_date if 'T' in str(to_date) else f'{to_date}T23:59:59'
+
+            if 'T' not in str(effective_from):
+                effective_from = f'{effective_from}T00:00:00'
+
+            # ── Build Odoo domain ─────────────────────────────────────────────
+            domain = [
+                ('upload_date', '>=', effective_from),
+                ('upload_date', '<=', effective_to),
+            ]
+
+            # State filter (default: active only, 'all' = active + archived)
+            if state == 'all':
+                domain.append(('is_deleted', '=', False))
+            elif state == 'archived':
+                domain.append(('state', '=', 'archived'))
+            else:
+                domain.append(('state', '=', 'active'))
+
+            # Filters: prefer ID, fall back to name ilike
+            filters_applied = {}
+
+            if company_id:
+                domain.append(('company_id', '=', int(company_id)))
+                filters_applied['company_id'] = int(company_id)
+            elif company_name:
+                domain.append(('company_id.name', 'ilike', company_name))
+                filters_applied['company_name'] = company_name
+
+            if department_id:
+                domain.append(('department_id', '=', int(department_id)))
+                filters_applied['department_id'] = int(department_id)
+            elif department_name:
+                domain.append(('department_id.name', 'ilike', department_name))
+                filters_applied['department_name'] = department_name
+
+            if document_type_id:
+                domain.append(('document_type_id', '=', int(document_type_id)))
+                filters_applied['document_type_id'] = int(document_type_id)
+            elif document_type:
+                domain.append(('document_type_id.name', 'ilike', document_type))
+                filters_applied['document_type'] = document_type
+
+            if confidentiality_level:
+                domain.append(('confidentiality_level', '=', confidentiality_level))
+                filters_applied['confidentiality_level'] = confidentiality_level
+
+            if uploader_id:
+                domain.append(('uploader_id', '=', int(uploader_id)))
+                filters_applied['uploader_id'] = int(uploader_id)
+            elif uploader_name:
+                domain.append(('uploader_id.name', 'ilike', uploader_name))
+                filters_applied['uploader_name'] = uploader_name
+
+            if folder_id:
+                domain.append(('folder_id', '=', int(folder_id)))
+                filters_applied['folder_id'] = int(folder_id)
+            elif folder_name:
+                domain.append(('folder_id.name', 'ilike', folder_name))
+                filters_applied['folder_name'] = folder_name
+
+            # ── Pagination ────────────────────────────────────────────────────
+            try:
+                page     = max(1, int(page))
+                per_page = min(500, max(1, int(per_page)))
+            except (TypeError, ValueError):
+                page, per_page = 1, 50
+
+            total       = Doc.search_count(domain)
+            total_pages = max(1, (total + per_page - 1) // per_page)
+            offset      = (page - 1) * per_page
+
+            docs = Doc.search(domain, limit=per_page, offset=offset, order='upload_date desc')
+
+            # ── Build response rows ───────────────────────────────────────────
+            data = []
+            for doc in docs:
+                data.append({
+                    'id':                    doc.id,
+                    'name':                  doc.name,
+                    'barcode':               doc.barcode or None,
+                    'upload_date':           doc.upload_date.isoformat() if doc.upload_date else None,
+                    'uploader_id':           doc.uploader_id.id if doc.uploader_id else None,
+                    'uploader_name':         doc.uploader_id.name if doc.uploader_id else None,
+                    'department_id':         doc.department_id.id if doc.department_id else None,
+                    'department_name':       doc.department_id.name if doc.department_id else None,
+                    'document_type_id':      doc.document_type_id.id if doc.document_type_id else None,
+                    'document_type_name':    doc.document_type_id.name if doc.document_type_id else None,
+                    'company_id':            doc.company_id.id if doc.company_id else None,
+                    'company_name':          doc.company_id.name if doc.company_id else None,
+                    'folder_id':             doc.folder_id.id if doc.folder_id else None,
+                    'folder_name':           doc.folder_id.name if doc.folder_id else None,
+                    'confidentiality_level': doc.confidentiality_level,
+                    'state':                 doc.state,
+                    'version_count':         doc.version_count or 0,
+                    'ocr_status':            doc.ocr_status or 'pending',
+                    'po_number':             doc.po_number or None,
+                    'bl_number':             doc.bl_number or None,
+                    'invoice_number':        doc.invoice_number or None,
+                    'container_number':      doc.container_number or None,
+                })
+
+            return {
+                'success': True,
+                'summary': {
+                    'total':       total,
+                    'from_date':   effective_from,
+                    'to_date':     effective_to,
+                    'filters':     filters_applied,
+                },
+                'data': data,
+                'pagination': {
+                    'page':        page,
+                    'per_page':    per_page,
+                    'total':       total,
+                    'total_pages': total_pages,
+                },
+            }
+
+        except Exception as exc:
+            _logger.error('documents_report error: %s', exc, exc_info=True)
+            return {'success': False, 'error': str(exc)}
