@@ -10,7 +10,7 @@ class LugalSupplyContainer(models.Model):
     """Supply container — B/L, clearance, tracking, status (Searates). موردين وحاويات."""
     _name = 'lugal.supply.container'
     _description = 'Lugal Supply Container'
-    _inherit = ['mail.thread', 'mail.activity.mixin']
+    _inherit = ['mail.thread', 'mail.activity.mixin', 'lugal.supply.attachment.sync.mixin']
     _order = 'departure_date desc, id desc'
     _rec_name = 'name'
 
@@ -157,7 +157,9 @@ class LugalSupplyContainer(models.Model):
         for vals in vals_list:
             if not vals.get('shipment_ref'):
                 vals['shipment_ref'] = seq.next_by_code('lugal.supply.shipment') or 'SHP-NEW'
-        return super().create(vals_list)
+        records = super().create(vals_list)
+        records._lugal_sync_linked_attachments_res()
+        return records
 
     def init(self):
         """Backfill Shipment ID for rows created before this field existed (no env in init)."""

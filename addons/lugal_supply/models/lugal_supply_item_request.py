@@ -8,7 +8,12 @@ class LugalSupplyItemRequest(models.Model):
     """Internal procurement item request (Notion: request order)."""
     _name = 'lugal.supply.item.request'
     _description = 'Supply Item Request'
-    _inherit = ['mail.thread', 'mail.activity.mixin', 'lugal.supply.dynamic.extra.mixin']
+    _inherit = [
+        'mail.thread',
+        'mail.activity.mixin',
+        'lugal.supply.dynamic.extra.mixin',
+        'lugal.supply.attachment.sync.mixin',
+    ]
     _order = 'request_date desc, id desc'
 
     name = fields.Char(
@@ -112,7 +117,9 @@ class LugalSupplyItemRequest(models.Model):
                 vals['name'] = self.env['ir.sequence'].next_by_code(
                     'lugal.supply.item.request'
                 ) or _('New')
-        return super().create(vals_list)
+        records = super().create(vals_list)
+        records._lugal_sync_linked_attachments_res()
+        return records
 
     def action_requester_confirm(self):
         """Basic e-sign: requester confirms their submission."""

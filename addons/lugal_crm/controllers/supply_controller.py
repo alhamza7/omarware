@@ -318,6 +318,10 @@ def _serialize_supply_po(po):
             })
     if 'extra_fields' in F:
         out['extra_fields'] = po.get_extra_fields_dict()
+    if 'attachment_ids' in F:
+        out['attachment_ids'] = po.attachment_ids.ids
+        out['attachment_count'] = int(po.attachment_count or len(po.attachment_ids))
+        out['attachments'] = [_serialize_attachment(a) for a in po.attachment_ids]
     return out
 
 

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from . import lugal_supply_dynamic_extra_mixin
+from . import lugal_supply_attachment_sync_mixin
 from . import lugal_supply_container
 from . import lugal_supply_container_penalty
 from . import lugal_supply_vendor

@@ -8,7 +8,12 @@ class LugalSupplyNegotiation(models.Model):
     """Supplier/agent price and terms discussion linked to an item request."""
     _name = 'lugal.supply.negotiation'
     _description = 'Supply Negotiation'
-    _inherit = ['mail.thread', 'mail.activity.mixin', 'lugal.supply.dynamic.extra.mixin']
+    _inherit = [
+        'mail.thread',
+        'mail.activity.mixin',
+        'lugal.supply.dynamic.extra.mixin',
+        'lugal.supply.attachment.sync.mixin',
+    ]
     _order = 'create_date desc, id desc'
 
     name = fields.Char(
@@ -131,7 +136,9 @@ class LugalSupplyNegotiation(models.Model):
                 vals['name'] = self.env['ir.sequence'].next_by_code(
                     'lugal.supply.negotiation'
                 ) or _('New')
-        return super().create(vals_list)
+        records = super().create(vals_list)
+        records._lugal_sync_linked_attachments_res()
+        return records
 
     def action_finalize(self):
         for rec in self:

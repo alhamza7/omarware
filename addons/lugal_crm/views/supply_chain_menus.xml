@@ -10,6 +10,7 @@
                 <field name="item_name"/>
                 <field name="requested_by_id"/>
                 <field name="priority"/>
+                <field name="attachment_count" optional="show"/>
                 <field name="capacity" optional="hide"/>
                 <field name="state"/>
                 <field name="request_date"/>
@@ -101,6 +102,7 @@
                 <field name="item_request_id"/>
                 <field name="vendor_id"/>
                 <field name="state"/>
+                <field name="attachment_count" optional="show"/>
                 <field name="offered_price"/>
                 <field name="final_agreed_price"/>
                 <field name="create_date" optional="hide"/>
@@ -199,6 +201,7 @@
                 <field name="item_request_id" optional="show"/>
                 <field name="negotiation_id" optional="hide"/>
                 <field name="status"/>
+                <field name="attachment_count" optional="show"/>
                 <field name="total_amount"/>
                 <field name="payment_state" optional="show"/>
                 <field name="order_date" optional="show"/>
@@ -288,13 +291,13 @@
                                         <field name="remaining_balance"/>
                                         <field name="payment_status"/>
                                         <field name="notes"/>
-                                        <field name="receipt_attachment_ids" widget="many2many_binary"/>
+                                        <field name="attachment_ids" widget="many2many_binary"/>
                                     </group>
                                 </form>
                             </field>
                         </page>
-                        <page string="Order attachments">
-                            <field name="order_attachment_ids" widget="many2many_binary" nolabel="1"/>
+                        <page string="Attachments">
+                            <field name="attachment_ids" widget="many2many_binary" nolabel="1"/>
                         </page>
                         <page string="Custom fields" name="po_extra_fields">
                             <group>
@@ -323,6 +326,7 @@
                 <field name="po_id"/>
                 <field name="payment_type"/>
                 <field name="paid_to"/>
+                <field name="attachment_count" optional="show"/>
                 <field name="amount" sum="Total"/>
                 <field name="currency_id"/>
                 <field name="payment_date"/>
@@ -350,7 +354,7 @@
                         <field name="remaining_balance"/>
                         <field name="payment_status"/>
                         <field name="notes"/>
-                        <field name="receipt_attachment_ids" widget="many2many_binary"/>
+                        <field name="attachment_ids" widget="many2many_binary"/>
                     </group>
                 </sheet>
                 <chatter/>
@@ -374,6 +378,7 @@
                 <field name="container_number"/>
                 <field name="supplier_id" optional="show"/>
                 <field name="shipment_tracking_state" optional="show"/>
+                <field name="attachment_count" optional="show"/>
                 <field name="status"/>
                 <field name="eta"/>
                 <field name="departure_date"/>

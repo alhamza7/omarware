@@ -126,6 +126,9 @@ export interface Po {
   is_suggested:          boolean;
   line_count:            number;
   total_amount:          number;
+  attachment_ids?:       number[];
+  attachment_count?:     number;
+  attachments?:          { id: number; name: string; url?: string; file_url?: string; mimetype?: string }[];
   created_by_id:         number | null;
   created_by_name:       string;
   created_at:            string;

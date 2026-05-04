@@ -5,7 +5,7 @@ from odoo import models, fields, api
 
 class CrmSupplyPoExtend(models.Model):
     """Supply chain links: item request → negotiation → order; payments; e-sign confirmation."""
-    _inherit = 'lugal.crm.supply.po'
+    _inherit = ['lugal.crm.supply.po', 'lugal.supply.attachment.sync.mixin']
 
     item_request_id = fields.Many2one(
         'lugal.supply.item.request',
@@ -57,12 +57,12 @@ class CrmSupplyPoExtend(models.Model):
         tracking=True,
     )
     notes = fields.Text(string='Notes', tracking=True)
-    order_attachment_ids = fields.Many2many(
+    attachment_ids = fields.Many2many(
         'ir.attachment',
         'lugal_crm_supply_po_order_attachment_rel',
         'po_id',
         'attachment_id',
-        string='Order Attachments',
+        string='Attachments',
     )
     order_confirmed_user_id = fields.Many2one(
         'res.users',
@@ -132,6 +132,7 @@ class CrmSupplyPoExtend(models.Model):
                 vals['name'] = seq.next_by_code('lugal.crm.supply.po') or '/'
         records = super().create(vals_list)
         records._sync_container_purchase_orders()
+        records._lugal_sync_linked_attachments_res()
         return records
 
     def write(self, vals):

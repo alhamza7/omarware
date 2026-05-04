@@ -19,6 +19,7 @@ from odoo.exceptions import UserError
 
 from ._auth import ensure_jwt_user_id
 from ._error import crm_error
+from .supply_attachment_api import supply_build_attachment_m2m_write, supply_kwargs_has_attachments
 from .supply_chain_api_controller import _pagination, _parse_date
 from .supply_controller import _serialize_attachment
 
@@ -98,6 +99,8 @@ def _serialize_negotiation(n, include_offers=True):
         'created_date': n.create_date.isoformat() if n.create_date else '',
         'created_at': n.create_date.isoformat() if n.create_date else '',
         'updated_at': n.write_date.isoformat() if n.write_date else '',
+        'attachment_ids': n.attachment_ids.ids,
+        'attachment_count': int(n.attachment_count or len(n.attachment_ids)),
     }
     if 'extra_fields' in n._fields:
         data['extra_fields'] = n.get_extra_fields_dict()
@@ -172,6 +175,8 @@ def _serialize_item_request(r):
         'created_by_name': r.create_uid.name if r.create_uid else '',
         'created_at': r.create_date.isoformat() if r.create_date else '',
         'updated_at': r.write_date.isoformat() if r.write_date else '',
+        'attachment_ids': r.attachment_ids.ids,
+        'attachment_count': int(r.attachment_count or len(r.attachment_ids)),
     }
     if 'extra_fields' in r._fields:
         data['extra_fields'] = r.get_extra_fields_dict()
@@ -182,7 +187,7 @@ def _serialize_payment(p):
     po = p.po_id
     cur = p.currency_id
     payee = p.payee_partner_id
-    rcpts = [_serialize_attachment(a) for a in p.receipt_attachment_ids]
+    rcpts = [_serialize_attachment(a) for a in p.attachment_ids]
     item_request_id = None
     negotiation_id = None
     container_id = None
@@ -225,6 +230,8 @@ def _serialize_payment(p):
         'payment_status': p.payment_status or 'pending',
         'notes': p.notes or '',
         'attachments': rcpts,
+        'attachment_ids': p.attachment_ids.ids,
+        'attachment_count': int(p.attachment_count or len(p.attachment_ids)),
         'created_at': p.create_date.isoformat() if p.create_date else '',
         'updated_at': p.write_date.isoformat() if p.write_date else '',
     }
@@ -274,6 +281,8 @@ def _serialize_shipment_container(c):
         'shipment_tracking_state': c.shipment_tracking_state or 'pending',
         'shipping_line': c.shipping_line or '',
         'documents': docs,
+        'attachment_ids': c.attachment_ids.ids,
+        'attachment_count': int(c.attachment_count or len(c.attachment_ids)),
         'tracking_url': c.tracking_url or '',
         'created_at': c.create_date.isoformat() if c.create_date else '',
         'updated_at': c.write_date.isoformat() if c.write_date else '',
@@ -515,6 +524,15 @@ class CrmSupplyExtraApiController(http.Controller):
             if kwargs.get('extra_fields') is not None:
                 vals['extra_fields'] = Neg.sanitize_extra_fields_input(kwargs['extra_fields'])
             rec = Neg.create(vals)
+            if supply_kwargs_has_attachments(kwargs):
+                try:
+                    aw = supply_build_attachment_m2m_write(
+                        request.env, kwargs, 'lugal.supply.negotiation', rec.id
+                    )
+                    if aw:
+                        rec.write(aw)
+                except ValueError as ve:
+                    return {'success': False, 'error': str(ve), 'data': None}
             Offer = request.env['lugal.supply.negotiation.offer'].sudo()
             op = kwargs.get('offered_price')
             if op is not None:
@@ -563,6 +581,15 @@ class CrmSupplyExtraApiController(http.Controller):
                     kwargs['extra_fields']
                 )
                 n.merge_extra_fields(cleaned)
+            if supply_kwargs_has_attachments(kwargs):
+                try:
+                    aw = supply_build_attachment_m2m_write(
+                        request.env, kwargs, 'lugal.supply.negotiation', n.id
+                    )
+                    if aw:
+                        n.write(aw)
+                except ValueError as ve:
+                    return {'success': False, 'error': str(ve), 'data': None}
             return {'success': True, 'data': _serialize_negotiation(n)}
         except Exception as e:
             return crm_error(e, 'supply_negotiations_update')
@@ -836,15 +863,19 @@ class CrmSupplyExtraApiController(http.Controller):
                 vals['packing_pcs_per_carton'] = float(kwargs['packing_pcs_per_carton'])
             if kwargs.get('request_date'):
                 vals['request_date'] = _parse_date(kwargs['request_date'])
-            ids = kwargs.get('attachment_ids') or kwargs.get('ids') or []
-            if ids:
-                if not isinstance(ids, (list, tuple)):
-                    return {'success': False, 'error': 'attachment_ids must be a list', 'data': None}
-                vals['attachment_ids'] = [(6, 0, [int(x) for x in ids])]
             IR = request.env['lugal.supply.item.request'].sudo()
             if kwargs.get('extra_fields') is not None:
                 vals['extra_fields'] = IR.sanitize_extra_fields_input(kwargs['extra_fields'])
             rec = IR.create(vals)
+            if supply_kwargs_has_attachments(kwargs):
+                try:
+                    aw = supply_build_attachment_m2m_write(
+                        request.env, kwargs, 'lugal.supply.item.request', rec.id
+                    )
+                    if aw:
+                        rec.write(aw)
+                except ValueError as ve:
+                    return {'success': False, 'error': str(ve), 'data': None}
             return {'success': True, 'data': _serialize_item_request(rec)}
         except Exception as e:
             return crm_error(e, 'supply_item_requests_create')
@@ -874,6 +905,15 @@ class CrmSupplyExtraApiController(http.Controller):
                     kwargs['extra_fields']
                 )
                 r.merge_extra_fields(cleaned)
+            if supply_kwargs_has_attachments(kwargs):
+                try:
+                    aw = supply_build_attachment_m2m_write(
+                        request.env, kwargs, 'lugal.supply.item.request', r.id
+                    )
+                    if aw:
+                        r.write(aw)
+                except ValueError as ve:
+                    return {'success': False, 'error': str(ve), 'data': None}
             return {'success': True, 'data': _serialize_item_request(r)}
         except Exception as e:
             return crm_error(e, 'supply_item_requests_update')
@@ -1307,6 +1347,15 @@ class CrmSupplyExtraApiController(http.Controller):
             if kwargs.get('notes'):
                 vals['notes'] = kwargs['notes']
             p = request.env['lugal.supply.payment'].sudo().create(vals)
+            if supply_kwargs_has_attachments(kwargs):
+                try:
+                    aw = supply_build_attachment_m2m_write(
+                        request.env, kwargs, 'lugal.supply.payment', p.id
+                    )
+                    if aw:
+                        p.write(aw)
+                except ValueError as ve:
+                    return {'success': False, 'error': str(ve), 'data': None}
             return {'success': True, 'data': _serialize_payment(p)}
         except Exception as e:
             return crm_error(e, 'supply_payments_create')
@@ -1333,6 +1382,15 @@ class CrmSupplyExtraApiController(http.Controller):
                 vals['payment_date'] = _parse_date(kwargs['payment_date'])
             if vals:
                 p.write(vals)
+            if supply_kwargs_has_attachments(kwargs):
+                try:
+                    aw = supply_build_attachment_m2m_write(
+                        request.env, kwargs, 'lugal.supply.payment', p.id
+                    )
+                    if aw:
+                        p.write(aw)
+                except ValueError as ve:
+                    return {'success': False, 'error': str(ve), 'data': None}
             return {'success': True, 'data': _serialize_payment(p)}
         except Exception as e:
             return crm_error(e, 'supply_payments_update')
@@ -1365,7 +1423,7 @@ class CrmSupplyExtraApiController(http.Controller):
             if not isinstance(ids, (list, tuple)):
                 return {'success': False, 'error': 'attachment_ids must be a list', 'data': None}
             cmd = [(6, 0, [int(x) for x in ids])] if ids else [(5,)]
-            p.write({'receipt_attachment_ids': cmd})
+            p.write({'attachment_ids': cmd})
             return {'success': True, 'data': _serialize_payment(p)}
         except Exception as e:
             return crm_error(e, 'supply_payments_attachments_link')
@@ -1456,6 +1514,15 @@ class CrmSupplyExtraApiController(http.Controller):
             if kwargs.get('shipping_line'):
                 vals['shipping_line'] = kwargs['shipping_line']
             c = request.env['lugal.supply.container'].sudo().create(vals)
+            if supply_kwargs_has_attachments(kwargs):
+                try:
+                    aw = supply_build_attachment_m2m_write(
+                        request.env, kwargs, 'lugal.supply.container', c.id
+                    )
+                    if aw:
+                        c.write(aw)
+                except ValueError as ve:
+                    return {'success': False, 'error': str(ve), 'data': None}
             return {'success': True, 'data': _serialize_shipment_container(c)}
         except Exception as e:
             return crm_error(e, 'supply_shipments_create')
@@ -1495,6 +1562,15 @@ class CrmSupplyExtraApiController(http.Controller):
                 vals['shipping_line'] = kwargs['shipping_line']
             if vals:
                 c.write(vals)
+            if supply_kwargs_has_attachments(kwargs):
+                try:
+                    aw = supply_build_attachment_m2m_write(
+                        request.env, kwargs, 'lugal.supply.container', c.id
+                    )
+                    if aw:
+                        c.write(aw)
+                except ValueError as ve:
+                    return {'success': False, 'error': str(ve), 'data': None}
             return {'success': True, 'data': _serialize_shipment_container(c)}
         except Exception as e:
             return crm_error(e, 'supply_shipments_update')

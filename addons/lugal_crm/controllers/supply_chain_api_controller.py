@@ -13,6 +13,7 @@ from odoo.http import request
 
 from ._auth import ensure_jwt_user_id
 from ._error import crm_error
+from .supply_attachment_api import supply_build_attachment_m2m_write, supply_kwargs_has_attachments
 from .supply_controller import _serialize_supply_po, _serialize_supply_po_line
 from .upload_controller import _build_attachment_url
 
@@ -104,7 +105,7 @@ def _serialize_container(c):
             c.clearance_info_delivered_at.isoformat() if c.clearance_info_delivered_at else None
         ),
         'clearance_info_delivered_by': delivered_by.name if delivered_by else '',
-        'attachment_count': len(c.attachment_ids),
+        'attachment_count': int(getattr(c, 'attachment_count', 0) or len(c.attachment_ids)),
         'penalty_count': len(c.penalty_ids),
         'vendor_id': supplier.id if supplier else None,
         'vendor_name': supplier.name if supplier else '',
@@ -527,6 +528,15 @@ class CrmSupplyChainApiController(http.Controller):
                     lv['currency_id'] = int(line['currency_id'])
                 Line.create(lv)
             po.invalidate_recordset()
+            if supply_kwargs_has_attachments(kwargs):
+                try:
+                    aw = supply_build_attachment_m2m_write(
+                        request.env, kwargs, 'lugal.crm.supply.po', po.id
+                    )
+                    if aw:
+                        po.write(aw)
+                except ValueError as ve:
+                    return {'success': False, 'error': str(ve), 'data': None}
             return {'success': True, 'data': _serialize_supply_po(po)}
         except Exception as e:
             return crm_error(e, 'supply_po_create')
@@ -584,6 +594,15 @@ class CrmSupplyChainApiController(http.Controller):
                     kwargs['extra_fields']
                 )
                 po.merge_extra_fields(cleaned)
+            if supply_kwargs_has_attachments(kwargs):
+                try:
+                    aw = supply_build_attachment_m2m_write(
+                        request.env, kwargs, 'lugal.crm.supply.po', po.id
+                    )
+                    if aw:
+                        po.write(aw)
+                except ValueError as ve:
+                    return {'success': False, 'error': str(ve), 'data': None}
             return {'success': True, 'data': _serialize_supply_po(po)}
         except Exception as e:
             return crm_error(e, 'supply_po_update')
@@ -764,8 +783,8 @@ class CrmSupplyChainApiController(http.Controller):
             if not po or po.is_deleted:
                 return {'success': False, 'error': 'PO not found', 'data': None}
             attachments = []
-            if 'order_attachment_ids' in po._fields:
-                for att in po.order_attachment_ids.sorted('id', reverse=True):
+            if 'attachment_ids' in po._fields:
+                for att in po.attachment_ids.sorted('id', reverse=True):
                     attachments.append({
                         'id': att.id,
                         'name': att.name or '',
@@ -791,13 +810,13 @@ class CrmSupplyChainApiController(http.Controller):
             po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
             if not po or po.is_deleted:
                 return {'success': False, 'error': 'PO not found', 'data': None}
-            if 'order_attachment_ids' not in po._fields:
-                return {'success': False, 'error': 'Order attachments not available', 'data': None}
+            if 'attachment_ids' not in po._fields:
+                return {'success': False, 'error': 'Attachments not available', 'data': None}
             ids = kwargs.get('attachment_ids') or kwargs.get('ids') or []
             if not isinstance(ids, (list, tuple)):
                 return {'success': False, 'error': 'attachment_ids must be a list', 'data': None}
             cmd = [(6, 0, [int(x) for x in ids])] if ids else [(5,)]
-            po.write({'order_attachment_ids': cmd})
+            po.write({'attachment_ids': cmd})
             return {'success': True, 'data': _serialize_supply_po(po)}
         except Exception as e:
             return crm_error(e, 'supply_po_attachments_link')

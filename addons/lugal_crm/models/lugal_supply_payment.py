@@ -7,7 +7,7 @@ class LugalSupplyPayment(models.Model):
     """Payment lines against a supply PO (deposit / partial / full)."""
     _name = 'lugal.supply.payment'
     _description = 'Supply Payment'
-    _inherit = ['mail.thread', 'mail.activity.mixin']
+    _inherit = ['mail.thread', 'mail.activity.mixin', 'lugal.supply.attachment.sync.mixin']
     _order = 'payment_date desc, id desc'
 
     name = fields.Char(
@@ -66,12 +66,12 @@ class LugalSupplyPayment(models.Model):
         help='Bank transfer, LC, cash, etc.',
     )
     notes = fields.Text(string='Notes', tracking=True)
-    receipt_attachment_ids = fields.Many2many(
+    attachment_ids = fields.Many2many(
         'ir.attachment',
         'lugal_supply_payment_receipt_attachment_rel',
         'payment_id',
         'attachment_id',
-        string='Receipt Attachments',
+        string='Attachments',
     )
     remaining_balance = fields.Monetary(
         string='Remaining Balance',
@@ -139,4 +139,6 @@ class LugalSupplyPayment(models.Model):
                 vals['name'] = self.env['ir.sequence'].next_by_code(
                     'lugal.supply.payment'
                 ) or _('New')
-        return super().create(vals_list)
+        records = super().create(vals_list)
+        records._lugal_sync_linked_attachments_res()
+        return records
