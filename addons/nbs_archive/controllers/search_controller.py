@@ -349,6 +349,7 @@ class NBSSearchController(http.Controller):
         uploader_name=None,
         folder_id=None,
         folder_name=None,
+        document_role=None,
         state=None,
         page=1,
         per_page=50,
@@ -374,6 +375,7 @@ class NBSSearchController(http.Controller):
           "uploader_name":        "admin",               // partial, case-insensitive
           "folder_id":            45,
           "folder_name":          "ALCAN-386",           // partial, case-insensitive
+          "document_role":        "main",                // main|sub|attachment|other
           "state":                "active",              // active|archived|all  (default: active)
           "page":                 1,
           "per_page":             50
@@ -405,6 +407,9 @@ class NBSSearchController(http.Controller):
               "folder_id":            45,
               "folder_name":          "ALCAN-386",
               "confidentiality_level":"internal",
+              "document_role":        "main",            // main|sub|attachment|other
+              "is_attachment":        false,
+              "parent_document_id":   null,
               "state":                "active",
               "version_count":        2,
               "ocr_status":           "completed"
@@ -506,6 +511,10 @@ class NBSSearchController(http.Controller):
                 domain.append(('folder_id.name', 'ilike', folder_name))
                 filters_applied['folder_name'] = folder_name
 
+            if document_role:
+                domain.append(('folder_role', '=', document_role))
+                filters_applied['document_role'] = document_role
+
             # ── Pagination ────────────────────────────────────────────────────
             try:
                 page     = max(1, int(page))
@@ -538,6 +547,9 @@ class NBSSearchController(http.Controller):
                     'folder_id':             doc.folder_id.id if doc.folder_id else None,
                     'folder_name':           doc.folder_id.name if doc.folder_id else None,
                     'confidentiality_level': doc.confidentiality_level,
+                    'document_role':         doc.folder_role or 'other',
+                    'is_attachment':         doc.is_attachment,
+                    'parent_document_id':    doc.parent_document_id.id if doc.parent_document_id else None,
                     'state':                 doc.state,
                     'version_count':         doc.version_count or 0,
                     'ocr_status':            doc.ocr_status or 'pending',
