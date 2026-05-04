@@ -508,6 +508,8 @@ class CrmSupplyChainApiController(http.Controller):
                 vals['shipping_method'] = kwargs['shipping_method']
             if kwargs.get('notes'):
                 vals['notes'] = kwargs['notes']
+            if kwargs.get('extra_fields') is not None:
+                vals['extra_fields'] = Po.sanitize_extra_fields_input(kwargs['extra_fields'])
             po = Po.create(vals)
             Line = request.env['lugal.crm.supply.po.line'].sudo()
             for line in kwargs.get('lines') or []:
@@ -577,6 +579,11 @@ class CrmSupplyChainApiController(http.Controller):
                 vals['production_completion_date'] = _parse_date(kwargs['production_completion_date'])
             if vals:
                 po.write(vals)
+            if 'extra_fields' in kwargs and kwargs['extra_fields'] is not None:
+                cleaned = request.env['lugal.crm.supply.po'].sudo().sanitize_extra_fields_input(
+                    kwargs['extra_fields']
+                )
+                po.merge_extra_fields(cleaned)
             return {'success': True, 'data': _serialize_supply_po(po)}
         except Exception as e:
             return crm_error(e, 'supply_po_update')

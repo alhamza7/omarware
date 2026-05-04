@@ -8,7 +8,7 @@ class LugalSupplyItemRequest(models.Model):
     """Internal procurement item request (Notion: request order)."""
     _name = 'lugal.supply.item.request'
     _description = 'Supply Item Request'
-    _inherit = ['mail.thread', 'mail.activity.mixin']
+    _inherit = ['mail.thread', 'mail.activity.mixin', 'lugal.supply.dynamic.extra.mixin']
     _order = 'request_date desc, id desc'
 
     name = fields.Char(

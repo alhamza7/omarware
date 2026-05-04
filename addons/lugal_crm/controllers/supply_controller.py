@@ -316,6 +316,8 @@ def _serialize_supply_po(po):
                 'currency_id': pc.id if pc else None,
                 'currency_name': pc.name if pc else '',
             })
+    if 'extra_fields' in F:
+        out['extra_fields'] = po.get_extra_fields_dict()
     return out
 
 

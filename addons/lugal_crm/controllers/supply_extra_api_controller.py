@@ -99,6 +99,8 @@ def _serialize_negotiation(n, include_offers=True):
         'created_at': n.create_date.isoformat() if n.create_date else '',
         'updated_at': n.write_date.isoformat() if n.write_date else '',
     }
+    if 'extra_fields' in n._fields:
+        data['extra_fields'] = n.get_extra_fields_dict()
     if include_offers:
         data['multiple_offers_history'] = [_serialize_negotiation_offer(o) for o in n.offer_ids]
         data['offer_ids'] = data['multiple_offers_history']
@@ -139,7 +141,7 @@ def _serialize_item_request(r):
             'currency_id': n.currency_id.id if n.currency_id else None,
             'currency_name': n.currency_id.name if n.currency_id else '',
         })
-    return {
+    data = {
         'id': r.id,
         'request_id': r.name or '',
         'name': r.name or '',
@@ -171,6 +173,9 @@ def _serialize_item_request(r):
         'created_at': r.create_date.isoformat() if r.create_date else '',
         'updated_at': r.write_date.isoformat() if r.write_date else '',
     }
+    if 'extra_fields' in r._fields:
+        data['extra_fields'] = r.get_extra_fields_dict()
+    return data
 
 
 def _serialize_payment(p):
@@ -506,7 +511,10 @@ class CrmSupplyExtraApiController(http.Controller):
                 vals['final_agreed_price'] = float(kwargs['final_agreed_price'])
             if kwargs.get('final_currency_id'):
                 vals['final_currency_id'] = int(kwargs['final_currency_id'])
-            rec = request.env['lugal.supply.negotiation'].sudo().create(vals)
+            Neg = request.env['lugal.supply.negotiation'].sudo()
+            if kwargs.get('extra_fields') is not None:
+                vals['extra_fields'] = Neg.sanitize_extra_fields_input(kwargs['extra_fields'])
+            rec = Neg.create(vals)
             Offer = request.env['lugal.supply.negotiation.offer'].sudo()
             op = kwargs.get('offered_price')
             if op is not None:
@@ -550,6 +558,11 @@ class CrmSupplyExtraApiController(http.Controller):
                 vals['final_currency_id'] = kwargs.get('final_currency_id') or False
             if vals:
                 n.write(vals)
+            if 'extra_fields' in kwargs and kwargs['extra_fields'] is not None:
+                cleaned = request.env['lugal.supply.negotiation'].sudo().sanitize_extra_fields_input(
+                    kwargs['extra_fields']
+                )
+                n.merge_extra_fields(cleaned)
             return {'success': True, 'data': _serialize_negotiation(n)}
         except Exception as e:
             return crm_error(e, 'supply_negotiations_update')
@@ -823,7 +836,15 @@ class CrmSupplyExtraApiController(http.Controller):
                 vals['packing_pcs_per_carton'] = float(kwargs['packing_pcs_per_carton'])
             if kwargs.get('request_date'):
                 vals['request_date'] = _parse_date(kwargs['request_date'])
-            rec = request.env['lugal.supply.item.request'].sudo().create(vals)
+            ids = kwargs.get('attachment_ids') or kwargs.get('ids') or []
+            if ids:
+                if not isinstance(ids, (list, tuple)):
+                    return {'success': False, 'error': 'attachment_ids must be a list', 'data': None}
+                vals['attachment_ids'] = [(6, 0, [int(x) for x in ids])]
+            IR = request.env['lugal.supply.item.request'].sudo()
+            if kwargs.get('extra_fields') is not None:
+                vals['extra_fields'] = IR.sanitize_extra_fields_input(kwargs['extra_fields'])
+            rec = IR.create(vals)
             return {'success': True, 'data': _serialize_item_request(rec)}
         except Exception as e:
             return crm_error(e, 'supply_item_requests_create')
@@ -848,6 +869,11 @@ class CrmSupplyExtraApiController(http.Controller):
                 vals['packing_pcs_per_carton'] = float(kwargs['packing_pcs_per_carton'] or 0.0)
             if vals:
                 r.write(vals)
+            if 'extra_fields' in kwargs and kwargs['extra_fields'] is not None:
+                cleaned = request.env['lugal.supply.item.request'].sudo().sanitize_extra_fields_input(
+                    kwargs['extra_fields']
+                )
+                r.merge_extra_fields(cleaned)
             return {'success': True, 'data': _serialize_item_request(r)}
         except Exception as e:
             return crm_error(e, 'supply_item_requests_update')

@@ -10,7 +10,7 @@ class CrmSupplyPo(models.Model):
     """Supply chain purchase order — vendor, container, division, lines."""
     _name = 'lugal.crm.supply.po'
     _description = 'CRM Supply Purchase Order'
-    _inherit = ['mail.thread', 'mail.activity.mixin']
+    _inherit = ['mail.thread', 'mail.activity.mixin', 'lugal.supply.dynamic.extra.mixin']
     _order = 'write_date desc, id desc'
     _rec_name = 'name'
 

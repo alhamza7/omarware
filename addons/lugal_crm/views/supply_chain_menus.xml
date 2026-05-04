@@ -74,6 +74,11 @@
                                 </list>
                             </field>
                         </page>
+                        <page string="Custom fields" name="extra_fields">
+                            <group>
+                                <field name="extra_fields" colspan="2" nolabel="1"/>
+                            </group>
+                        </page>
                     </notebook>
                 </sheet>
                 <chatter/>
@@ -162,6 +167,11 @@
                                     <field name="total_amount"/>
                                 </list>
                             </field>
+                        </page>
+                        <page string="Custom fields" name="negotiation_extra_fields">
+                            <group>
+                                <field name="extra_fields" colspan="2" nolabel="1"/>
+                            </group>
                         </page>
                     </notebook>
                     <group string="Notes">
@@ -285,6 +295,11 @@
                         </page>
                         <page string="Order attachments">
                             <field name="order_attachment_ids" widget="many2many_binary" nolabel="1"/>
+                        </page>
+                        <page string="Custom fields" name="po_extra_fields">
+                            <group>
+                                <field name="extra_fields" colspan="2" nolabel="1"/>
+                            </group>
                         </page>
                     </notebook>
                 </sheet>
