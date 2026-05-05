@@ -6,15 +6,26 @@ Covers vendors, containers (CRUD + workflow helpers), and purchase orders + line
 Chat/stories remain in other controllers; attachments lists aligned with `supply_controller`.
 """
 
+import json
+import mimetypes
 from datetime import date, datetime
 
 from odoo import fields, http
-from odoo.http import request
+from odoo.http import request, Response
 
 from ._auth import ensure_jwt_user_id
 from ._error import crm_error
 from .supply_attachment_api import supply_build_attachment_m2m_write, supply_kwargs_has_attachments
-from .supply_controller import _serialize_attachment, _serialize_supply_po, _serialize_supply_po_line
+from .supply_controller import (
+    MAX_SUPPLY_CHAT_UPLOAD_MB,
+    MAX_SUPPLY_CHAT_VIDEO_MB,
+    VIDEO_MIMES,
+    _serialize_attachment,
+    _serialize_supply_po,
+    _serialize_supply_po_line,
+    _supply_chat_mime_allowed,
+)
+from .upload_controller import _create_attachment
 
 _logger = __import__('logging').getLogger(__name__)
 
@@ -858,6 +869,113 @@ class CrmSupplyChainApiController(http.Controller):
             return {'success': True, 'data': {'po_id': po.id, 'attachments': attachments}}
         except Exception as e:
             return crm_error(e, 'supply_po_attachments_list')
+
+    @http.route(
+        '/api/crm/supply/po/<int:po_id>/attachments/upload',
+        type='http',
+        auth='none',
+        methods=['POST', 'OPTIONS'],
+        csrf=False,
+        save_session=False,
+        cors='*',
+        max_content_length=1073741824,
+    )
+    def supply_po_attachments_upload(self, po_id, **kwargs):
+        """
+        Multipart upload for PO attachments (Supply Chain SPA).
+
+        Form fields:
+          - file | files | files[] — one or more file parts
+
+        Response JSON:
+          { "success": true, "data": { "files": [<attachment shape>], "uploaded_count": n } }
+        """
+
+        def _json(payload, status=200):
+            return Response(
+                json.dumps(payload),
+                status=status,
+                headers=[('Content-Type', 'application/json')],
+            )
+
+        try:
+            if request.httprequest.method == 'OPTIONS':
+                return Response(status=204, headers=[
+                    ('Access-Control-Allow-Origin', '*'),
+                    ('Access-Control-Allow-Methods', 'POST, OPTIONS'),
+                    ('Access-Control-Allow-Headers', 'Authorization, Content-Type'),
+                    ('Access-Control-Max-Age', '86400'),
+                ])
+
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return _json({'success': False, 'error': 'Unauthorized'}, 401)
+
+            po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
+            if not po or po.is_deleted:
+                return _json({'success': False, 'error': 'PO not found'}, 404)
+            if 'attachment_ids' not in po._fields:
+                return _json({'success': False, 'error': 'Attachments not available'}, 400)
+
+            files = (
+                request.httprequest.files.getlist('files[]')
+                or request.httprequest.files.getlist('files')
+                or request.httprequest.files.getlist('file')
+            )
+            if not files:
+                return _json(
+                    {'success': False, 'error': 'No files provided (use file, files, or files[])'},
+                    400,
+                )
+
+            model_po = 'lugal.crm.supply.po'
+            out_files = []
+
+            for f in files:
+                data = f.read()
+                mime = f.mimetype or mimetypes.guess_type(f.filename or '')[0] or ''
+                is_video = mime in VIDEO_MIMES
+                limit_mb = MAX_SUPPLY_CHAT_VIDEO_MB if is_video else MAX_SUPPLY_CHAT_UPLOAD_MB
+                limit_bytes = limit_mb * 1024 * 1024
+
+                if len(data) > limit_bytes:
+                    return _json(
+                        {'success': False, 'error': f'{f.filename or "file"}: exceeds {limit_mb} MB'},
+                        400,
+                    )
+                if not _supply_chat_mime_allowed(mime):
+                    return _json(
+                        {'success': False, 'error': f'{f.filename or "file"}: unsupported type ({mime})'},
+                        400,
+                    )
+
+                filename = f.filename or 'upload'
+                att = _create_attachment(
+                    filename=filename,
+                    mimetype=mime,
+                    data_bytes=data,
+                    res_model=model_po,
+                    res_id=po.id,
+                )
+                po.write({'attachment_ids': [(4, att.id)]})
+                po.invalidate_recordset(['attachment_ids'])
+                out_files.append(_serialize_attachment(att))
+
+            return _json({
+                'success': True,
+                'data': {
+                    'files': out_files,
+                    'uploaded_count': len(out_files),
+                    'po_id': po.id,
+                },
+            })
+        except Exception as e:
+            _logger.exception('supply_po_attachments_upload')
+            try:
+                request.env.cr.rollback()
+            except Exception:
+                pass
+            return _json({'success': False, 'error': str(e)}, 500)
 
     @http.route(
         '/api/crm/supply/po/<int:po_id>/attachments/link',
