@@ -131,13 +131,36 @@ def _serialize_negotiation(n, include_offers=True):
 
 
 def _item_request_attachment_recordset(r):
-    Att = r.env['ir.attachment'].sudo()
-    linked = r.attachment_ids
+    Att = r.env['ir.attachment'].sudo().with_context(active_test=False)
+    linked = r.with_context(active_test=False).attachment_ids
     by_res = Att.search([
         ('res_model', '=', 'lugal.supply.item.request'),
         ('res_id', '=', r.id),
     ])
     return (linked | by_res).sorted('id')
+
+
+def _build_item_request_attachment_map(env, item_request_rs):
+    """One read + one search for all records; merged M2M ids and res_model/res_id matches."""
+    rids = [int(x) for x in item_request_rs.ids]
+    if not rids:
+        return {}
+    Att = env['ir.attachment'].sudo().with_context(active_test=False)
+    model = 'lugal.supply.item.request'
+    rows_data = item_request_rs.read(['attachment_ids'])
+    m2m_by_rid = {row['id']: set(row['attachment_ids']) for row in rows_data}
+    by_res = Att.search([('res_model', '=', model), ('res_id', 'in', rids)])
+    by_rid_res = {}
+    for a in by_res:
+        if not a.res_id:
+            continue
+        rid = int(a.res_id)
+        by_rid_res.setdefault(rid, set()).add(a.id)
+    out = {}
+    for rid in rids:
+        merged = m2m_by_rid.get(rid, set()) | by_rid_res.get(rid, set())
+        out[rid] = Att.browse(sorted(merged))
+    return out
 
 
 def _serialize_item_request_attachment_row(att):
@@ -149,10 +172,13 @@ def _serialize_item_request_attachment_row(att):
     }
 
 
-def _serialize_item_request(r):
+def _serialize_item_request(r, preloaded_attachments=None):
     requester = r.requested_by_id
     conf = r.requester_confirm_user_id
-    all_atts = _item_request_attachment_recordset(r)
+    if preloaded_attachments is not None:
+        all_atts = preloaded_attachments.sorted('id')
+    else:
+        all_atts = _item_request_attachment_recordset(r)
     imgs = [_serialize_attachment(a) for a in all_atts]
     attachments = [_serialize_item_request_attachment_row(a) for a in all_atts]
     negs = r.negotiation_ids.filtered(lambda n: not getattr(n, 'is_deleted', False))
@@ -849,11 +875,16 @@ class CrmSupplyExtraApiController(http.Controller):
             order_ids = list(rows.ids)
             supply_sync_item_request_attachment_m2m(request.env, rows)
             rows = IR.browse(order_ids)
+            att_map = _build_item_request_attachment_map(request.env, rows)
+            AttEmpty = request.env['ir.attachment'].sudo().with_context(active_test=False)
             return {
                 'success': True,
                 'data': {
                     'total': total, 'page': page, 'per_page': per_page,
-                    'items': [_serialize_item_request(r) for r in rows],
+                    'items': [
+                        _serialize_item_request(r, att_map.get(r.id) or AttEmpty.browse())
+                        for r in rows
+                    ],
                 },
             }
         except Exception as e:

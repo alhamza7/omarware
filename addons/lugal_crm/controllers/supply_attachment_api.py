@@ -127,13 +127,24 @@ ITEM_REQUEST_ATTACHMENT_MODEL = 'lugal.supply.item.request'
 
 
 def supply_sync_item_request_attachment_m2m(env, item_requests):
-    """Ensure ir.attachment rows with res_model/res_id are linked on attachment_ids M2M."""
+    """Link M2M from res_model/res_id; set res_model/res_id on M2M rows when missing/wrong."""
     if not item_requests:
         return
-    Att = env['ir.attachment'].sudo()
+    Att = env['ir.attachment'].sudo().with_context(active_test=False)
     rids = [int(x) for x in item_requests.ids]
     if not rids:
         return
+    for rec in item_requests:
+        for att in rec.with_context(active_test=False).attachment_ids:
+            wrong = (
+                (att.res_model or '') != ITEM_REQUEST_ATTACHMENT_MODEL
+                or int(att.res_id or 0) != rec.id
+            )
+            if wrong:
+                att.sudo().write({
+                    'res_model': ITEM_REQUEST_ATTACHMENT_MODEL,
+                    'res_id': rec.id,
+                })
     atts = Att.search([
         ('res_model', '=', ITEM_REQUEST_ATTACHMENT_MODEL),
         ('res_id', 'in', rids),
@@ -143,6 +154,8 @@ def supply_sync_item_request_attachment_m2m(env, item_requests):
         rid = int(a.res_id)
         by_rid.setdefault(rid, []).append(a.id)
     for rec in item_requests:
-        extra = [aid for aid in by_rid.get(rec.id, []) if aid not in rec.attachment_ids.ids]
+        linked_ids = set(rec.with_context(active_test=False).attachment_ids.ids)
+        extra = [aid for aid in by_rid.get(rec.id, []) if aid not in linked_ids]
         if extra:
             rec.write({'attachment_ids': [(4, x) for x in extra]})
+    item_requests.invalidate_recordset(['attachment_ids'])
