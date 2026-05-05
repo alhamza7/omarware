@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'Lugal CRM',
-    'version': '1.0.2',
+    'version': '1.0.3',
     'category': 'CRM',
     'summary': 'Custom CRM module for Lugal platform',
     'description': """

@@ -196,11 +196,14 @@ def _build_item_request_attachment_map(env, item_request_rs):
 
 
 def _serialize_item_request_attachment_row(att):
+    aid = att.id
+    if not aid:
+        return None
     return {
-        'id': att.id,
+        'id': aid,
         'name': att.name or '',
         'mimetype': att.mimetype or 'application/octet-stream',
-        'url': '/web/content/%s' % (att.id,),
+        'url': '/web/content/' + str(aid),
     }
 
 
@@ -211,8 +214,13 @@ def _serialize_item_request(r, preloaded_attachments=None):
         all_atts = preloaded_attachments.sorted('id')
     else:
         all_atts = _item_request_attachment_recordset(r)
+    all_atts = all_atts.filtered(lambda a: a.id)
     imgs = [_serialize_attachment(a) for a in all_atts]
-    attachments = [_serialize_item_request_attachment_row(a) for a in all_atts]
+    attachments = []
+    for a in all_atts:
+        row = _serialize_item_request_attachment_row(a)
+        if row:
+            attachments.append(row)
     negs = r.negotiation_ids.filtered(lambda n: not getattr(n, 'is_deleted', False))
     negotiations_payload = []
     for n in negs:
@@ -884,6 +892,7 @@ class CrmSupplyExtraApiController(http.Controller):
 
     @http.route('/api/crm/supply/item_requests/list', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def supply_item_requests_list(self, **kwargs):
+        """Each item includes attachment_ids, attachments[{id,name,mimetype,url}], reference_images (unchanged)."""
         try:
             kwargs = _unwrap_item_request_kwargs(kwargs)
             if not ensure_jwt_user_id():
