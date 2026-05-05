@@ -215,7 +215,6 @@ def _serialize_item_request(r, preloaded_attachments=None):
     else:
         all_atts = _item_request_attachment_recordset(r)
     all_atts = all_atts.filtered(lambda a: a.id)
-    imgs = [_serialize_attachment(a) for a in all_atts]
     attachments = []
     for a in all_atts:
         row = _serialize_item_request_attachment_row(a)
@@ -248,8 +247,6 @@ def _serialize_item_request(r, preloaded_attachments=None):
         'capacity': r.capacity or '',
         'packing': float(r.packing_pcs_per_carton or 0.0),
         'packing_pcs_per_carton': float(r.packing_pcs_per_carton or 0.0),
-        'reference_images': imgs,
-        'reference_files': imgs,
         'attachments': attachments,
         'priority': r.priority or 'medium',
         'state': r.state or 'draft',
@@ -892,7 +889,7 @@ class CrmSupplyExtraApiController(http.Controller):
 
     @http.route('/api/crm/supply/item_requests/list', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def supply_item_requests_list(self, **kwargs):
-        """Each item includes attachment_ids, attachments[{id,name,mimetype,url}], reference_images (unchanged)."""
+        """Each item includes attachment_ids, attachment_count, attachments[{id,name,mimetype,url}]."""
         try:
             kwargs = _unwrap_item_request_kwargs(kwargs)
             if not ensure_jwt_user_id():

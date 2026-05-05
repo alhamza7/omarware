@@ -16,7 +16,7 @@ class LugalSupplyDynamicExtraMixin(models.AbstractModel):
 
     extra_fields = fields.Json(
         string='Extra fields',
-        default=lambda: {},
+        default=lambda self: {},
         copy=True,
         help='Arbitrary JSON object for custom keys from frontend or integrations '
              '(values must be JSON-serializable).',
