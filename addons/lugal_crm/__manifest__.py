@@ -31,6 +31,7 @@ Requirements and specifications are in addons/lugal_crm/requirements/
         'security/ir.model.access.csv',
         'data/crm_sequences.xml',
         'data/crm_cron.xml',
+        'views/res_config_settings_supply_workflow_views.xml',
         'views/supply_chain_menus.xml',
     ],
     'demo': [],

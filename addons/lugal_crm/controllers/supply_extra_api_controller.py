@@ -130,6 +130,15 @@ def _serialize_item_request(r):
     requester = r.requested_by_id
     conf = r.requester_confirm_user_id
     imgs = [_serialize_attachment(a) for a in r.attachment_ids]
+    attachments = [
+        {
+            'id': x['id'],
+            'name': x['name'],
+            'mimetype': x['mimetype'],
+            'url': x['url'],
+        }
+        for x in imgs
+    ]
     negs = r.negotiation_ids.filtered(lambda n: not getattr(n, 'is_deleted', False))
     negotiations_payload = []
     for n in negs:
@@ -159,6 +168,7 @@ def _serialize_item_request(r):
         'packing_pcs_per_carton': float(r.packing_pcs_per_carton or 0.0),
         'reference_images': imgs,
         'reference_files': imgs,
+        'attachments': attachments,
         'priority': r.priority or 'medium',
         'state': r.state or 'draft',
         'status': r.state or 'draft',
@@ -820,6 +830,7 @@ class CrmSupplyExtraApiController(http.Controller):
             IR = request.env['lugal.supply.item.request'].sudo()
             total = IR.search_count(domain)
             rows = IR.search(domain, order='request_date desc, id desc', limit=per_page, offset=offset)
+            rows.mapped('attachment_ids')
             return {
                 'success': True,
                 'data': {
@@ -874,8 +885,10 @@ class CrmSupplyExtraApiController(http.Controller):
                     )
                     if aw:
                         rec.write(aw)
+                        rec.invalidate_recordset()
                 except ValueError as ve:
                     return {'success': False, 'error': str(ve), 'data': None}
+            rec = IR.browse(rec.id)
             return {'success': True, 'data': _serialize_item_request(rec)}
         except Exception as e:
             return crm_error(e, 'supply_item_requests_create')

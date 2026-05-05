@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="res_config_settings_view_form_supply_workflow" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.inherit.supply.workflow</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                <app string="Supply workflow" name="lugal_supply_workflow" groups="base.group_system">
+                    <block title="Supply chain enhancements">
+                        <setting string="Multi-level approval rows"
+                                 help="Number of approval lines created on item request (Start), negotiation (create), and supply PO (create). Use 0 to rely on existing e-sign / finalize only.">
+                            <field name="supply_workflow_level_count"/>
+                        </setting>
+                        <setting string="Workflow activity notifications"
+                                 help="Schedule To-Do activities on item request progress/completion and PO confirmation.">
+                            <field name="supply_workflow_activity_notify"/>
+                        </setting>
+                        <setting string="Stock check before PO confirm"
+                                 help="When confirming a PO, validate qty_available for lines with a product or matching default_code (item code).">
+                            <field name="supply_stock_validate_po"/>
+                        </setting>
+                        <setting string="Budget limit on PO confirm"
+                                 help="When enabled, a linked budget allocation with an amount blocks confirmation if PO total exceeds the limit.">
+                            <field name="supply_budget_control_enabled"/>
+                        </setting>
+                    </block>
+                </app>
+            </xpath>
+        </field>
+    </record>
+</odoo>

@@ -47,6 +47,10 @@
                             <field name="requester_confirm_user_id"/>
                             <field name="requester_confirm_date"/>
                         </group>
+                        <group string="Workflow milestones">
+                            <field name="workflow_milestone_start" readonly="1"/>
+                            <field name="workflow_milestone_completed" readonly="1"/>
+                        </group>
                     </group>
                     <group string="Attachments">
                         <field name="attachment_ids" widget="many2many_binary" nolabel="1"/>
@@ -79,6 +83,17 @@
                             <group>
                                 <field name="extra_fields" colspan="2" nolabel="1"/>
                             </group>
+                        </page>
+                        <page string="Approvals" name="item_request_approvals">
+                            <field name="supply_workflow_approval_line_ids" nolabel="1" context="{'default_item_request_id': id}">
+                                <list editable="bottom">
+                                    <field name="level" readonly="1"/>
+                                    <field name="state"/>
+                                    <field name="approver_user_id"/>
+                                    <field name="decided_at" readonly="1"/>
+                                    <field name="notes"/>
+                                </list>
+                            </field>
                         </page>
                     </notebook>
                 </sheet>
@@ -140,6 +155,11 @@
                             <field name="finalized_by_id"/>
                             <field name="finalized_date"/>
                         </group>
+                        <group string="Lead time">
+                            <field name="expected_lead_time_days"/>
+                            <field name="quoted_delivery_date"/>
+                            <field name="order_count" readonly="1"/>
+                        </group>
                     </group>
                     <group string="Attachments">
                         <field name="attachment_ids" widget="many2many_binary" nolabel="1"/>
@@ -174,6 +194,30 @@
                             <group>
                                 <field name="extra_fields" colspan="2" nolabel="1"/>
                             </group>
+                        </page>
+                        <page string="Supplier quotes" name="supplier_quotes">
+                            <field name="supplier_quote_ids" nolabel="1" context="{'default_negotiation_id': id}">
+                                <list editable="bottom">
+                                    <field name="sequence" widget="handle"/>
+                                    <field name="vendor_id"/>
+                                    <field name="offered_price"/>
+                                    <field name="currency_id"/>
+                                    <field name="lead_time_days"/>
+                                    <field name="is_recommended"/>
+                                    <field name="notes"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Approvals" name="negotiation_approvals">
+                            <field name="supply_workflow_approval_line_ids" nolabel="1" context="{'default_negotiation_id': id}">
+                                <list editable="bottom">
+                                    <field name="level" readonly="1"/>
+                                    <field name="state"/>
+                                    <field name="approver_user_id"/>
+                                    <field name="decided_at" readonly="1"/>
+                                    <field name="notes"/>
+                                </list>
+                            </field>
                         </page>
                     </notebook>
                     <group string="Notes">
@@ -241,6 +285,11 @@
                             <field name="payment_state"/>
                             <field name="order_confirmed_user_id"/>
                             <field name="order_confirmed_date"/>
+                            <field name="budget_allocation_id"/>
+                            <field name="supplier_commitment_date"/>
+                            <field name="planned_receipt_date"/>
+                            <field name="order_acknowledged_at" readonly="1"/>
+                            <field name="lead_time_delay_days" readonly="1"/>
                         </group>
                     </group>
                     <group string="Notes">
@@ -251,6 +300,7 @@
                             <field name="line_ids">
                                 <list editable="bottom">
                                     <field name="sequence" widget="handle"/>
+                                    <field name="product_id" optional="show"/>
                                     <field name="product_name"/>
                                     <field name="item_code"/>
                                     <field name="quantity_pcs"/>
@@ -304,6 +354,17 @@
                                 <field name="extra_fields" colspan="2" nolabel="1"/>
                             </group>
                         </page>
+                        <page string="Approvals" name="po_approvals">
+                            <field name="supply_workflow_approval_line_ids" nolabel="1" context="{'default_po_id': id}">
+                                <list editable="bottom">
+                                    <field name="level" readonly="1"/>
+                                    <field name="state"/>
+                                    <field name="approver_user_id"/>
+                                    <field name="decided_at" readonly="1"/>
+                                    <field name="notes"/>
+                                </list>
+                            </field>
+                        </page>
                     </notebook>
                 </sheet>
                 <chatter/>
@@ -353,6 +414,8 @@
                         <field name="payment_method"/>
                         <field name="remaining_balance"/>
                         <field name="payment_status"/>
+                        <field name="funds_cleared_at"/>
+                        <field name="value_date"/>
                         <field name="notes"/>
                         <field name="attachment_ids" widget="many2many_binary"/>
                     </group>
@@ -414,6 +477,8 @@
                             <field name="eta" string="ETA (Arrival)"/>
                             <field name="received_date"/>
                             <field name="arrived_at"/>
+                            <field name="planned_gate_in_date"/>
+                            <field name="actual_gate_in_at"/>
                         </group>
                         <group>
                             <field name="status"/>
@@ -449,6 +514,46 @@
         <field name="view_mode">list,form</field>
     </record>
 
+    <!-- Budget allocation (structure; enforcement optional via settings) -->
+    <record id="view_lugal_supply_budget_allocation_tree" model="ir.ui.view">
+        <field name="name">lugal.supply.budget.allocation.list</field>
+        <field name="model">lugal.supply.budget.allocation</field>
+        <field name="arch" type="xml">
+            <list string="Budget allocations">
+                <field name="name"/>
+                <field name="company_id" groups="base.group_multi_company"/>
+                <field name="currency_id"/>
+                <field name="amount_limit" sum="Total limit"/>
+                <field name="active"/>
+            </list>
+        </field>
+    </record>
+    <record id="view_lugal_supply_budget_allocation_form" model="ir.ui.view">
+        <field name="name">lugal.supply.budget.allocation.form</field>
+        <field name="model">lugal.supply.budget.allocation</field>
+        <field name="arch" type="xml">
+            <form string="Budget allocation">
+                <sheet>
+                    <group>
+                        <field name="name"/>
+                        <field name="company_id" groups="base.group_multi_company"/>
+                        <field name="currency_id"/>
+                        <field name="amount_limit"/>
+                        <field name="active"/>
+                    </group>
+                    <group string="Notes">
+                        <field name="note" nolabel="1"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="action_lugal_supply_budget_allocation" model="ir.actions.act_window">
+        <field name="name">Budget allocations</field>
+        <field name="res_model">lugal.supply.budget.allocation</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
     <!-- Menu -->
     <menuitem id="menu_lugal_supply_chain_root"
         name="Supply chain"
@@ -459,6 +564,11 @@
         parent="menu_lugal_supply_chain_root"
         action="action_lugal_supply_item_request"
         sequence="10"/>
+    <menuitem id="menu_lugal_supply_budget_allocation"
+        name="Budget allocations"
+        parent="menu_lugal_supply_chain_root"
+        action="action_lugal_supply_budget_allocation"
+        sequence="15"/>
     <menuitem id="menu_lugal_supply_negotiation"
         name="Negotiations"
         parent="menu_lugal_supply_chain_root"

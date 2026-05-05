@@ -14,3 +14,12 @@ class LugalSupplyContainerExtend(models.Model):
         'po_id',
         string='Linked Orders',
     )
+    planned_gate_in_date = fields.Date(
+        string='Planned gate-in date',
+        tracking=True,
+        help='Optional milestone for port / yard gate-in (complements ETA).',
+    )
+    actual_gate_in_at = fields.Datetime(
+        string='Actual gate-in',
+        tracking=True,
+    )

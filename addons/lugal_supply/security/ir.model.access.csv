@@ -5,3 +5,4 @@ access_lugal_supply_container_penalty_user,lugal.supply.container.penalty.user,m
 access_lugal_supply_item_request_user,lugal.supply.item.request user,model_lugal_supply_item_request,base.group_user,1,1,1,1
 access_lugal_supply_negotiation_user,lugal.supply.negotiation user,model_lugal_supply_negotiation,base.group_user,1,1,1,1
 access_lugal_supply_negotiation_offer_user,lugal.supply.negotiation.offer user,model_lugal_supply_negotiation_offer,base.group_user,1,1,1,1
+access_lugal_supply_negotiation_supplier_quote_user,lugal.supply.negotiation.supplier.quote user,model_lugal_supply_negotiation_supplier_quote,base.group_user,1,1,1,1

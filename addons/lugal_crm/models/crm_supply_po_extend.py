@@ -2,6 +2,8 @@
 
 from odoo import models, fields, api
 
+from .supply_workflow_config import supply_workflow_level_count
+
 
 class CrmSupplyPoExtend(models.Model):
     """Supply chain links: item request → negotiation → order; payments; e-sign confirmation."""
@@ -133,6 +135,7 @@ class CrmSupplyPoExtend(models.Model):
         records = super().create(vals_list)
         records._sync_container_purchase_orders()
         records._lugal_sync_linked_attachments_res()
+        records._bootstrap_supply_po_workflow_lines()
         return records
 
     def write(self, vals):
@@ -140,6 +143,22 @@ class CrmSupplyPoExtend(models.Model):
         if 'container_id' in vals:
             self._sync_container_purchase_orders()
         return res
+
+    def _bootstrap_supply_po_workflow_lines(self):
+        """Create empty approval rows when multi-level count > 0 (see supply_workflow_config)."""
+        n = supply_workflow_level_count(self.env)
+        if n <= 0:
+            return
+        Line = self.env['lugal.supply.workflow.approval.line'].sudo()
+        for po in self:
+            if Line.search([('po_id', '=', po.id)], limit=1):
+                continue
+            for level in range(1, n + 1):
+                Line.create({
+                    'po_id': po.id,
+                    'level': level,
+                    'state': 'pending',
+                })
 
     def _sync_container_purchase_orders(self):
         """When a PO is linked to a container, include it in container.purchase_order_ids."""

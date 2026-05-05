@@ -650,6 +650,76 @@ class CrmSupplyChainApiController(http.Controller):
         except Exception as e:
             return crm_error(e, 'supply_po_confirm')
 
+    @http.route('/api/crm/supply/dashboard/summary', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_dashboard_summary(self, **kwargs):
+        """Aggregate counts for supply dashboard (extends metrics without replacing existing list APIs)."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            icp = request.env['ir.config_parameter'].sudo()
+            Item = request.env['lugal.supply.item.request'].sudo()
+            Neg = request.env['lugal.supply.negotiation'].sudo()
+            Po = request.env['lugal.crm.supply.po'].sudo()
+            Pay = request.env['lugal.supply.payment'].sudo()
+            Cont = request.env['lugal.supply.container'].sudo()
+            Line = request.env['lugal.supply.workflow.approval.line'].sudo()
+
+            def alive_domain(model):
+                dom = []
+                if 'is_deleted' in model._fields:
+                    dom.append(('is_deleted', '=', False))
+                if 'active' in model._fields:
+                    dom.append(('active', '=', True))
+                return dom
+
+            item_dom = alive_domain(Item)
+            neg_dom = alive_domain(Neg)
+            po_dom = alive_domain(Po)
+            pay_dom = alive_domain(Pay)
+            cont_dom = alive_domain(Cont)
+
+            confirmed_pos = Po.search(po_dom + [('status', '=', 'confirmed')])
+            delayed_receipt = 0
+            if 'lead_time_delay_days' in Po._fields:
+                delayed_receipt = sum(1 for p in confirmed_pos if (p.lead_time_delay_days or 0) > 0)
+
+            data = {
+                'item_requests': {
+                    'draft': Item.search_count(item_dom + [('state', '=', 'draft')]),
+                    'in_progress': Item.search_count(item_dom + [('state', '=', 'in_progress')]),
+                    'completed': Item.search_count(item_dom + [('state', '=', 'completed')]),
+                },
+                'negotiations': {
+                    'ongoing': Neg.search_count(neg_dom + [('state', '=', 'ongoing')]),
+                    'finalized': Neg.search_count(neg_dom + [('state', '=', 'finalized')]),
+                    'cancelled': Neg.search_count(neg_dom + [('state', '=', 'cancelled')]),
+                },
+                'purchase_orders': {
+                    'draft': Po.search_count(po_dom + [('status', '=', 'draft')]),
+                    'confirmed': Po.search_count(po_dom + [('status', '=', 'confirmed')]),
+                    'cancelled': Po.search_count(po_dom + [('status', '=', 'cancelled')]),
+                    'delayed_receipt': delayed_receipt,
+                },
+                'payments': {
+                    'total': Pay.search_count(pay_dom),
+                },
+                'shipments': {
+                    'total': Cont.search_count(cont_dom),
+                },
+                'approvals': {
+                    'pending': Line.search_count([('state', '=', 'pending')]),
+                },
+                'config_flags': {
+                    'workflow_level_count': max(0, int(icp.get_param('lugal_supply.workflow_level_count', '0') or 0)),
+                    'budget_control_enabled': icp.get_param('lugal_supply.budget_control_enabled', 'False') == 'True',
+                    'stock_validate_po': icp.get_param('lugal_supply.stock_validate_po', 'True') == 'True',
+                    'workflow_activity_notify': icp.get_param('lugal_supply.workflow_activity_notify', 'True') == 'True',
+                },
+            }
+            return {'success': True, 'data': data}
+        except Exception as e:
+            return crm_error(e, 'supply_dashboard_summary')
+
     @http.route('/api/crm/supply/po/<int:po_id>/ship', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def supply_po_ship(self, po_id, **kwargs):
         try:
