@@ -259,6 +259,68 @@ class UserController(http.Controller):
         except Exception as e:
             return crm_error(e, 'update_me')
 
+    # ─── Change password ──────────────────────────────────────────────────────
+
+    @http.route('/api/crm/users/me/change_password', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def change_password(self, old_password=None, current_password=None, new_password=None, confirm_password=None, **kwargs):
+        """
+        Change the current user's password.
+
+        Params:
+          old_password     (str, required) — current password for verification
+          new_password     (str, required) — desired new password (min 6 chars)
+          confirm_password (str, optional) — must match new_password if supplied
+        """
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+            # Accept both 'current_password' and 'old_password' field names
+            old_password = old_password or current_password
+            if not old_password:
+                return {'success': False, 'error': 'current_password is required'}
+            if not new_password:
+                return {'success': False, 'error': 'new_password is required'}
+            if len(new_password) < 6:
+                return {'success': False, 'error': 'Password must be at least 6 characters'}
+            if confirm_password is not None and new_password != confirm_password:
+                return {'success': False, 'error': 'Passwords do not match'}
+
+            user = request.env['res.users'].sudo().browse(uid)
+            if not user.exists():
+                return {'success': False, 'error': 'User not found'}
+
+            # Verify old password against the stored hash directly.
+            # passlib is always available in Odoo and this works across all versions.
+            try:
+                from passlib.context import CryptContext
+                _pwd_ctx = CryptContext(schemes=['pbkdf2_sha512'], deprecated=[])
+                cr = request.env.cr
+                cr.execute(
+                    "SELECT password FROM res_users WHERE id = %s AND active = true",
+                    (uid,),
+                )
+                row = cr.fetchone()
+                stored_hash = row[0] if row else None
+                if not stored_hash or not _pwd_ctx.verify(old_password, stored_hash):
+                    return {'success': False, 'error': 'Current password is incorrect'}
+            except Exception:
+                return {'success': False, 'error': 'Current password is incorrect'}
+
+            user.write({'password': new_password})
+
+            # Invalidate all existing JWT tokens so old sessions must re-login
+            try:
+                request.env['lugal.jwt.blacklist'].sudo().search(
+                    [('user_id', '=', uid), ('revoked', '=', False)]
+                ).write({'revoked': True, 'reason': 'password_changed'})
+            except Exception:
+                pass
+
+            return {'success': True, 'data': {'message': 'Password changed successfully'}}
+        except Exception as e:
+            return crm_error(e, 'change_password')
+
     # ─── Single user detail ───────────────────────────────────────────────────
 
     @http.route('/api/crm/users/<int:user_id>', type='jsonrpc', auth='none', csrf=False, methods=['POST'])

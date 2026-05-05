@@ -80,7 +80,7 @@ class CrmEmailController(http.Controller):
             if folder:
                 domain.append(('folder', '=', folder))
             offset = (int(page) - 1) * int(per_page)
-            msgs  = Msg.search(domain, limit=int(per_page), offset=offset, order='date desc')
+            msgs  = Msg.search(domain, limit=int(per_page), offset=offset, order='create_date desc, id desc')
             # Try to resolve customer name from CRM model if available
             customer_name = ''
             try:
@@ -156,7 +156,7 @@ class CrmEmailController(http.Controller):
             Msg   = request.env['lugal.email.message'].sudo()
             total = Msg.search_count(domain)
             offset = (int(page) - 1) * int(per_page)
-            msgs  = Msg.search(domain, limit=int(per_page), offset=offset, order='date desc')
+            msgs  = Msg.search(domain, limit=int(per_page), offset=offset, order='create_date desc, id desc')
             return {
                 'success': True,
                 'data': {
@@ -293,13 +293,24 @@ class CrmEmailController(http.Controller):
             if not uid:
                 return {'success': False, 'error': 'Unauthorized'}
 
-            # Wake the IDLE supervisor immediately for this user's accounts.
-            # start_all() is idempotent — it only starts threads that are not
-            # already running and skips credential groups in backoff windows.
+            # Wake the IDLE supervisor immediately.
+            # We trigger the dedicated cron job instead of calling start_all()
+            # directly so that the IMAP threads are always owned by the
+            # long-lived cron worker (SNl process) rather than a short-lived
+            # HTTP worker that gets recycled after ~N requests.  The cron
+            # trigger wakes the cron worker within seconds.
             try:
-                request.env['lugal.email.idle.watcher'].sudo().start_all()
+                cron = request.env.ref(
+                    'lugal_email.ir_cron_lugal_email_idle_supervisor',
+                    raise_if_not_found=False,
+                )
+                if cron:
+                    cron.sudo()._trigger()
+                else:
+                    # Fallback if the cron ref is not found
+                    request.env['lugal.email.idle.watcher'].sudo().start_all()
             except Exception as exc:
-                _logger.warning('subscribe: start_all() failed: %s', exc)
+                _logger.warning('subscribe: cron trigger failed: %s', exc)
 
             # Return which accounts are being monitored for this user.
             accounts = request.env['lugal.email.account'].sudo().search([
@@ -313,11 +324,52 @@ class CrmEmailController(http.Controller):
                 if (acc.password or '').strip()
             ]
 
+            # Trigger one background IMAP sync per credential group on connect.
+            # Force=True bypasses the 30-second throttle so the user always gets
+            # fresh emails immediately when they open the app or reconnect.
+            try:
+                db_name = request.env.cr.dbname
+                from odoo.addons.lugal_email.controllers.email_controller import (
+                    _run_imap_sync_bg,
+                )
+                seen_creds: set = set()
+                for acc in accounts:
+                    if not (acc.password or '').strip():
+                        continue
+                    cred = (
+                        (acc.imap_host or '').strip(),
+                        int(acc.imap_port or 993),
+                        (acc.username or acc.email_address or '').strip(),
+                    )
+                    if cred in seen_creds:
+                        continue
+                    seen_creds.add(cred)
+                    # Always force a sync on WS connect — user expects fresh data
+                    _run_imap_sync_bg(acc.id, db_name, force=True)
+            except Exception as exc_sync:
+                _logger.warning('subscribe: immediate email sync failed: %s', exc_sync)
+
+            # Return current unread count so the FE can reconcile immediately on
+            # connect without waiting for the next IMAP sync or push event.
+            # This closes the race where an email arrives between page load and
+            # WebSocket subscription.
+            total_unread = 0
+            try:
+                total_unread = request.env['lugal.email.message'].sudo().search_count([
+                    ('account_id', 'in', accounts.ids),
+                    ('folder', '=', 'inbox'),
+                    ('is_read', '=', False),
+                    ('is_deleted', '=', False),
+                ])
+            except Exception:
+                pass
+
             return {
                 'success': True,
                 'subscribed': True,
                 'accounts': monitored,
                 'polling_interval_seconds': 30,
+                'unread_count': total_unread,
             }
         except Exception as exc:
             return _crm_error(exc, 'subscribe')

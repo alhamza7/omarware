@@ -17,24 +17,69 @@ def _to_riyadh_iso(dt):
     return dt.astimezone(_RIYADH_TZ).isoformat(timespec='seconds')
 
 
+def _build_message_preview(record):
+    """
+    Build a complete inbox-ready message dict from an ORM record.
+
+    This mirrors the shape of _message_to_dict() in email_controller so the FE
+    can immediately prepend the new message to the inbox list without a
+    follow-up /api/lugal/email/messages call.  Attachments are omitted from
+    the preview (body_fetched=False for IMAP-synced headers-only messages) and
+    can be fetched lazily via message_detail when the user opens the email.
+    """
+    try:
+        atts = record.env['ir.attachment'].sudo().search([
+            ('res_model', '=', 'lugal.email.message'),
+            ('res_id',    '=', record.id),
+        ])
+        attachments = [{
+            'id':       a.id,
+            'name':     a.name or 'attachment',
+            'mimetype': a.mimetype or 'application/octet-stream',
+            'size':     a.file_size or 0,
+        } for a in atts]
+    except Exception:
+        attachments = []
+
+    return {
+        'id':             record.id,
+        'account_id':     record.account_id.id,
+        'folder':         record.folder,
+        'subject':        record.subject or '(no subject)',
+        'from_name':      record.from_name or '',
+        'from_address':   record.from_address or '',
+        'to_addresses':   record.to_addresses or '[]',
+        'cc_addresses':   record.cc_addresses or '[]',
+        'date':           _to_riyadh_iso(record.date),
+        'received_at':    _to_riyadh_iso(record.create_date),
+        'read_at':        None,
+        'is_read':        record.is_read,
+        'is_starred':     record.is_starred,
+        'is_flagged':     record.is_flagged,
+        'is_important':   record.is_important,
+        'is_draft':       record.is_draft,
+        'smtp_delivered': record.smtp_delivered,
+        'smtp_error':     record.smtp_error or None,
+        'smtp_status':    record.smtp_status or 'pending',
+        'body_fetched':   bool(getattr(record, 'body_fetched', False)),
+        'attachments':    attachments,
+        'crm_links': {
+            'customer': None,
+            'ticket':   None,
+        },
+    }
+
+
 class LugalEmailMessageWs(models.Model):
     """
-    Phase 4: Wire new inbox email arrivals to the Odoo bus so that the
-    FE WebSocket client receives a real-time push notification instead
-    of relying on HTTP polling.
+    Wire new inbox email arrivals to the Odoo bus so the FE WebSocket client
+    receives a real-time push with the FULL message payload.
 
-    Additive only — zero changes to addons/lugal_email/. This model
-    inherits lugal.email.message and overrides create() only.
-
-    Field names (verified against lugal.email.message):
-      - record.folder          — 'inbox' | 'sent' | 'drafts' | 'trash'
-      - record.is_read         — Boolean
-      - record.account_id      — lugal.email.account record
-      - record.account_id.user_id.id — the res.users uid who owns the account
-      - record.from_address    — sender email address string
-      - record.from_name       — sender display name string
-      - record.subject         — email subject string
-      - record.date            — datetime of email
+    The payload now includes a `message_data` key with the complete inbox-row
+    dict so the FE can immediately prepend the new message to the inbox list
+    without a follow-up /api/lugal/email/messages call.  This eliminates the
+    race condition where the inbox API was called before the DB committed the
+    new message, causing the FE to show stale (old) inbox data.
     """
     _inherit = 'lugal.email.message'
 
@@ -51,15 +96,15 @@ class LugalEmailMessageWs(models.Model):
                 )
                 if uid:
                     try:
-                        # Count unread inbox messages for this account now that
-                        # the new message is persisted — gives the FE an accurate
-                        # badge count without a separate API call.
                         unread_count = self.sudo().search_count([
                             ('account_id', '=', record.account_id.id),
                             ('folder',     '=', 'inbox'),
                             ('is_read',    '=', False),
                             ('is_deleted', '=', False),
                         ])
+                        # Full message dict so the FE can update the inbox list
+                        # immediately without calling messages_list again.
+                        message_data = _build_message_preview(record)
                         payload = {
                             'message_id':   record.id,
                             'account_id':   record.account_id.id,
@@ -71,27 +116,23 @@ class LugalEmailMessageWs(models.Model):
                             'received_at':  _to_riyadh_iso(record.date),
                             'unread_count': unread_count,
                             'uid':          uid,
+                            # Full row — FE should prepend this to the inbox
+                            # list rather than re-fetching /messages.
+                            'message_data': message_data,
                         }
                         _logger.info(
-                            '[EmailWS] Calling bus._sendone for uid=%s '
-                            'channel=supply_user.%s at %.3f',
-                            uid, uid, time.time(),
+                            '[EmailWS] bus._sendone uid=%s channel=supply_user.%s '
+                            'message_id=%s at %.3f',
+                            uid, uid, record.id, time.time(),
                         )
                         self.env['bus.bus'].sudo()._sendone(
                             f'supply_user.{uid}',
                             'crm.email.message.new',
                             payload,
                         )
-                        _logger.info(
-                            '[EmailWS] bus._sendone returned at %.3f '
-                            '(uid=%s message_id=%s)',
-                            time.time(), uid, record.id,
-                        )
                     except Exception as exc:
-                        # Non-fatal — email is saved regardless
                         _logger.debug(
-                            'lugal_email_ws: bus notify error for uid=%s: %s',
-                            uid, exc
+                            'lugal_email_ws: bus notify error uid=%s: %s', uid, exc,
                         )
                     # Web Push — deliver even when browser tab is closed
                     try:
@@ -102,10 +143,10 @@ class LugalEmailMessageWs(models.Model):
                             title=sender_label,
                             body=subject,
                             data={
-                                'type': 'email',
+                                'type':       'email',
                                 'message_id': record.id,
                                 'account_id': record.account_id.id,
-                                'url': '/emails',
+                                'url':        '/emails',
                             },
                         )
                     except Exception:

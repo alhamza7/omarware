@@ -10,11 +10,27 @@ Run:
     python3 scripts/ws_proxy.py
 
 Service is registered as a systemd user unit (lugal-proxy.service).
+
+Keep-alive strategy
+-------------------
+Odoo's bus/websocket.py has a hardcoded CONNECTION_TIMEOUT = 60 s.
+After 45 s of silence it sends a PING; if no PONG arrives within 15 s it
+closes the connection with code 4002 (KEEP_ALIVE_TIMEOUT).
+
+When a browser tab goes to the background, browsers throttle JS/WS callbacks
+so the round-trip  Odoo→proxy→browser→proxy→Odoo  can easily exceed 15 s,
+causing Odoo to tear down the connection (user sees no notifications until
+they hard-reload).
+
+Fix: the proxy answers Odoo's PINGs immediately (proxy-side PONG), so Odoo
+never times out regardless of what the browser is doing.  A separate
+coroutine sends periodic PINGs to the browser so that leg of the tunnel also
+stays alive even during long periods of user inactivity.
 """
 
 import asyncio
 import aiohttp
-from aiohttp import web, ClientSession, WSMsgType
+from aiohttp import web, ClientSession, ClientTimeout, WSMsgType
 import logging
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -24,13 +40,20 @@ PROXY_PORT  = 3003
 ODOO_HOST   = "http://127.0.0.1:8069"
 GEVENT_HOST = "http://127.0.0.1:8072"
 
+# Send a PING to the browser every N seconds to keep the browser-side
+# connection alive.  Must be shorter than any browser/OS idle timeout
+# (typically 60–120 s).  30 s is a safe margin.
+BROWSER_PING_INTERVAL = 30
+
 SKIP_HEADERS = {"host", "content-length", "transfer-encoding", "connection",
                 "keep-alive", "te", "trailers", "upgrade"}
 
 
 async def proxy_websocket(request: web.Request) -> web.WebSocketResponse:
     """Upgrade to WebSocket and bridge to gevent worker on 8072."""
-    ws_server = web.WebSocketResponse(autoping=False)
+    # autoping=True: aiohttp automatically replies to any PING the browser
+    # sends with a PONG.  We still send our own periodic pings to the browser.
+    ws_server = web.WebSocketResponse(autoping=True)
     await ws_server.prepare(request)
 
     qs = "?" + request.query_string if request.query_string else ""
@@ -44,22 +67,32 @@ async def proxy_websocket(request: web.Request) -> web.WebSocketResponse:
 
     log.info("WS  %s → %s", request.path + qs, target)
 
+    # timeout=None: never let aiohttp kill a long-lived idle WebSocket
+    # connection at the session level.
+    _no_timeout = ClientTimeout(total=None, connect=30)
     try:
-        async with ClientSession() as session:
-            async with session.ws_connect(target, headers=upstream_headers,
-                                          autoclose=False, autoping=False) as ws_client:
+        async with ClientSession(timeout=_no_timeout) as session:
+            # autoping=True: aiohttp automatically PONGs Odoo's PINGs
+            # immediately, so Odoo's 15-second PONG-wait never fires.
+            async with session.ws_connect(
+                target,
+                headers=upstream_headers,
+                autoclose=False,
+                autoping=True,          # ← key fix: proxy PONGs Odoo instantly
+                heartbeat=30,           # ← also send keep-alive PINGs upstream
+            ) as ws_client:
 
                 async def forward_to_client():
-                    """Forward frames from gevent (upstream) → browser (downstream)."""
+                    """Forward data/control frames from Odoo → browser."""
                     async for msg in ws_client:
                         if msg.type == WSMsgType.TEXT:
                             await ws_server.send_str(msg.data)
                         elif msg.type == WSMsgType.BINARY:
                             await ws_server.send_bytes(msg.data)
-                        elif msg.type == WSMsgType.PING:
-                            await ws_server.ping(msg.data)
-                        elif msg.type == WSMsgType.PONG:
-                            await ws_server.pong(msg.data)
+                        elif msg.type in (WSMsgType.PING, WSMsgType.PONG):
+                            # autoping=True already handled these on ws_client;
+                            # nothing to forward — swallow silently.
+                            pass
                         elif msg.type == WSMsgType.CLOSE:
                             # Forward the close code + reason so the browser
                             # receives it (e.g. 4001 = session expired → FE
@@ -78,16 +111,16 @@ async def proxy_websocket(request: web.Request) -> web.WebSocketResponse:
                             break
 
                 async def forward_to_server():
-                    """Forward frames from browser (downstream) → gevent (upstream)."""
+                    """Forward data/control frames from browser → Odoo."""
                     async for msg in ws_server:
                         if msg.type == WSMsgType.TEXT:
                             await ws_client.send_str(msg.data)
                         elif msg.type == WSMsgType.BINARY:
                             await ws_client.send_bytes(msg.data)
-                        elif msg.type == WSMsgType.PING:
-                            await ws_client.ping(msg.data)
-                        elif msg.type == WSMsgType.PONG:
-                            await ws_client.pong(msg.data)
+                        elif msg.type in (WSMsgType.PING, WSMsgType.PONG):
+                            # autoping=True on ws_server already handled these;
+                            # swallow so we don't double-reply upstream.
+                            pass
                         elif msg.type == WSMsgType.CLOSE:
                             log.info(
                                 "WS browser CLOSE code=%s → forwarding upstream",
@@ -102,9 +135,26 @@ async def proxy_websocket(request: web.Request) -> web.WebSocketResponse:
                             log.warning("WS browser error: %s", ws_server.exception())
                             break
 
+                async def browser_keepalive():
+                    """Periodically ping the browser to prevent idle disconnects.
+
+                    Browsers (especially background tabs) do not send frames on
+                    their own, so without this the proxy→browser leg silently
+                    dies after the OS/browser idle timeout (~60–120 s).
+                    """
+                    while not ws_server.closed:
+                        await asyncio.sleep(BROWSER_PING_INTERVAL)
+                        if ws_server.closed:
+                            break
+                        try:
+                            await ws_server.ping()
+                        except Exception:
+                            break
+
                 await asyncio.gather(
                     forward_to_client(),
                     forward_to_server(),
+                    browser_keepalive(),
                     return_exceptions=True,
                 )
     except Exception as exc:

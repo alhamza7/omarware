@@ -16,7 +16,7 @@ Lugal Supply
     'author': 'NBS IT Team',
     'website': 'https://nbs.com',
     'license': 'LGPL-3',
-    'depends': ['base', 'mail'],
+    'depends': ['base', 'mail', 'product'],
     'data': ['security/ir.model.access.csv'],
     'installable': True,
     'application': False,

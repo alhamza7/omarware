@@ -297,8 +297,11 @@ Step 9 ── When a new conversation is created → re-subscribe
           Backend adds the new channel automatically
 
 Step 10 ── On logout
-           ws.close(1000, "user_logout")
-           Do NOT reconnect after close code 1000
+           Call POST /lugal/auth/logout (JWT revoke).
+           The server pushes session.logout via bus → your _handlePushEvent handler
+           sets this.stopped=true and closes ws with code 1000 automatically.
+           Alternatively, close immediately: ws.close(1000, "user_logout").
+           In both cases do NOT reconnect after code 1000.
 ```
 
 ---
@@ -385,6 +388,119 @@ Always:
 
 ## 7. All Push Event Types & Payloads
 
+---
+
+### ⚡ Session Lifecycle Events — MUST HANDLE
+
+These events are new as of v3.2 and solve the "WS connected but email stuck after
+login/logout" bug.  **Handle them before everything else.**
+
+| `message.type` | Channel | When fired |
+|----------------|---------|------------|
+| `session.logout` | `supply_session.<sid>` AND `supply_user.<uid>` | User called `POST /lugal/auth/logout` |
+| `session.reconnect_required` | `supply_session.<sid>` AND `supply_user.<old_uid>` | A different user logged in using the same browser session cookie |
+
+#### Root cause of the "email stuck" bug (fixed in v3.2)
+
+Before this fix, logging out then logging back in (or switching users) reused
+the same Odoo session cookie SID. The open WebSocket was still subscribed to
+`supply_user.<old_uid>` while new emails were pushed to `supply_user.<new_uid>`.
+The FE saw the WS as "connected" but received nothing.
+
+The backend now:
+1. Invalidates the server-side session on logout → the WS detects uid=None on
+   the next heartbeat frame → closes with **code 4001**.
+2. Pushes `session.logout` immediately via the bus so the WS closes *before*
+   the next heartbeat (fast-path, typically < 1 s).
+3. When a different user logs in using the same session, pushes
+   `session.reconnect_required` on the old user's channel AND raises
+   `SessionExpiredException` on the next WS frame → closes 4001 → FE reconnects
+   with the new user's channels.
+
+#### How to handle them in the FE
+
+```typescript
+// Inside your BusClient / WS message handler:
+
+private _handlePushEvent(type: string, payload: any): void {
+  switch (type) {
+
+    // ── Session events (handle FIRST, highest priority) ──────────────────
+
+    case 'session.logout':
+      // Server confirmed the user has logged out.
+      // Close the WS cleanly and do NOT reconnect — user is no longer authenticated.
+      this.stopped = true;
+      this.ws?.close(1000, 'session_logout');
+      // Navigate to login screen (or dispatch a Redux "session_expired" action).
+      window.dispatchEvent(new CustomEvent('app:session_logout'));
+      return;
+
+    case 'session.reconnect_required':
+      // A different user is now associated with this browser session.
+      // Close and reopen the WS so it subscribes to the new user's channels.
+      // The new session_id will be picked up automatically from the cookie
+      // that the login endpoint already set.
+      this.sessionId = null;            // force re-fetch in _ensureSession()
+      this.sessionExpiresAt = 0;
+      this.ws?.close(1000, 'session_changed');  // close current WS
+      // _handleClose(1000) normally stops reconnecting; we bypass that here:
+      this._scheduleReconnect(true);           // reconnect with fresh session
+      return;
+
+    // ── Email events ──────────────────────────────────────────────────────
+    case 'crm.email.message.new':
+      this.dispatch('crm.email.message.new', payload);
+      return;
+
+    // ... rest of your event handlers ...
+  }
+}
+```
+
+#### Fix for the infinite-retry loop after logout
+
+When `_scheduleReconnect(true)` calls `_ensureSession()` and the JWT is already
+revoked (401), it must **not** loop forever:
+
+```typescript
+private _scheduleReconnect(refreshSession: boolean): void {
+  if (this.stopped) return;   // ← add this guard (already present in most implementations)
+  const delay = this._nextBackoff();
+  setTimeout(async () => {
+    if (this.stopped) return;
+    try {
+      if (refreshSession) await this._ensureSession();
+      this._openSocket();
+    } catch (err: any) {
+      // If the session bridge returned 401, the user is logged out.
+      // Stop reconnecting and signal the app to show the login screen.
+      if (err?.status === 401 || err?.message?.includes('401')) {
+        this.stopped = true;
+        window.dispatchEvent(new CustomEvent('app:session_expired'));
+        return;
+      }
+      this._scheduleReconnect(true);   // network error — keep trying
+    }
+  }, delay);
+}
+```
+
+#### New channel: `supply_session.<session_id>`
+
+The backend now subscribes each WS connection to **three** types of channels:
+
+| Channel | Purpose |
+|---------|---------|
+| `supply_user.<uid>` | Per-user events (email, chat receipts) — all tabs for this user |
+| `supply_session.<session_id>` | **NEW** Per-session events — only this browser's WS receives them |
+| `supply_stories` | Global broadcast |
+
+The per-session channel means logout/reconnect signals go to the **exact** browser
+that initiated the logout — other tabs logged in as the same user are unaffected.
+
+---
+
 ### Chat events
 
 | `message.type` | Channel | Trigger |
@@ -458,14 +574,70 @@ When `is_pinned` is `false`, `pinned_at` and `pinned_by_id` are `null` — an un
 ```
 
 #### `supply.chat.typing.start` / `.stop` payload
+
 ```json
 {
   "conversation_id": 28,
   "user_id": 38,
   "user_name": "Omar",
-  "is_typing": true
+  "is_typing": true,
+  "heartbeat_time": 1746362400000
 }
 ```
+
+> **`heartbeat_time`** is a Unix epoch in milliseconds captured at the exact moment the heartbeat was received by the server. It is included in both `.start` and `.stop` events.
+>
+> **Why it exists — multi-worker stale-stop problem**
+>
+> Odoo runs many worker processes (e.g. 16). Each heartbeat POST from a user can land on any worker. If User A sends heartbeats at t=0 (worker-3), t=2 (worker-7), t=4 (worker-11) and then stops, each worker fires its own 8-second auto-stop timer independently. Worker-3's timer fires at t=8 and emits a `typing.stop` — but workers 7 and 11 also fire stops at t=10 and t=12. Without `heartbeat_time`, the FE receives contradictory events. With it the FE can discard any stop event whose `heartbeat_time` is older than the last `.start` it accepted for that user.
+
+#### Correct FE typing-indicator state machine
+
+The FE is the **single source of truth** for who is currently typing. Implement a per-conversation `typingByUser` map and never rely on an aggregate list from the server.
+
+```typescript
+// Per conversation state
+const typingByUser = new Map<number, { name: string; lastHeartbeat: number; timer: ReturnType<typeof setTimeout> }>();
+
+function onTypingStart(convId: number, userId: number, userName: string, heartbeatTime: number) {
+  const existing = typingByUser.get(userId);
+  if (existing) clearTimeout(existing.timer);
+
+  // Client-side safety timeout (slightly longer than server's 8s)
+  const timer = setTimeout(() => {
+    typingByUser.delete(userId);
+    renderTypingLine(convId, typingByUser);
+  }, 10_000);
+
+  typingByUser.set(userId, { name: userName, lastHeartbeat: heartbeatTime, timer });
+  renderTypingLine(convId, typingByUser);
+}
+
+function onTypingStop(convId: number, userId: number, heartbeatTime: number) {
+  const existing = typingByUser.get(userId);
+  if (!existing) return; // already gone
+  // Discard stale auto-stops from old worker processes
+  if (heartbeatTime < existing.lastHeartbeat) return;
+
+  clearTimeout(existing.timer);
+  typingByUser.delete(userId);
+  renderTypingLine(convId, typingByUser);
+}
+
+function renderTypingLine(convId: number, map: typeof typingByUser) {
+  const names = [...map.values()].map(t => t.name);
+  if (names.length === 0) return setTypingText('');
+  if (names.length === 1) return setTypingText(`${names[0]} is typing…`);
+  if (names.length === 2) return setTypingText(`${names[0]} and ${names[1]} are typing…`);
+  return setTypingText(`${names[0]}, ${names[1]} and ${names.length - 2} others are typing…`);
+}
+```
+
+Key rules:
+- **Use `userId` as the map key**, never `userName` (names can be identical).
+- **Always reset the timer on every `.start`** — the FE timer is a safety net; the server-side stop is the primary signal.
+- **Check `heartbeat_time` on `.stop`** before removing the user — this discards stale auto-stops from old worker processes.
+- **Clear the entire map** when the user navigates away from the conversation or the WebSocket reconnects.
 
 ### Stories events
 
@@ -926,11 +1098,11 @@ function dispatch(type: string, payload: any): void {
       break;
 
     case 'supply.chat.typing.start':
-      showTypingIndicator(payload.conversation_id, payload.user_id, payload.user_name);
+      onTypingStart(payload.conversation_id, payload.user_id, payload.user_name, payload.heartbeat_time);
       break;
 
     case 'supply.chat.typing.stop':
-      hideTypingIndicator(payload.conversation_id, payload.user_id);
+      onTypingStop(payload.conversation_id, payload.user_id, payload.heartbeat_time);
       break;
 
     case 'supply.chat.message.delivered':
@@ -987,9 +1159,25 @@ All codes verified from `addons/bus/websocket.py` (`CloseCode` enum):
 | `1006` | *(browser)* | Network drop — no close frame sent | Reconnect with backoff |
 | `1012` | `RESTART` | Odoo worker restarted | Reconnect with backoff |
 | `1013` | `TRY_LATER` | Server under load / no DB cursor | Reconnect with backoff |
-| `4001` | `SESSION_EXPIRED` | Odoo session invalidated | Refresh session (Step 3-4), then reconnect |
+| `4001` | `SESSION_EXPIRED` | Odoo session invalidated **OR** user switched on same session | Refresh session (Step 3-4), then reconnect |
 | `4002` | `KEEP_ALIVE_TIMEOUT` | Missed PING/PONG | Reconnect with backoff |
 | `4003` | `KILL_NOW` | Server-side forced kill | Reconnect with backoff |
+
+#### How code 4001 is triggered on user-switch (backend mechanism)
+
+When user B logs in on the same browser session that user A was using, the backend:
+
+1. Updates `session.uid = B` but **intentionally keeps the old session token** (computed for user A).
+2. Immediately pushes a `session.reconnect_required` bus event to `supply_session.<sid>`.
+
+On the next notification dispatch (triggered by the bus event in step 2 above):
+
+- `_dispatch_bus_notifications()` reads the session, calls `check_session()`.
+- `check_session()` computes the expected token for uid=B — it does **not** match the stored token for uid=A → returns `False`.
+- `SessionExpiredException` is raised → WebSocket closes with **code 4001**.
+- FE calls `_scheduleReconnect(true)` → `_ensureSession()` → gets a fresh session for user B → reconnects and subscribes to user B's channels.
+
+This mechanism guarantees the stale connection is torn down **even if the FE has stopped sending subscribe frames** (which happens after the initial replay storm, described below).
 
 ### Backoff schedule
 
@@ -1006,7 +1194,68 @@ Reset to 1s after a successful connection.
 
 ---
 
-## 14. Multi-Tab Deduplication
+---
+
+## 14. Preventing the Subscribe Storm (IMPORTANT)
+
+### What is the subscribe storm?
+
+The Odoo bus replays **all bus notifications with id > `last`** that are still in the dispatch window (≤ 10 seconds old) when the FE subscribes. If the FE sends `last: 0` on every connect, it replays everything from the beginning of the history window.
+
+Among replayed events is `supply.chat.resubscribe` — sent when a new conversation is created. If the FE calls `busClient.resubscribe()` for each of these replayed events, it sends another subscribe frame, which replays more events, which triggers more resubscribes. This creates a **subscribe storm** that:
+
+- Floods the backend with repeated subscribe frames (visible in logs as rapid "Connection authenticated" + "Channel list built" entries every 1-2 seconds for ~7-10 seconds).
+- Exhausts the Odoo WS rate limiter (`RL_BURST = 10` frames per `RL_DELAY * RL_BURST = 2s`). After 10 rapid frames, the connection is closed with `TRY_LATER` (4003).
+- Delays actual notification delivery while the channel subscription is being rebuilt repeatedly.
+
+### The fix — guard `resubscribe()` with deduplication
+
+**Do NOT call `resubscribe()` for every received `supply.chat.resubscribe` event.** Instead, track which conversation IDs are already subscribed:
+
+```typescript
+// In your event dispatcher / handleBusEvent:
+case 'supply.chat.resubscribe': {
+  const { conversation_id } = payload as { conversation_id: number };
+
+  // Only resubscribe if this conversation is genuinely NEW (not already in our list)
+  if (!this.knownConversationIds.has(conversation_id)) {
+    this.knownConversationIds.add(conversation_id);
+    busClient.resubscribe();
+  }
+  break;
+}
+```
+
+Where `knownConversationIds` is a `Set<number>` initialized on login with the IDs of all conversations the user already belongs to (fetch them from `POST /api/crm/supply/conversations/list` on startup).
+
+### Alternative fix — use a stable `lastId` from session storage
+
+Another approach: persist `lastId` across page reloads in `sessionStorage` so replays are bounded:
+
+```typescript
+// On init:
+const storedLast = parseInt(sessionStorage.getItem('ws_last_id') ?? '0', 10);
+this.lastId = storedLast;
+
+// In _handleMessage, after updating this.lastId:
+sessionStorage.setItem('ws_last_id', String(this.lastId));
+```
+
+With a persisted `lastId`, the subscribe frame sends `last: <stored_id>` instead of `last: 0`. Only events newer than the stored ID are replayed — no `supply.chat.resubscribe` storm for already-seen conversations.
+
+**Clear `sessionStorage` on logout** to avoid replaying notifications for a different user:
+```typescript
+disconnect(): void {
+  this.stopped = true;
+  sessionStorage.removeItem('ws_last_id');
+  this.ws?.close(1000, 'user_logout');
+  this.ws = null;
+}
+```
+
+---
+
+## 16. Multi-Tab Deduplication
 
 Each browser tab has its own WebSocket. The same event arrives on every open tab. Without deduplication, the badge would increment once per tab.
 
@@ -1028,7 +1277,7 @@ Tab B receives bus event id=1042 from its own WS
 
 ---
 
-## 15. Testing Checklist
+## 17. Testing Checklist
 
 All tests on `lugal_ws_sandbox` with `ws.rollout.enabled = True` (already set).
 
@@ -1078,7 +1327,7 @@ All tests on `lugal_ws_sandbox` with `ws.rollout.enabled = True` (already set).
 
 ---
 
-## 16. Troubleshooting
+## 18. Troubleshooting
 
 ### WS flag check in browser console
 
@@ -1146,7 +1395,7 @@ The proxy target is likely wrong. Verify that `/lugal` in `vite.config.ts` point
 
 ---
 
-## 17. Quick Reference Card
+## 19. Quick Reference Card
 
 ```
 Sandbox HTTP:    http://192.168.116.204:8075

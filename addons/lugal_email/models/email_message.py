@@ -43,6 +43,13 @@ class LugalEmailMessage(models.Model):
     reply_to       = fields.Char(string='Reply-To')
     message_id     = fields.Char(string='Message-ID (IMAP)', index=True)
     in_reply_to    = fields.Char(string='In-Reply-To')
+    # Space-separated chain of ancestor Message-IDs (RFC 2822 References header).
+    # Column quoted because "references" is a reserved word in PostgreSQL.
+    references     = fields.Text(string='References', column='references')
+    # Root Message-ID of the conversation thread.  All messages in the same
+    # thread share the same thread_id.  Set to the first entry in References
+    # (or to the message's own Message-ID when it is the root).
+    thread_id      = fields.Char(string='Thread ID', index=True)
     date           = fields.Datetime(string='Date', index=True)
 
     # ── Body ──────────────────────────────────────────────────────────────────
@@ -50,9 +57,14 @@ class LugalEmailMessage(models.Model):
     body_text = fields.Text(string='Body Text')
 
     # ── Status ────────────────────────────────────────────────────────────────
-    is_read    = fields.Boolean(string='Read',    default=False, index=True)
-    is_starred = fields.Boolean(string='Starred', default=False)
-    is_draft   = fields.Boolean(string='Draft',   default=False)
+    is_read      = fields.Boolean(string='Read',      default=False, index=True)
+    is_starred   = fields.Boolean(string='Starred',    default=False)
+    is_draft     = fields.Boolean(string='Draft',      default=False)
+    # is_flagged maps to the IMAP \Flagged flag — independent of is_starred.
+    # is_starred is a UI bookmark; is_flagged is the IMAP protocol flag.
+    is_flagged   = fields.Boolean(string='Flagged',    default=False, index=True)
+    # is_important stores the "important" marker (Gmail \Important or manual).
+    is_important = fields.Boolean(string='Important', default=False, index=True)
 
     # Timestamp set the first time this message is marked as read.
     # Null for messages that have never been opened.
@@ -78,6 +90,16 @@ class LugalEmailMessage(models.Model):
         string='SMTP Error',
         help='Last SMTP error message if delivery failed.',
     )
+    # smtp_status is the canonical delivery state returned to the FE.
+    # 'pending'   = queued in background thread, not yet attempted
+    # 'delivered' = SMTP server accepted the message
+    # 'failed'    = SMTP server rejected or network error
+    # Only meaningful for outbound (sent/draft) messages.
+    smtp_status = fields.Selection([
+        ('pending',   'Pending'),
+        ('delivered', 'Delivered'),
+        ('failed',    'Failed'),
+    ], string='SMTP Status', default='pending', index=True)
 
     # True for messages we created locally (sent/reply/forward) or once the full
     # IMAP body has been downloaded on-demand. False for inbox rows that were
@@ -86,6 +108,15 @@ class LugalEmailMessage(models.Model):
         string='Full Body Fetched', default=False,
         help='False = only headers synced; body fetched on first open.',
     )
+
+    # ── Mention / direct-address flag ────────────────────────────────────────
+    # True when the account owner's email appears in the To: header
+    # (i.e. the message was sent directly to them, not just CC'd).
+    # Matches Outlook "Mentioned Mail" / Exchange behaviour.
+    is_mentioned = fields.Boolean(string='Mentioned', default=False, index=True)
+
+    # ── RFC-822 message size in bytes (approx; populated on full-body sync) ──
+    message_size = fields.Integer(string='Message Size (bytes)', default=0)
 
     # ── Soft delete ───────────────────────────────────────────────────────────
     active     = fields.Boolean(default=True)

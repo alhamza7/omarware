@@ -588,6 +588,16 @@ class SupplyStoriesController(http.Controller):
             except (ValueError, TypeError):
                 duration = 0.0
 
+            # Enforce 60-second cap for video/audio stories
+            STORY_MAX_DURATION_S = 60.0
+            if kind in ('video', 'audio') and duration > STORY_MAX_DURATION_S:
+                return _json(
+                    {'success': False,
+                     'error': f'Video/audio stories may not exceed {int(STORY_MAX_DURATION_S)} seconds. '
+                              f'Received: {duration:.1f}s'},
+                    400,
+                )
+
             token = uuid.uuid4().hex
             Att = request.env['ir.attachment'].sudo()
             att = Att.create({

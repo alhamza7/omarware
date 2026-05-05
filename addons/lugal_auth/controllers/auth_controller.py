@@ -22,18 +22,78 @@ def _attach_ws_session(uid):
     in the same HTTP response that returns the JWT tokens.  The WebSocket can
     then be opened immediately — no separate POST /api/crm/ws/session call needed.
 
+    When the current request session already belongs to a DIFFERENT user (e.g.
+    the browser kept a stale cookie from a previous login), we push a
+    'session.reconnect_required' bus event on the old user's channels so any
+    open WebSocket for the old session can close immediately.  The _authenticate()
+    override in lugal_ir_websocket.py will independently detect the uid change
+    and raise SessionExpiredException (close 4001) — this bus push is just an
+    additional fast-path signal for the FE.
+
     Returns the session SID string on success, or None if session setup fails
     (tokens are still valid; the FE can fall back to /api/crm/ws/session).
     """
     try:
         session = request.session
+        old_uid = session.uid  # uid of the previous owner (may be None or different user)
+
         session.uid   = uid
         session.db    = request.db or request.httprequest.headers.get('X-Odoo-Database')
         session.login = request.env['res.users'].sudo().browse(uid).login
-        session.session_token = compute_session_token(session, request.env)
+
+        if old_uid and old_uid != uid:
+            # A DIFFERENT user is taking over this session.
+            #
+            # Intentionally do NOT recalculate session_token here.  The stored
+            # token was computed for old_uid; it will NOT match what
+            # check_session() computes for new uid.  The next time
+            # _dispatch_bus_notifications() runs (triggered by the bus push
+            # below), check_session() returns False → SessionExpiredException
+            # → WebSocket closes with code 4001.
+            #
+            # Why this matters: _authenticate() only runs when the FE sends a
+            # WS frame (subscribe, custom event).  After the initial subscribe
+            # storm the FE goes quiet — the uid-change in _authenticate() never
+            # fires.  By invalidating the token here we guarantee the DISPATCH
+            # path (server-initiated) also detects the uid change and closes
+            # the stale connection, even with zero client frames.
+            pass
+        else:
+            # Same user or fresh session — compute a valid token.
+            session.session_token = compute_session_token(session, request.env)
+
         session.can_save = True
         session.touch()
         root.session_store.save(session)
+
+        # Push a bus signal when a DIFFERENT user is taking over this session.
+        # This gives the old user's WS a fast-path close signal in addition to
+        # the uid-change detection in _authenticate().
+        if old_uid and old_uid != uid:
+            try:
+                session_sid = session.sid
+                bus = request.env['bus.bus'].sudo()
+                # Per-session signal (fastest — hits only the browser whose cookie
+                # matches this session SID).
+                bus._sendone(
+                    f'supply_session.{session_sid}',
+                    'session.reconnect_required',
+                    {'reason': 'user_changed', 'old_uid': old_uid, 'new_uid': uid},
+                )
+                # Per-user fallback (catches any other tab open as the old user).
+                bus._sendone(
+                    f'supply_user.{old_uid}',
+                    'session.reconnect_required',
+                    {'reason': 'user_changed', 'session_id': session_sid},
+                )
+                _logger.info(
+                    '_attach_ws_session: pushed reconnect signal — '
+                    'session %s reassigned from uid=%s to uid=%s',
+                    session_sid[:8], old_uid, uid,
+                )
+            except Exception as be:
+                _logger.debug('_attach_ws_session: bus signal failed: %s', be)
+
         return session.sid
     except Exception as exc:
         _logger.warning('_attach_ws_session failed for uid=%s: %s', uid, exc)
@@ -119,6 +179,45 @@ class LugalAuthController(http.Controller):
             except Exception as exc_imap:
                 _logger.warning('login: start_all() failed: %s', exc_imap)
 
+            # Trigger a FORCED background IMAP sync for this user's accounts on login.
+            # force=True bypasses the throttle so users always see fresh emails right away.
+            # For accounts that have NEVER been synced we WAIT for the sync to complete
+            # (up to 10 seconds) so the first inbox load shows real emails instead of
+            # an empty list.  Subsequent logins use fire-and-forget.
+            try:
+                db_name = request.env.cr.dbname
+                from odoo.addons.lugal_email.controllers.email_controller import (
+                    _run_imap_sync_bg,
+                )
+                user_accounts = request.env['lugal.email.account'].sudo().search([
+                    ('user_id', '=', uid),
+                    ('is_active', '=', True),
+                    ('is_deleted', '=', False),
+                ])
+                seen_creds: set = set()
+                first_time_threads = []
+                for acc in user_accounts:
+                    if not (acc.password or '').strip():
+                        continue
+                    cred = (
+                        (acc.imap_host or '').strip(),
+                        int(acc.imap_port or 993),
+                        (acc.username or acc.email_address or '').strip(),
+                    )
+                    if cred in seen_creds:
+                        continue  # one sync per credential group is enough
+                    seen_creds.add(cred)
+                    t = _run_imap_sync_bg(acc.id, db_name, force=True)
+                    # Wait for first-time syncs (sync_status='never') so the FE
+                    # immediately receives emails on first login without a second trip.
+                    if t and (not acc.last_sync_date or acc.sync_status == 'never'):
+                        first_time_threads.append(t)
+                # Block for at most 10 s — enough for a typical IMAP cold start.
+                for t in first_time_threads:
+                    t.join(timeout=10.0)
+            except Exception as exc_sync:
+                _logger.warning('login: immediate email sync failed: %s', exc_sync)
+
             return {'success': True, 'data': result}
 
         except Exception as exc:
@@ -177,6 +276,14 @@ class LugalAuthController(http.Controller):
         After logout the token is blacklisted — further requests with it
         will receive 401 Unauthorized.
 
+        Also invalidates the Odoo session so any open WebSocket connection
+        for this user detects uid=None on its next frame, raises
+        SessionExpiredException (code 4001), and closes cleanly.
+
+        The FE WebSocket handler's _handleClose(4001) should attempt
+        _ensureSession() which will get 401 (token revoked) → stop reconnecting
+        and redirect to the login screen.
+
         Params: (none — token is read from header)
         Response: { success: true }
         """
@@ -186,7 +293,57 @@ class LugalAuthController(http.Controller):
                 return {'success': False, 'error': 'No Bearer token in Authorization header'}
 
             token = auth_header.split(' ', 1)[1]
+
+            # Decode uid from JWT BEFORE revoking so we can push bus notifications.
+            uid = None
+            session_sid = None
+            try:
+                payload = request.env['lugal.jwt.service'].sudo().decode_token(token)
+                uid = payload.get('uid') if payload else None
+            except Exception:
+                pass
+
+            # Revoke the JWT.
             request.env['lugal.jwt.service'].sudo().revoke_token(token, reason='logout')
+
+            # Invalidate the Odoo session so the WS connection for this session
+            # detects uid=None on the next heartbeat/frame and closes (code 4001).
+            try:
+                old_session = request.session
+                session_sid = old_session.sid if old_session else None
+                if old_session and old_session.uid:
+                    old_session.logout(keep_db=True)
+                    root.session_store.save(old_session)
+                    _logger.info(
+                        'logout: session %s invalidated for uid=%s',
+                        (session_sid or '')[:8], old_session.uid,
+                    )
+            except Exception as se:
+                _logger.debug('logout: session cleanup failed: %s', se)
+
+            # Push a bus event so the WS client for THIS session closes immediately
+            # rather than waiting for the next heartbeat cycle (up to 60 s).
+            # supply_session.{sid} targets only this browser's WS connection.
+            # supply_user.{uid} is sent as a fallback for tabs that may have missed
+            # the per-session signal.
+            if session_sid or uid:
+                try:
+                    bus = request.env['bus.bus'].sudo()
+                    if session_sid:
+                        bus._sendone(
+                            f'supply_session.{session_sid}',
+                            'session.logout',
+                            {'reason': 'logout', 'uid': uid},
+                        )
+                    if uid:
+                        bus._sendone(
+                            f'supply_user.{uid}',
+                            'session.logout',
+                            {'reason': 'logout', 'session_id': session_sid},
+                        )
+                except Exception as be:
+                    _logger.debug('logout: bus notification failed: %s', be)
+
             return {'success': True, 'data': {'message': 'Logged out successfully'}}
 
         except Exception as exc:
@@ -387,21 +544,25 @@ class LugalAuthController(http.Controller):
             if not user.exists():
                 return {'success': False, 'error': 'Account not found'}
 
-            # Update password and invalidate the token
+            # Update password and invalidate the one-time token
             user.write({'password': new_password})
             ICP.set_param(param_key, '')   # one-time use — delete after use
 
-            # Blacklist all existing tokens for this user so old sessions are forced to re-login
+            # Revoke any blacklist entries already associated with this user
+            # (e.g. from a previous logout). New active tokens carry JTIs that
+            # are not stored here, so they will expire naturally. A savepoint
+            # prevents a cleanup failure from aborting the outer transaction.
             try:
-                request.env['lugal.jwt.blacklist'].sudo().search(
-                    [('user_id', '=', uid), ('revoked', '=', False)]
-                ).write({'revoked': True, 'reason': 'password_reset'})
-            except Exception:
-                pass
+                with request.env.cr.savepoint():
+                    request.env['lugal.jwt.blacklist'].sudo().search(
+                        [('user_id', '=', uid)]
+                    ).write({'reason': 'password_reset'})
+            except Exception as bl_exc:
+                _logger.debug('reset_password: blacklist cleanup skipped for uid=%s: %s', uid, bl_exc)
 
             _logger.info('reset_password: password updated for uid=%s', uid)
             return {'success': True, 'data': {'message': 'Password updated successfully. You can now log in with your new password.'}}
 
         except Exception as exc:
-            _logger.error('lugal_auth reset_password error: %s', exc, exc_info=True)
+            _logger.error('lugal_auth reset_password error (%s): %s', type(exc).__name__, exc, exc_info=True)
             return {'success': False, 'error': 'Password reset failed'}

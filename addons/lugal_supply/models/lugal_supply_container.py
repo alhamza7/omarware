@@ -17,7 +17,14 @@ class LugalSupplyContainer(models.Model):
     name = fields.Char(string='Container Name / اسم الحاوية', required=True, index=True, tracking=True)
     container_number = fields.Char(string='Container Number / رقم الحاوية', index=True, tracking=True)
     bl_number = fields.Char(string='B/L Number / رقم بوليصة الشحن', index=True, tracking=True)
-    clearance_company = fields.Char(string='Clearance Company / شركة التخليص', tracking=True)
+    clearance_company = fields.Char(string='Clearance Company (legacy) / شركة التخليص', tracking=True)
+    clearance_company_id = fields.Many2one(
+        'lugal.supply.clearance.company',
+        string='Clearance Company / شركة التخليص',
+        ondelete='set null',
+        index=True,
+        tracking=True,
+    )
     origin_location = fields.Char(string='Origin / المنشأ', tracking=True)
     departure_date = fields.Date(string='Departure Date / تاريخ المغادرة', index=True, tracking=True)
     eta = fields.Date(string='ETA / الموعد المتوقع', tracking=True)
@@ -49,6 +56,15 @@ class LugalSupplyContainer(models.Model):
     )
 
     tracking_url = fields.Char(string='Tracking URL (Searates)', tracking=True)
+
+    destination_port = fields.Char(string='Destination Port / ميناء الوصول', tracking=True)
+    total_weight_kg = fields.Float(string='Total Weight (kg)', digits=(16, 3), tracking=True)
+    total_cbm = fields.Float(string='Total CBM', digits=(16, 4), tracking=True)
+    reminder_date = fields.Date(string='Reminder Date', tracking=True)
+    reminder_note = fields.Char(string='Reminder Note', tracking=True)
+    driver_name = fields.Char(string='Driver Name', tracking=True)
+    driver_phone = fields.Char(string='Driver Phone', tracking=True)
+    driver_assigned_at = fields.Datetime(string='Driver Assigned At', tracking=True)
 
     # --- Clearance delivery status (highlighted flag in UI) ---
     clearance_info_delivered = fields.Boolean(

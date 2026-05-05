@@ -54,13 +54,20 @@ def _norm_addr_list(raw):
     return result
 
 # ── Background IMAP sync state ────────────────────────────────────────────────
-# Per-account sync lock: prevents duplicate concurrent IMAP fetches.
+# Per-account lock: prevents the same account running two syncs simultaneously.
 _sync_lock = threading.Lock()
 _syncing_accounts: set = set()
 
+# Per-credential lock: prevents multiple accounts sharing the same IMAP login
+# (same imap_host + username) from opening concurrent IMAP connections.
+# Without this lock, logging in with 15 accounts that share one IMAP username
+# fires 15 simultaneous connections → server limit exceeded → IDLE crashes.
+_cred_sync_lock = threading.Lock()
+_syncing_credentials: set = set()   # set of (imap_host, imap_port, username)
+
 # Throttle mirrors (kept here so the controller doesn't import from the model).
-_IMAP_THROTTLE_SECONDS = 15       # min gap between syncs when inbox has messages
-_IMAP_THROTTLE_EMPTY_SECONDS = 10 # min gap when inbox is empty
+_IMAP_THROTTLE_SECONDS = 30        # min gap between syncs when inbox has messages
+_IMAP_THROTTLE_EMPTY_SECONDS = 20  # min gap when inbox is empty
 
 
 def _needs_imap_sync(acc, force=False):
@@ -85,12 +92,20 @@ def _needs_imap_sync(acc, force=False):
     return delta >= limit
 
 
-def _run_imap_sync_bg(acc_id, db_name):
+def _run_imap_sync_bg(acc_id, db_name, force=False):
     """
     Spawn a one-shot daemon thread to run IMAP inbox sync for a single account.
-    Returns the Thread object so callers can optionally join/wait, or None if a
-    sync is already running for that account.
-    The thread commits its own transaction independently of the HTTP worker.
+
+    Two-level de-duplication:
+      1. Per account_id  — prevents the same account syncing twice in parallel.
+      2. Per IMAP credential (host + username) — prevents multiple accounts that
+         share one IMAP login from opening concurrent connections to the mail
+         server, which would hit the server's max-connections-per-user limit and
+         cause the IDLE watcher's persistent connection to be force-closed.
+
+    force=True bypasses the 30-second throttle (use on login / WS connect).
+
+    Returns the Thread object, or None if a sync is already running.
     """
     with _sync_lock:
         if acc_id in _syncing_accounts:
@@ -98,19 +113,47 @@ def _run_imap_sync_bg(acc_id, db_name):
         _syncing_accounts.add(acc_id)
 
     def _do():
+        cred_key = None
         try:
             from odoo.modules.registry import Registry as _Registry
             import odoo as _odoo
             with _Registry(db_name).cursor() as cr:
                 env = _odoo.api.Environment(cr, _odoo.SUPERUSER_ID, {})
                 acc = env['lugal.email.account'].browse(acc_id)
-                if acc.exists() and (acc.password or '').strip():
+                if not acc.exists() or not acc.is_active or not (acc.password or '').strip():
+                    return
+
+                # Build the credential key
+                imap_host = (acc.imap_host or '').strip()
+                imap_port = int(acc.imap_port or 993)
+                username  = (acc.username or acc.email_address or '').strip()
+                cred_key  = (imap_host, imap_port, username)
+
+                # Credential-level check: skip if another sync is already open
+                # for this IMAP username+server combination.
+                with _cred_sync_lock:
+                    if cred_key in _syncing_credentials:
+                        _logger.debug(
+                            'Skipping bg sync for acc %s — credential %s already syncing',
+                            acc_id, cred_key,
+                        )
+                        cred_key = None  # don't discard it on exit — we didn't add it
+                        return
+                    _syncing_credentials.add(cred_key)
+
+                if force:
                     acc.action_sync()
+                else:
+                    acc.action_sync_if_stale()
+
         except Exception:
             _logger.exception('Background IMAP sync failed account_id=%s', acc_id)
         finally:
             with _sync_lock:
                 _syncing_accounts.discard(acc_id)
+            if cred_key:
+                with _cred_sync_lock:
+                    _syncing_credentials.discard(cred_key)
 
     t = threading.Thread(target=_do, daemon=True, name=f'imap-bg-{acc_id}')
     t.start()
@@ -134,6 +177,21 @@ def _unauthorized():
 
 def _not_found(msg='Not found'):
     return _json_response({'success': False, 'error': msg}, status=404)
+
+
+def _resolve_imap_folder(account, local_folder):
+    """Map a local folder label to the real IMAP server folder name.
+
+    Uses the account's cached folder discovery so the result is correct for
+    Gmail ('[Gmail]/Sent Mail'), Dovecot ('Sent'), cPanel ('INBOX.Sent'), etc.
+    Falls back to a sensible default if discovery is unavailable.
+    """
+    if local_folder == 'inbox':
+        return 'INBOX'
+    try:
+        return account.sudo()._get_server_folder_name(local_folder)
+    except Exception:
+        return local_folder.capitalize()
 
 
 def _account_to_dict(acc):
@@ -177,9 +235,16 @@ def _message_to_dict(msg, full=False):
         'read_at':        _to_riyadh_iso(msg.read_at) if msg.read_at else None,
         'is_read':        msg.is_read,
         'is_starred':     msg.is_starred,
+        'is_flagged':     msg.is_flagged,    # IMAP \Flagged — independent of is_starred
+        'is_important':   msg.is_important,
         'is_draft':       msg.is_draft,
+        'is_mentioned':   msg.is_mentioned,
+        'message_size':   msg.message_size or 0,
         'smtp_delivered': msg.smtp_delivered,
         'smtp_error':     msg.smtp_error or None,
+        'smtp_status':    msg.smtp_status or 'pending',
+        'thread_id':      msg.thread_id or None,
+        'in_reply_to':    msg.in_reply_to or None,
         'crm_links': {
             'customer': {'id': msg.linked_customer_id, 'name': msg.linked_customer_name}
                         if msg.linked_customer_id else None,
@@ -187,12 +252,121 @@ def _message_to_dict(msg, full=False):
                         if msg.linked_ticket_id else None,
         },
     }
+    # Attachment summary — always present so FE can show paperclip icon in list view.
+    # Inline images (description starts with "__inline_cid__:") are excluded so they
+    # don't appear as downloadable attachments in the UI.
+    try:
+        atts = msg.env['ir.attachment'].sudo().search([
+            ('res_model', '=', 'lugal.email.message'),
+            ('res_id',    '=', msg.id),
+        ])
+        att_list = [{
+            'id':       a.id,
+            'name':     a.name or 'attachment',
+            'mimetype': a.mimetype or 'application/octet-stream',
+            'size':     a.file_size or 0,
+            'url': (
+                f'/web/content/{a.id}?access_token={a.access_token}'
+                if a.access_token
+                else f'/web/content/{a.id}?download=true'
+            ),
+        } for a in atts if not (a.description or '').startswith('__inline_cid__:')]
+    except Exception:
+        att_list = []
+
+    data['has_attachments']   = bool(att_list)
+    data['attachment_count']  = len(att_list)
+
     if full:
         data['body_html']    = msg.body_html or ''
         data['body_text']    = msg.body_text or ''
         data['body_fetched'] = bool(msg.body_fetched)
-        data['attachments']  = []
+        data['attachments']  = att_list
     return data
+
+
+def _build_quoted_html(msg):
+    """Return an HTML block with the original message quoted below the reply area."""
+    date_str = _to_riyadh_iso(msg.date) or ''
+    sender   = msg.from_name or msg.from_address or 'Unknown'
+    addr     = msg.from_address or ''
+    header   = (
+        f'<div style="color:#555;font-size:0.9em;margin-top:16px;border-top:1px solid #e0e0e0;padding-top:8px;">'
+        f'<b>On {date_str}, {sender}'
+        f'{(" &lt;" + addr + "&gt;") if addr else ""} wrote:</b>'
+        f'</div>'
+    )
+    original = msg.body_html or (msg.body_text or '').replace('\n', '<br>')
+    return (
+        f'<br><br>{header}'
+        f'<blockquote style="margin:8px 0 0 8px;padding-left:12px;'
+        f'border-left:3px solid #ccc;color:#333;">'
+        f'{original}'
+        f'</blockquote>'
+    )
+
+
+def _build_quoted_text(msg):
+    """Return a plain-text block with the original message quoted (> prefix)."""
+    date_str = _to_riyadh_iso(msg.date) or ''
+    sender   = msg.from_name or msg.from_address or 'Unknown'
+    addr     = msg.from_address or ''
+    header   = f'On {date_str}, {sender}{(" <" + addr + ">") if addr else ""} wrote:'
+    original = (msg.body_text or '').strip()
+    quoted   = '\n'.join('> ' + line for line in original.splitlines()) if original else ''
+    return f'\n\n{header}\n{quoted}'
+
+
+def _thread_vals_for_reply(orig):
+    """Return the thread_id / references / in_reply_to values for a reply or reply-all.
+
+    Thread-ID is the root of the conversation — the very first message's
+    Message-ID.  The References chain grows with each reply so email clients
+    can reconstruct the full conversation tree.
+
+    RFC 2822 rules:
+    - in_reply_to  = Message-ID of the immediate parent
+    - references   = parent.references + parent.message_id (space-joined)
+    - thread_id    = first entry in the final references list (= root msg-id)
+    """
+    parent_msg_id  = (orig.message_id or '').strip()
+    parent_refs    = (orig.references or '').strip()
+    parent_tid     = (orig.thread_id or '').strip()
+
+    # Build the new References chain
+    if parent_refs:
+        new_refs = f'{parent_refs} {parent_msg_id}'.strip() if parent_msg_id else parent_refs
+    elif parent_msg_id:
+        new_refs = parent_msg_id
+    else:
+        new_refs = ''
+
+    # thread_id is inherited from the parent, falling back to the parent's
+    # own Message-ID (making it the implicit root).
+    new_thread_id = parent_tid or parent_msg_id or ''
+
+    return {
+        'in_reply_to': parent_msg_id or False,
+        'references':  new_refs or False,
+        'thread_id':   new_thread_id or False,
+    }
+
+
+def _thread_vals_for_forward(orig):
+    """Return thread values for a forward.
+
+    Forwards start a NEW thread in the recipient's mailbox — the forward
+    itself is the root.  The original thread_id is NOT propagated.
+    We still carry a References header pointing to the original so that
+    mail servers can link them loosely.
+    """
+    parent_msg_id = (orig.message_id or '').strip()
+    new_refs      = parent_msg_id if parent_msg_id else ''
+    return {
+        'in_reply_to': parent_msg_id or False,
+        'references':  new_refs or False,
+        'thread_id':   False,   # will be set to the new message's own Message-ID after create
+    }
 
 
 def _get_user_accounts(uid):
@@ -552,6 +726,99 @@ class LugalEmailController(http.Controller):
             _logger.exception('email_push_notify failed')
             return _json_response({'success': False, 'error': str(exc)}, 500)
 
+    # ── Manual Force-Sync ─────────────────────────────────────────────────────
+    #
+    # FE can call this endpoint to immediately (re)sync one or all of the
+    # logged-in user's email accounts.  Runs synchronously and waits for
+    # completion so the response already contains the fresh message counts.
+    #
+    # POST /api/lugal/email/sync
+    # Body (JSON, all optional):
+    #   { "account_id": 55 }     // sync a specific account
+    #   {}                       // sync all of this user's accounts
+    #
+    # Response:
+    #   { "success": true, "accounts": [{ "id":55, "sync_ok":true, "imported":12,
+    #     "unread":5, "sync_status":"ok", "sync_error": null }] }
+
+    @http.route('/api/lugal/email/sync',
+                type='http', auth='none', csrf=False, methods=['POST', 'OPTIONS'])
+    def force_sync(self, **kwargs):
+        if request.httprequest.method == 'OPTIONS':
+            return _json_response({})
+        uid = ensure_jwt_user_id()
+        if not uid:
+            return _unauthorized()
+        try:
+            body = {}
+            raw = request.httprequest.get_data(cache=False)
+            if raw:
+                try:
+                    body = json.loads(raw)
+                except Exception:
+                    pass
+
+            account_id = body.get('account_id')
+            Acc = request.env['lugal.email.account'].sudo()
+
+            if account_id:
+                accs = Acc.browse(int(account_id))
+                if not accs.exists() or accs.user_id.id != uid:
+                    return _not_found('Email account not found')
+            else:
+                accs = _get_user_accounts(uid)
+
+            if not accs:
+                return _json_response({'success': False, 'error': 'No email accounts configured'}, 400)
+
+            results = []
+            for acc in accs:
+                if not (acc.password or '').strip():
+                    results.append({
+                        'id':          acc.id,
+                        'sync_ok':     False,
+                        'error':       'No app password configured on this account',
+                        'sync_status': acc.sync_status or 'never',
+                        'imported':    0,
+                        'unread':      0,
+                    })
+                    continue
+
+                try:
+                    sync_result = acc.action_sync()
+                    request.env.cr.commit()
+                    unread = request.env['lugal.email.message'].sudo().search_count([
+                        ('account_id', '=', acc.id),
+                        ('folder', '=', 'inbox'),
+                        ('is_read', '=', False),
+                        ('is_deleted', '=', False),
+                    ])
+                    results.append({
+                        'id':          acc.id,
+                        'name':        acc.name,
+                        'email':       acc.email_address,
+                        'sync_ok':     (sync_result or {}).get('sync_status') == 'ok',
+                        'imported':    (sync_result or {}).get('imported', 0),
+                        'unread':      unread,
+                        'sync_status': acc.sync_status or 'never',
+                        'sync_error':  acc.sync_error_msg or None,
+                    })
+                except Exception as exc:
+                    _logger.exception('force_sync failed for account %s', acc.id)
+                    results.append({
+                        'id':          acc.id,
+                        'sync_ok':     False,
+                        'error':       str(exc),
+                        'sync_status': 'error',
+                        'imported':    0,
+                        'unread':      0,
+                    })
+
+            return _json_response({'success': True, 'accounts': results})
+        except Exception as exc:
+            _logger.exception('force_sync endpoint error')
+            return _json_response({'success': False, 'error': str(exc)}, 500)
+
     # ── Messages / Mailbox ────────────────────────────────────────────────────
 
     @http.route([
@@ -577,47 +844,135 @@ class LugalEmailController(http.Controller):
             offset      = int(params.get('offset', 0))
             auto_sync   = params.get('auto_sync', '1') != '0'
             force_sync  = params.get('force_sync', '0') == '1'
+            # since_id: when provided, NEW messages (id > since_id) are fetched
+            # first and prepended before the paginated list.  Use this after
+            # receiving a crm.email.message.new WS event to guarantee the newly
+            # arrived email appears at the top even if its Date header is old.
+            since_id    = int(params.get('since_id', 0) or 0)
+
+            # Optional server-side filter params
+            filter_unread         = params.get('unread')
+            filter_flagged        = params.get('flagged')
+            filter_important      = params.get('important')
+            filter_has_attachment = params.get('has_attachments')
+            filter_mentioned      = params.get('mentioned')
+            filter_sent_to_me     = params.get('sent_to_me')
 
             # scope to this user's accounts
             user_accounts = _get_user_accounts(uid)
             account_ids   = user_accounts.ids
 
-            # Kick off IMAP sync if the account is stale, then wait up to 7 seconds
-            # for it to complete before serving data.  Batch IMAP fetch means a typical
-            # sync of ~150 messages finishes in 2-4 s.  If the server is unusually slow
-            # we fall through and return whatever is already cached in the DB.
+            # Kick off IMAP sync if the account is stale, then wait for completion.
+            # For accounts that have NEVER been synced (sync_status='never') we use
+            # force=True and a longer 15-second timeout so the first inbox load
+            # always shows real emails rather than an empty list.
+            # For routine syncs a 7-second timeout is sufficient.
             if auto_sync and folder == 'inbox':
                 db_name = request.env.cr.dbname
                 sync_threads = []
+                has_never_synced = False
                 for acc in user_accounts:
                     try:
-                        if _needs_imap_sync(acc, force=force_sync):
-                            t = _run_imap_sync_bg(acc.id, db_name)
+                        acc_never = not acc.last_sync_date or acc.sync_status == 'never'
+                        effective_force = force_sync or acc_never
+                        if effective_force or _needs_imap_sync(acc, force=False):
+                            t = _run_imap_sync_bg(acc.id, db_name, force=effective_force)
                             if t:
                                 sync_threads.append(t)
+                                if acc_never:
+                                    has_never_synced = True
+                                    _logger.info(
+                                        'mailbox: first-time sync triggered for account %s',
+                                        acc.id,
+                                    )
                     except Exception:
                         _logger.exception('mailbox auto-sync kick failed for account %s', acc.id)
-                # Wait for all kicked syncs to finish (or time out)
+                # Wait longer for first-time syncs (cold start from mail server).
+                wait_secs = 15.0 if has_never_synced else 7.0
                 for t in sync_threads:
-                    t.join(timeout=7.0)
+                    t.join(timeout=wait_secs)
 
-            domain = [
+            base_domain = [
                 ('account_id', 'in', account_ids),
                 ('is_deleted', '=', False),
                 ('folder', '=', folder),
             ]
             if account_id:
-                domain.append(('account_id', '=', int(account_id)))
+                base_domain.append(('account_id', '=', int(account_id)))
             if query:
-                domain += ['|', ('subject', 'ilike', query), ('body_text', 'ilike', query)]
+                base_domain += ['|', ('subject', 'ilike', query), ('body_text', 'ilike', query)]
             if starred:
-                domain.append(('is_starred', '=', True))
+                base_domain.append(('is_starred', '=', True))
             if linked_model and linked_id:
-                domain += [('linked_model', '=', linked_model), ('linked_record_id', '=', int(linked_id))]
+                base_domain += [('linked_model', '=', linked_model), ('linked_record_id', '=', int(linked_id))]
+
+            # Optional server-side filters
+            if filter_unread == '1':
+                base_domain.append(('is_read', '=', False))
+            if filter_flagged == '1':
+                base_domain.append(('is_starred', '=', True))
+            if filter_important == '1':
+                base_domain.append(('is_important', '=', True))
+            if filter_mentioned == '1':
+                base_domain.append(('is_mentioned', '=', True))
+            if filter_has_attachment == '1':
+                att_msg_ids = request.env['ir.attachment'].sudo().search([
+                    ('res_model', '=', 'lugal.email.message'),
+                ]).mapped('res_id')
+                base_domain.append(('id', 'in', att_msg_ids))
+            if filter_sent_to_me == '1':
+                user_emails = [a.email_address for a in user_accounts if a.email_address]
+                if user_emails:
+                    to_clauses = [('to_addresses', 'ilike', e) for e in user_emails]
+                    if len(to_clauses) == 1:
+                        base_domain += to_clauses
+                    else:
+                        or_clause = ['|'] * (len(to_clauses) - 1) + to_clauses
+                        base_domain += or_clause
 
             Msg   = request.env['lugal.email.message'].sudo()
-            total = Msg.search_count(domain)
-            msgs  = Msg.search(domain, limit=limit, offset=offset, order='date desc')
+            total = Msg.search_count(base_domain)
+
+            # Sort by create_date desc (when Odoo stored the message) then id desc.
+            # Using create_date instead of the email Date header avoids future-dated
+            # messages (mail servers with wrong clocks) from appearing above genuinely
+            # newer messages that arrived later.
+            sort_order = 'create_date desc, id desc'
+
+            new_msgs = Msg.browse()
+            if since_id:
+                # When since_id is provided we intentionally search across ALL of
+                # the user's accounts, ignoring any ?account_id= filter, so that
+                # a new message for account A is still returned even when the
+                # caller currently has account B selected.  The regular paginated
+                # list still respects the account_id filter.
+                all_accs_domain = [
+                    ('account_id', 'in', account_ids),
+                    ('is_deleted', '=', False),
+                    ('folder',     '=', folder),
+                    ('id',         '>',  since_id),
+                ]
+                new_msgs = Msg.search(all_accs_domain, order='id desc')
+
+            page_msgs = Msg.search(base_domain, limit=limit, offset=offset, order=sort_order)
+
+            if new_msgs:
+                new_ids  = set(new_msgs.ids)
+                # New messages pinned at top; de-duplicate from paginated list
+                combined = list(new_msgs) + [m for m in page_msgs if m.id not in new_ids]
+                items = [_message_to_dict(m) for m in combined[:limit]]
+            else:
+                items = [_message_to_dict(m) for m in page_msgs]
+
+            # Include the highest message ID across all user accounts so the FE
+            # can poll with ?since_id=<max_id> to discover newly arrived messages
+            # regardless of which account_id filter is active.
+            all_max = Msg.search([
+                ('account_id', 'in', account_ids),
+                ('is_deleted', '=', False),
+                ('folder',     '=', folder),
+            ], order='id desc', limit=1)
+            max_id = all_max[0].id if all_max else 0
 
             return _json_response({
                 'success': True,
@@ -626,7 +981,8 @@ class LugalEmailController(http.Controller):
                     'total':   total,
                     'limit':   limit,
                     'offset':  offset,
-                    'items':   [_message_to_dict(m) for m in msgs],
+                    'max_id':  max_id,
+                    'items':   items,
                 },
             })
         except Exception as exc:
@@ -634,23 +990,75 @@ class LugalEmailController(http.Controller):
             return _json_response({'success': False, 'error': str(exc)}, 500)
 
     @http.route('/api/lugal/email/messages/<int:message_id>', type='http', auth='none', csrf=False,
-                methods=['GET', 'DELETE', 'OPTIONS'])
+                methods=['GET', 'PATCH', 'DELETE', 'OPTIONS'])
     def message_detail(self, message_id, **kwargs):
         if request.httprequest.method == 'OPTIONS':
             return _json_response({})
         uid = ensure_jwt_user_id()
         if not uid:
             return _unauthorized()
+        # ?preview=true → return message data without marking it as read.
+        # Used by notification handlers that need the payload without side-effects.
+        preview_mode = str(kwargs.get('preview', '')).lower() in ('1', 'true', 'yes')
         try:
             msg = request.env['lugal.email.message'].sudo().browse(message_id)
             if not msg.exists() or msg.is_deleted or msg.account_id.user_id.id != uid:
                 return _not_found()
+            if request.httprequest.method == 'PATCH':
+                body = json.loads(request.httprequest.data or '{}')
+                vals = {}
+                imap_uid    = msg.imap_uid
+                imap_folder = _resolve_imap_folder(msg.account_id, msg.folder)
+
+                if 'is_flagged' in body:
+                    is_flagged = bool(body['is_flagged'])
+                    vals['is_flagged'] = is_flagged   # independent field from is_starred
+                    if imap_uid:
+                        if is_flagged:
+                            msg.account_id.sudo()._imap_store_async(
+                                imap_uid, imap_folder, add_flags=['\\Flagged']
+                            )
+                        else:
+                            msg.account_id.sudo()._imap_store_async(
+                                imap_uid, imap_folder, remove_flags=['\\Flagged']
+                            )
+
+                if 'is_starred' in body:
+                    vals['is_starred'] = bool(body['is_starred'])
+
+                if 'is_important' in body:
+                    vals['is_important'] = bool(body['is_important'])
+
+                if 'is_read' in body:
+                    is_read = bool(body['is_read'])
+                    vals['is_read'] = is_read
+                    if is_read and not msg.read_at:
+                        from datetime import datetime
+                        vals['read_at'] = datetime.utcnow()
+                    if imap_uid:
+                        if is_read:
+                            msg.account_id.sudo()._imap_store_async(
+                                imap_uid, imap_folder, add_flags=['\\Seen']
+                            )
+                        else:
+                            msg.account_id.sudo()._imap_store_async(
+                                imap_uid, imap_folder, remove_flags=['\\Seen']
+                            )
+
+                if not vals:
+                    return _json_response(
+                        {'success': False, 'error': 'Provide at least one of: is_flagged, is_starred, is_important, is_read'},
+                        400,
+                    )
+                msg.write(vals)
+                return _json_response({'success': True, 'data': _message_to_dict(msg)})
+
             if request.httprequest.method == 'DELETE':
                 prev_folder = msg.folder
                 msg.write({'folder': 'trash'})
                 # Push move to IMAP server (fire-and-forget)
                 if msg.imap_uid:
-                    imap_from = 'INBOX' if prev_folder == 'inbox' else prev_folder.upper()
+                    imap_from = _resolve_imap_folder(msg.account_id, prev_folder)
                     msg.account_id.sudo()._imap_move_async(msg.imap_uid, imap_from, 'trash')
                 return _json_response({'success': True})
             # Lazy-fetch full body if this message was imported headers-only.
@@ -660,21 +1068,68 @@ class LugalEmailController(http.Controller):
                     msg.invalidate_recordset()  # reload from DB
                 except Exception:
                     _logger.exception('Lazy body fetch failed for message %s', msg.id)
-            # Auto mark as read on GET
-            if not msg.is_read:
-                msg.write({'is_read': True})
-                # Push \Seen flag to IMAP server
-                if msg.imap_uid and msg.folder == 'inbox':
-                    msg.account_id.sudo()._imap_store_async(
-                        msg.imap_uid, 'INBOX', add_flags=['\\Seen']
-                    )
-                # Decrement unread counter
-                if msg.folder == 'inbox':
-                    msg.account_id.sudo().write({
-                        'unread_count': max(0, msg.account_id.unread_count - 1)
-                    })
+            # GET does NOT auto-mark as read.
+            # To mark a message as read, use: POST /api/lugal/email/messages/<id>/read
             return _json_response({'success': True, 'data': _message_to_dict(msg, full=True)})
         except Exception as exc:
+            return _json_response({'success': False, 'error': str(exc)}, 500)
+
+    @http.route('/api/lugal/email/messages/<int:message_id>/thread', type='http', auth='none', csrf=False,
+                methods=['GET', 'OPTIONS'])
+    def message_thread(self, message_id, **kwargs):
+        """Return all messages in the same email thread, ordered oldest → newest.
+
+        A thread is the full conversation: the original email plus all replies,
+        reply-alls that share the same root Message-ID (thread_id).
+
+        The requesting message itself is always included.  Messages from all
+        folders (inbox, sent) are included so the user sees both sides of the
+        conversation.  Deleted messages are excluded.
+
+        Query params:
+          include_body=1   — include body_html / body_text for each message
+                             (default: 0, returns headers only to keep response small)
+        """
+        if request.httprequest.method == 'OPTIONS':
+            return _json_response({})
+        uid = ensure_jwt_user_id()
+        if not uid:
+            return _unauthorized()
+        try:
+            anchor = request.env['lugal.email.message'].sudo().browse(message_id)
+            if not anchor.exists() or anchor.account_id.user_id.id != uid:
+                return _not_found()
+
+            thread_id = anchor.thread_id or anchor.message_id
+            account_ids = _get_user_accounts(uid).ids
+            include_body = request.httprequest.args.get('include_body', '0') == '1'
+
+            Msg = request.env['lugal.email.message'].sudo()
+            if thread_id:
+                thread_msgs = Msg.search([
+                    ('account_id', 'in', account_ids),
+                    ('is_deleted', '=', False),
+                    ('thread_id',  '=', thread_id),
+                ], order='date asc, id asc')
+            else:
+                # Fallback: no thread_id — return just this message
+                thread_msgs = anchor
+
+            # Always ensure the anchor itself is in the list even if thread_id is missing
+            if anchor.id not in thread_msgs.ids:
+                thread_msgs = anchor | thread_msgs
+
+            items = [_message_to_dict(m, full=include_body) for m in thread_msgs]
+            return _json_response({
+                'success': True,
+                'data': {
+                    'thread_id':    thread_id or None,
+                    'total':        len(items),
+                    'messages':     items,
+                },
+            })
+        except Exception as exc:
+            _logger.exception('message_thread error')
             return _json_response({'success': False, 'error': str(exc)}, 500)
 
     @http.route('/api/lugal/email/messages/details', type='http', auth='none', csrf=False,
@@ -730,6 +1185,18 @@ class LugalEmailController(http.Controller):
             found_ids = set(msgs.ids)
             missing_ids = [i for i in message_ids if i not in found_ids]
 
+            # If we have missing IDs it likely means the inbox hasn't synced yet.
+            # Kick off a background sync for every account that is overdue so
+            # subsequent requests pick up the messages. Non-blocking / non-fatal.
+            if missing_ids:
+                try:
+                    db_name = request.env.cr.dbname
+                    for acc in user_accounts:
+                        if (acc.password or '').strip() and _needs_imap_sync(acc):
+                            _run_imap_sync_bg(acc.id, db_name)
+                except Exception:
+                    pass
+
             # Lazy-fetch bodies that were imported as headers-only
             for msg in msgs:
                 if msg.folder == 'inbox' and not msg.body_fetched and msg.imap_uid:
@@ -739,13 +1206,34 @@ class LugalEmailController(http.Controller):
                     except Exception:
                         _logger.exception('Bulk lazy body fetch failed for message %s', msg.id)
 
+            # Pre-fetch all attachments for the batch in one SQL query
+            msg_ids_found = list(found_ids)
+            IrAtt = request.env['ir.attachment'].sudo()
+            all_atts = IrAtt.search([
+                ('res_model', '=', 'lugal.email.message'),
+                ('res_id',    'in', msg_ids_found),
+            ])
+            att_by_msg: dict = {}
+            for a in all_atts:
+                att_by_msg.setdefault(a.res_id, []).append({
+                    'id':       a.id,
+                    'name':     a.name or 'attachment',
+                    'mimetype': a.mimetype or 'application/octet-stream',
+                    'size':     a.file_size or 0,
+                    'url': (
+                        f'/web/content/{a.id}?access_token={a.access_token}'
+                        if a.access_token
+                        else f'/web/content/{a.id}?download=true'
+                    ),
+                })
+
             items = []
             for msg in msgs:
                 items.append({
                     'id':          msg.id,
                     'body_html':   msg.body_html or '',
                     'body_text':   msg.body_text or '',
-                    'attachments': [],
+                    'attachments': att_by_msg.get(msg.id, []),
                 })
 
             return _json_response({
@@ -776,8 +1264,47 @@ class LugalEmailController(http.Controller):
             # Optional ISO datetime: only return new_messages received after this timestamp.
             # Pass the `data.checked_at` value from the previous poll response.
             since_str = params.get('since', '')
+            # Optional integer: only return messages with id > last_seen_id.
+            # Complements since= for browsers that missed a push notification
+            # (e.g. second browser session that connected after the push was sent).
+            last_seen_id = int(params.get('last_seen_id', 0) or 0)
 
             accs = _get_user_accounts(uid)
+
+            # ── Auto-sync for accounts that have never been synced or errored ─
+            # The notifications endpoint is often called before the inbox is opened.
+            # Without this, a newly-configured account (sync_status='never') would
+            # show 0 emails indefinitely until the user navigates to the inbox view.
+            db_name = request.env.cr.dbname
+            sync_threads = []
+            for acc in accs:
+                needs_urgent_sync = (
+                    (acc.password or '').strip() and
+                    (acc.sync_status in ('never', 'error') or not acc.last_sync_date)
+                )
+                if needs_urgent_sync:
+                    try:
+                        t = _run_imap_sync_bg(acc.id, db_name, force=True)
+                        if t:
+                            sync_threads.append(t)
+                            _logger.info(
+                                'notifications: triggered urgent sync for account %s '
+                                '(sync_status=%s)', acc.id, acc.sync_status,
+                            )
+                    except Exception:
+                        _logger.exception(
+                            'notifications: urgent sync kick failed for account %s', acc.id,
+                        )
+
+            # Wait up to 8 seconds for urgent syncs so the response contains fresh counts.
+            # If the sync takes longer the FE will get the cached (possibly stale) counts
+            # and the sync will complete in the background.
+            for t in sync_threads:
+                t.join(timeout=8.0)
+
+            # Re-read accounts after sync to pick up updated unread_count / sync_status.
+            accs = _get_user_accounts(uid)
+
             per_account = []
             total_unread = 0
             for acc in accs:
@@ -789,12 +1316,23 @@ class LugalEmailController(http.Controller):
                     ('is_deleted', '=', False),
                 ])
                 total_unread += unread
+                has_pw     = bool((acc.password or '').strip())
+                err_msg    = acc.sync_error_msg or ''
+                is_auth    = 'AUTHENTICATIONFAILED' in err_msg.upper() or 'INVALID CREDENTIALS' in err_msg.upper()
+                needs_setup = not has_pw or is_auth
                 per_account.append({
-                    'id':           acc.id,
-                    'name':         acc.name,
-                    'unread_count': unread,
-                    'sync_status':  acc.sync_status or 'never',
+                    'id':             acc.id,
+                    'name':           acc.name,
+                    'unread_count':   unread,
+                    'sync_status':    acc.sync_status or 'never',
                     'last_sync_date': _to_riyadh_iso(acc.last_sync_date),
+                    'sync_error':     err_msg or None,
+                    'password_set':   has_pw,
+                    # needs_setup=true means inbox will remain empty until
+                    # the user (or admin) configures valid credentials.
+                    'needs_setup':    needs_setup,
+                    'setup_reason':   ('invalid_credentials' if is_auth
+                                       else ('no_password' if not has_pw else None)),
                 })
 
             # Per-folder unread totals across all accounts
@@ -834,6 +1372,12 @@ class LugalEmailController(http.Controller):
                     new_msg_domain.append(('date', '>', since_dt))
                 except Exception:
                     pass  # ignore bad since value
+            # last_seen_id allows the FE to detect messages it missed (e.g. if the
+            # WebSocket push was lost because the browser wasn't subscribed yet).
+            # On each poll, send the highest message id seen so far; the server
+            # returns any inbox messages with id > last_seen_id.
+            if last_seen_id:
+                new_msg_domain.append(('id', '>', last_seen_id))
             new_inbox = Msg.search(new_msg_domain, order='date desc', limit=10)
             new_messages = [
                 {
@@ -875,7 +1419,11 @@ class LugalEmailController(http.Controller):
                     'inbox':              per_folder.get('inbox', 0),
                     'total':              total_unread,
                     'per_folder':         per_folder,
-                    'account_configured': bool(accs),
+                    # account_configured=true only when at least one account
+                    # has a password set AND is NOT in an auth-failure state.
+                    'account_configured': any(
+                        not a.get('needs_setup') for a in per_account
+                    ),
                     'accounts':           per_account,
                     'sync_status':        accs[0].sync_status if accs else 'never',
                     'last_sync_date':     last_sync,
@@ -945,38 +1493,49 @@ class LugalEmailController(http.Controller):
                 'body_fetched': True,
                 'date':         __import__('odoo').fields.Datetime.now(),
             })
+            # New compose: this message IS the root of its own thread.
+            if msg.message_id and not msg.thread_id:
+                msg.write({'thread_id': msg.message_id})
 
-            delivered, smtp_error, refused = _send_via_smtp(
+            # Link uploaded attachments to this message so they appear in
+            # message details APIs and are preserved for thread display.
+            if attachment_ids:
+                try:
+                    request.env['ir.attachment'].sudo().browse(
+                        [int(i) for i in attachment_ids]
+                    ).write({'res_id': msg.id})
+                except Exception:
+                    pass
+
+            # Commit NOW so the background SMTP thread can see the message row
+            # and attachments immediately via its own fresh cursor.
+            request.env.cr.commit()
+
+            importance_raw       = (body.get('importance') or 'normal').lower()
+            request_read_receipt = bool(body.get('request_read_receipt', False))
+
+            # Fire SMTP in background — all file I/O + network happens in daemon
+            # thread; the HTTP response is returned without waiting.
+            _send_via_smtp_async(
                 acc, to_emails, subject, body_html, body_text, cc_emails, bcc_emails,
                 msg_id=msg.id, attachment_ids=attachment_ids,
+                importance=importance_raw,
+                request_read_receipt=request_read_receipt,
             )
 
-            # Update delivery status in the same transaction so the FE sees it immediately.
-            msg.write({
-                'smtp_delivered': delivered and not refused,
-                'smtp_error':     smtp_error or False,
-            })
-
-            # All recipients were rejected immediately → remove from sent, return error
-            if refused and not delivered:
-                msg.sudo().unlink()
-                return _json_response({
-                    'success': False,
-                    'error':   smtp_error,
-                    'code':    'recipient_not_found',
-                }, 422)
-
             resp_data = _message_to_dict(msg)
-            if smtp_error:
-                resp_data['smtp_warning'] = smtp_error
+            resp_data['smtp_pending'] = True  # SMTP running in background
             return _json_response({'success': True, 'data': resp_data}, 201)
         except Exception as exc:
             _logger.exception('send_email error')
             return _json_response({'success': False, 'error': str(exc)}, 500)
 
     @http.route('/api/lugal/email/messages/<int:message_id>/reply', type='http', auth='none', csrf=False,
-                methods=['POST', 'OPTIONS'])
+                methods=['GET', 'POST', 'OPTIONS'])
     def reply(self, message_id, **kwargs):
+        """GET → returns compose prefill (to, subject, quoted_body_html, quoted_body_text).
+           POST → sends the reply immediately.
+        """
         if request.httprequest.method == 'OPTIONS':
             return _json_response({})
         uid = ensure_jwt_user_id()
@@ -986,26 +1545,72 @@ class LugalEmailController(http.Controller):
             orig = request.env['lugal.email.message'].sudo().browse(message_id)
             if not orig.exists() or orig.account_id.user_id.id != uid:
                 return _not_found()
-            body    = json.loads(request.httprequest.data or '{}')
-            acc     = orig.account_id
-            to      = [orig.from_address] if orig.from_address else []
+
+            acc       = orig.account_id
+            own_email = (acc.email_address or '').strip().lower()
+
+            # Reply-To takes precedence over From per RFC 5322
+            reply_addr = (orig.reply_to or '').strip() or (orig.from_address or '').strip()
+            reply_name = orig.from_name or orig.from_address or ''
+            to_addr    = [reply_addr] if reply_addr else []
+
             subject = (orig.subject or '') if (orig.subject or '').startswith('Re:') \
                       else f"Re: {orig.subject or ''}"
+
+            if request.httprequest.method == 'GET':
+                return _json_response({
+                    'success': True,
+                    'data': {
+                        'to':  [{'name': reply_name, 'email': reply_addr}] if reply_addr else [],
+                        'cc':  [],
+                        'bcc': [],
+                        'subject':          subject,
+                        'in_reply_to':      orig.message_id or '',
+                        # body_html/body_text: initialize the compose box to empty.
+                        # The user types their reply here; the backend appends the
+                        # quoted block automatically on POST so raw HTML never appears
+                        # in the editor.
+                        'body_html':        '',
+                        'body_text':        '',
+                        # quoted_body_html/text: the formatted quote block (for display
+                        # as a read-only preview below the editor if the FE wishes).
+                        # Do NOT insert these into the editable composer.
+                        'quoted_body_html': _build_quoted_html(orig),
+                        'quoted_body_text': _build_quoted_text(orig),
+                    },
+                })
+
+            body = json.loads(request.httprequest.data or '{}')
+
+            # Build complete email body: user's content + quoted original.
+            # The FE compose box only collects the user's new reply text;
+            # the quoted block is assembled here so raw HTML never appears in the editor.
+            user_html   = (body.get('body_html', '') or '').strip()
+            user_text   = (body.get('body_text', '') or '').strip()
+            quoted_html = _build_quoted_html(orig)
+            quoted_text = _build_quoted_text(orig)
+            final_html  = (user_html + quoted_html) if user_html else quoted_html
+            final_text  = (user_text + '\n\n' + quoted_text) if user_text else quoted_text
+
+            thread_vals = _thread_vals_for_reply(orig)
+            importance_raw       = (body.get('importance') or 'normal').lower()
+            request_read_receipt = bool(body.get('request_read_receipt', False))
             vals = {
-                'account_id':   acc.id,
-                'folder':       'sent',
-                'subject':      subject,
-                'from_name':    acc.display_name_field or acc.email_address,
-                'from_address': acc.email_address,
-                'to_addresses': json.dumps([{'email': e} for e in to]),
-                'cc_addresses': json.dumps([{'email': e} for e in _norm_addr_list(body.get('cc', []))]),
+                'account_id':    acc.id,
+                'folder':        'sent',
+                'subject':       subject,
+                'from_name':     acc.display_name_field or acc.email_address,
+                'from_address':  acc.email_address,
+                'to_addresses':  json.dumps([{'email': e} for e in to_addr]),
+                'cc_addresses':  json.dumps([{'email': e} for e in _norm_addr_list(body.get('cc', []))]),
                 'bcc_addresses': json.dumps([{'email': e} for e in _norm_addr_list(body.get('bcc', []))]),
-                'in_reply_to':  orig.message_id or '',
-                'body_html':    body.get('body_html', ''),
-                'body_text':    body.get('body_text', ''),
-                'is_read':      True,
-                'body_fetched': True,
-                'date':         __import__('odoo').fields.Datetime.now(),
+                'body_html':     final_html,
+                'body_text':     final_text,
+                'is_read':       True,
+                'body_fetched':  True,
+                'is_important':  importance_raw == 'high',
+                'date':          __import__('odoo').fields.Datetime.now(),
+                **thread_vals,
             }
             if orig.linked_customer_id:
                 vals['linked_customer_id'] = orig.linked_customer_id
@@ -1013,26 +1618,208 @@ class LugalEmailController(http.Controller):
                 vals['linked_ticket_id'] = orig.linked_ticket_id
             msg = request.env['lugal.email.message'].sudo().create(vals)
             attachment_ids = body.get('attachment_ids', [])
-            delivered, smtp_error, refused = _send_via_smtp(
-                acc, to, subject, body.get('body_html', ''), body.get('body_text', ''),
+            if attachment_ids:
+                try:
+                    request.env['ir.attachment'].sudo().browse(
+                        [int(i) for i in attachment_ids]
+                    ).write({'res_id': msg.id})
+                except Exception:
+                    pass
+            request.env.cr.commit()
+            _send_via_smtp_async(
+                acc, to_addr, subject, final_html, final_text,
                 msg_id=msg.id, attachment_ids=attachment_ids,
+                importance=importance_raw,
+                request_read_receipt=request_read_receipt,
             )
-            msg.write({
-                'smtp_delivered': delivered and not refused,
-                'smtp_error':     smtp_error or False,
-            })
-            if refused and not delivered:
-                msg.sudo().unlink()
-                return _json_response({
-                    'success': False,
-                    'error':   smtp_error,
-                    'code':    'recipient_not_found',
-                }, 422)
             resp_data = _message_to_dict(msg)
-            if smtp_error:
-                resp_data['smtp_warning'] = smtp_error
+            resp_data['smtp_pending'] = True
             return _json_response({'success': True, 'data': resp_data}, 201)
         except Exception as exc:
+            return _json_response({'success': False, 'error': str(exc)}, 500)
+
+    @http.route('/api/lugal/email/messages/<int:message_id>/reply_all', type='http', auth='none', csrf=False,
+                methods=['GET', 'POST', 'OPTIONS'])
+    def reply_all(self, message_id, **kwargs):
+        """GET  → returns compose prefill (to, cc, subject, quoted body).
+           POST → sends the reply-all immediately.
+
+        To field rules (RFC 5322):
+          - If original has Reply-To, that goes in To (primary).
+          - Plus all original To addresses excluding the sender's own address.
+          - Original From is added to To only when Reply-To is absent.
+        Cc  = all original Cc addresses, excluding the sender's own address.
+        Bcc = never copied from original (not transmitted in received emails).
+              POST body may include extra bcc:[...] addresses.
+        """
+        if request.httprequest.method == 'OPTIONS':
+            return _json_response({})
+        uid = ensure_jwt_user_id()
+        if not uid:
+            return _unauthorized()
+        try:
+            orig = request.env['lugal.email.message'].sudo().browse(message_id)
+            if not orig.exists() or orig.account_id.user_id.id != uid:
+                return _not_found()
+
+            acc       = orig.account_id
+            own_email = (acc.email_address or '').strip().lower()
+
+            # ── Build To list (RFC 5322 §3.6.2) ──────────────────────────────
+            # If Reply-To is set, it replaces From as the primary reply target.
+            # All original To recipients are still included (Reply All = everyone).
+            orig_to_parsed = []
+            try:
+                orig_to_parsed = json.loads(orig.to_addresses or '[]')
+            except Exception:
+                pass
+
+            reply_to_override = (orig.reply_to or '').strip()
+            to_entries: list[dict] = []   # {'name': ..., 'email': ...}
+            seen_emails: set[str] = set()
+
+            def _add_to(name: str, email: str, target: list):
+                """Append to target list, skipping own address and duplicates."""
+                e = email.strip()
+                el = e.lower()
+                if e and el != own_email and el not in seen_emails:
+                    seen_emails.add(el)
+                    target.append({'name': name, 'email': e})
+
+            if reply_to_override:
+                # Reply-To takes precedence as the primary reply address
+                _add_to('', reply_to_override, to_entries)
+            else:
+                # No Reply-To: use the original From
+                _add_to(orig.from_name or '', orig.from_address or '', to_entries)
+
+            # Add remaining original To recipients (they're already part of "all")
+            for entry in orig_to_parsed:
+                _add_to(
+                    entry.get('name') or '',
+                    entry.get('email') or '',
+                    to_entries,
+                )
+
+            # ── Build Cc list ──────────────────────────────────────────────────
+            orig_cc_parsed = []
+            try:
+                orig_cc_parsed = json.loads(orig.cc_addresses or '[]')
+            except Exception:
+                pass
+
+            cc_entries: list[dict] = []
+            for entry in orig_cc_parsed:
+                e  = (entry.get('email') or '').strip()
+                el = e.lower()
+                # Skip own address AND addresses already in To (no duplicates)
+                if e and el != own_email and el not in seen_emails:
+                    seen_emails.add(el)
+                    cc_entries.append({'name': entry.get('name') or '', 'email': e})
+
+            subject = (orig.subject or '') if (orig.subject or '').startswith('Re:') \
+                      else f"Re: {orig.subject or ''}"
+
+            if request.httprequest.method == 'GET':
+                return _json_response({
+                    'success': True,
+                    'data': {
+                        'to':      to_entries,
+                        'cc':      cc_entries,
+                        'bcc':     [],
+                        'subject': subject,
+                        'in_reply_to':      orig.message_id or '',
+                        # body_html/body_text: initialize the compose box to empty.
+                        'body_html':        '',
+                        'body_text':        '',
+                        # quoted_body_html/text: read-only preview below the editor.
+                        # Do NOT insert these into the editable composer.
+                        'quoted_body_html': _build_quoted_html(orig),
+                        'quoted_body_text': _build_quoted_text(orig),
+                    },
+                })
+
+            # ── POST: send the reply ───────────────────────────────────────────
+            body = json.loads(request.httprequest.data or '{}')
+
+            # Merge any extra addresses the FE added in the compose window
+            for e in _norm_addr_list(body.get('to', [])):
+                el = e.lower()
+                if e and el != own_email and el not in seen_emails:
+                    seen_emails.add(el)
+                    to_entries.append({'name': '', 'email': e})
+            for e in _norm_addr_list(body.get('cc', [])):
+                el = e.lower()
+                if e and el != own_email and el not in seen_emails:
+                    seen_emails.add(el)
+                    cc_entries.append({'name': '', 'email': e})
+
+            to_addrs  = [entry['email'] for entry in to_entries]
+            cc_addrs  = [entry['email'] for entry in cc_entries]
+            bcc_addrs = _norm_addr_list(body.get('bcc', []))
+
+            if not to_addrs:
+                return _json_response(
+                    {'success': False, 'error': 'No recipients to reply to'}, 400
+                )
+
+            # Build complete email body: user's content + quoted original.
+            user_html   = (body.get('body_html', '') or '').strip()
+            user_text   = (body.get('body_text', '') or '').strip()
+            quoted_html = _build_quoted_html(orig)
+            quoted_text = _build_quoted_text(orig)
+            final_html  = (user_html + quoted_html) if user_html else quoted_html
+            final_text  = (user_text + '\n\n' + quoted_text) if user_text else quoted_text
+
+            importance_raw       = (body.get('importance') or 'normal').lower()
+            request_read_receipt = bool(body.get('request_read_receipt', False))
+            thread_vals = _thread_vals_for_reply(orig)
+            vals = {
+                'account_id':    acc.id,
+                'folder':        'sent',
+                'subject':       subject,
+                'from_name':     acc.display_name_field or acc.email_address,
+                'from_address':  acc.email_address,
+                'to_addresses':  json.dumps(to_entries),
+                'cc_addresses':  json.dumps(cc_entries),
+                'bcc_addresses': json.dumps([{'email': e} for e in bcc_addrs]),
+                'body_html':     final_html,
+                'body_text':     final_text,
+                'is_read':       True,
+                'body_fetched':  True,
+                'is_important':  importance_raw == 'high',
+                'date':          __import__('odoo').fields.Datetime.now(),
+                **thread_vals,
+            }
+            if orig.linked_customer_id:
+                vals['linked_customer_id'] = orig.linked_customer_id
+            if orig.linked_ticket_id:
+                vals['linked_ticket_id'] = orig.linked_ticket_id
+
+            msg = request.env['lugal.email.message'].sudo().create(vals)
+            attachment_ids = body.get('attachment_ids', [])
+            if attachment_ids:
+                try:
+                    request.env['ir.attachment'].sudo().browse(
+                        [int(i) for i in attachment_ids]
+                    ).write({'res_id': msg.id})
+                except Exception:
+                    pass
+
+            request.env.cr.commit()
+            _send_via_smtp_async(
+                acc, to_addrs, subject,
+                final_html, final_text,
+                cc=cc_addrs, bcc=bcc_addrs,
+                msg_id=msg.id, attachment_ids=attachment_ids,
+                importance=importance_raw,
+                request_read_receipt=request_read_receipt,
+            )
+            resp_data = _message_to_dict(msg)
+            resp_data['smtp_pending'] = True
+            return _json_response({'success': True, 'data': resp_data}, 201)
+        except Exception as exc:
+            _logger.exception('reply_all error')
             return _json_response({'success': False, 'error': str(exc)}, 500)
 
     @http.route('/api/lugal/email/messages/<int:message_id>/forward', type='http', auth='none', csrf=False,
@@ -1054,7 +1841,14 @@ class LugalEmailController(http.Controller):
             cc_fwd   = _norm_addr_list(body.get('cc', []))
             bcc_fwd  = _norm_addr_list(body.get('bcc', []))
             subject = f"Fwd: {orig.subject or ''}"
-            fwd_body = body.get('body_html', '') + (orig.body_html or '')
+            importance_raw = (body.get('importance') or 'normal').lower()
+            # Combine the user's intro text (if any) with the properly formatted
+            # quoted original message.  Using _build_quoted_html gives a consistent
+            # "---------- Forwarded message ----------" style header.
+            fwd_user_html = (body.get('body_html', '') or '').strip()
+            fwd_quoted    = _build_quoted_html(orig)
+            fwd_body      = (fwd_user_html + fwd_quoted) if fwd_user_html else fwd_quoted
+            fwd_thread = _thread_vals_for_forward(orig)
             msg = request.env['lugal.email.message'].sudo().create({
                 'account_id':    acc.id,
                 'folder':        'sent',
@@ -1068,27 +1862,32 @@ class LugalEmailController(http.Controller):
                 'body_text':     body.get('body_text', ''),
                 'is_read':       True,
                 'body_fetched':  True,
+                'is_important':  importance_raw == 'high',
                 'date':          __import__('odoo').fields.Datetime.now(),
+                **fwd_thread,
             })
-            delivered, smtp_error, refused = _send_via_smtp(
+            # Forward is the root of a new thread on OUR side — use its own msg-id
+            if not msg.thread_id and msg.message_id:
+                msg.write({'thread_id': msg.message_id})
+            fwd_attachment_ids   = body.get('attachment_ids', [])
+            request_read_receipt = bool(body.get('request_read_receipt', False))
+            if fwd_attachment_ids:
+                try:
+                    request.env['ir.attachment'].sudo().browse(
+                        [int(i) for i in fwd_attachment_ids]
+                    ).write({'res_id': msg.id, 'res_model': 'lugal.email.message'})
+                except Exception:
+                    pass
+            request.env.cr.commit()
+            _send_via_smtp_async(
                 acc, to_fwd, subject, fwd_body, body.get('body_text', ''),
                 cc=cc_fwd, bcc=bcc_fwd,
-                msg_id=msg.id, attachment_ids=body.get('attachment_ids', []),
+                msg_id=msg.id, attachment_ids=fwd_attachment_ids,
+                importance=importance_raw,
+                request_read_receipt=request_read_receipt,
             )
-            msg.write({
-                'smtp_delivered': delivered and not refused,
-                'smtp_error':     smtp_error or False,
-            })
-            if refused and not delivered:
-                msg.sudo().unlink()
-                return _json_response({
-                    'success': False,
-                    'error':   smtp_error,
-                    'code':    'recipient_not_found',
-                }, 422)
             resp_data = _message_to_dict(msg)
-            if smtp_error:
-                resp_data['smtp_warning'] = smtp_error
+            resp_data['smtp_pending'] = True
             return _json_response({'success': True, 'data': resp_data}, 201)
         except Exception as exc:
             return _json_response({'success': False, 'error': str(exc)}, 500)
@@ -1112,7 +1911,7 @@ class LugalEmailController(http.Controller):
             msg.write({'is_read': is_read})
             # Push \Seen / -\Seen flag to IMAP server
             if msg.imap_uid:
-                imap_folder = 'INBOX' if msg.folder == 'inbox' else msg.folder.upper()
+                imap_folder = _resolve_imap_folder(msg.account_id, msg.folder)
                 if is_read:
                     msg.account_id.sudo()._imap_store_async(
                         msg.imap_uid, imap_folder, add_flags=['\\Seen']
@@ -1144,7 +1943,7 @@ class LugalEmailController(http.Controller):
             msg.write({'is_starred': new_starred})
             # Push \Flagged / -\Flagged to IMAP server
             if msg.imap_uid:
-                imap_folder = 'INBOX' if msg.folder == 'inbox' else msg.folder.upper()
+                imap_folder = _resolve_imap_folder(msg.account_id, msg.folder)
                 if new_starred:
                     msg.account_id.sudo()._imap_store_async(
                         msg.imap_uid, imap_folder, add_flags=['\\Flagged']
@@ -1173,7 +1972,7 @@ class LugalEmailController(http.Controller):
             msg.write({'folder': 'inbox'})
             # Move back to INBOX on the IMAP server
             if msg.imap_uid:
-                imap_from = 'INBOX' if prev_folder == 'inbox' else prev_folder.upper()
+                imap_from = _resolve_imap_folder(msg.account_id, prev_folder)
                 msg.account_id.sudo()._imap_move_async(msg.imap_uid, imap_from, 'inbox')
             return _json_response({'success': True})
         except Exception as exc:
@@ -1195,8 +1994,34 @@ class LugalEmailController(http.Controller):
             msg.write({'folder': 'archive'})
             # Move to Archive folder on the IMAP server
             if msg.imap_uid:
-                imap_from = 'INBOX' if prev_folder == 'inbox' else prev_folder.upper()
+                imap_from = _resolve_imap_folder(msg.account_id, prev_folder)
                 msg.account_id.sudo()._imap_move_async(msg.imap_uid, imap_from, 'archive')
+            return _json_response({'success': True})
+        except Exception as exc:
+            return _json_response({'success': False, 'error': str(exc)}, 500)
+
+    @http.route('/api/lugal/email/messages/<int:message_id>/unarchive', type='http', auth='none', csrf=False,
+                methods=['POST', 'OPTIONS'])
+    def unarchive_msg(self, message_id, **kwargs):
+        """Move a message from the archive folder back to the inbox."""
+        if request.httprequest.method == 'OPTIONS':
+            return _json_response({})
+        uid = ensure_jwt_user_id()
+        if not uid:
+            return _unauthorized()
+        try:
+            msg = request.env['lugal.email.message'].sudo().browse(message_id)
+            if not msg.exists() or msg.account_id.user_id.id != uid:
+                return _not_found()
+            if msg.folder != 'archive':
+                return _json_response(
+                    {'success': False, 'error': 'Message is not in the archive folder'},
+                    409,
+                )
+            msg.write({'folder': 'inbox'})
+            if msg.imap_uid:
+                imap_archive = _resolve_imap_folder(msg.account_id, 'archive')
+                msg.account_id.sudo()._imap_move_async(msg.imap_uid, imap_archive, 'inbox')
             return _json_response({'success': True})
         except Exception as exc:
             return _json_response({'success': False, 'error': str(exc)}, 500)
@@ -1368,6 +2193,633 @@ class LugalEmailController(http.Controller):
             return _json_response({'success': False, 'error': str(exc)}, 500)
 
 
+    # ── Draft Emails ──────────────────────────────────────────────────────────
+
+    @http.route('/api/lugal/email/drafts', type='http', auth='none', csrf=False,
+                methods=['POST', 'GET', 'OPTIONS'])
+    def drafts(self, **kwargs):
+        """
+        GET  /api/lugal/email/drafts
+             List all drafts for the authenticated user.
+             Query params: limit (int, default 50), offset (int, default 0)
+
+        POST /api/lugal/email/drafts
+             Create a new draft (or auto-save an existing one by passing "id").
+             Body (JSON):
+               {
+                 "account_id":    4,           // required
+                 "to":            ["a@b.com"],  // optional
+                 "cc":            [],
+                 "bcc":           [],
+                 "subject":       "...",
+                 "body_html":     "<p>...</p>",
+                 "body_text":     "...",
+                 "attachment_ids": [42, 43],    // already-uploaded ir.attachment IDs
+                 "id":            123           // if present: UPDATE existing draft
+               }
+             Response: { "success": true, "data": { <draft message dict> } }
+        """
+        if request.httprequest.method == 'OPTIONS':
+            return _json_response({})
+        uid = ensure_jwt_user_id()
+        if not uid:
+            return _unauthorized()
+
+        # ── GET: list drafts ──────────────────────────────────────────────────
+        if request.httprequest.method == 'GET':
+            try:
+                args = request.httprequest.args
+                limit  = int(args.get('limit', 50))
+                offset = int(args.get('offset', 0))
+                account_ids = [a.id for a in _get_user_accounts(uid)]
+                if not account_ids:
+                    return _json_response({'success': True, 'data': {'total': 0, 'items': []}})
+                Msg   = request.env['lugal.email.message'].sudo()
+                domain = [
+                    ('account_id', 'in', account_ids),
+                    ('is_draft',   '=', True),
+                    ('is_deleted', '=', False),
+                ]
+                total = Msg.search_count(domain)
+                msgs  = Msg.search(domain, limit=limit, offset=offset, order='write_date desc')
+                return _json_response({
+                    'success': True,
+                    'data': {
+                        'total':  total,
+                        'limit':  limit,
+                        'offset': offset,
+                        'items':  [_message_to_dict(m, full=True) for m in msgs],
+                    },
+                })
+            except Exception as exc:
+                _logger.exception('drafts GET error')
+                return _json_response({'success': False, 'error': str(exc)}, 500)
+
+        # ── POST: create / update draft ───────────────────────────────────────
+        try:
+            body       = json.loads(request.httprequest.data or '{}')
+            draft_id   = body.get('id')
+            account_id = body.get('account_id')
+            to_emails  = _norm_addr_list(body.get('to', []))
+            cc_emails  = _norm_addr_list(body.get('cc', []))
+            bcc_emails = _norm_addr_list(body.get('bcc', []))
+            subject    = body.get('subject', '')
+            body_html  = body.get('body_html', body.get('body', ''))
+            body_text  = body.get('body_text', '')
+            att_ids    = body.get('attachment_ids', [])
+
+            # Resolve account
+            if account_id:
+                acc = request.env['lugal.email.account'].sudo().browse(int(account_id))
+                if not acc.exists() or acc.user_id.id != uid:
+                    return _not_found('Email account not found')
+            else:
+                accs = _get_user_accounts(uid).filtered('is_default')
+                acc  = accs[0] if accs else _get_user_accounts(uid)[:1]
+                if not acc:
+                    return _json_response({'success': False, 'error': 'No email account configured'}, 400)
+
+            vals = {
+                'account_id':   acc.id,
+                'folder':       'drafts',
+                'is_draft':     True,
+                'is_read':      True,
+                'body_fetched': True,
+                'from_name':    acc.display_name_field or acc.email_address,
+                'from_address': acc.email_address,
+                'to_addresses': json.dumps([{'email': e} for e in to_emails]),
+                'cc_addresses': json.dumps([{'email': e} for e in cc_emails]),
+                'bcc_addresses': json.dumps([{'email': e} for e in bcc_emails]),
+                'subject':      subject,
+                'body_html':    body_html,
+                'body_text':    body_text,
+                'date':         __import__('odoo').fields.Datetime.now(),
+            }
+
+            Msg = request.env['lugal.email.message'].sudo()
+            if draft_id:
+                # Update existing draft
+                draft = Msg.browse(int(draft_id))
+                if not draft.exists() or not draft.is_draft or draft.account_id.user_id.id != uid:
+                    return _not_found('Draft not found')
+                draft.write(vals)
+                msg = draft
+            else:
+                msg = Msg.create(vals)
+
+            # Link attachments to this draft
+            if att_ids:
+                try:
+                    request.env['ir.attachment'].sudo().browse(
+                        [int(i) for i in att_ids]
+                    ).write({'res_id': msg.id, 'res_model': 'lugal.email.message'})
+                except Exception:
+                    pass
+
+            return _json_response({'success': True, 'data': _message_to_dict(msg, full=True)},
+                                  200 if draft_id else 201)
+        except Exception as exc:
+            _logger.exception('drafts POST error')
+            return _json_response({'success': False, 'error': str(exc)}, 500)
+
+    @http.route('/api/lugal/email/drafts/<int:draft_id>', type='http', auth='none', csrf=False,
+                methods=['GET', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'])
+    def draft_detail(self, draft_id, **kwargs):
+        """
+        GET    /api/lugal/email/drafts/<id>  — fetch a single draft with full body + attachments
+        PUT    /api/lugal/email/drafts/<id>  — replace draft content (same body as POST /drafts)
+        PATCH  /api/lugal/email/drafts/<id>  — partial update (same body, only provided fields updated)
+        DELETE /api/lugal/email/drafts/<id>  — permanently discard the draft
+        """
+        if request.httprequest.method == 'OPTIONS':
+            return _json_response({})
+        uid = ensure_jwt_user_id()
+        if not uid:
+            return _unauthorized()
+
+        try:
+            draft = request.env['lugal.email.message'].sudo().browse(draft_id)
+            if not draft.exists() or not draft.is_draft \
+                    or draft.is_deleted or draft.account_id.user_id.id != uid:
+                return _not_found('Draft not found')
+
+            method = request.httprequest.method
+
+            if method == 'GET':
+                return _json_response({'success': True, 'data': _message_to_dict(draft, full=True)})
+
+            if method == 'DELETE':
+                draft.write({'is_deleted': True, 'active': False})
+                return _json_response({'success': True})
+
+            # PUT / PATCH — update fields
+            body       = json.loads(request.httprequest.data or '{}')
+            to_emails  = _norm_addr_list(body.get('to', []))
+            cc_emails  = _norm_addr_list(body.get('cc', []))
+            bcc_emails = _norm_addr_list(body.get('bcc', []))
+            att_ids    = body.get('attachment_ids', [])
+
+            vals = {}
+            if 'to'        in body: vals['to_addresses']  = json.dumps([{'email': e} for e in to_emails])
+            if 'cc'        in body: vals['cc_addresses']  = json.dumps([{'email': e} for e in cc_emails])
+            if 'bcc'       in body: vals['bcc_addresses'] = json.dumps([{'email': e} for e in bcc_emails])
+            if 'subject'   in body: vals['subject']    = body['subject']
+            if 'body_html' in body: vals['body_html']  = body.get('body_html', '')
+            if 'body_text' in body: vals['body_text']  = body.get('body_text', '')
+            if 'body'      in body: vals['body_html']  = body.get('body', '')
+
+            if vals:
+                draft.write(vals)
+            if att_ids:
+                try:
+                    request.env['ir.attachment'].sudo().browse(
+                        [int(i) for i in att_ids]
+                    ).write({'res_id': draft.id, 'res_model': 'lugal.email.message'})
+                except Exception:
+                    pass
+
+            return _json_response({'success': True, 'data': _message_to_dict(draft, full=True)})
+        except Exception as exc:
+            _logger.exception('draft_detail error')
+            return _json_response({'success': False, 'error': str(exc)}, 500)
+
+    @http.route('/api/lugal/email/drafts/<int:draft_id>/send', type='http', auth='none', csrf=False,
+                methods=['POST', 'OPTIONS'])
+    def send_draft(self, draft_id, **kwargs):
+        """
+        POST /api/lugal/email/drafts/<id>/send
+
+        Sends an existing draft via SMTP (async — returns immediately).
+        Optionally accepts a body to make final edits before sending:
+          {
+            "to":             [...],   // override recipients
+            "subject":        "...",   // override subject
+            "body_html":      "...",   // override body
+            "attachment_ids": [...]    // additional attachment IDs
+          }
+        The draft is moved to the sent folder on success.
+        """
+        if request.httprequest.method == 'OPTIONS':
+            return _json_response({})
+        uid = ensure_jwt_user_id()
+        if not uid:
+            return _unauthorized()
+        try:
+            draft = request.env['lugal.email.message'].sudo().browse(draft_id)
+            if not draft.exists() or not draft.is_draft \
+                    or draft.is_deleted or draft.account_id.user_id.id != uid:
+                return _not_found('Draft not found')
+
+            # Idempotency guard: atomically claim the draft send with a row-level
+            # lock so double-clicks or concurrent requests only trigger one SMTP send.
+            try:
+                request.env.cr.execute(
+                    "SELECT id FROM lugal_email_message "
+                    "WHERE id = %s AND is_draft = TRUE FOR UPDATE NOWAIT",
+                    (draft_id,),
+                )
+                if not request.env.cr.fetchone():
+                    return _json_response(
+                        {'success': False, 'error': 'Draft already sent or is being sent'},
+                        409,
+                    )
+            except Exception:
+                # Lock contention: another request is already sending this draft.
+                return _json_response(
+                    {'success': False, 'error': 'Draft send already in progress'},
+                    409,
+                )
+
+            body = json.loads(request.httprequest.data or '{}')
+
+            # Apply any last-minute overrides
+            to_emails  = _norm_addr_list(body['to']) if 'to' in body \
+                         else _norm_addr_list(json.loads(draft.to_addresses or '[]'))
+            cc_emails  = _norm_addr_list(body['cc']) if 'cc' in body \
+                         else _norm_addr_list(json.loads(draft.cc_addresses or '[]'))
+            bcc_emails = _norm_addr_list(body.get('bcc', [])) \
+                         if 'bcc' in body \
+                         else _norm_addr_list(json.loads(draft.bcc_addresses or '[]'))
+            subject        = body.get('subject', draft.subject or '')
+            body_html      = body.get('body_html', body.get('body', draft.body_html or ''))
+            body_text      = body.get('body_text', draft.body_text or '')
+            importance_raw       = (body.get('importance') or 'normal').lower()
+            request_read_receipt = bool(body.get('request_read_receipt', False))
+
+            if not to_emails:
+                return _json_response({'success': False, 'error': "'to' is required to send"}, 400)
+
+            # Merge attachment IDs: already linked + any extras passed now
+            existing_att_ids = [
+                a.id for a in request.env['ir.attachment'].sudo().search([
+                    ('res_model', '=', 'lugal.email.message'),
+                    ('res_id',    '=', draft.id),
+                ])
+            ]
+            extra_att_ids = [int(i) for i in body.get('attachment_ids', [])]
+            all_att_ids = list({*existing_att_ids, *extra_att_ids})
+
+            # Move draft → sent
+            import odoo as _odoo
+            draft.write({
+                'folder':       'sent',
+                'is_draft':     False,
+                'subject':      subject,
+                'to_addresses': json.dumps([{'email': e} for e in to_emails]),
+                'cc_addresses': json.dumps([{'email': e} for e in cc_emails]),
+                'bcc_addresses': json.dumps([{'email': e} for e in bcc_emails]),
+                'body_html':    body_html,
+                'body_text':    body_text,
+                'is_important': importance_raw == 'high',
+                'date':         _odoo.fields.Datetime.now(),
+            })
+            # Link any extra attachments
+            if extra_att_ids:
+                try:
+                    request.env['ir.attachment'].sudo().browse(extra_att_ids).write({
+                        'res_id': draft.id, 'res_model': 'lugal.email.message',
+                    })
+                except Exception:
+                    pass
+
+            request.env.cr.commit()
+
+            acc = draft.account_id
+            _send_via_smtp_async(
+                acc, to_emails, subject, body_html, body_text,
+                cc=cc_emails, bcc=bcc_emails,
+                msg_id=draft.id, attachment_ids=all_att_ids,
+                importance=importance_raw,
+                request_read_receipt=request_read_receipt,
+            )
+
+            resp_data = _message_to_dict(draft)
+            resp_data['smtp_pending'] = True
+            return _json_response({'success': True, 'data': resp_data}, 200)
+        except Exception as exc:
+            _logger.exception('send_draft error')
+            return _json_response({'success': False, 'error': str(exc)}, 500)
+
+    # ── Mailbox folders ────────────────────────────────────────────────────────
+
+    @http.route('/api/lugal/email/accounts/<int:account_id>/folders',
+                type='http', auth='none', csrf=False, methods=['GET', 'OPTIONS'])
+    def account_folders(self, account_id, **kwargs):
+        """List all IMAP folders for an account (including user-created ones).
+
+        Returns stable folder objects:
+          { "name": "INBOX", "path": "INBOX", "role": "inbox",
+            "message_count": 42, "unread_count": 5 }
+        """
+        if request.httprequest.method == 'OPTIONS':
+            return _json_response({})
+        uid = ensure_jwt_user_id()
+        if not uid:
+            return _unauthorized()
+        try:
+            acc = request.env['lugal.email.account'].sudo().browse(account_id)
+            if not acc.exists() or acc.user_id.id != uid:
+                return _not_found('Account not found')
+            if not (acc.password or '').strip():
+                return _json_response({'success': False, 'error': 'No app password configured'}, 400)
+
+            import imaplib
+            conn = acc._imap_connect()
+            typ, raw_list = conn.list()
+            conn.logout()
+
+            if typ != 'OK':
+                return _json_response({'success': False, 'error': 'IMAP LIST failed'}, 502)
+
+            import re
+            _LIST_RE = re.compile(r'\((?P<flags>[^)]*)\)\s+"(?P<delim>[^"]*)"\s+(?P<name>.+)')
+
+            # Map common folder names to semantic roles
+            _ROLE_MAP = {
+                'inbox':          'inbox',
+                'sent':           'sent', 'sent items': 'sent', 'sent messages': 'sent',
+                'drafts':         'drafts', 'draft': 'drafts',
+                'trash':          'trash', 'deleted': 'trash', 'deleted items': 'trash',
+                'spam':           'spam', 'junk':  'spam', 'junk e-mail': 'spam',
+                'archive':        'archive', 'archives': 'archive',
+            }
+
+            Msg = request.env['lugal.email.message'].sudo()
+            folders = []
+            for item in raw_list:
+                if not item:
+                    continue
+                line = item.decode('utf-8', errors='replace') if isinstance(item, bytes) else item
+                m = _LIST_RE.match(line.strip())
+                if not m:
+                    continue
+                flags    = m.group('flags').lower()
+                raw_name = m.group('name').strip().strip('"')
+                if '\\noselect' in flags:
+                    continue
+                role = _ROLE_MAP.get(raw_name.lower(), 'custom')
+
+                # Count messages only for folders that match our local storage
+                local_folder_key = role if role in ('inbox', 'sent', 'drafts', 'trash', 'archive', 'spam') else None
+                if local_folder_key:
+                    total  = Msg.search_count([('account_id', '=', acc.id), ('folder', '=', local_folder_key), ('is_deleted', '=', False)])
+                    unread = Msg.search_count([('account_id', '=', acc.id), ('folder', '=', local_folder_key), ('is_read', '=', False), ('is_deleted', '=', False)])
+                else:
+                    total = unread = 0
+
+                folders.append({
+                    'path':          raw_name,
+                    'name':          raw_name.split('/')[-1].split('.')[-1] or raw_name,
+                    'role':          role,
+                    'flags':         [f.strip().lstrip('\\') for f in m.group('flags').split() if f.strip()],
+                    'message_count': total,
+                    'unread_count':  unread,
+                })
+
+            return _json_response({'success': True, 'data': {'total': len(folders), 'items': folders}})
+        except Exception as exc:
+            return _json_response({'success': False, 'error': str(exc)}, 500)
+
+    # ── Move to custom folder ──────────────────────────────────────────────────
+
+    @http.route('/api/lugal/email/messages/<int:message_id>/move',
+                type='http', auth='none', csrf=False, methods=['POST', 'OPTIONS'])
+    def message_move(self, message_id, **kwargs):
+        """Move a message to any folder — including user-created custom ones.
+
+        Body: { "folder": "INBOX/Projects" }
+          folder may be a logical name (inbox, sent, drafts, trash, archive, spam)
+          or a raw IMAP folder path (e.g. "INBOX/Work/2026").
+        """
+        if request.httprequest.method == 'OPTIONS':
+            return _json_response({})
+        uid = ensure_jwt_user_id()
+        if not uid:
+            return _unauthorized()
+        try:
+            msg = request.env['lugal.email.message'].sudo().browse(message_id)
+            if not msg.exists() or msg.is_deleted or msg.account_id.user_id.id != uid:
+                return _not_found()
+            body       = json.loads(request.httprequest.data or '{}')
+            target_raw = (body.get('folder') or '').strip()
+            if not target_raw:
+                return _json_response({'success': False, 'error': 'folder is required'}, 400)
+
+            # Map logical names → IMAP folder via account helper, otherwise use raw path
+            LOGICAL = {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'}
+            if target_raw.lower() in LOGICAL:
+                target_logical = target_raw.lower()
+                imap_dest = msg.account_id.sudo()._get_server_folder_name(target_logical)
+            else:
+                target_logical = 'custom'
+                imap_dest = target_raw
+
+            prev_folder = msg.folder
+            imap_from   = _resolve_imap_folder(msg.account_id, prev_folder)
+
+            # Update local DB record
+            msg.write({
+                'folder':     target_logical if target_logical != 'custom' else prev_folder,
+                'custom_folder': target_raw if target_logical == 'custom' else False,
+            } if hasattr(msg, 'custom_folder') else {
+                'folder': target_logical if target_logical != 'custom' else prev_folder,
+            })
+
+            # Push IMAP move asynchronously
+            if msg.imap_uid:
+                import threading
+                acc        = msg.account_id
+                imap_uid   = msg.imap_uid
+                db_name    = request.env.cr.dbname
+                acc_id     = acc.id
+
+                def _bg_move():
+                    try:
+                        import imaplib
+                        from odoo.modules.registry import Registry as _Registry
+                        with _Registry(db_name).cursor() as _cr:
+                            from odoo.api import Environment
+                            _env = Environment(_cr, 1, {})
+                            _acc = _env['lugal.email.account'].browse(acc_id)
+                            conn = _acc._imap_connect()
+                            conn.select(imap_from)
+                            # Try MOVE (RFC 6851), fall back to COPY + STORE \Deleted + EXPUNGE
+                            result = conn.uid('move', str(imap_uid), imap_dest)
+                            if result[0] != 'OK':
+                                conn.uid('copy', str(imap_uid), imap_dest)
+                                conn.uid('store', str(imap_uid), '+FLAGS', '(\\Deleted)')
+                                conn.expunge()
+                            conn.logout()
+                    except Exception as _e:
+                        _logger.warning('message_move IMAP failed uid=%s: %s', imap_uid, _e)
+
+                threading.Thread(target=_bg_move, daemon=True, name=f'imap-move-{message_id}').start()
+
+            return _json_response({'success': True, 'data': {
+                'id': msg.id, 'folder': target_raw,
+            }})
+        except Exception as exc:
+            return _json_response({'success': False, 'error': str(exc)}, 500)
+
+    # ── Related messages ───────────────────────────────────────────────────────
+
+    @http.route('/api/lugal/email/messages/<int:message_id>/related',
+                type='http', auth='none', csrf=False, methods=['GET', 'OPTIONS'])
+    def message_related(self, message_id, **kwargs):
+        """Return messages related to a given message.
+
+        Query params:
+          type   = "sender"       → all messages from the same from_address
+                 | "conversation" → all messages in the same thread (by subject / thread_id)
+          scope  = "inbox"        → only inbox folder (default)
+                 | "all"          → all folders the user owns
+          limit  = int (default 50, max 500)
+          offset = int (default 0)
+
+        Always excludes the source message itself and soft-deleted rows.
+        Results ordered: newest first.
+        """
+        if request.httprequest.method == 'OPTIONS':
+            return _json_response({})
+        uid = ensure_jwt_user_id()
+        if not uid:
+            return _unauthorized()
+        try:
+            msg = request.env['lugal.email.message'].sudo().browse(message_id)
+            if not msg.exists() or msg.is_deleted or msg.account_id.user_id.id != uid:
+                return _not_found('Message not found')
+
+            args      = request.httprequest.args
+            rel_type  = (args.get('type') or 'sender').lower()     # sender | conversation
+            scope     = (args.get('scope') or 'inbox').lower()     # inbox  | all
+            limit     = min(int(args.get('limit') or 50), 500)
+            offset    = max(int(args.get('offset') or 0), 0)
+
+            # Base domain — restrict to accounts owned by this user
+            user_accounts = _get_user_accounts(uid)
+            account_ids   = user_accounts.ids
+
+            domain = [
+                ('account_id', 'in', account_ids),
+                ('is_deleted', '=', False),
+                ('id',         '!=', message_id),
+            ]
+
+            if scope == 'inbox':
+                domain.append(('folder', '=', 'inbox'))
+
+            if rel_type == 'sender':
+                sender = (msg.from_address or '').strip().lower()
+                if not sender:
+                    return _json_response({'success': False, 'error': 'Source message has no sender'}, 400)
+                # Case-insensitive match on from_address
+                domain.append(('from_address', 'ilike', sender))
+
+            elif rel_type == 'conversation':
+                # Match by thread_id first (most reliable), then fall back to
+                # normalised subject scan so threaded replies without proper
+                # References headers are still grouped.
+                thread_id  = (msg.thread_id or '').strip()
+                raw_subject = (msg.subject or '').strip()
+
+                # Strip common prefixes: Re:, Fwd:, Fw:, AW:, ... (case-insensitive)
+                import re as _re
+                _PREFIX = _re.compile(r'^(?:(?:re|fwd?|aw|tr|rép|sv)\s*:\s*)+', _re.IGNORECASE)
+                norm_subject = _PREFIX.sub('', raw_subject).strip()
+
+                if thread_id:
+                    # Prefer thread_id — exact match OR subject fallback via OR
+                    if norm_subject:
+                        domain += ['|',
+                            ('thread_id', '=', thread_id),
+                            ('subject',   'ilike', norm_subject),
+                        ]
+                    else:
+                        domain.append(('thread_id', '=', thread_id))
+                elif norm_subject:
+                    domain.append(('subject', 'ilike', norm_subject))
+                else:
+                    return _json_response({'success': False, 'error': 'Cannot determine conversation — no thread_id or subject'}, 400)
+
+            else:
+                return _json_response({'success': False, 'error': f'Unknown type "{rel_type}". Use sender or conversation'}, 400)
+
+            Msg   = request.env['lugal.email.message'].sudo()
+            total = Msg.search_count(domain)
+            msgs  = Msg.search(domain, limit=limit, offset=offset, order='create_date desc, id desc')
+
+            return _json_response({
+                'success': True,
+                'data': {
+                    'type':   rel_type,
+                    'scope':  scope,
+                    'total':  total,
+                    'limit':  limit,
+                    'offset': offset,
+                    'items':  [_message_to_dict(m) for m in msgs],
+                },
+            })
+        except Exception as exc:
+            _logger.exception('message_related error')
+            return _json_response({'success': False, 'error': str(exc)}, 500)
+
+    # ── Sender contact resolve ─────────────────────────────────────────────────
+
+    @http.route('/api/lugal/email/senders/resolve',
+                type='http', auth='none', csrf=False, methods=['GET', 'OPTIONS'])
+    def sender_resolve(self, **kwargs):
+        """Resolve a sender email address → contact info (phone, mobile, social links).
+
+        Query param: ?email=someone@example.com
+
+        Looks up res.partner, then lugal.crm.employee (by work email / email).
+        Returns the first match.
+        """
+        if request.httprequest.method == 'OPTIONS':
+            return _json_response({})
+        uid = ensure_jwt_user_id()
+        if not uid:
+            return _unauthorized()
+        try:
+            email = (request.httprequest.args.get('email') or '').strip().lower()
+            if not email:
+                return _json_response({'success': False, 'error': 'email param required'}, 400)
+
+            result = {'email': email, 'found': False}
+
+            # 1. Try res.partner
+            partner = request.env['res.partner'].sudo().search(
+                [('email', '=ilike', email)], limit=1,
+            )
+            if partner:
+                result.update({
+                    'found':   True,
+                    'source':  'partner',
+                    'name':    partner.name or '',
+                    'phone':   partner.phone or '',
+                    'mobile':  partner.mobile or '',
+                    'website': partner.website or '',
+                })
+
+            # 2. Try res.users (internal employee)
+            if not result['found']:
+                user = request.env['res.users'].sudo().search(
+                    [('email', '=ilike', email)], limit=1,
+                )
+                if user:
+                    result.update({
+                        'found':   True,
+                        'source':  'user',
+                        'name':    user.name or '',
+                        'phone':   getattr(user.partner_id, 'phone', '') or '',
+                        'mobile':  getattr(user.partner_id, 'mobile', '') or '',
+                        'website': '',
+                    })
+
+            return _json_response({'success': True, 'data': result})
+        except Exception as exc:
+            return _json_response({'success': False, 'error': str(exc)}, 500)
+
     # ── Email attachment upload ────────────────────────────────────────────────
 
     @http.route('/api/lugal/email/attachments/upload', type='http', auth='none', csrf=False,
@@ -1379,6 +2831,9 @@ class LugalEmailController(http.Controller):
         Form fields:
           - file | files | files[]  – one or more binary parts
           - account_id (optional)   – link attachment to this email account
+          - inline (optional, "true") – mark as inline image; returns a `cid` for use
+            in body HTML as <img src="cid:…">  Inline images are excluded from the
+            attachments[] list returned by message detail APIs.
 
         Response:
           {
@@ -1386,16 +2841,23 @@ class LugalEmailController(http.Controller):
             "data": {
               "attachments": [
                 { "id": 42, "name": "invoice.pdf", "mimetype": "application/pdf",
-                  "size": 102400, "url": "/web/content/42?download=true" }
+                  "size": 102400, "url": "/web/content/42?download=true",
+                  "inline": false }
               ]
             }
           }
 
-        Pass the returned "id" values in send/reply/forward as:
+        For inline images the response also includes:
+          "cid": "cid:img-<uuid>@lugal.mail"
+        Embed this value in the HTML body as <img src="cid:img-<uuid>@lugal.mail">.
+
+        Pass ALL returned "id" values (inline + regular) in send/reply/forward as:
           { "attachment_ids": [42, 43] }
+        The backend automatically separates inline from regular when building the email.
         """
         import base64
         import mimetypes as _mimetypes
+        import uuid as _uuid
 
         if request.httprequest.method == 'OPTIONS':
             return _json_response({})
@@ -1413,6 +2875,8 @@ class LugalEmailController(http.Controller):
             if not files:
                 return _json_response({'success': False, 'error': 'No files provided'}, 400)
 
+            is_inline = str(kwargs.get('inline') or request.httprequest.form.get('inline', '')).lower() == 'true'
+
             MAX_MB = 1024  # 1 GB
             max_bytes = MAX_MB * 1024 * 1024
 
@@ -1429,8 +2893,16 @@ class LugalEmailController(http.Controller):
                 mime = f.mimetype or _mimetypes.guess_type(f.filename or '')[0] or 'application/octet-stream'
                 filename = f.filename or 'attachment'
 
-                import uuid as _uuid
                 att_token = _uuid.uuid4().hex
+
+                # For inline images: generate a Content-ID and store it in `description`
+                # so the MIME builder can embed the image as multipart/related.
+                cid_value = None
+                description = None
+                if is_inline:
+                    cid_value = f'img-{_uuid.uuid4().hex}@lugal.mail'
+                    description = f'__inline_cid__:{cid_value}'
+
                 att = Attachment.create({
                     'name': filename,
                     'mimetype': mime,
@@ -1438,18 +2910,23 @@ class LugalEmailController(http.Controller):
                     'type': 'binary',
                     'res_model': 'lugal.email.message',
                     'access_token': att_token,
+                    **(({'description': description}) if description else {}),
                 })
                 att.flush_recordset(['access_token'])
 
                 att_url = f"/web/content/{att.id}?access_token={att_token}"
-                results.append({
+                entry = {
                     'id': att.id,
                     'name': att.name or filename,
                     'mimetype': mime,
                     'size': len(data),
                     'url': att_url,
                     'file_url': att_url,
-                })
+                    'inline': is_inline,
+                }
+                if cid_value:
+                    entry['cid'] = f'cid:{cid_value}'
+                results.append(entry)
 
             return _json_response({'success': True, 'data': {'attachments': results}})
 
@@ -1473,116 +2950,217 @@ _SMTP_RECIPIENT_ERROR_CODES = {
 }
 
 
-def _send_via_smtp(acc, to_list, subject, body_html, body_text, cc=None, bcc=None,
-                   msg_id=None, attachment_ids=None):
+def _read_att_parts(attachment_ids, cr, db_name):
     """
-    Send an email synchronously via SMTP.
+    Read raw binary data for each attachment from filestore or DB.
 
-    Returns a tuple:
-        (delivered: bool, error_msg: str | None, refused: dict)
+    Returns (regular_parts, inline_parts):
+      regular_parts – list of (filename, mimetype, raw_bytes)   → Content-Disposition: attachment
+      inline_parts  – list of (cid, filename, mimetype, raw_bytes) → multipart/related embed
 
-    - delivered=True, error_msg=None, refused={}  → all recipients accepted
-    - delivered=False, refused={addr: (code, reason)}  → recipient(s) rejected by server
-    - delivered=False, refused={}                 → connection / auth / other error
+    Inline images are identified by a description field starting with
+    ``__inline_cid__:<cid_value>`` — set by the upload endpoint when
+    ``inline=true`` is passed.
 
-    Writes smtp_delivered / smtp_error back to lugal.email.message if msg_id given.
-    Uses a 10-second SMTP timeout — fast on success and on immediate server rejections.
-
-    attachment_ids: list of ir.attachment IDs to attach to the outgoing message.
+    Uses direct SQL — avoids ir.attachment.datas ORM computed field which in
+    Odoo 17+ returns raw bytes (not base64), causing silent corruption when
+    base64.b64decode() is applied.
     """
-    import base64
-    import smtplib
+    import os as _os
+    import odoo as _odoo_mod
+
+    regular_parts = []
+    inline_parts  = []
+    if not attachment_ids:
+        return regular_parts, inline_parts
+
+    ids_int = [int(i) for i in attachment_ids]
+    cr.execute(
+        "SELECT id, name, mimetype, store_fname, description FROM ir_attachment WHERE id = ANY(%s)",
+        (ids_int,),
+    )
+    att_meta = {row[0]: row for row in cr.fetchall()}
+    filestore_base = _os.path.join(
+        _odoo_mod.tools.config['data_dir'], 'filestore', db_name
+    )
+
+    for att_id in ids_int:
+        if att_id not in att_meta:
+            _logger.warning('_read_att_parts: attachment %s not found — skipping', att_id)
+            continue
+        _, att_name, att_mime, store_fname, description = att_meta[att_id]
+        att_name = att_name or 'attachment'
+        att_mime = att_mime or 'application/octet-stream'
+        data = b''
+
+        if store_fname:
+            file_path = _os.path.join(filestore_base, store_fname)
+            try:
+                with open(file_path, 'rb') as fh:
+                    data = fh.read()
+            except Exception as exc:
+                _logger.warning(
+                    '_read_att_parts: filestore read failed for att %s at %s: %s',
+                    att_id, file_path, exc,
+                )
+        else:
+            cr.execute("SELECT db_datas FROM ir_attachment WHERE id = %s", (att_id,))
+            row = cr.fetchone()
+            if row and row[0]:
+                raw = row[0]
+                data = bytes(raw) if not isinstance(raw, bytes) else raw
+
+        if not data:
+            _logger.warning('_read_att_parts: no binary data for att %s (%s)', att_id, att_name)
+            continue
+
+        _logger.debug('_read_att_parts: loaded %s (%s, %d bytes)', att_name, att_mime, len(data))
+
+        # Inline images: description = "__inline_cid__:<cid_value>"
+        cid_prefix = '__inline_cid__:'
+        if description and description.startswith(cid_prefix):
+            cid_value = description[len(cid_prefix):]
+            inline_parts.append((cid_value, att_name, att_mime, data))
+        else:
+            regular_parts.append((att_name, att_mime, data))
+
+    return regular_parts, inline_parts
+
+
+def _build_mime_message(from_header, to_list, subject, body_html, body_text,
+                        cc, att_parts, from_address, importance='normal',
+                        inline_parts=None, request_read_receipt=False):
+    """
+    Build a MIME message from pre-loaded data. Returns raw RFC-2822 string.
+
+    att_parts     – list of (filename, mimetype, raw_bytes) for regular attachments
+    inline_parts  – list of (cid, filename, mimetype, raw_bytes) for CID-embedded images.
+                    These are wrapped in multipart/related so <img src="cid:…"> renders.
+    request_read_receipt – when True, adds Disposition-Notification-To header (read receipt).
+    """
     from email.mime.base import MIMEBase
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
     from email.encoders import encode_base64
     from email.utils import formatdate, make_msgid
 
-    smtp_host    = acc.smtp_host
-    smtp_port    = acc.smtp_port
-    smtp_use_tls = acc.smtp_use_tls
-    username     = acc.username or acc.email_address
-    password     = acc.password or ''
-    from_address = acc.email_address
-    display_name = (acc.display_name_field or '').strip()
-    db_name      = acc.env.cr.dbname
+    inline_parts = inline_parts or []
 
-    from_header = f'{display_name} <{from_address}>' if display_name else from_address
+    # ── Build the text/alternative part ─────────────────────────────────────
+    alt_part = MIMEMultipart('alternative')
+    if body_text:
+        alt_part.attach(MIMEText(body_text, 'plain', 'utf-8'))
+    if body_html:
+        alt_part.attach(MIMEText(body_html, 'html', 'utf-8'))
 
-    # Resolve ir.attachment records
-    att_records = []
-    if attachment_ids:
-        IrAtt = acc.env['ir.attachment'].sudo()
-        for att_id in attachment_ids:
-            att = IrAtt.browse(int(att_id)).exists()
-            if att:
-                att_records.append(att)
-
-    if att_records:
-        # mixed → contains alternative (text+html) + file parts
-        mime_msg = MIMEMultipart('mixed')
-        alt_part = MIMEMultipart('alternative')
-        if body_text:
-            alt_part.attach(MIMEText(body_text, 'plain', 'utf-8'))
-        if body_html:
-            alt_part.attach(MIMEText(body_html, 'html', 'utf-8'))
-        mime_msg.attach(alt_part)
-        for att in att_records:
+    # ── Wrap in multipart/related when inline (CID) images are present ──────
+    # Structure:  multipart/related
+    #               multipart/alternative (text + html)
+    #               image/png (Content-ID: <cid>, Content-Disposition: inline)
+    if inline_parts:
+        related_part = MIMEMultipart('related')
+        related_part.attach(alt_part)
+        for cid_value, img_name, img_mime, img_data in inline_parts:
             try:
-                data = base64.b64decode(att.datas or b'')
-                mime_type = (att.mimetype or 'application/octet-stream').split('/')
+                mime_type = img_mime.split('/')
                 main_type = mime_type[0]
-                sub_type = mime_type[1] if len(mime_type) > 1 else 'octet-stream'
+                sub_type  = mime_type[1] if len(mime_type) > 1 else 'octet-stream'
+                img_part = MIMEBase(main_type, sub_type)
+                img_part.set_payload(img_data)
+                encode_base64(img_part)
+                img_part.add_header('Content-ID', f'<{cid_value}>')
+                img_part.add_header('Content-Disposition', 'inline', filename=img_name)
+                related_part.attach(img_part)
+                _logger.debug('_build_mime_message: inline image %s cid=%s', img_name, cid_value)
+            except Exception as exc:
+                _logger.warning('_build_mime_message: inline image failed %s: %s', img_name, exc)
+        body_part = related_part
+    else:
+        body_part = alt_part
+
+    # ── Wrap in multipart/mixed when regular attachments are present ─────────
+    if att_parts:
+        mime_msg = MIMEMultipart('mixed')
+        mime_msg.attach(body_part)
+        for att_name, att_mime, data in att_parts:
+            try:
+                mime_type = att_mime.split('/')
+                main_type = mime_type[0]
+                sub_type  = mime_type[1] if len(mime_type) > 1 else 'octet-stream'
                 part = MIMEBase(main_type, sub_type)
                 part.set_payload(data)
                 encode_base64(part)
-                filename = att.name or 'attachment'
-                part.add_header('Content-Disposition', 'attachment', filename=filename)
+                part.add_header('Content-Disposition', 'attachment', filename=att_name)
                 mime_msg.attach(part)
+                _logger.debug('_build_mime_message: attached %s (%s, %d bytes)',
+                              att_name, att_mime, len(data))
             except Exception as att_exc:
-                _logger.warning('Could not attach file %s: %s', att.name, att_exc)
+                _logger.warning('_build_mime_message: MIME build failed for %s: %s',
+                                att_name, att_exc)
     else:
-        mime_msg = MIMEMultipart('alternative')
-        if body_text:
-            mime_msg.attach(MIMEText(body_text, 'plain', 'utf-8'))
-        if body_html:
-            mime_msg.attach(MIMEText(body_html, 'html', 'utf-8'))
+        mime_msg = body_part
 
     mime_msg['Subject']    = subject
     mime_msg['From']       = from_header
     mime_msg['To']         = ', '.join(to_list)
     mime_msg['Date']       = formatdate(localtime=True)
-    mime_msg['Message-ID'] = make_msgid(domain=from_address.split('@')[-1] if '@' in from_address else 'mail')
+    mime_msg['Message-ID'] = make_msgid(
+        domain=from_address.split('@')[-1] if '@' in from_address else 'mail'
+    )
     if cc:
         mime_msg['Cc'] = ', '.join(cc)
 
-    all_recipients = list(to_list) + list(cc or []) + list(bcc or [])
-    raw_message    = mime_msg.as_string()
+    # High-importance headers (honoured by Outlook, Apple Mail, Gmail)
+    if (importance or 'normal').lower() == 'high':
+        mime_msg['X-Priority']        = '1'
+        mime_msg['X-MSMail-Priority'] = 'High'
+        mime_msg['Importance']        = 'High'
 
-    delivered  = False
-    error_msg  = None
-    refused    = {}
+    # Read/Delivery receipt — asks the recipient's mail client to send a notification
+    # when the message is read (RFC 3798).  Not all clients honour this.
+    if request_read_receipt:
+        mime_msg['Disposition-Notification-To'] = from_address
+        mime_msg['Return-Receipt-To']           = from_address
+
+    return mime_msg.as_string()
+
+
+def _do_smtp_send(smtp_host, smtp_port, smtp_use_tls, username, password,
+                  from_address, all_recipients, raw_message, msg_id, db_name):
+    """
+    Perform the actual SMTP send and write result back to lugal.email.message.
+    Safe to call from a background thread — uses its own Registry cursor for
+    the write-back so it never touches the HTTP request cursor.
+
+    Returns (delivered: bool, error_msg: str|None, refused: dict).
+    """
+    import smtplib
+
+    delivered = False
+    error_msg = None
+    refused   = {}
 
     try:
-        use_ssl = (not smtp_use_tls) or (smtp_port == 465)
-        if use_ssl:
-            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=10)
+        # Port 465 = implicit TLS (SMTP_SSL).
+        # smtp_use_tls + other ports = STARTTLS (explicit TLS, common on 587).
+        # No TLS + non-465 = plain SMTP (port 25 or custom relay).
+        if smtp_port == 465:
+            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=30)
             server.ehlo()
-        else:
-            server = smtplib.SMTP(smtp_host, smtp_port, timeout=10)
+        elif smtp_use_tls:
+            server = smtplib.SMTP(smtp_host, smtp_port, timeout=30)
             server.ehlo()
             server.starttls()
             server.ehlo()
+        else:
+            server = smtplib.SMTP(smtp_host, smtp_port, timeout=30)
+            server.ehlo()
 
         server.login(username, password)
-
-        # sendmail() returns a dict of per-recipient errors; raises
-        # SMTPRecipientsRefused only when ALL recipients are rejected.
         partial_refused = server.sendmail(from_address, all_recipients, raw_message)
         server.quit()
 
         if partial_refused:
-            # Some recipients accepted, some refused — still a partial delivery.
             delivered = True
             parts = []
             for addr, (code, reason) in partial_refused.items():
@@ -1594,8 +3172,8 @@ def _send_via_smtp(acc, to_list, subject, body_html, body_text, cc=None, bcc=Non
             delivered = True
 
         _logger.info(
-            'SMTP delivered: from=%s to=%s subject=%r host=%s:%s',
-            from_address, all_recipients, subject, smtp_host, smtp_port,
+            'SMTP delivered: from=%s to=%s subject=(see msg %s) host=%s:%s',
+            from_address, all_recipients, msg_id, smtp_host, smtp_port,
         )
 
     except smtplib.SMTPRecipientsRefused as exc:
@@ -1616,24 +3194,207 @@ def _send_via_smtp(acc, to_list, subject, body_html, body_text, cc=None, bcc=Non
             from_address, all_recipients, smtp_host, smtp_port, smtp_use_tls, exc,
         )
 
-    # Write delivery result back to the stored message row (if we have one).
-    # NOTE: This uses a separate cursor intentionally — in the "send" flow the
-    # caller (HTTP handler) may not have committed yet, but in contexts where
-    # msg_id is passed from an already-committed record this still works.
-    # Callers should ALSO update the msg record via their own cursor post-call.
+    # Write delivery result back via a fresh cursor (safe from any thread).
+    final_delivered = delivered and not refused
     if msg_id:
         try:
             from odoo.modules.registry import Registry as _Registry
             import odoo as _odoo
-            with _Registry(db_name).cursor() as cr:
-                env = _odoo.api.Environment(cr, _odoo.SUPERUSER_ID, {})
+            with _Registry(db_name).cursor() as _cr:
+                env = _odoo.api.Environment(_cr, _odoo.SUPERUSER_ID, {})
                 record = env['lugal.email.message'].browse(msg_id)
                 if record.exists():
                     record.write({
-                        'smtp_delivered': delivered and not refused,
+                        'smtp_delivered': final_delivered,
                         'smtp_error':     error_msg or False,
+                        'smtp_status':    'delivered' if final_delivered else 'failed',
                     })
+                    # Push a real-time failure notification so the FE can show a
+                    # "delivery failed" banner without waiting for the next poll.
+                    if not final_delivered:
+                        try:
+                            user_id = record.account_id.user_id.id
+                            env['bus.bus']._sendone(
+                                f'supply_user.{user_id}',
+                                'crm.email.smtp.failed',
+                                {
+                                    'msg_id':  msg_id,
+                                    'subject': record.subject or '',
+                                    'error':   error_msg or 'Delivery failed',
+                                },
+                            )
+                        except Exception as bus_exc:
+                            _logger.debug('smtp.failed bus push error: %s', bus_exc)
         except Exception as write_exc:
-            _logger.warning('Could not update smtp_delivered on msg %s: %s', msg_id, write_exc)
+            _logger.warning('_do_smtp_send: write-back failed for msg %s: %s', msg_id, write_exc)
 
     return delivered, error_msg, refused
+
+
+def _send_via_smtp_async(acc, to_list, subject, body_html, body_text, cc=None, bcc=None,
+                         msg_id=None, attachment_ids=None, importance='normal',
+                         request_read_receipt=False):
+    """
+    Fire-and-forget SMTP send.
+
+    Captures SMTP credentials and other primitives from the Odoo record objects
+    (which must not be accessed from another thread), then hands all work —
+    file reading, MIME building, SMTP network I/O — to a daemon thread.
+
+    The HTTP handler calls this AFTER committing the message row to the DB and
+    returns immediately; the background thread writes smtp_delivered/smtp_error
+    back via its own Registry cursor.
+    """
+    import threading
+
+    # Capture all credentials and config as plain Python primitives before the
+    # thread starts — Odoo ORM objects are NOT thread-safe across threads.
+    db_name       = acc.env.cr.dbname
+    acc_id        = acc.id
+    smtp_host     = acc.smtp_host
+    smtp_port     = acc.smtp_port
+    smtp_use_tls  = acc.smtp_use_tls
+    imap_host     = acc.imap_host
+    imap_port     = int(acc.imap_port or 993)
+    imap_use_ssl  = bool(acc.imap_use_ssl)
+    username      = acc.username or acc.email_address
+    password      = acc.password or ''
+    from_address  = acc.email_address
+    display_name  = (acc.display_name_field or '').strip()
+    from_header   = f'{display_name} <{from_address}>' if display_name else from_address
+    att_ids       = [int(i) for i in (attachment_ids or [])]
+    all_recipients = list(to_list) + list(cc or []) + list(bcc or [])
+
+    _logger.info(
+        'SMTP async queued: from=%s to=%s attachments=%s msg_id=%s',
+        from_address, all_recipients, att_ids, msg_id,
+    )
+
+    def _bg():
+        """Background worker: reads files, builds MIME, sends, then appends to IMAP Sent."""
+        try:
+            from odoo.modules.registry import Registry as _Registry
+            import odoo as _odoo
+            import imaplib as _imaplib
+
+            # Open a fresh cursor to read attachment binary data.
+            with _Registry(db_name).cursor() as _cr:
+                att_parts, inline_parts = _read_att_parts(att_ids, _cr, db_name)
+
+            raw_message = _build_mime_message(
+                from_header, to_list, subject, body_html, body_text, cc, att_parts,
+                from_address, importance=importance,
+                inline_parts=inline_parts,
+                request_read_receipt=request_read_receipt,
+            )
+
+            delivered, error_msg, refused = _do_smtp_send(
+                smtp_host, smtp_port, smtp_use_tls, username, password,
+                from_address, all_recipients, raw_message, msg_id, db_name,
+            )
+
+            # ── IMAP APPEND ───────────────────────────────────────────────────
+            # After successful SMTP delivery, upload a copy to the IMAP Sent
+            # folder so the message appears in webmail, Outlook, etc.
+            if delivered:
+                try:
+                    # Discover the server-side Sent folder name (cached after first run).
+                    sent_folder = 'Sent'
+                    try:
+                        with _Registry(db_name).cursor() as _cr2:
+                            env2 = _odoo.api.Environment(_cr2, _odoo.SUPERUSER_ID, {})
+                            acc_rec = env2['lugal.email.account'].browse(acc_id)
+                            if acc_rec.exists():
+                                sent_folder = acc_rec._get_server_folder_name('sent')
+                    except Exception:
+                        pass  # fall back to 'Sent'
+
+                    # Throttle APPEND connections with the same per-server semaphore
+                    # used by IDLE threads so we don't exceed the server's
+                    # max-connections-per-user limit during bulk sends.
+                    _append_conn = None
+                    _append_sem = None
+                    _append_sem_acquired = False
+                    try:
+                        from odoo.addons.lugal_email.models.email_idle_watcher import _server_semaphore
+                        _append_sem = _server_semaphore(imap_host, imap_port, username)
+                        _append_sem_acquired = _append_sem.acquire(timeout=30)
+                        if not _append_sem_acquired:
+                            _logger.warning(
+                                'IMAP APPEND skipped (server %s:%s at capacity) for msg=%s',
+                                imap_host, imap_port, msg_id,
+                            )
+                            raise RuntimeError('semaphore timeout')
+                    except ImportError:
+                        pass  # watcher not loaded — no throttle, proceed anyway
+
+                    try:
+                        conn_cls = _imaplib.IMAP4_SSL if imap_use_ssl else _imaplib.IMAP4
+                        _append_conn = conn_cls(imap_host, imap_port)
+                        _append_conn.login(username, password)
+
+                        msg_bytes = (
+                            raw_message.encode('utf-8')
+                            if isinstance(raw_message, str)
+                            else raw_message
+                        )
+                        typ, data = _append_conn.append(sent_folder, '(\\Seen)', None, msg_bytes)
+                        _append_conn.logout()
+                        _append_conn = None
+
+                        if typ == 'OK':
+                            _logger.info(
+                                'SMTP+APPEND: msg=%s appended to %s folder=%s',
+                                msg_id, imap_host, sent_folder,
+                            )
+                        else:
+                            _logger.warning(
+                                'IMAP APPEND returned %s for msg=%s folder=%s: %s',
+                                typ, msg_id, sent_folder, data,
+                            )
+                    finally:
+                        if _append_conn:
+                            try:
+                                _append_conn.logout()
+                            except Exception:
+                                pass
+                        if _append_sem and _append_sem_acquired:
+                            _append_sem.release()
+                except Exception as append_exc:
+                    _logger.warning(
+                        'IMAP APPEND to Sent failed for msg=%s acc=%s: %s',
+                        msg_id, acc_id, append_exc,
+                    )
+
+        except Exception as exc:
+            _logger.error('SMTP background worker crashed for msg %s: %s', msg_id, exc, exc_info=True)
+
+    threading.Thread(target=_bg, daemon=True, name=f'smtp-{msg_id}').start()
+
+
+def _send_via_smtp(acc, to_list, subject, body_html, body_text, cc=None, bcc=None,
+                   msg_id=None, attachment_ids=None):
+    """
+    Synchronous SMTP send — kept for backward compatibility / direct callers.
+    New callers should prefer _send_via_smtp_async.
+    """
+    db_name      = acc.env.cr.dbname
+    smtp_host    = acc.smtp_host
+    smtp_port    = acc.smtp_port
+    smtp_use_tls = acc.smtp_use_tls
+    username     = acc.username or acc.email_address
+    password     = acc.password or ''
+    from_address = acc.email_address
+    display_name = (acc.display_name_field or '').strip()
+    from_header  = f'{display_name} <{from_address}>' if display_name else from_address
+
+    att_parts, inline_parts = _read_att_parts(attachment_ids or [], acc.env.cr, db_name)
+    all_recipients = list(to_list) + list(cc or []) + list(bcc or [])
+    raw_message    = _build_mime_message(
+        from_header, to_list, subject, body_html, body_text, cc, att_parts, from_address,
+        inline_parts=inline_parts,
+    )
+    return _do_smtp_send(
+        smtp_host, smtp_port, smtp_use_tls, username, password,
+        from_address, all_recipients, raw_message, msg_id, db_name,
+    )

@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+import threading
 import email as email_lib
 from email import policy
 from email.header import decode_header
@@ -11,6 +12,19 @@ from email.utils import getaddresses, parsedate_to_datetime, parseaddr
 from odoo import api, models, fields
 
 _logger = logging.getLogger(__name__)
+
+# Per-account mutex to prevent concurrent _upsert_inbox_message calls for the
+# same account from creating duplicate rows when IDLE and polling threads fire
+# at the same instant for the same new message.
+_upsert_locks: dict = {}
+_upsert_locks_guard = threading.Lock()
+
+
+def _get_upsert_lock(account_id: int) -> threading.Lock:
+    with _upsert_locks_guard:
+        if account_id not in _upsert_locks:
+            _upsert_locks[account_id] = threading.Lock()
+        return _upsert_locks[account_id]
 
 # How many IMAP messages to pull on first / incremental catch-up (per sync call).
 SYNC_MAX_MESSAGES = 150
@@ -276,6 +290,78 @@ class LugalEmailAccount(models.Model):
         threading.Thread(target=_do_store, daemon=True,
                          name=f'imap-store-{imap_uid}').start()
 
+    def _imap_append_sent_async(self, raw_message):
+        """
+        Upload a copy of a just-sent email to the IMAP Sent folder so it appears
+        in webmail, Outlook, and any other email client connected to the same account.
+
+        raw_message: the RFC-2822 email as a bytes or str object.
+        Runs in a background daemon thread — the HTTP response is never blocked.
+        """
+        self.ensure_one()
+
+        import threading
+        import imaplib
+
+        acc_id   = self.id
+        db_name  = self.env.cr.dbname
+        imap_host    = self.imap_host
+        imap_port    = int(self.imap_port or 993)
+        imap_use_ssl = bool(self.imap_use_ssl)
+        username     = self.username or self.email_address
+        password     = self.password or ''
+
+        def _do_append():
+            try:
+                from odoo.modules.registry import Registry as _Registry
+                import odoo as _odoo
+
+                # Discover the server-side Sent folder name (cached after first run).
+                sent_folder = 'Sent'
+                try:
+                    with _Registry(db_name).cursor() as _cr:
+                        env = _odoo.api.Environment(_cr, _odoo.SUPERUSER_ID, {})
+                        acc = env['lugal.email.account'].browse(acc_id)
+                        if acc.exists():
+                            sent_folder = acc._get_server_folder_name('sent')
+                except Exception:
+                    pass  # fall back to 'Sent'
+
+                conn_cls = imaplib.IMAP4_SSL if imap_use_ssl else imaplib.IMAP4
+                conn = conn_cls(imap_host, imap_port)
+                conn.login(username, password)
+
+                # APPEND expects bytes; encode if we received a string.
+                msg_bytes = (
+                    raw_message.encode('utf-8')
+                    if isinstance(raw_message, str)
+                    else raw_message
+                )
+
+                # Append to Sent with \Seen so the copy appears already-read.
+                typ, data = conn.append(sent_folder, '(\\Seen)', None, msg_bytes)
+                conn.logout()
+
+                if typ == 'OK':
+                    _logger.info(
+                        'IMAP APPEND to Sent succeeded: acc=%s folder=%s',
+                        acc_id, sent_folder,
+                    )
+                else:
+                    _logger.warning(
+                        'IMAP APPEND to Sent returned %s for acc=%s folder=%s: %s',
+                        typ, acc_id, sent_folder, data,
+                    )
+            except Exception as exc:
+                _logger.warning(
+                    'IMAP APPEND to Sent failed for acc=%s: %s',
+                    acc_id, exc,
+                )
+
+        threading.Thread(
+            target=_do_append, daemon=True, name=f'imap-append-sent-{acc_id}'
+        ).start()
+
     def _imap_move_async(self, imap_uid, from_folder, to_folder_purpose):
         """Move a message between IMAP folders in a background thread.
 
@@ -438,12 +524,51 @@ class LugalEmailAccount(models.Model):
         cc_raw = msg.get_all('Cc', [])
         cc_pairs = getaddresses(cc_raw) if cc_raw else []
         cc_list = [{'name': self._decode_mime_header(n or ''), 'email': e} for n, e in cc_pairs if e]
+        # Reply-To: used by reply/reply_all to address the reply correctly
+        reply_to_raw = msg.get('Reply-To', '')
+        reply_to_addr = ''
+        if reply_to_raw:
+            rt_pairs = getaddresses([reply_to_raw])
+            reply_to_addr = rt_pairs[0][1] if rt_pairs else ''
+
+        # References: chain of ancestor Message-IDs used for thread grouping
+        references_raw = (msg.get('References') or msg.get('references') or '').strip()
+        references_ids = references_raw.split() if references_raw else []
+        # Also consider In-Reply-To in case References is absent (some clients)
+        in_reply_to_hdr = (msg.get('In-Reply-To') or '').strip()
+
+        # thread_id = the oldest ancestor Message-ID (first in References chain).
+        # If References is absent, use In-Reply-To. If neither present, this
+        # message is the root — use its own Message-ID.
+        if references_ids:
+            thread_id = references_ids[0].strip()
+        elif in_reply_to_hdr:
+            thread_id = in_reply_to_hdr
+        else:
+            thread_id = message_id or ''
+
         body_text, body_html = self._extract_best_body(msg)
         is_read = self._parse_flags_from_fetch_response(flags_meta)
 
+        # is_mentioned: True when the account owner's email is in the To: header
+        # (direct recipient, not just CC). Matches Outlook "Mentioned Mail".
+        own_email = (self.email_address or '').strip().lower()
+        to_emails_lower = [pair[1].lower() for pair in getaddresses(msg.get_all('To', [])) if pair[1]]
+        is_mentioned = bool(own_email and own_email in to_emails_lower)
+
+        # message_size: approximate RFC-822 size in bytes
+        message_size = len(raw_bytes) if raw_bytes else 0
+
         Message = self.env['lugal.email.message'].sudo()
+        # Search by imap_uid first; also check message_id as a secondary key so
+        # we never store the same RFC-2822 message twice even if the UID changed.
         domain = [('account_id', '=', self.id), ('folder', '=', 'inbox'), ('imap_uid', '=', uid_int)]
         existing = Message.search(domain, limit=1)
+        if not existing and message_id:
+            existing = Message.search(
+                [('account_id', '=', self.id), ('message_id', '=', message_id)],
+                limit=1,
+            )
         vals = {
             'account_id':    self.id,
             'folder':        'inbox',
@@ -453,11 +578,17 @@ class LugalEmailAccount(models.Model):
             'from_address':  from_addr or '',
             'to_addresses':  json.dumps(to_list),
             'cc_addresses':  json.dumps(cc_list),
+            'reply_to':      reply_to_addr or False,
             'message_id':    message_id,
+            'in_reply_to':   in_reply_to_hdr or False,
+            'references':    references_raw or False,
+            'thread_id':     thread_id or False,
             'date':          dt,
             'is_read':       is_read,
             'is_deleted':    False,
             'active':        True,
+            'is_mentioned':  is_mentioned,
+            'message_size':  message_size,
         }
         if headers_only:
             # Do not overwrite body if we already have it from a previous full fetch.
@@ -476,17 +607,82 @@ class LugalEmailAccount(models.Model):
                 vals.pop('body_html', None)
                 vals.pop('body_fetched', None)
             existing.write(vals)
-            return existing
-        return Message.create(vals)
+            stored_msg = existing
+        else:
+            # Acquire a per-account mutex before the INSERT to prevent two threads
+            # (IDLE push + polling fallback) racing on the same new message and
+            # each inserting a separate row for the same imap_uid / message_id.
+            _acc_lock = _get_upsert_lock(self.id)
+            with _acc_lock:
+                # Re-check inside the lock — the other thread may have just created it.
+                stored_msg = Message.search(domain, limit=1)
+                if not stored_msg and message_id:
+                    stored_msg = Message.search(
+                        [('account_id', '=', self.id), ('message_id', '=', message_id)],
+                        limit=1,
+                    )
+
+                if stored_msg:
+                    # Another thread won the race — just update.
+                    if not (headers_only and stored_msg.body_fetched):
+                        stored_msg.write(vals)
+                else:
+                    # We are the first — create, using a SAVEPOINT so a concurrent
+                    # INSERT at the DB level (unlikely but possible) rolls back
+                    # only the inner block and leaves the cursor usable.
+                    try:
+                        with self.env.cr.savepoint():
+                            stored_msg = Message.create(vals)
+                    except Exception as dup_exc:
+                        # Unique-constraint violation from a concurrent INSERT —
+                        # fall back to search and update.
+                        _logger.warning(
+                            '_upsert_inbox_message: duplicate INSERT caught for '
+                            'account=%s uid=%s message_id=%s — %s',
+                            self.id, uid_int, message_id, dup_exc,
+                        )
+                        stored_msg = Message.search(domain, limit=1)
+                        if not stored_msg and message_id:
+                            stored_msg = Message.search(
+                                [('account_id', '=', self.id), ('message_id', '=', message_id)],
+                                limit=1,
+                            )
+                        if stored_msg and not (headers_only and stored_msg.body_fetched):
+                            stored_msg.write(vals)
+
+                    # Run inbox rules only on genuinely new messages.
+                    if stored_msg:
+                        try:
+                            self.env['lugal.email.rule'].sudo().apply_inbox_rules(stored_msg, vals)
+                        except Exception as _re:
+                            _logger.warning('Inbox rule execution failed for msg %s: %s', stored_msg.id, _re)
+
+        # Extract and persist file attachments when we have the full body.
+        if not headers_only:
+            self._store_imap_attachments(stored_msg, msg)
+
+        return stored_msg
 
     def action_sync_if_stale(self, force=False):
         """
         Run IMAP inbox import unless recently synced (reduces load on mailbox polling).
         If inbox has no rows, sync runs unless the last attempt was very recent.
+
+        Accounts with sync_status='never' (never successfully synced) always bypass
+        the throttle — we want the very first sync to happen as soon as possible.
         """
         self.ensure_one()
         if not (self.password or '').strip():
             return {'skipped': True, 'reason': 'no_password'}
+
+        # Always sync if this account has never been synced successfully.
+        if not self.last_sync_date or self.sync_status == 'never':
+            _logger.info(
+                'action_sync_if_stale: account %s has sync_status=%s — forcing immediate sync',
+                self.id, self.sync_status,
+            )
+            return self.action_sync()
+
         now = fields.Datetime.now()
         Msg = self.env['lugal.email.message'].sudo()
         inbox_count = Msg.search_count([
@@ -494,7 +690,7 @@ class LugalEmailAccount(models.Model):
             ('folder', '=', 'inbox'),
             ('is_deleted', '=', False),
         ])
-        if not force and self.last_sync_date:
+        if not force:
             delta = (now - self.last_sync_date).total_seconds()
             limit = SYNC_THROTTLE_EMPTY_SECONDS if inbox_count == 0 else SYNC_THROTTLE_SECONDS
             if delta < limit:
@@ -502,8 +698,171 @@ class LugalEmailAccount(models.Model):
 
         return self.action_sync()
 
+    def _sync_sent_folder(self, conn):
+        """
+        Incrementally import messages from the IMAP Sent folder into Odoo
+        so they appear in the "sent" mailbox view.
+
+        Uses an ir.config_parameter as the UID cursor so no model change is needed.
+        Skips messages that already exist in the local DB (e.g. sent via our system).
+        Called from action_sync with the already-open IMAP connection.
+        """
+        import email as _email
+        import json as _json
+
+        Msg = self.env['lugal.email.message'].sudo()
+        ICP = self.env['ir.config_parameter'].sudo()
+        cursor_key = f'lugal.email.sent_max_uid.{self.id}'
+
+        try:
+            sent_folder = self._get_server_folder_name('sent')
+        except Exception:
+            sent_folder = 'Sent'
+
+        try:
+            typ, data = conn.select(sent_folder, readonly=True)
+            if typ != 'OK' or not data:
+                _logger.warning(
+                    'Sent folder sync: SELECT %r failed for acc=%s (typ=%s) — '
+                    'clearing cached name and retrying discovery',
+                    sent_folder, self.id, typ,
+                )
+                # Clear cached folder name and try auto-discovery again
+                cache_key = f'lugal.email.folder.{self.id}.sent'
+                self.env['ir.config_parameter'].sudo().set_param(cache_key, '')
+                try:
+                    sent_folder = self._get_server_folder_name('sent')
+                    typ, data = conn.select(sent_folder, readonly=True)
+                    if typ != 'OK' or not data:
+                        _logger.warning(
+                            'Sent folder fallback also failed for acc=%s: folder=%r',
+                            self.id, sent_folder,
+                        )
+                        return
+                except Exception:
+                    return
+        except Exception as exc:
+            _logger.warning('Sent folder select failed for acc=%s: %s', self.id, exc)
+            return
+
+        try:
+            max_uid_cursor = int(ICP.get_param(cursor_key, '0') or '0')
+        except (ValueError, TypeError):
+            max_uid_cursor = 0
+
+        # Fetch only new UIDs (above our cursor)
+        search_criteria = f'UID {max_uid_cursor + 1}:*' if max_uid_cursor else 'ALL'
+        try:
+            typ, uid_data = conn.uid('search', None, search_criteria)
+        except Exception as exc:
+            _logger.debug('Sent UID search failed for acc=%s: %s', self.id, exc)
+            return
+
+        if typ != 'OK' or not uid_data or not uid_data[0]:
+            return
+
+        uid_list = [int(u) for u in uid_data[0].split() if u.isdigit() and int(u) > max_uid_cursor]
+        if not uid_list:
+            return
+
+        # Fetch in batches of 25 (Sent folder items are usually larger)
+        BATCH = 25
+        max_seen = max_uid_cursor
+        uid_re = re.compile(br'UID\s+(\d+)')
+
+        for i in range(0, len(uid_list), BATCH):
+            batch = uid_list[i:i + BATCH]
+            uid_set = ','.join(str(u) for u in batch)
+            try:
+                typ, items = conn.uid('fetch', uid_set, '(FLAGS RFC822.HEADER)')
+            except Exception:
+                continue
+            if typ != 'OK' or not items:
+                continue
+
+            for item in items:
+                if not isinstance(item, tuple) or len(item) < 2:
+                    continue
+                meta, header_bytes = item[0], item[1]
+                if not isinstance(meta, bytes):
+                    continue
+                m = uid_re.search(meta)
+                if not m:
+                    continue
+                uid_int = int(m.group(1))
+                if uid_int <= max_uid_cursor:
+                    continue
+
+                try:
+                    msg = _email.message_from_bytes(header_bytes, policy=policy.default)
+                    message_id = (msg.get('Message-ID') or '').strip() or False
+                    subject    = self._decode_mime_header(msg.get('Subject', ''))
+                    from_name, from_addr = parseaddr(msg.get('From', ''))
+                    if from_name:
+                        from_name = self._decode_mime_header(from_name)
+
+                    date_hdr = msg.get('Date')
+                    dt = None
+                    if date_hdr:
+                        try:
+                            from email.utils import parsedate_to_datetime as _p2d
+                            dt = _p2d(date_hdr)
+                            if dt.tzinfo is not None:
+                                dt = dt.replace(tzinfo=None)
+                        except Exception:
+                            pass
+                    if not dt:
+                        dt = fields.Datetime.now()
+
+                    to_raw  = msg.get_all('To', [])
+                    to_list = [{'name': self._decode_mime_header(n or ''), 'email': e}
+                               for n, e in getaddresses(to_raw) if e]
+                    cc_raw  = msg.get_all('Cc', [])
+                    cc_list = [{'name': self._decode_mime_header(n or ''), 'email': e}
+                               for n, e in getaddresses(cc_raw) if e]
+
+                    # Skip if already in local DB (e.g. sent via our own SMTP send)
+                    domain = [
+                        ('account_id', '=', self.id),
+                        ('folder', '=', 'sent'),
+                    ]
+                    if message_id:
+                        domain.append(('message_id', '=', message_id))
+                    else:
+                        domain += [('subject', '=', subject or '(no subject)'), ('date', '=', dt)]
+
+                    if not Msg.search_count(domain):
+                        Msg.create({
+                            'account_id':   self.id,
+                            'folder':       'sent',
+                            'imap_uid':     uid_int,
+                            'subject':      subject or '(no subject)',
+                            'from_name':    from_name or '',
+                            'from_address': from_addr or '',
+                            'to_addresses': _json.dumps(to_list),
+                            'cc_addresses': _json.dumps(cc_list),
+                            'message_id':   message_id or False,
+                            'date':         dt,
+                            'is_read':      True,  # sent messages are always read
+                            'smtp_delivered': True,
+                            'body_fetched': False,
+                        })
+
+                    if uid_int > max_seen:
+                        max_seen = uid_int
+
+                except Exception as exc:
+                    _logger.warning('Sent folder upsert failed uid=%s acc=%s: %s', uid_int, self.id, exc)
+
+        if max_seen > max_uid_cursor:
+            ICP.set_param(cursor_key, str(max_seen))
+            _logger.info(
+                'Sent folder sync: acc=%s new_max_uid=%s (was %s)',
+                self.id, max_seen, max_uid_cursor,
+            )
+
     def action_sync(self):
-        """Import INBOX messages over IMAP and refresh unread_count from the database."""
+        """Import INBOX and Sent folder messages over IMAP."""
         self.ensure_one()
         Msg = self.env['lugal.email.message'].sudo()
         if not (self.password or '').strip():
@@ -569,7 +928,7 @@ class LugalEmailAccount(models.Model):
             # IMAP fetch specs:
             # • Header-only (fast, ~1 KB/msg) — used for initial bulk import
             # • Full body  (slow, ~50 KB/msg) — used for incremental (typically 1-10 new msgs)
-            HEADERS_FETCH = '(UID FLAGS BODY.PEEK[HEADER.FIELDS (FROM TO CC DATE SUBJECT MESSAGE-ID IN-REPLY-TO REFERENCES)])'
+            HEADERS_FETCH = '(UID FLAGS BODY.PEEK[HEADER.FIELDS (FROM TO CC REPLY-TO DATE SUBJECT MESSAGE-ID IN-REPLY-TO REFERENCES)])'
             BODY_FETCH    = '(UID FLAGS BODY.PEEK[])'
 
             if max_uid_cursor == 0:
@@ -606,6 +965,14 @@ class LugalEmailAccount(models.Model):
                     if typ == 'OK' and data_list:
                         _upsert_batch(_parse_batch_fetch(data_list), min_uid=max_uid_cursor, headers_only=False)
 
+            # ── Sent folder sync ─────────────────────────────────────────────
+            # Reuse the same connection to also pull sent messages so they
+            # appear in our "sent" mailbox and match webmail / Outlook.
+            try:
+                self._sync_sent_folder(conn)
+            except Exception:
+                _logger.warning('Sent folder sync failed for acc=%s', self.id, exc_info=True)
+
             conn.logout()
 
             unread = Msg.search_count([
@@ -614,21 +981,42 @@ class LugalEmailAccount(models.Model):
                 ('is_read', '=', False),
                 ('is_deleted', '=', False),
             ])
-            self.write({
-                'sync_status':       'ok',
-                'last_sync_date':    fields.Datetime.now(),
-                'unread_count':      unread,
-                'imap_inbox_max_uid': max_seen,
-                'sync_error_msg':    False,
-            })
+
+            # Use a savepoint so that a concurrent-update / serialization error
+            # from updating the account row does NOT abort the outer transaction.
+            # Without this, PostgreSQL would roll back all the message INSERTs
+            # created above, making newly-arrived emails disappear.
+            now_dt = fields.Datetime.now()
+            try:
+                with self.env.cr.savepoint():
+                    self.write({
+                        'sync_status':        'ok',
+                        'last_sync_date':     now_dt,
+                        'unread_count':       unread,
+                        'imap_inbox_max_uid': max_seen,
+                        'sync_error_msg':     False,
+                    })
+            except Exception:
+                _logger.warning(
+                    'action_sync: account %s status write failed (concurrent update) '
+                    '— message inserts are preserved', self.id,
+                )
+
             return {
                 'sync_status':    'ok',
-                'last_sync_date': self.last_sync_date.isoformat() if self.last_sync_date else None,
+                'last_sync_date': now_dt.isoformat(),
                 'unread_count':   unread,
                 'imported':       imported,
             }
         except Exception as exc:
-            self.write({'sync_status': 'error', 'sync_error_msg': str(exc)})
+            # Wrap this write in a savepoint too: if the outer exception left the
+            # transaction in a bad state (e.g. IMAP connect error after a prior
+            # failed SQL), we still want to record the error without aborting again.
+            try:
+                with self.env.cr.savepoint():
+                    self.write({'sync_status': 'error', 'sync_error_msg': str(exc)})
+            except Exception:
+                pass
             _logger.exception('action_sync failed for account %s', self.id)
             return {'sync_status': 'error', 'message': str(exc)}
 
@@ -639,20 +1027,103 @@ class LugalEmailAccount(models.Model):
         Syncs INBOX for every active account that has a password configured.
         Called by the ir.cron scheduler; runs each account in its own savepoint
         so one failure does not abort the others.
+
+        De-duplicates by IMAP credential so accounts sharing the same login
+        only open ONE connection per cron run, preventing per-user connection
+        limit errors on the mail server.
+
+        Also detects accounts with a stale sync_status='ok' that have never
+        actually imported any messages — these are typically accounts where the
+        password was set up during a previous test run but auth has since failed.
+        Such accounts are included in the cron run so their status is updated.
         """
         accounts = self.search([
             ('is_active', '=', True),
             ('is_deleted', '=', False),
         ])
+        synced_creds: set = set()
         for acc in accounts:
             if not (acc.password or '').strip():
+                # Mark completely unconfigured accounts clearly
+                if acc.sync_status not in ('never',):
+                    try:
+                        with self.env.cr.savepoint():
+                            acc.write({'sync_status': 'never', 'sync_error_msg': False})
+                    except Exception:
+                        pass
                 continue
+            cred = (
+                (acc.imap_host or '').strip(),
+                int(acc.imap_port or 993),
+                (acc.username or acc.email_address or '').strip(),
+            )
+            if cred in synced_creds:
+                continue  # already synced this mailbox in this cron run
+            synced_creds.add(cred)
             try:
                 acc.action_sync()
                 self.env.cr.commit()
             except Exception:
                 self.env.cr.rollback()
                 _logger.exception('Cron IMAP sync failed for account %s (%s)', acc.id, acc.email_address)
+
+    def _store_imap_attachments(self, msg_record, email_msg):
+        """Extract MIME attachments from a parsed email and store as ir.attachment.
+
+        Skips parts that are already stored (deduplicates by name + size).
+        Called after the full message body is downloaded from IMAP.
+        """
+        import base64 as _b64
+        import uuid as _uuid
+        import mimetypes as _mimetypes
+
+        IrAtt = self.env['ir.attachment'].sudo()
+        existing_names = {
+            a.name
+            for a in IrAtt.search([
+                ('res_model', '=', 'lugal.email.message'),
+                ('res_id',    '=', msg_record.id),
+            ])
+        }
+
+        for part in email_msg.walk():
+            # Only process attachment/inline parts with a filename
+            disposition = part.get_content_disposition() or ''
+            filename = part.get_filename()
+            if not filename and 'attachment' not in disposition:
+                continue
+            if not filename:
+                continue
+            filename = self._decode_mime_header(filename)
+            if filename in existing_names:
+                continue
+
+            att_data = part.get_payload(decode=True)
+            if not att_data:
+                continue
+
+            mime = part.get_content_type() or _mimetypes.guess_type(filename)[0] or 'application/octet-stream'
+            att_token = _uuid.uuid4().hex
+            try:
+                IrAtt.create({
+                    'name':         filename,
+                    'mimetype':     mime,
+                    'datas':        _b64.b64encode(att_data).decode('utf-8'),
+                    'type':         'binary',
+                    'res_model':    'lugal.email.message',
+                    'res_id':       msg_record.id,
+                    'access_token': att_token,
+                })
+                existing_names.add(filename)
+                _logger.debug(
+                    'Stored IMAP attachment %r (%d bytes) for msg=%s',
+                    filename, len(att_data), msg_record.id,
+                )
+            except Exception:
+                _logger.warning(
+                    'Failed to store IMAP attachment %r for msg=%s',
+                    filename, msg_record.id, exc_info=True,
+                )
 
     def fetch_message_body(self, message_id):
         """
@@ -677,13 +1148,11 @@ class LugalEmailAccount(models.Model):
             typ, _ = conn.select(folder, readonly=True)
             if typ != 'OK':
                 return msg
-            uid_re = re.compile(br'UID\s+(\d+)')
             typ, data_list = conn.uid('fetch', str(msg.imap_uid), '(FLAGS BODY.PEEK[])')
             conn.logout()
             if typ != 'OK' or not data_list:
                 return msg
 
-            # Parse the single-message response
             for item in data_list:
                 if not isinstance(item, tuple) or len(item) < 2:
                     continue
@@ -697,6 +1166,8 @@ class LugalEmailAccount(models.Model):
                     'body_html':    body_html or False,
                     'body_fetched': True,
                 })
+                # Extract and store file attachments
+                self._store_imap_attachments(msg, email_msg)
                 return msg
         except Exception:
             _logger.exception('fetch_message_body failed for msg=%s account=%s', message_id, self.id)
