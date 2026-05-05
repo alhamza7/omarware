@@ -685,17 +685,43 @@ class NBSDocumentController(http.Controller):
 
             file_name = version.file_name or f'document_{document_id}'
 
-            # ── MIME type and disposition ────────────────────────────────────
+            # ── MIME type ────────────────────────────────────────────────────
             mime_type = mimetypes.guess_type(file_name)[0] or 'application/octet-stream'
             is_preview = str(preview or '').lower() in ('1', 'true', 'yes')
-            if is_preview:
-                disposition = f'inline; filename="{file_name}"'
-                # Keep the detected mime type so the browser renders it
-            else:
-                disposition = f'attachment; filename="{file_name}"'
 
-            # ── Try streaming directly from filestore ────────────────────────
-            # This avoids loading any base64 into memory — peak RAM = 0 extra.
+            # ── Safe Content-Disposition (RFC 6266 / RFC 5987) ──────────────
+            # HTTP headers must be ASCII.  Non-ASCII filenames (Arabic, CJK…)
+            # MUST use the filename* parameter with UTF-8 percent-encoding.
+            from urllib.parse import quote as _url_quote
+            safe_ascii = file_name.encode('ascii', errors='replace').decode('ascii')
+            encoded_name = _url_quote(file_name, safe='')
+            disp_type = 'inline' if is_preview else 'attachment'
+            disposition = (
+                f"{disp_type}; "
+                f'filename="{safe_ascii}"; '
+                f"filename*=UTF-8''{encoded_name}"
+            )
+
+            def _stream_file(full_path):
+                """Return a streaming Response for *full_path*."""
+                file_size = os.path.getsize(full_path)
+                resp = werkzeug.wrappers.Response(
+                    response=open(full_path, 'rb'),
+                    status=200,
+                    direct_passthrough=True,
+                )
+                resp.headers['Content-Type']        = mime_type
+                resp.headers['Content-Disposition'] = disposition
+                resp.headers['Content-Length']      = str(file_size)
+                resp.headers['Cache-Control']       = 'private, max-age=3600'
+                resp.headers['Accept-Ranges']       = 'bytes'
+                return resp
+
+            # ── Path 1: version.file_path (fast-upload direct-write path) ───
+            if version.file_path and os.path.isfile(version.file_path):
+                return _stream_file(version.file_path)
+
+            # ── Path 2: ir.attachment in filestore ───────────────────────────
             IrAttachment = env['ir.attachment'].sudo()
             attachment = IrAttachment.search([
                 ('res_model', '=', 'nbs.document.version'),
@@ -706,25 +732,21 @@ class NBSDocumentController(http.Controller):
             if attachment and attachment.store_fname:
                 full_path = IrAttachment._full_path(attachment.store_fname)
                 if os.path.isfile(full_path):
-                    file_size = os.path.getsize(full_path)
-                    response = werkzeug.wrappers.Response(
-                        response=open(full_path, 'rb'),
-                        status=200,
-                        direct_passthrough=True,
-                    )
-                    response.headers['Content-Type']        = mime_type
-                    response.headers['Content-Disposition'] = disposition
-                    response.headers['Content-Length']      = str(file_size)
-                    response.headers['Cache-Control']       = 'private, max-age=3600'
-                    response.headers['Accept-Ranges']       = 'bytes'
-                    return response
+                    return _stream_file(full_path)
 
-            # ── Fallback: read raw bytes (attachment.raw handles filestore) ──
+            # ── Path 3: read raw bytes from ORM ──────────────────────────────
             if attachment and attachment.raw:
                 raw_bytes = attachment.raw
             elif version.file_data:
                 raw_bytes = base64.b64decode(version.file_data)
             else:
+                _logger.warning(
+                    'download_document: no file found for doc=%s ver=%s '
+                    '(file_path=%r, attachment=%s)',
+                    document_id, version_id,
+                    getattr(version, 'file_path', None),
+                    attachment.id if attachment else None,
+                )
                 return request.not_found()
 
             return request.make_response(
