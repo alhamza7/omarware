@@ -15,6 +15,7 @@ from ._error import crm_error
 from .upload_controller import (
     ALLOWED_DOC_MIMES,
     ALLOWED_IMAGE_MIMES,
+    _build_attachment_public_path,
     _build_attachment_url,
     _create_attachment,
     is_allowed_crm_image_mime,
@@ -95,12 +96,13 @@ def _create_supply_chat_attachment(filename, mimetype, data_bytes, res_model=Fal
 
 
 def _serialize_attachment(att):
+    """Single canonical shape for supply-chain attachment lists (no duplicate arrays)."""
     return {
         'id': att.id,
         'name': att.name or '',
         'mimetype': att.mimetype or 'application/octet-stream',
         'size': int(att.file_size or 0),
-        'url': _build_attachment_url(att),
+        'url': _build_attachment_public_path(att),
         'file_url': _build_attachment_url(att),
         'uploaded_by_name': att.create_uid.name if att.create_uid else '',
         'created_at': att.create_date.isoformat() if att.create_date else '',
@@ -646,7 +648,8 @@ class CrmSupplyController(http.Controller):
                 else:
                     att = _create_supply_chat_attachment(filename, mime, data)
 
-                url = _build_attachment_url(att)
+                pub = _build_attachment_public_path(att)
+                file_url = _build_attachment_url(att)
 
                 # Auto-detect kind if not provided
                 if kind_hint:
@@ -665,13 +668,14 @@ class CrmSupplyController(http.Controller):
                     'name':             att.name or filename,
                     'mimetype':         mime,
                     'size':             len(data),
-                    'url':              url,
+                    'url':              pub,
+                    'file_url':         file_url,
                     'kind':             kind,
                     'duration_seconds': duration_hint if kind in ('audio', 'voice', 'video') else 0,
                 })
 
             # Legacy "attachments" key kept for backwards compat
-            attachments_out = [{'name': r['name'], 'url': r['url']} for r in ir_rows]
+            attachments_out = [{'name': r['name'], 'url': r.get('file_url') or r['url']} for r in ir_rows]
 
             return _json({
                 'success': True,

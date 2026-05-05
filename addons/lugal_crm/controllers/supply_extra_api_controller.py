@@ -195,18 +195,6 @@ def _build_item_request_attachment_map(env, item_request_rs):
     return out
 
 
-def _serialize_item_request_attachment_row(att):
-    aid = att.id
-    if not aid:
-        return None
-    return {
-        'id': aid,
-        'name': att.name or '',
-        'mimetype': att.mimetype or 'application/octet-stream',
-        'url': '/web/content/' + str(aid),
-    }
-
-
 def _serialize_item_request(r, preloaded_attachments=None):
     requester = r.requested_by_id
     conf = r.requester_confirm_user_id
@@ -215,11 +203,7 @@ def _serialize_item_request(r, preloaded_attachments=None):
     else:
         all_atts = _item_request_attachment_recordset(r)
     all_atts = all_atts.filtered(lambda a: a.id)
-    attachments = []
-    for a in all_atts:
-        row = _serialize_item_request_attachment_row(a)
-        if row:
-            attachments.append(row)
+    attachments = [_serialize_attachment(a) for a in all_atts]
     negs = r.negotiation_ids.filtered(lambda n: not getattr(n, 'is_deleted', False))
     negotiations_payload = []
     for n in negs:
@@ -330,7 +314,7 @@ def _serialize_shipment_container(c):
     """Shipment view over `lugal.supply.container` (+ CRM linked POs)."""
     supplier = c.supplier_id
     agent = c.agent_id
-    docs = [_serialize_attachment(a) for a in c.attachment_ids]
+    atts = [_serialize_attachment(a) for a in c.attachment_ids]
     linked_pos = []
     if 'purchase_order_ids' in c._fields:
         for po in c.purchase_order_ids:
@@ -369,7 +353,7 @@ def _serialize_shipment_container(c):
         'status': c.shipment_tracking_state or 'pending',
         'shipment_tracking_state': c.shipment_tracking_state or 'pending',
         'shipping_line': c.shipping_line or '',
-        'documents': docs,
+        'attachments': atts,
         'attachment_ids': c.attachment_ids.ids,
         'attachment_count': int(c.attachment_count or len(c.attachment_ids)),
         'tracking_url': c.tracking_url or '',
@@ -889,7 +873,7 @@ class CrmSupplyExtraApiController(http.Controller):
 
     @http.route('/api/crm/supply/item_requests/list', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def supply_item_requests_list(self, **kwargs):
-        """Each item includes attachment_ids, attachment_count, attachments[{id,name,mimetype,url}]."""
+        """Each item includes attachment_ids, attachment_count, attachments (§2.5 shape in SUPPLY_CHAIN_MODELS_API)."""
         try:
             kwargs = _unwrap_item_request_kwargs(kwargs)
             if not ensure_jwt_user_id():

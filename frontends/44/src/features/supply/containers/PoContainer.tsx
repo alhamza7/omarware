@@ -721,7 +721,7 @@ function PoDetailSheet({ po: initialPo, onClose, onUpdated }: {
                 <div key={a.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
                   <FileText className="w-8 h-8 text-blue-500 shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <a href={a.url} target="_blank" rel="noreferrer" className="text-sm font-medium text-blue-600 hover:underline truncate block">{a.name}</a>
+                    <a href={a.file_url || a.url} target="_blank" rel="noreferrer" className="text-sm font-medium text-blue-600 hover:underline truncate block">{a.name}</a>
                     <p className="text-xs text-gray-400">{a.mimetype} · {a.uploaded_by_name}</p>
                   </div>
                   <button onClick={() => deleteAttachment(a.id)} disabled={busy === `att-${a.id}`}

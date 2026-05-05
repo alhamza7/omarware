@@ -116,7 +116,7 @@ You may combine **`attachment_ids`** and **`attachment_files`** in one call; the
 
 ### 2.5 Attachment object in JSON responses
 
-Serialized attachment (e.g. in `reference_images`, `attachments`, `documents`):
+Supply-chain list/detail payloads expose a **single** `attachments` array (no duplicate `reference_images` / `reference_files` keys). Each element:
 
 ```json
 {
@@ -124,14 +124,19 @@ Serialized attachment (e.g. in `reference_images`, `attachments`, `documents`):
   "name": "photo.jpg",
   "mimetype": "image/jpeg",
   "size": 24580,
-  "url": "/web/content/101?access_token=...",
-  "file_url": "/web/content/101?access_token=...",
+  "url": "/web/content/101",
+  "file_url": "/web/content/101?access_token=abc",
   "uploaded_by_name": "Admin",
-  "created_at": "2026-05-01T12:00:00"
+  "created_at": "2026-05-01T12:00:00.123456"
 }
 ```
 
+- **`url`:** path only (no access token).
+- **`file_url`:** same path with **`access_token`** when the attachment has a token; otherwise equal to **`url`**.
+
 Responses also include **`attachment_ids`** (list of integers) and **`attachment_count`** where implemented.
+
+Shipment/container views use **`attachments`** (not a separate `documents` list).
 
 ---
 
@@ -187,19 +192,18 @@ Base path: `/api/crm/supply/item_requests`
         "capacity": "50ml",
         "packing": 48.0,
         "packing_pcs_per_carton": 48.0,
-        "reference_images": [
+        "attachments": [
           {
             "id": 101,
             "name": "ref.jpg",
             "mimetype": "image/jpeg",
             "size": 1200,
-            "url": "/web/content/101?access_token=abc",
+            "url": "/web/content/101",
             "file_url": "/web/content/101?access_token=abc",
             "uploaded_by_name": "User",
             "created_at": "2026-05-01T10:00:00"
           }
         ],
-        "reference_files": [],
         "priority": "medium",
         "state": "draft",
         "status": "draft",
@@ -405,7 +409,7 @@ Base path: `/api/crm/supply/item_requests`
 { "attachment_ids": [101, 102] }
 ```
 
-**Success `result`:** serialized item request (includes `attachment_ids`, `reference_images`, etc.).
+**Success `result`:** serialized item request (includes `attachment_ids`, `attachment_count`, and `attachments` as in §2.5).
 
 **Error example:**
 
@@ -1324,7 +1328,7 @@ Alias: `po_ids`.
   "status": "in_transit",
   "shipment_tracking_state": "in_transit",
   "shipping_line": "MSC",
-  "documents": [],
+  "attachments": [],
   "attachment_ids": [],
   "attachment_count": 0,
   "tracking_url": "",

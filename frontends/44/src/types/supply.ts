@@ -128,7 +128,7 @@ export interface Po {
   total_amount:          number;
   attachment_ids?:       number[];
   attachment_count?:     number;
-  attachments?:          { id: number; name: string; url?: string; file_url?: string; mimetype?: string }[];
+  attachments?:          SupplyAttachment[];
   created_by_id:         number | null;
   created_by_name:       string;
   created_at:            string;
@@ -242,16 +242,20 @@ export interface ContainerListFilter {
   search?:    string;
 }
 
-// ─── Attachment ──────────────────────────────────────────────
-export interface Attachment {
+// ─── Attachment (supply-chain API §2.5) ───────────────────────
+export interface SupplyAttachment {
   id:               number;
   name:             string;
   mimetype:         string;
   size:             number;
   url:              string;
+  file_url:         string;
   uploaded_by_name: string;
   created_at:       string;
 }
+
+/** @deprecated Use SupplyAttachment; kept for older imports */
+export type Attachment = SupplyAttachment;
 
 // ─── Comment ─────────────────────────────────────────────────
 // Backend returns is_note (boolean); type field was removed.

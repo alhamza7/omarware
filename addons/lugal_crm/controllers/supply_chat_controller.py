@@ -37,7 +37,7 @@ from odoo.http import request
 
 from ._auth import ensure_jwt_user_id
 from ._error import crm_error
-from .upload_controller import _build_attachment_url
+from .upload_controller import _build_attachment_public_path, _build_attachment_url
 
 _logger = logging.getLogger(__name__)
 
@@ -938,7 +938,7 @@ class SupplyChatController(http.Controller):
                             'name': att.name or '',
                             'mimetype': mime,
                             'size': int(att.file_size or 0),
-                            'url': _build_attachment_url(att),
+                            'url': _build_attachment_public_path(att),
                             'file_url': _build_attachment_url(att),
                             'kind': att_kind,
                             'file_type': att_kind,

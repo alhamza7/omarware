@@ -27,7 +27,10 @@ from odoo.http import request, Response
 
 from ._auth import ensure_jwt_user_id
 from ._error import crm_error
-from .upload_controller import _build_attachment_url
+from .upload_controller import (
+    _build_attachment_public_path,
+    _build_attachment_url,
+)
 
 _RIYADH_TZ = timezone(timedelta(hours=3))
 
@@ -81,8 +84,7 @@ def _serialize_story(story, viewer_uid):
     media_url = None
     att_id = None
     if att and att.exists():
-        token = att.access_token or ''
-        media_url = f'/web/content/{att.id}?access_token={token}'
+        media_url = _build_attachment_url(att)
         att_id = att.id
 
     # Build attachments array — FE expects an array even for single-attachment stories
@@ -101,7 +103,7 @@ def _serialize_story(story, viewer_uid):
         attachments = [{
             'id':        att_id,
             'name':      att.name or 'file',
-            'url':       media_url,
+            'url':       _build_attachment_public_path(att),
             'file_url':  media_url,
             'mimetype':  mime,
             'file_type': file_type,
@@ -601,13 +603,12 @@ class SupplyStoriesController(http.Controller):
             })
             att.flush_recordset(['access_token'])
 
-            url = _build_attachment_url(att)
-
             return _json({
                 'success': True,
                 'data': {
                     'attachment_id':    att.id,
-                    'url':              url,
+                    'url':              _build_attachment_public_path(att),
+                    'file_url':         _build_attachment_url(att),
                     'kind':             kind,
                     'mimetype':         mime,
                     'size':             len(data),

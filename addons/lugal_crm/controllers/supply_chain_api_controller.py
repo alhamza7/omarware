@@ -14,8 +14,7 @@ from odoo.http import request
 from ._auth import ensure_jwt_user_id
 from ._error import crm_error
 from .supply_attachment_api import supply_build_attachment_m2m_write, supply_kwargs_has_attachments
-from .supply_controller import _serialize_supply_po, _serialize_supply_po_line
-from .upload_controller import _build_attachment_url
+from .supply_controller import _serialize_attachment, _serialize_supply_po, _serialize_supply_po_line
 
 _logger = __import__('logging').getLogger(__name__)
 
@@ -855,16 +854,7 @@ class CrmSupplyChainApiController(http.Controller):
             attachments = []
             if 'attachment_ids' in po._fields:
                 for att in po.attachment_ids.sorted('id', reverse=True):
-                    attachments.append({
-                        'id': att.id,
-                        'name': att.name or '',
-                        'mimetype': att.mimetype or 'application/octet-stream',
-                        'size': int(att.file_size or 0),
-                        'url': _build_attachment_url(att),
-                        'file_url': _build_attachment_url(att),
-                        'uploaded_by_name': att.create_uid.name if att.create_uid else '',
-                        'created_at': att.create_date.isoformat() if att.create_date else '',
-                    })
+                    attachments.append(_serialize_attachment(att))
             return {'success': True, 'data': {'po_id': po.id, 'attachments': attachments}}
         except Exception as e:
             return crm_error(e, 'supply_po_attachments_list')

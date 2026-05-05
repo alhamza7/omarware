@@ -55,15 +55,22 @@ VALID_DOC_TYPES = {
 }
 
 
-def _build_attachment_url(attachment):
-    """Return a stable relative path for an ir.attachment record.
+def _build_attachment_public_path(attachment):
+    """Relative `/web/content/<id>` without query string (no access token)."""
+    return f"/web/content/{attachment.id}"
 
-    Using a relative path (no hostname) ensures the URL works correctly for every
-    client regardless of which IP/hostname they use to access the app, and lets the
-    Vite dev-server proxy (or Nginx in production) resolve it correctly.
+
+def _build_attachment_url(attachment):
+    """Relative download URL; appends `access_token` when the record has one.
+
+    Prefer `_build_attachment_public_path` for a token-free path and this helper
+    for a shareable / unauthenticated download link.
     """
-    token = attachment.access_token or ''
-    return f"/web/content/{attachment.id}?access_token={token}"
+    base = _build_attachment_public_path(attachment)
+    token = (getattr(attachment, 'access_token', None) or '').strip()
+    if token:
+        return f"{base}?access_token={token}"
+    return base
 
 
 def _create_attachment(filename, mimetype, data_bytes, res_model='lugal.crm.customer', res_id=None):
