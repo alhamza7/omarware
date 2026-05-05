@@ -7,6 +7,7 @@ import {
   Loader2, X, Ship, Anchor, Package2, FileText, MessageSquare,
   Paperclip, Upload, Send, AlertTriangle, User, Check, Pencil,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '../../../components/ui/button';
 import { Input }  from '../../../components/ui/input';
 import supplyApi  from '../../../services/supplyApi';
@@ -187,7 +188,12 @@ function ContainerDetailSheet({ container: initial, onClose, onUpdated }: {
 
   useEffect(() => {
     if (tab === 'attachments') supplyApi.containerAttachList(c.id).then(r => { if (r?.success) setAttachments(r.data?.attachments ?? []); });
-    if (tab === 'comments')    supplyApi.containerCommentList(c.id).then(r => { if (r?.success) setComments(r.data?.items ?? []); });
+    if (tab === 'comments') {
+      supplyApi.containerCommentList(c.id).then(r => {
+        if (r?.success) setComments(r.data?.items ?? []);
+        else if (r?.error) toast.error(r.error);
+      });
+    }
     if (tab === 'penalties')   supplyApi.containerPenaltiesList(c.id).then(r => { if (r?.success) { setPenalties(r.data?.items ?? []); setTotalPenAmt(r.data?.total_amount ?? 0); } });
   }, [tab, c.id]);
 
@@ -271,6 +277,7 @@ function ContainerDetailSheet({ container: initial, onClose, onUpdated }: {
     setBusy('comment');
     const res = await supplyApi.containerCommentAdd(c.id, newComment.trim(), isNote);
     if (res?.success) { setComments(p => [...p, res.data]); setNewComment(''); }
+    else if (res?.error) toast.error(res.error);
     setBusy(null);
   };
 
@@ -278,6 +285,7 @@ function ContainerDetailSheet({ container: initial, onClose, onUpdated }: {
     setBusy(`cdel-${msgId}`);
     const res = await supplyApi.containerCommentDelete(c.id, msgId);
     if (res?.success) setComments(p => p.filter(x => x.id !== msgId));
+    else if (res?.error) toast.error(res.error);
     setBusy(null);
   };
 

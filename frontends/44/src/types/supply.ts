@@ -257,6 +257,45 @@ export interface SupplyAttachment {
 /** @deprecated Use SupplyAttachment; kept for older imports */
 export type Attachment = SupplyAttachment;
 
+// ─── Negotiations (supply_extra_api) ──────────────────────────
+export interface Negotiation {
+  id: number;
+  name: string;
+  negotiation_code?: string;
+  vendor_id?: number | null;
+  vendor_name: string;
+  item_name: string;
+  state: string;
+  status?: string;
+  item_request_id?: number | null;
+  item_request_name?: string;
+}
+
+export interface NegotiationListData {
+  items: Negotiation[];
+  total: number;
+  page: number;
+  per_page: number;
+}
+
+export interface NegotiationListFilter {
+  page?: number;
+  per_page?: number;
+  state?: string;
+  vendor_id?: number;
+  item_request_id?: number;
+  search?: string;
+}
+
+/** Row from `POST .../negotiations/<id>/comments/list` (maps to `Comment` in UI). */
+export interface NegotiationCommentRow {
+  id: number;
+  body: string;
+  author_id: number | null;
+  author_name: string;
+  date: string;
+}
+
 // ─── Comment ─────────────────────────────────────────────────
 // Backend returns is_note (boolean); type field was removed.
 export interface Comment {

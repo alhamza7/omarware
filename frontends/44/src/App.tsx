@@ -1,17 +1,20 @@
 import { useState } from 'react';
+import { Toaster } from 'sonner';
 import { PosAppContainer }    from './features/pos/containers/PosAppContainer';
 import { PoContainer }        from './features/supply/containers/PoContainer';
 import { ContainerContainer } from './features/supply/containers/ContainerContainer';
 import { VendorContainer }    from './features/supply/containers/VendorContainer';
-import { Package, ShoppingCart, Ship, Building2 } from 'lucide-react';
+import { NegotiationContainer } from './features/supply/containers/NegotiationContainer';
+import { Package, ShoppingCart, Ship, Building2, Handshake } from 'lucide-react';
 
-type AppTab = 'pos' | 'supply' | 'containers' | 'vendors';
+type AppTab = 'pos' | 'supply' | 'containers' | 'negotiations' | 'vendors';
 
 const NAV_ITEMS: { id: AppTab; label: string; icon: React.ReactNode }[] = [
-  { id: 'supply',     label: 'Purchase Orders', icon: <Package className="w-4 h-4" /> },
-  { id: 'containers', label: 'Containers',      icon: <Ship className="w-4 h-4" /> },
-  { id: 'vendors',    label: 'Vendors',         icon: <Building2 className="w-4 h-4" /> },
-  { id: 'pos',        label: 'POS',             icon: <ShoppingCart className="w-4 h-4" /> },
+  { id: 'supply',       label: 'Purchase Orders', icon: <Package className="w-4 h-4" /> },
+  { id: 'containers',   label: 'Containers',      icon: <Ship className="w-4 h-4" /> },
+  { id: 'negotiations', label: 'Negotiations',    icon: <Handshake className="w-4 h-4" /> },
+  { id: 'vendors',      label: 'Vendors',         icon: <Building2 className="w-4 h-4" /> },
+  { id: 'pos',          label: 'POS',             icon: <ShoppingCart className="w-4 h-4" /> },
 ];
 
 export default function App() {
@@ -19,6 +22,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      <Toaster richColors position="top-center" />
       {/* App-level nav */}
       <div className="bg-gray-900 text-white flex items-center gap-1 px-4 py-2">
         <span className="text-sm font-bold text-gray-300 mr-4">Lugal</span>
@@ -37,10 +41,11 @@ export default function App() {
         ))}
       </div>
 
-      {tab === 'supply'     && <PoContainer />}
-      {tab === 'containers' && <ContainerContainer />}
-      {tab === 'vendors'    && <VendorContainer />}
-      {tab === 'pos'        && <PosAppContainer />}
+      {tab === 'supply'       && <PoContainer />}
+      {tab === 'containers'   && <ContainerContainer />}
+      {tab === 'negotiations' && <NegotiationContainer />}
+      {tab === 'vendors'      && <VendorContainer />}
+      {tab === 'pos'          && <PosAppContainer />}
     </div>
   );
 }

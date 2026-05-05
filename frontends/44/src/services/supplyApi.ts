@@ -27,6 +27,10 @@ import type {
   Comment,
   Penalty,
   PenaltyInput,
+  Negotiation,
+  NegotiationListData,
+  NegotiationListFilter,
+  NegotiationCommentRow,
 } from '../types/supply';
 
 // ── Config ─────────────────────────────────────────────────────────────────
@@ -224,6 +228,37 @@ export const containerPenaltyDelete = (containerId: number, penaltyId: number) =
   );
 
 // ═══════════════════════════════════════════════════════════════════════════
+// NEGOTIATIONS
+// ═══════════════════════════════════════════════════════════════════════════
+export const negotiationList = (filter: NegotiationListFilter = {}) =>
+  rpc<NegotiationListData>('/api/crm/supply/negotiations/list', {
+    page:     filter.page     ?? 1,
+    per_page: filter.per_page ?? 20,
+    ...(filter.state           ? { state: filter.state } : {}),
+    ...(filter.vendor_id       ? { vendor_id: filter.vendor_id } : {}),
+    ...(filter.item_request_id ? { item_request_id: filter.item_request_id } : {}),
+    ...(filter.search          ? { search: filter.search } : {}),
+  });
+
+export const negotiationGet = (negId: number) =>
+  rpc<Negotiation>(`/api/crm/supply/negotiations/${negId}/get`, {});
+
+export const negotiationCommentList = (negId: number, page = 1, per_page = 50) =>
+  rpc<{ total: number; page: number; per_page: number; items: NegotiationCommentRow[] }>(
+    `/api/crm/supply/negotiations/${negId}/comments/list`,
+    { page, per_page },
+  );
+
+export const negotiationCommentAdd = (negId: number, body: string) =>
+  rpc<{ posted: boolean }>(`/api/crm/supply/negotiations/${negId}/comments/add`, { body });
+
+export const negotiationCommentDelete = (negId: number, msgId: number) =>
+  rpc<{ id: number; deleted: boolean }>(
+    `/api/crm/supply/negotiations/${negId}/comments/${msgId}/delete`,
+    {},
+  );
+
+// ═══════════════════════════════════════════════════════════════════════════
 // PURCHASE ORDERS
 // ═══════════════════════════════════════════════════════════════════════════
 /** POST /api/crm/supply/po/suggested — POs with `is_suggested=true` */
@@ -308,6 +343,8 @@ export const poCommentDelete = (poId: number, msgId: number) =>
 const supplyApi = {
   login,
   getToken, saveToken, clearToken,
+  // negotiations
+  negotiationList, negotiationGet, negotiationCommentList, negotiationCommentAdd, negotiationCommentDelete,
   // vendors
   vendorList, vendorGet, vendorCreate, vendorUpdate, vendorDelete,
   // containers

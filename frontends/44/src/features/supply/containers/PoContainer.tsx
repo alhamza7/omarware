@@ -7,6 +7,7 @@ import {
   CheckCircle2, Truck, Package, XCircle, RotateCcw, Loader2,
   FileText, MessageSquare, Paperclip, X, Send, Upload, Pencil, Check,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button }         from '../../../components/ui/button';
 import { Input }          from '../../../components/ui/input';
 import { useSupplyStore } from '../store/supplyStore';
@@ -41,9 +42,9 @@ function fmt(n: number) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Login Gate
+// Login Gate (shared with other supply screens, e.g. Negotiations)
 // ─────────────────────────────────────────────────────────────
-function LoginForm({ onLogin }: { onLogin: () => void }) {
+export export function LoginForm({ onLogin }: { onLogin: () => void }) {
   const [user, setUser] = useState('');
   const [pass, setPass] = useState('');
   const [err,  setErr]  = useState('');
@@ -397,7 +398,12 @@ function PoDetailSheet({ po: initialPo, onClose, onUpdated }: {
   useEffect(() => { setPo(initialPo); }, [initialPo]);
 
   useEffect(() => {
-    if (tab === 'comments')    supplyApi.poCommentList(po.id).then(r => { if (r?.success) setComments(r.data?.items ?? []); });
+    if (tab === 'comments') {
+      supplyApi.poCommentList(po.id).then(r => {
+        if (r?.success) setComments(r.data?.items ?? []);
+        else if (r?.error) toast.error(r.error);
+      });
+    }
     if (tab === 'attachments') supplyApi.poAttachList(po.id).then(r => { if (r?.success) setAttachments(r.data?.attachments ?? []); });
   }, [tab, po.id]);
 
@@ -446,6 +452,8 @@ function PoDetailSheet({ po: initialPo, onClose, onUpdated }: {
       // Append to end: backend returns oldest-first (date asc), new is newest
       setComments(c => [...c, res.data]);
       setNewComment('');
+    } else if (res?.error) {
+      toast.error(res.error);
     }
     setBusy(null);
   };
@@ -454,6 +462,7 @@ function PoDetailSheet({ po: initialPo, onClose, onUpdated }: {
     setBusy(`comment-del-${msgId}`);
     const res = await supplyApi.poCommentDelete(po.id, msgId);
     if (res?.success) setComments(c => c.filter(x => x.id !== msgId));
+    else if (res?.error) toast.error(res.error);
     setBusy(null);
   };
 
