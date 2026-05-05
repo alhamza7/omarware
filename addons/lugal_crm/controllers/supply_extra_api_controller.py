@@ -9,6 +9,7 @@ Covers:
   - Clearance Companies CRUD
   - Inventory Min/Max (list / upsert / delete)
   - Supply Notifications (list / create / mark_read / mark_all_read / delete)
+  - Payments: PO dropdown list (lightweight) for `po_id` selection
 """
 
 from odoo import fields, http
@@ -28,6 +29,30 @@ from .supply_chain_api_controller import _pagination, _parse_date
 from .supply_controller import _serialize_attachment
 
 _logger = __import__('logging').getLogger(__name__)
+
+_PAYMENT_TYPE_ALLOWED = frozenset({'deposit', 'installment', 'final', 'other'})
+# Older backend / clients used partial & full; map to the current FE-aligned keys.
+_LEGACY_PAYMENT_TYPE = {'partial': 'installment', 'full': 'final'}
+
+
+def _normalize_payment_type(raw, default='installment'):
+    """Canonical `lugal.supply.payment.payment_type` for API input.
+
+    Allowed: deposit | installment | final | other.
+    Legacy aliases: partial → installment, full → final.
+    """
+    if raw is None or raw is False:
+        return default
+    s = str(raw).strip().lower()
+    if not s:
+        return default
+    s = _LEGACY_PAYMENT_TYPE.get(s, s)
+    if s not in _PAYMENT_TYPE_ALLOWED:
+        raise ValueError(
+            'payment_type must be one of: deposit, installment, final, other '
+            '(legacy: partial→installment, full→final)'
+        )
+    return s
 
 
 def _unwrap_item_request_kwargs(kwargs):
@@ -256,6 +281,16 @@ def _serialize_item_request(r, preloaded_attachments=None):
     return data
 
 
+def _serialize_po_for_payment_dropdown(po):
+    """Minimal PO row for payment form / searchable dropdown (`id`, `name`, `supplier`)."""
+    vendor = po.vendor_id
+    return {
+        'id': po.id,
+        'name': po.name or '',
+        'supplier': vendor.name if vendor else '',
+    }
+
+
 def _serialize_payment(p):
     po = p.po_id
     cur = p.currency_id
@@ -277,6 +312,13 @@ def _serialize_payment(p):
         if 'container_id' in po._fields and po.container_id:
             container_id = po.container_id.id
             container_name = po.container_id.name or ''
+    pt = p.payment_type or 'installment'
+    pt_label = ''
+    try:
+        sel = dict((p.fields_get(['payment_type']) or {}).get('payment_type', {}).get('selection') or [])
+        pt_label = sel.get(pt, '')
+    except Exception:
+        pt_label = ''
     return {
         'id': p.id,
         'payment_id': p.name or '',
@@ -293,7 +335,8 @@ def _serialize_payment(p):
         'paid_to': p.paid_to or '',
         'payee_partner_id': payee.id if payee else None,
         'payee_name': payee.name if payee else '',
-        'payment_type': p.payment_type or 'partial',
+        'payment_type': pt,
+        'payment_type_label': pt_label,
         'amount': float(p.amount or 0.0),
         'currency_id': cur.id if cur else None,
         'currency_name': cur.name if cur else '',
@@ -1395,8 +1438,12 @@ class CrmSupplyExtraApiController(http.Controller):
                     pass
             if kwargs.get('payment_status'):
                 domain.append(('payment_status', '=', kwargs['payment_status']))
-            if kwargs.get('payment_type'):
-                domain.append(('payment_type', '=', kwargs['payment_type']))
+            raw_pt = kwargs.get('payment_type')
+            if raw_pt is not None and str(raw_pt).strip() != '':
+                try:
+                    domain.append(('payment_type', '=', _normalize_payment_type(raw_pt)))
+                except ValueError as ve:
+                    return {'success': False, 'error': str(ve), 'data': None}
             Pay = request.env['lugal.supply.payment'].sudo()
             total = Pay.search_count(domain)
             rows = Pay.search(domain, order='payment_date desc, id desc', limit=per_page, offset=offset)
@@ -1424,6 +1471,40 @@ class CrmSupplyExtraApiController(http.Controller):
         except Exception as e:
             return crm_error(e, 'supply_payments_get')
 
+    @http.route(
+        '/api/crm/supply/payments/po/list',
+        type='jsonrpc', auth='none', csrf=False, methods=['POST'],
+    )
+    def supply_payments_po_dropdown_list(self, **kwargs):
+        """List purchase orders for payment `po_id` dropdown (lightweight, searchable)."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            page, per_page, offset = _pagination(kwargs)
+            domain = [('is_deleted', '=', False), ('active', '=', True)]
+            if kwargs.get('status'):
+                domain.append(('status', '=', kwargs['status']))
+            if kwargs.get('division'):
+                domain.append(('division', '=', kwargs['division']))
+            search = (kwargs.get('search') or '').strip()
+            if search:
+                domain += ['|', ('name', 'ilike', search), ('vendor_id.name', 'ilike', search)]
+            Po = request.env['lugal.crm.supply.po'].sudo()
+            total = Po.search_count(domain)
+            rows = Po.search(domain, order='name asc, id desc', limit=per_page, offset=offset)
+            items = [_serialize_po_for_payment_dropdown(po) for po in rows]
+            return {
+                'success': True,
+                'data': {
+                    'total': total,
+                    'page': page,
+                    'per_page': per_page,
+                    'items': items,
+                },
+            }
+        except Exception as e:
+            return crm_error(e, 'supply_payments_po_dropdown_list')
+
     @http.route('/api/crm/supply/payments/create', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def supply_payments_create(self, **kwargs):
         try:
@@ -1433,10 +1514,25 @@ class CrmSupplyExtraApiController(http.Controller):
             amount = kwargs.get('amount')
             if not po_id or amount is None:
                 return {'success': False, 'error': 'po_id and amount are required', 'data': None}
+            try:
+                po_int = int(po_id)
+            except (TypeError, ValueError):
+                return {'success': False, 'error': 'Invalid Purchase Order selected', 'data': None}
+            Po = request.env['lugal.crm.supply.po'].sudo()
+            po = Po.search(
+                [('id', '=', po_int), ('is_deleted', '=', False), ('active', '=', True)],
+                limit=1,
+            )
+            if not po:
+                return {'success': False, 'error': 'Invalid Purchase Order selected', 'data': None}
+            try:
+                pay_type = _normalize_payment_type(kwargs.get('payment_type'))
+            except ValueError as ve:
+                return {'success': False, 'error': str(ve), 'data': None}
             vals = {
-                'po_id': int(po_id),
+                'po_id': po_int,
                 'amount': float(amount),
-                'payment_type': kwargs.get('payment_type') or 'partial',
+                'payment_type': pay_type,
             }
             if kwargs.get('paid_to'):
                 vals['paid_to'] = kwargs['paid_to']
@@ -1473,9 +1569,14 @@ class CrmSupplyExtraApiController(http.Controller):
             if not p:
                 return {'success': False, 'error': 'Payment not found', 'data': None}
             vals = {}
-            for k in ('paid_to', 'payment_type', 'payment_method', 'notes'):
+            for k in ('paid_to', 'payment_method', 'notes'):
                 if k in kwargs:
                     vals[k] = kwargs[k]
+            if 'payment_type' in kwargs:
+                try:
+                    vals['payment_type'] = _normalize_payment_type(kwargs.get('payment_type'))
+                except ValueError as ve:
+                    return {'success': False, 'error': str(ve), 'data': None}
             if 'amount' in kwargs:
                 vals['amount'] = float(kwargs['amount'] or 0.0)
             if 'currency_id' in kwargs:

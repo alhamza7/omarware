@@ -974,6 +974,21 @@ Supports scalar header fields, `extra_fields` (merge), and attachment keys per �
 
 Base path: `/api/crm/supply/payments`
 
+### `payment_type` (request + stored value)
+
+| Key | Label |
+|-----|--------|
+| `deposit` | Deposit |
+| `installment` | Installment |
+| `final` | Final |
+| `other` | Other |
+
+- **Default** on create when `payment_type` is omitted: `installment`.
+- **Legacy aliases** still accepted on create, update, and list filter: `partial` → `installment`, `full` → `final`.
+- Responses include **`payment_type_label`** (English label for the stored key).
+
+`payment_status` on the same record remains the **computed** balance state (`pending` \| `partial` \| `paid`) and is separate from `payment_type`.
+
 ### 6.1 List
 
 | Item | Value |
@@ -1012,6 +1027,7 @@ Base path: `/api/crm/supply/payments`
   "payee_partner_id": 45,
   "payee_name": "ACME Vendor",
   "payment_type": "deposit",
+  "payment_type_label": "Deposit",
   "amount": 5000.0,
   "currency_id": 1,
   "currency_name": "USD",

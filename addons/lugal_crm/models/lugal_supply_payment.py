@@ -4,7 +4,7 @@ from odoo import models, fields, api, _
 
 
 class LugalSupplyPayment(models.Model):
-    """Payment lines against a supply PO (deposit / partial / full)."""
+    """Payment lines against a supply PO (deposit / installment / final / other)."""
     _name = 'lugal.supply.payment'
     _description = 'Supply Payment'
     _inherit = ['mail.thread', 'mail.activity.mixin', 'lugal.supply.attachment.sync.mixin']
@@ -43,12 +43,13 @@ class LugalSupplyPayment(models.Model):
     payment_type = fields.Selection(
         [
             ('deposit', 'Deposit'),
-            ('partial', 'Partial'),
-            ('full', 'Full'),
+            ('installment', 'Installment'),
+            ('final', 'Final'),
+            ('other', 'Other'),
         ],
         string='Payment Type',
         required=True,
-        default='partial',
+        default='installment',
         tracking=True,
     )
     amount = fields.Monetary(string='Amount', required=True, tracking=True)
