@@ -30,6 +30,22 @@ from .supply_controller import _serialize_attachment
 _logger = __import__('logging').getLogger(__name__)
 
 
+def _unwrap_item_request_kwargs(kwargs):
+    """Flatten nested JSON-RPC dicts (`params` / `params.params`) so fields bind to the endpoint."""
+    if not isinstance(kwargs, dict):
+        return kwargs
+    merged = dict(kwargs)
+    cur = merged.get('params')
+    depth = 0
+    while isinstance(cur, dict) and depth < 5:
+        for key, val in cur.items():
+            if key != 'params':
+                merged[key] = val
+        cur = cur.get('params')
+        depth += 1
+    return merged
+
+
 # ---------------------------------------------------------------------------
 # Serializers
 # ---------------------------------------------------------------------------
@@ -141,14 +157,15 @@ def _item_request_attachment_recordset(r):
 
 
 def _build_item_request_attachment_map(env, item_request_rs):
-    """One read + one search for all records; merged M2M ids and res_model/res_id matches."""
+    """Prefetch M2M + one ir.attachment search; merged M2M and res_model/res_id matches."""
     rids = [int(x) for x in item_request_rs.ids]
     if not rids:
         return {}
     Att = env['ir.attachment'].sudo().with_context(active_test=False)
     model = 'lugal.supply.item.request'
-    rows_data = item_request_rs.read(['attachment_ids'])
-    m2m_by_rid = {row['id']: set(row['attachment_ids']) for row in rows_data}
+    rs = item_request_rs.with_context(active_test=False)
+    rs.mapped('attachment_ids')
+    m2m_by_rid = {rec.id: set(rec.attachment_ids.ids) for rec in rs}
     by_res = Att.search([('res_model', '=', model), ('res_id', 'in', rids)])
     by_rid_res = {}
     for a in by_res:
@@ -159,7 +176,7 @@ def _build_item_request_attachment_map(env, item_request_rs):
     out = {}
     for rid in rids:
         merged = m2m_by_rid.get(rid, set()) | by_rid_res.get(rid, set())
-        out[rid] = Att.browse(sorted(merged))
+        out[rid] = Att.browse(sorted(merged)).exists()
     return out
 
 
@@ -853,6 +870,7 @@ class CrmSupplyExtraApiController(http.Controller):
     @http.route('/api/crm/supply/item_requests/list', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def supply_item_requests_list(self, **kwargs):
         try:
+            kwargs = _unwrap_item_request_kwargs(kwargs)
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized', 'data': None}
             page, per_page, offset = _pagination(kwargs)
@@ -893,6 +911,7 @@ class CrmSupplyExtraApiController(http.Controller):
     @http.route('/api/crm/supply/item_requests/<int:req_id>/get', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def supply_item_requests_get(self, req_id, **kwargs):
         try:
+            kwargs = _unwrap_item_request_kwargs(kwargs)
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized', 'data': None}
             r = request.env['lugal.supply.item.request'].sudo().browse(req_id).exists()
@@ -907,6 +926,7 @@ class CrmSupplyExtraApiController(http.Controller):
     @http.route('/api/crm/supply/item_requests/create', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def supply_item_requests_create(self, **kwargs):
         try:
+            kwargs = _unwrap_item_request_kwargs(kwargs)
             uid = ensure_jwt_user_id()
             if not uid:
                 return {'success': False, 'error': 'Unauthorized', 'data': None}
@@ -949,6 +969,7 @@ class CrmSupplyExtraApiController(http.Controller):
     @http.route('/api/crm/supply/item_requests/<int:req_id>/update', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def supply_item_requests_update(self, req_id, **kwargs):
         try:
+            kwargs = _unwrap_item_request_kwargs(kwargs)
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized', 'data': None}
             r = request.env['lugal.supply.item.request'].sudo().browse(req_id).exists()
@@ -993,6 +1014,7 @@ class CrmSupplyExtraApiController(http.Controller):
     def supply_item_requests_requester_confirm(self, req_id, **kwargs):
         """Requester e-sign confirm (optional; negotiation has separate finalize flow)."""
         try:
+            kwargs = _unwrap_item_request_kwargs(kwargs)
             uid = ensure_jwt_user_id()
             if not uid:
                 return {'success': False, 'error': 'Unauthorized', 'data': None}
@@ -1013,6 +1035,7 @@ class CrmSupplyExtraApiController(http.Controller):
     def supply_item_requests_attachments_link(self, req_id, **kwargs):
         """Link existing `ir.attachment` ids (after multipart upload elsewhere)."""
         try:
+            kwargs = _unwrap_item_request_kwargs(kwargs)
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized', 'data': None}
             r = request.env['lugal.supply.item.request'].sudo().browse(req_id).exists()
@@ -1032,6 +1055,7 @@ class CrmSupplyExtraApiController(http.Controller):
     @http.route('/api/crm/supply/item_requests/<int:req_id>/update_status', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def supply_item_requests_update_status(self, req_id, **kwargs):
         try:
+            kwargs = _unwrap_item_request_kwargs(kwargs)
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized', 'data': None}
             r = request.env['lugal.supply.item.request'].sudo().browse(req_id).exists()
@@ -1050,6 +1074,7 @@ class CrmSupplyExtraApiController(http.Controller):
     @http.route('/api/crm/supply/item_requests/<int:req_id>/delete', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def supply_item_requests_delete(self, req_id, **kwargs):
         try:
+            kwargs = _unwrap_item_request_kwargs(kwargs)
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized', 'data': None}
             r = request.env['lugal.supply.item.request'].sudo().browse(req_id).exists()
