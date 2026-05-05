@@ -344,14 +344,19 @@ class NBSDocumentController(http.Controller):
     def upload_document(self, **kwargs):
         """Upload new document via HTTP POST with JWT authentication"""
         try:
-            # Parse JSON body (must be a dict; if list, take first element)
+            # Parse JSON body — try UTF-8-sig first (strips BOM that some clients
+            # add when the payload contains non-ASCII/Arabic text), then plain UTF-8.
+            raw_body = request.httprequest.data
             try:
-                data = json.loads(request.httprequest.data.decode('utf-8'))
+                data = json.loads(raw_body.decode('utf-8-sig'))
             except Exception:
-                return request.make_json_response({
-                    'success': False,
-                    'error': 'Invalid JSON in request body'
-                })
+                try:
+                    data = json.loads(raw_body.decode('utf-8'))
+                except Exception:
+                    return request.make_json_response({
+                        'success': False,
+                        'error': 'Invalid JSON in request body'
+                    })
             if isinstance(data, list):
                 data = data[0] if data and isinstance(data[0], dict) else {}
             if not isinstance(data, dict):
@@ -458,39 +463,41 @@ class NBSDocumentController(http.Controller):
                 except Exception:
                     folder_ids_to_link = []
 
-            # Enforce folder for sub/attachment
-            if upload_kind in ('sub', 'attachment') and not folder_ids_to_link and not create_folder:
-                return request.make_json_response({
-                    'success': False,
-                    'error': 'folder_id is required for sub/attachment uploads'
-                }, status=400)
+            # Resolve parent_document_id early so we can use it in role logic
+            resolved_parent_id = None
+            if parent_document_id:
+                try:
+                    resolved_parent_id = int(parent_document_id)
+                except Exception:
+                    return request.make_json_response(
+                        {'success': False, 'error': 'Invalid parent_document_id'}, status=400
+                    )
 
             # Apply parent / role flags
             if upload_kind in ('sub', 'attachment'):
-                if parent_document_id:
-                    try:
-                        vals['parent_document_id'] = int(parent_document_id)
-                    except Exception:
-                        return request.make_json_response({'success': False, 'error': 'Invalid parent_document_id'}, status=400)
+                # Accept: folder_id, folder_ids, parent_document_id, create_folder, or no linkage
+                # (orphan sub/attachment is valid — FE may link it later)
+                if resolved_parent_id:
+                    vals['parent_document_id'] = resolved_parent_id
                 vals['folder_role'] = 'attachment' if upload_kind == 'attachment' else 'sub'
-                vals['is_attachment'] = True if upload_kind == 'attachment' else False
+                vals['is_attachment'] = upload_kind == 'attachment'
+                if not folder_ids_to_link and not create_folder and not resolved_parent_id:
+                    _logger.warning(
+                        'upload_document: upload_kind=%s with no folder_id / parent_document_id; '
+                        'document will be created without explicit parent linkage.', upload_kind
+                    )
             elif upload_kind == 'main':
                 vals['folder_role'] = 'main'
                 vals['is_attachment'] = False
             else:
-                # If upload_kind not specified, determine based on folder and parent
+                # upload_kind not specified — auto-detect from context
                 if create_folder:
-                    # Creating new folder = main document
                     vals['folder_role'] = 'main'
                     vals['is_attachment'] = False
-                elif parent_document_id:
-                    # Has parent = secondary document
+                elif resolved_parent_id:
                     vals['folder_role'] = 'sub'
                     vals['is_attachment'] = False
-                    try:
-                        vals['parent_document_id'] = int(parent_document_id)
-                    except Exception:
-                        return request.make_json_response({'success': False, 'error': 'Invalid parent_document_id'}, status=400)
+                    vals['parent_document_id'] = resolved_parent_id
                 elif folder_ids_to_link:
                     # Adding to existing folder - check if folder already has a main document
                     existing_main = Document.search_count([
