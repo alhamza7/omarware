@@ -123,7 +123,7 @@ class LugalSupplyNegotiation(models.Model):
     active = fields.Boolean(default=True)
     is_deleted = fields.Boolean(string='Soft Deleted', default=False, index=True)
 
-    @api.depends('offer_ids.price', 'offer_ids.offer_date', 'offer_ids.id')
+    @api.depends('offer_ids.price', 'offer_ids.offer_date')
     def _compute_offer_prices(self):
         for neg in self:
             last = neg.offer_ids.sorted(lambda o: (o.offer_date, o.id), reverse=True)[:1]

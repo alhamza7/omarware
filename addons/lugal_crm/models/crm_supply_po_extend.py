@@ -7,6 +7,7 @@ from .supply_workflow_config import supply_workflow_level_count
 
 class CrmSupplyPoExtend(models.Model):
     """Supply chain links: item request → negotiation → order; payments; e-sign confirmation."""
+    _name = 'lugal.crm.supply.po'
     _inherit = ['lugal.crm.supply.po', 'lugal.supply.attachment.sync.mixin']
 
     item_request_id = fields.Many2one(

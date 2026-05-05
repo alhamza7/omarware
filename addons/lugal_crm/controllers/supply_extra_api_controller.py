@@ -156,6 +156,17 @@ def _item_request_attachment_recordset(r):
     return (linked | by_res).sorted('id')
 
 
+def _norm_attachment_id_set(raw_ids):
+    """Stable sorted int ids for ir.attachment browse (avoid str/int sort errors)."""
+    out = []
+    for x in raw_ids:
+        try:
+            out.append(int(x))
+        except (TypeError, ValueError):
+            continue
+    return sorted(set(out))
+
+
 def _build_item_request_attachment_map(env, item_request_rs):
     """Prefetch M2M + one ir.attachment search; merged M2M and res_model/res_id matches."""
     rids = [int(x) for x in item_request_rs.ids]
@@ -169,14 +180,18 @@ def _build_item_request_attachment_map(env, item_request_rs):
     by_res = Att.search([('res_model', '=', model), ('res_id', 'in', rids)])
     by_rid_res = {}
     for a in by_res:
-        if not a.res_id:
+        rv = a.res_id
+        if rv in (False, None):
             continue
-        rid = int(a.res_id)
+        try:
+            rid = int(rv)
+        except (TypeError, ValueError):
+            continue
         by_rid_res.setdefault(rid, set()).add(a.id)
     out = {}
     for rid in rids:
         merged = m2m_by_rid.get(rid, set()) | by_rid_res.get(rid, set())
-        out[rid] = Att.browse(sorted(merged)).exists()
+        out[rid] = Att.browse(_norm_attachment_id_set(merged))
     return out
 
 

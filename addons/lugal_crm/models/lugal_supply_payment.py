@@ -100,7 +100,6 @@ class LugalSupplyPayment(models.Model):
         'po_id.payment_ids',
         'po_id.payment_ids.amount',
         'po_id.payment_ids.payment_date',
-        'po_id.payment_ids.id',
     )
     def _compute_payment_position(self):
         for pay in self:
