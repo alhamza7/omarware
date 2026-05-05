@@ -121,3 +121,28 @@ def supply_build_attachment_m2m_write(env, kwargs, res_model, res_id):
     if new_ids:
         return {'attachment_ids': [(4, nid) for nid in new_ids]}
     return {}
+
+
+ITEM_REQUEST_ATTACHMENT_MODEL = 'lugal.supply.item.request'
+
+
+def supply_sync_item_request_attachment_m2m(env, item_requests):
+    """Ensure ir.attachment rows with res_model/res_id are linked on attachment_ids M2M."""
+    if not item_requests:
+        return
+    Att = env['ir.attachment'].sudo()
+    rids = [int(x) for x in item_requests.ids]
+    if not rids:
+        return
+    atts = Att.search([
+        ('res_model', '=', ITEM_REQUEST_ATTACHMENT_MODEL),
+        ('res_id', 'in', rids),
+    ])
+    by_rid = {}
+    for a in atts:
+        rid = int(a.res_id)
+        by_rid.setdefault(rid, []).append(a.id)
+    for rec in item_requests:
+        extra = [aid for aid in by_rid.get(rec.id, []) if aid not in rec.attachment_ids.ids]
+        if extra:
+            rec.write({'attachment_ids': [(4, x) for x in extra]})

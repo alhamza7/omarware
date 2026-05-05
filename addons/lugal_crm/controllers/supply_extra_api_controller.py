@@ -19,7 +19,11 @@ from odoo.exceptions import UserError
 
 from ._auth import ensure_jwt_user_id
 from ._error import crm_error
-from .supply_attachment_api import supply_build_attachment_m2m_write, supply_kwargs_has_attachments
+from .supply_attachment_api import (
+    supply_build_attachment_m2m_write,
+    supply_kwargs_has_attachments,
+    supply_sync_item_request_attachment_m2m,
+)
 from .supply_chain_api_controller import _pagination, _parse_date
 from .supply_controller import _serialize_attachment
 
@@ -126,19 +130,31 @@ def _serialize_negotiation(n, include_offers=True):
     return data
 
 
+def _item_request_attachment_recordset(r):
+    Att = r.env['ir.attachment'].sudo()
+    linked = r.attachment_ids
+    by_res = Att.search([
+        ('res_model', '=', 'lugal.supply.item.request'),
+        ('res_id', '=', r.id),
+    ])
+    return (linked | by_res).sorted('id')
+
+
+def _serialize_item_request_attachment_row(att):
+    return {
+        'id': att.id,
+        'name': att.name or '',
+        'mimetype': att.mimetype or 'application/octet-stream',
+        'url': '/web/content/%s' % (att.id,),
+    }
+
+
 def _serialize_item_request(r):
     requester = r.requested_by_id
     conf = r.requester_confirm_user_id
-    imgs = [_serialize_attachment(a) for a in r.attachment_ids]
-    attachments = [
-        {
-            'id': x['id'],
-            'name': x['name'],
-            'mimetype': x['mimetype'],
-            'url': x['url'],
-        }
-        for x in imgs
-    ]
+    all_atts = _item_request_attachment_recordset(r)
+    imgs = [_serialize_attachment(a) for a in all_atts]
+    attachments = [_serialize_item_request_attachment_row(a) for a in all_atts]
     negs = r.negotiation_ids.filtered(lambda n: not getattr(n, 'is_deleted', False))
     negotiations_payload = []
     for n in negs:
@@ -185,8 +201,8 @@ def _serialize_item_request(r):
         'created_by_name': r.create_uid.name if r.create_uid else '',
         'created_at': r.create_date.isoformat() if r.create_date else '',
         'updated_at': r.write_date.isoformat() if r.write_date else '',
-        'attachment_ids': r.attachment_ids.ids,
-        'attachment_count': int(r.attachment_count or len(r.attachment_ids)),
+        'attachment_ids': all_atts.ids,
+        'attachment_count': len(all_atts),
     }
     if 'extra_fields' in r._fields:
         data['extra_fields'] = r.get_extra_fields_dict()
@@ -830,7 +846,9 @@ class CrmSupplyExtraApiController(http.Controller):
             IR = request.env['lugal.supply.item.request'].sudo()
             total = IR.search_count(domain)
             rows = IR.search(domain, order='request_date desc, id desc', limit=per_page, offset=offset)
-            rows.mapped('attachment_ids')
+            order_ids = list(rows.ids)
+            supply_sync_item_request_attachment_m2m(request.env, rows)
+            rows = IR.browse(order_ids)
             return {
                 'success': True,
                 'data': {
@@ -849,6 +867,8 @@ class CrmSupplyExtraApiController(http.Controller):
             r = request.env['lugal.supply.item.request'].sudo().browse(req_id).exists()
             if not r or r.is_deleted:
                 return {'success': False, 'error': 'Item request not found', 'data': None}
+            supply_sync_item_request_attachment_m2m(request.env, r)
+            r = request.env['lugal.supply.item.request'].sudo().browse(req_id)
             return {'success': True, 'data': _serialize_item_request(r)}
         except Exception as e:
             return crm_error(e, 'supply_item_requests_get')
@@ -889,6 +909,8 @@ class CrmSupplyExtraApiController(http.Controller):
                 except ValueError as ve:
                     return {'success': False, 'error': str(ve), 'data': None}
             rec = IR.browse(rec.id)
+            supply_sync_item_request_attachment_m2m(request.env, rec)
+            rec = IR.browse(rec.id)
             return {'success': True, 'data': _serialize_item_request(rec)}
         except Exception as e:
             return crm_error(e, 'supply_item_requests_create')
@@ -927,6 +949,8 @@ class CrmSupplyExtraApiController(http.Controller):
                         r.write(aw)
                 except ValueError as ve:
                     return {'success': False, 'error': str(ve), 'data': None}
+            supply_sync_item_request_attachment_m2m(request.env, r)
+            r = request.env['lugal.supply.item.request'].sudo().browse(req_id)
             return {'success': True, 'data': _serialize_item_request(r)}
         except Exception as e:
             return crm_error(e, 'supply_item_requests_update')
@@ -945,6 +969,8 @@ class CrmSupplyExtraApiController(http.Controller):
             if not r or r.is_deleted:
                 return {'success': False, 'error': 'Item request not found', 'data': None}
             r.action_requester_confirm()
+            supply_sync_item_request_attachment_m2m(request.env, r)
+            r = request.env['lugal.supply.item.request'].sudo().browse(req_id)
             return {'success': True, 'data': _serialize_item_request(r)}
         except Exception as e:
             return crm_error(e, 'supply_item_requests_requester_confirm')
@@ -966,6 +992,8 @@ class CrmSupplyExtraApiController(http.Controller):
                 return {'success': False, 'error': 'attachment_ids must be a list', 'data': None}
             cmd = [(6, 0, [int(x) for x in ids])] if ids else [(5,)]
             r.write({'attachment_ids': cmd})
+            supply_sync_item_request_attachment_m2m(request.env, r)
+            r = request.env['lugal.supply.item.request'].sudo().browse(req_id)
             return {'success': True, 'data': _serialize_item_request(r)}
         except Exception as e:
             return crm_error(e, 'supply_item_requests_attachments_link')
@@ -982,6 +1010,8 @@ class CrmSupplyExtraApiController(http.Controller):
             if not state:
                 return {'success': False, 'error': 'state is required', 'data': None}
             r.write({'state': state})
+            supply_sync_item_request_attachment_m2m(request.env, r)
+            r = request.env['lugal.supply.item.request'].sudo().browse(req_id)
             return {'success': True, 'data': _serialize_item_request(r)}
         except Exception as e:
             return crm_error(e, 'supply_item_requests_update_status')
