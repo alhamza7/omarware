@@ -1233,6 +1233,82 @@ class LugalEmailAccount(models.Model):
             return {'imported': imported, 'error': str(exc), 'resolved_path': path}
         return {'imported': imported, 'error': None, 'resolved_path': path}
 
+    def _imap_list_all_mailbox_names(self):
+        """Return every mailbox path from IMAP LIST (raw server strings)."""
+        self.ensure_one()
+        try:
+            conn = self._imap_connect()
+            typ, raw_list = conn.list()
+            try:
+                conn.logout()
+            except Exception:
+                pass
+            if typ != 'OK' or not raw_list:
+                return []
+            lr = re.compile(
+                r'^\((?P<flags>[^)]*)\)\s+'
+                r'(?:"(?P<delim>[^"]*)"|NIL)\s+'
+                r'(?P<name>.+?)\s*$'
+            )
+            names = []
+            for item in raw_list:
+                if not item:
+                    continue
+                line = item.decode('utf-8', errors='replace') if isinstance(item, bytes) else item
+                m = lr.match(line.strip())
+                if not m:
+                    continue
+                name = m.group('name').strip().strip('"')
+                if name:
+                    names.append(name)
+            return names
+        except Exception:
+            _logger.warning('_imap_list_all_mailbox_names failed acc=%s', self.id, exc_info=True)
+            return []
+
+    def imap_child_mailboxes(self, parent_path):
+        """Return full IMAP paths of mailboxes directly under ``parent_path`` (any hierarchy).
+
+        Used when ``parent_path`` is a Dovecot/cPanel *namespace* folder that has
+        no messages of its own (UID SEARCH empty) but child folders such as
+        ``INBOX.user.Important`` hold the mail.
+        """
+        self.ensure_one()
+        parent = self._resolve_imap_mailbox_path((parent_path or '').strip())
+        if not parent:
+            return []
+        pl = parent.lower()
+        all_names = self._imap_list_all_mailbox_names()
+        out = []
+        for n in all_names:
+            nl = n.lower()
+            if nl == pl:
+                continue
+            if nl.startswith(pl + '.') or n.startswith(parent + '/'):
+                out.append(n)
+        return sorted(set(out))
+
+    def sync_imap_branch_mailboxes(self, parent_path, max_children=40):
+        """Run ``sync_custom_imap_folder`` on ``parent_path`` and every child mailbox."""
+        self.ensure_one()
+        parent = self._resolve_imap_mailbox_path((parent_path or '').strip())
+        children = self.imap_child_mailboxes(parent)
+        detail = []
+        total = 0
+        pr = self.sync_custom_imap_folder(parent)
+        total += int(pr.get('imported') or 0)
+        detail.append({'path': parent, **pr})
+        for ch in children[:max_children]:
+            r = self.sync_custom_imap_folder(ch)
+            total += int(r.get('imported') or 0)
+            detail.append({'path': ch, **r})
+        return {
+            'parent_resolved': parent,
+            'children':        children,
+            'imported_total':  total,
+            'per_mailbox':     detail,
+        }
+
     def _resolve_imap_mailbox_path(self, requested_path: str) -> str:
         """Return the server's exact mailbox name for a path (case / delimiter)."""
         req = (requested_path or '').strip()

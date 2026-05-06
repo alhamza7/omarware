@@ -932,6 +932,7 @@ class LugalEmailController(http.Controller):
             _LOGICAL_MAILBOX = {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'}
             is_custom_mailbox = folder_raw.lower() not in _LOGICAL_MAILBOX
             imap_folder_sync = None
+            folder_branch_expand = False
 
             # Kick off IMAP sync if the account is stale, then wait for completion.
             # For accounts that have NEVER been synced (sync_status='never') we use
@@ -972,6 +973,7 @@ class LugalEmailController(http.Controller):
                 except (TypeError, ValueError):
                     aid = None
                 targets = user_accounts.filtered(lambda a: a.id == aid) if aid else user_accounts
+                folder_branch_expand = False
                 for acc in targets:
                     if not (acc.password or '').strip():
                         imap_folder_sync.append({
@@ -982,10 +984,33 @@ class LugalEmailController(http.Controller):
                         })
                         continue
                     try:
-                        res = acc.sudo().sync_custom_imap_folder(folder_raw)
-                        imap_folder_sync.append({'account_id': acc.id, **res})
-                        if res.get('resolved_path'):
-                            folder_q = res['resolved_path']
+                        children_paths = acc.sudo().imap_child_mailboxes(folder_raw)
+                    except Exception:
+                        _logger.exception(
+                            'imap_child_mailboxes failed acc=%s parent=%s',
+                            acc.id, folder_raw,
+                        )
+                        children_paths = []
+                    try:
+                        if children_paths:
+                            br = acc.sudo().sync_imap_branch_mailboxes(folder_raw)
+                            folder_branch_expand = True
+                            imap_folder_sync.append({
+                                'account_id':       acc.id,
+                                'branch':           True,
+                                'child_mailboxes':  br.get('children', []),
+                                'imported':         br.get('imported_total', 0),
+                                'error':            None,
+                                'resolved_path':    br.get('parent_resolved', folder_raw),
+                                'per_mailbox':      br.get('per_mailbox', []),
+                            })
+                            if br.get('parent_resolved'):
+                                folder_q = br['parent_resolved']
+                        else:
+                            res = acc.sudo().sync_custom_imap_folder(folder_raw)
+                            imap_folder_sync.append({'account_id': acc.id, **res})
+                            if res.get('resolved_path'):
+                                folder_q = res['resolved_path']
                     except Exception:
                         _logger.exception(
                             'mailbox custom-folder sync failed acc=%s folder=%s',
@@ -998,13 +1023,26 @@ class LugalEmailController(http.Controller):
                             'resolved_path': folder_raw,
                         })
 
+            # Namespace parent (e.g. INBOX.syednaqvi): include messages stored under
+            # child folders (INBOX.syednaqvi.Important) in the same list response.
+            _folder_domain = [('folder', '=', folder_q)]
+            if is_custom_mailbox and folder_branch_expand:
+                _folder_domain = [
+                    '|', '|',
+                    ('folder', '=', folder_q),
+                    ('folder', 'like', folder_q + '.%'),
+                    ('folder', 'like', folder_q + '/%'),
+                ]
+
             base_domain = [
                 ('account_id', 'in', account_ids),
                 ('is_deleted', '=', False),
-                ('folder', '=', folder_q),
-            ]
+            ] + _folder_domain
             if account_id:
-                base_domain.append(('account_id', '=', int(account_id)))
+                try:
+                    base_domain.append(('account_id', '=', int(str(account_id).strip())))
+                except (TypeError, ValueError):
+                    pass
             if query:
                 base_domain += ['|', ('subject', 'ilike', query), ('body_text', 'ilike', query)]
             if starred:
@@ -1055,7 +1093,7 @@ class LugalEmailController(http.Controller):
                 all_accs_domain = [
                     ('account_id', 'in', account_ids),
                     ('is_deleted', '=', False),
-                    ('folder',     '=', folder_q),
+                ] + _folder_domain + [
                     ('id',         '>',  since_id),
                 ]
                 new_msgs = Msg.search(all_accs_domain, order='id desc')
@@ -1076,8 +1114,7 @@ class LugalEmailController(http.Controller):
             all_max = Msg.search([
                 ('account_id', 'in', account_ids),
                 ('is_deleted', '=', False),
-                ('folder',     '=', folder_q),
-            ], order='id desc', limit=1)
+            ] + _folder_domain, order='id desc', limit=1)
             max_id = all_max[0].id if all_max else 0
 
             return _json_response({
@@ -1090,6 +1127,9 @@ class LugalEmailController(http.Controller):
                     'max_id':           max_id,
                     'items':            items,
                     'imap_folder_sync': imap_folder_sync,
+                    'includes_descendant_folders': bool(
+                        is_custom_mailbox and folder_branch_expand
+                    ),
                 },
             })
         except Exception as exc:
