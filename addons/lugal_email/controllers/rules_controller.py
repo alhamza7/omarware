@@ -391,18 +391,44 @@ class EmailRulesController(http.Controller):
             if not acc.exists() or acc.user_id.id != uid:
                 return _json_err('Account not found or access denied', 404)
 
-            # ── Sanitize sender name for use as a folder component ─────────────
+            # ── Folder path segment: derive from *email*, not display nickname ──
+            # Using sender_name alone strips dots ("syed.naqvi" → "syednaqvi") and
+            # breaks expectations; IMAP segments must stay stable and match the
+            # mailbox owner.  Optional body.folder_slug overrides (alphanumeric + _-).
             import re as _re
-            safe_name = _re.sub(r'[^\w\s\-]', '', sender_name).strip()
-            safe_name = _re.sub(r'\s+', ' ', safe_name)   # collapse whitespace
-            if not safe_name:
-                safe_name = sender_email.split('@')[0] if sender_email else 'Sender'
+
+            def _folder_slug_from_email(addr: str) -> str:
+                addr = (addr or '').strip().lower()
+                if not addr:
+                    return 'sender'
+                local, _, domain = addr.partition('@')
+                local = (local or (domain.split('.')[0] if domain else '') or 'sender')
+                # Dots in local-part become '_' so one hierarchy segment (delimiter is often '.')
+                local = local.replace('.', '_')
+                slug = _re.sub(r'[^\w\-]+', '_', local, flags=_re.ASCII).strip('_') or 'sender'
+                return slug[:60].rstrip('_')
+
+            if sender_email:
+                folder_slug = _folder_slug_from_email(sender_email)
+            else:
+                folder_slug = _re.sub(r'[^\w\s\-]', '', (sender_name or 'Sender')).strip()
+                folder_slug = _re.sub(r'\s+', '_', folder_slug) or 'Sender'
+
+            slug_override = (body.get('folder_slug') or '').strip()
+            if slug_override:
+                folder_slug = _re.sub(r'[^\w\-]+', '', slug_override, flags=_re.ASCII)[:60] or folder_slug
+
+            # Human-readable name in rule titles (prefer real name; else email)
+            if sender_name and '@' not in sender_name:
+                sender_label = sender_name.strip()
+            else:
+                sender_label = (sender_email or sender_name or 'Sender').strip()
 
             # ── Template catalogue ─────────────────────────────────────────────
             LOGICAL = {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'}
             TEMPLATES = {
                 'move_all_from_sender': {
-                    'label':       f'Move all emails from {safe_name}',
+                    'label':       f'Move all emails from {sender_label}',
                     'child_name':  None,   # goes straight into parent folder
                     'match_mode':  'all',
                     'conditions':  [{'field': 'from_address', 'operator': 'contains',
@@ -411,7 +437,7 @@ class EmailRulesController(http.Controller):
                     'stop_processing': True,
                 },
                 'move_important_from_sender': {
-                    'label':       f'Move all important emails from {safe_name}',
+                    'label':       f'Move all important emails from {sender_label}',
                     'child_name':  'Important',
                     'match_mode':  'all',
                     'conditions':  [
@@ -422,7 +448,7 @@ class EmailRulesController(http.Controller):
                     'stop_processing': True,
                 },
                 'move_with_attachments_from_sender': {
-                    'label':       f'Move all emails with attachments from {safe_name}',
+                    'label':       f'Move all emails with attachments from {sender_label}',
                     'child_name':  'With Attachments',
                     'match_mode':  'all',
                     'conditions':  [
@@ -433,7 +459,7 @@ class EmailRulesController(http.Controller):
                     'stop_processing': True,
                 },
                 'move_with_cc_bcc_from_sender': {
-                    'label':       f'Move all emails with CC and BCC from {safe_name}',
+                    'label':       f'Move all emails with CC and BCC from {sender_label}',
                     'child_name':  'CC and BCC',
                     'match_mode':  'all',
                     'conditions':  [
@@ -445,7 +471,7 @@ class EmailRulesController(http.Controller):
                     'stop_processing': True,
                 },
                 'mark_important_from_sender': {
-                    'label':       f'Mark all emails from {safe_name} as important',
+                    'label':       f'Mark all emails from {sender_label} as important',
                     'child_name':  None,   # no move; just mark
                     'match_mode':  'all',
                     'conditions':  [{'field': 'from_address', 'operator': 'contains',
@@ -454,7 +480,7 @@ class EmailRulesController(http.Controller):
                     'stop_processing': False,
                 },
                 'mark_read_from_sender': {
-                    'label':       f'Auto-mark all emails from {safe_name} as read',
+                    'label':       f'Auto-mark all emails from {sender_label} as read',
                     'child_name':  None,
                     'match_mode':  'all',
                     'conditions':  [{'field': 'from_address', 'operator': 'contains',
@@ -487,7 +513,7 @@ class EmailRulesController(http.Controller):
             except Exception:
                 delimiter = '.'
 
-            parent_path = f'INBOX{delimiter}{safe_name}'
+            parent_path = f'INBOX{delimiter}{folder_slug}'
             child_name  = tpl['child_name']
             dest_path   = (f'{parent_path}{delimiter}{child_name}'
                            if child_name else parent_path)
@@ -576,6 +602,8 @@ class EmailRulesController(http.Controller):
 
             return _json_ok({
                 'rule':            _rule_dict(rule),
+                'folder_slug':     folder_slug,
+                'sender_label':    sender_label,
                 'parent_folder':   parent_path if is_move_template else None,
                 'dest_folder':     dest_path   if is_move_template else None,
                 'folders_created': folders_created,

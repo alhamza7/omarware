@@ -1152,6 +1152,7 @@ class LugalEmailAccount(models.Model):
             return {'imported': 0, 'error': 'use action_sync for standard folders', 'resolved_path': path}
 
         imported = 0
+        diag = None
         try:
             import imaplib
             conn = self._imap_connect()
@@ -1167,12 +1168,16 @@ class LugalEmailAccount(models.Model):
 
             def _parse_batch_fetch(data_list):
                 parsed = []
+                if not data_list:
+                    return parsed
                 for item in data_list:
                     if not isinstance(item, tuple) or len(item) < 2:
                         continue
                     meta, payload = item[0], item[1]
                     if not isinstance(meta, bytes):
                         continue
+                    if isinstance(payload, str):
+                        payload = payload.encode('utf-8', errors='replace')
                     if not isinstance(payload, (bytes, bytearray)) or len(payload) == 0:
                         continue
                     m = uid_re.search(meta)
@@ -1187,11 +1192,20 @@ class LugalEmailAccount(models.Model):
                 '(UID FLAGS BODY.PEEK[HEADER.FIELDS '
                 '(FROM TO CC BCC REPLY-TO DATE SUBJECT MESSAGE-ID IN-REPLY-TO REFERENCES)])'
             )
+            FULL_HDR_FETCH = '(UID FLAGS BODY.PEEK[HEADER])'
 
             typ_s, d_s = conn.uid('search', None, 'ALL')
             uids = []
-            if typ_s == 'OK' and d_s and d_s[0]:
-                uids = sorted(int(x) for x in d_s[0].split() if x.isdigit())
+            raw_search = b''
+            if typ_s == 'OK' and d_s and d_s[0] is not None:
+                raw_search = d_s[0] if isinstance(d_s[0], (bytes, bytearray)) else str(d_s[0]).encode()
+                parts = raw_search.split()
+                uids = sorted(int(x) for x in parts if x.isdigit())
+
+            diag = {
+                'uid_search_typ': typ_s,
+                'uid_count':      len(uids),
+            }
 
             if not uids:
                 try:
@@ -1203,13 +1217,24 @@ class LugalEmailAccount(models.Model):
                     'error':      None,
                     'resolved_path': path,
                     'note':       'mailbox_empty_or_uid_search_empty',
+                    'diagnostics': diag,
                 }
 
             tail = uids[-SYNC_MAX_MESSAGES:]
-            uid_csv = ','.join(str(u) for u in tail)
-            typ_f, data_list = conn.uid('fetch', uid_csv, HEADERS_FETCH)
-            if typ_f == 'OK' and data_list:
-                for uid_val, raw, flags_meta in _parse_batch_fetch(data_list):
+            diag['fetch_uid_min'] = tail[0] if tail else None
+            diag['fetch_uid_max'] = tail[-1] if tail else None
+
+            def _do_fetch(uid_chunk, fetch_macro):
+                nonlocal imported
+                uid_csv = ','.join(str(u) for u in uid_chunk)
+                typ_f, data_list = conn.uid('fetch', uid_csv, fetch_macro)
+                diag.setdefault('fetch_typs', []).append(typ_f)
+                if typ_f != 'OK' or not data_list:
+                    return 0
+                parsed = _parse_batch_fetch(data_list)
+                diag.setdefault('parsed_per_fetch', []).append(len(parsed))
+                n = 0
+                for uid_val, raw, flags_meta in parsed:
                     try:
                         self._upsert_inbox_message(
                             uid_val, raw, flags_meta,
@@ -1217,12 +1242,27 @@ class LugalEmailAccount(models.Model):
                             folder_key=path,
                             run_rules=False,
                         )
-                        imported += 1
+                        n += 1
                     except Exception:
                         _logger.warning(
                             'custom folder upsert failed uid=%s folder=%s acc=%s',
                             uid_val, path, self.id, exc_info=True,
                         )
+                imported += n
+                return n
+
+            # Chunk UID FETCH (some servers reject very long UID sets)
+            _BATCH = 45
+            for i in range(0, len(tail), _BATCH):
+                _do_fetch(tail[i:i + _BATCH], HEADERS_FETCH)
+
+            # Fallback: HEADER.FIELDS response shape not parsed — try full RFC822 header
+            if imported == 0 and tail:
+                for i in range(0, len(tail), _BATCH):
+                    _do_fetch(tail[i:i + _BATCH], FULL_HDR_FETCH)
+
+            if imported == 0 and tail:
+                diag['note'] = 'uid_search_ok_but_fetch_or_upsert_yielded_zero'
 
             try:
                 conn.logout()
@@ -1230,8 +1270,14 @@ class LugalEmailAccount(models.Model):
                 pass
         except Exception as exc:
             _logger.warning('sync_custom_imap_folder acc=%s path=%s: %s', self.id, path, exc)
-            return {'imported': imported, 'error': str(exc), 'resolved_path': path}
-        return {'imported': imported, 'error': None, 'resolved_path': path}
+            ret = {'imported': imported, 'error': str(exc), 'resolved_path': path}
+            if diag is not None:
+                ret['diagnostics'] = diag
+            return ret
+        ret = {'imported': imported, 'error': None, 'resolved_path': path}
+        if diag is not None:
+            ret['diagnostics'] = diag
+        return ret
 
     def _imap_list_all_mailbox_names(self):
         """Return every mailbox path from IMAP LIST (raw server strings)."""
