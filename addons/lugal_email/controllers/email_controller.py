@@ -3088,11 +3088,16 @@ class LugalEmailController(http.Controller):
                             # Remove DB records for this folder so they stop appearing in
                             # the messages list.
                             try:
-                                request.env['lugal.email.message'].sudo().search([
+                                # Restore messages to inbox instead of marking deleted.
+                                # Messages only get is_deleted when the user explicitly
+                                # deletes them — not when a folder container is removed.
+                                orphaned = request.env['lugal.email.message'].sudo().search([
                                     ('account_id', '=', account_id),
                                     ('folder',     '=', folder_path),
                                     ('is_deleted', '=', False),
-                                ]).write({'is_deleted': True})
+                                ])
+                                if orphaned:
+                                    orphaned.write({'folder': 'inbox'})
                                 request.env.cr.commit()
                             except Exception:
                                 pass
@@ -3118,9 +3123,93 @@ class LugalEmailController(http.Controller):
                     }, 503)
                 return _json_response({'success': False, 'error': fe}, 502)
 
+            # ── Cleanup: delete rules + restore messages when folder deleted ──
+            # Rules pointing at a deleted folder silently drop future emails.
+            # Delete them now and fire async IMAP to put orphaned messages back.
+            rules_deleted = 0
+            msgs_restored = 0
+            if deleted_paths:
+                deleted_set = set(p.lower() for p in deleted_paths)
+
+                # 1. Delete rules whose move_folder destination is now gone
+                Rule = request.env['lugal.email.rule'].sudo()
+                rules_to_del = Rule.browse()
+                for rule in Rule.search([('account_id', '=', account_id)]):
+                    try:
+                        actions = json.loads(rule.actions_json or '[]')
+                        for act in actions:
+                            if act.get('action') == 'move_folder':
+                                if (act.get('value') or '').lower() in deleted_set:
+                                    rules_to_del |= rule
+                                    break
+                    except Exception:
+                        pass
+                if rules_to_del:
+                    rules_deleted = len(rules_to_del)
+                    _logger.info(
+                        'folder_delete: removing %d rule(s) targeting deleted path(s): %s',
+                        rules_deleted, [r.id for r in rules_to_del],
+                    )
+                    rules_to_del.unlink()
+
+                # 2. Any messages still under deleted paths → restore to inbox
+                Msg = request.env['lugal.email.message'].sudo()
+                still_orphaned = Msg.search([
+                    ('account_id', '=', account_id),
+                    ('folder',     'in', deleted_paths),
+                    ('is_deleted', '=', False),
+                ])
+                if still_orphaned:
+                    msgs_restored = len(still_orphaned)
+                    to_imap = [(m.imap_uid, m.folder) for m in still_orphaned if m.imap_uid]
+                    still_orphaned.write({'folder': 'inbox'})
+
+                    # Async IMAP: physically move messages back to INBOX on server
+                    import collections as _col, threading as _thr
+                    _db  = request.env.cr.dbname
+                    _aid = account_id
+                    by_src = _col.defaultdict(list)
+                    for uid, src in to_imap:
+                        by_src[src].append(uid)
+
+                    def _bg(_by_src=by_src, _db=_db, _aid=_aid):
+                        try:
+                            from odoo.modules.registry import Registry as _Reg
+                            import odoo as _odoo
+                            with _Reg(_db).cursor() as _cr:
+                                _env = _odoo.api.Environment(_cr, _odoo.SUPERUSER_ID, {})
+                                _acc = _env['lugal.email.account'].browse(_aid)
+                                with _acc._imap_session() as _conn:
+                                    for _src, _uids in _by_src.items():
+                                        try:
+                                            _conn.select(_src, readonly=False)
+                                            _uid_set = ','.join(str(u) for u in _uids)
+                                            _t, _ = _conn.uid('move', _uid_set, 'INBOX')
+                                            if _t != 'OK':
+                                                _conn.uid('copy', _uid_set, 'INBOX')
+                                                _conn.uid('store', _uid_set, '+FLAGS', '(\\Deleted)')
+                                                _conn.expunge()
+                                            _logger.info(
+                                                'folder_delete restore: %d msgs %s→INBOX', len(_uids), _src)
+                                        except Exception as _me:
+                                            _logger.warning('folder_delete restore %s: %s', _src, _me)
+                        except Exception as _e:
+                            _logger.warning('folder_delete restore thread: %s', _e)
+
+                    if to_imap:
+                        _thr.Thread(target=_bg, daemon=True,
+                                    name=f'imap-restore-{_aid}').start()
+
+                try:
+                    request.env.cr.commit()
+                except Exception:
+                    pass
+
             return _json_response({'success': True, 'data': {
                 'deleted_path':  path,
                 'deleted_paths': deleted_paths,
+                'rules_deleted': rules_deleted,
+                'msgs_restored': msgs_restored,
             }})
         except Exception as exc:
             return _json_response({'success': False, 'error': _format_imap_error(exc)}, 500)
