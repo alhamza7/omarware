@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# File: addons/lugal_email/models/email_rule.py
 # Component: Lugal Email — lugal.email.rule model (email_rule.py)
 """
 lugal.email.rule  — per-user / per-account inbox rules.

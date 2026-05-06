@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# File: addons/lugal_email/controllers/email_controller.py
 # Component: Lugal Email — REST API controller for /api/lugal/email/* (email_controller.py)
 """
 Layer 1 — /api/lugal/email/*

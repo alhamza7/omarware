@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# File: addons/lugal_email/controllers/crm_email_controller.py
 """
 Layer 2 — /api/crm/email/*
 CRM-context wrappers around the email engine (JSON-RPC format).

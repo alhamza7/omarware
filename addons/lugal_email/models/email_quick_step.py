@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# File: addons/lugal_email/models/email_quick_step.py
 """
 lugal.email.quick.step — named action bundles applied in one click.
 

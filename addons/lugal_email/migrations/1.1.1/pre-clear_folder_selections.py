@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# File: addons/lugal_email/migrations/1.1.1/pre-clear_folder_selections.py
 # Component: Lugal Email — pre-migration 1.1.1 (clear folder field selection rows)
 """Allow lugal.email.message.folder to change from Selection to Char.
 

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# File: addons/lugal_email/__manifest__.py
 # Component: Lugal Email — module manifest (lugal_email / __manifest__.py)
 {
     'name': 'Lugal Email',

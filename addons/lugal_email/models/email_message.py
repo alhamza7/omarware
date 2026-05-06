@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# File: addons/lugal_email/models/email_message.py
 # Component: Lugal Email — lugal.email.message model (email_message.py)
 
 from odoo import models, fields, api

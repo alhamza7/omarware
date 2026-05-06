@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+# File: addons/lugal_email/models/email_idle_watcher.py
 """
 IMAP poll-based email watcher — simple, reliable inbox notification.
 

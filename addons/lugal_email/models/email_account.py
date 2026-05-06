@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# File: addons/lugal_email/models/email_account.py
 # Component: Lugal Email — lugal.email.account model (email_account.py)
 
 import json
