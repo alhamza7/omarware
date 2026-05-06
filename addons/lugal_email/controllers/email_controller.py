@@ -962,6 +962,7 @@ class LugalEmailController(http.Controller):
                     aid = None
                 targets = user_accounts.filtered(lambda a: a.id == aid) if aid else user_accounts
                 folder_branch_expand = False
+
                 for acc in targets:
                     if not (acc.password or '').strip():
                         imap_folder_sync.append({
@@ -979,8 +980,22 @@ class LugalEmailController(http.Controller):
                             acc.id, folder_raw,
                         )
                         children_paths = []
+
+                    # A folder is a namespace parent (expand to children) only when:
+                    # 1. It has child mailboxes on the server, AND
+                    # 2. It has NO messages of its own stored in the DB
+                    # This prevents leaf folders like INBOX.sender.Important from
+                    # incorrectly pulling in sibling folders' messages.
+                    Msg = request.env['lugal.email.message'].sudo()
+                    has_own_messages = Msg.search_count([
+                        ('account_id', 'in', account_ids),
+                        ('folder',     '=', folder_raw),
+                        ('is_deleted', '=', False),
+                    ]) > 0
+                    is_namespace_parent = bool(children_paths) and not has_own_messages
+
                     try:
-                        if children_paths:
+                        if is_namespace_parent:
                             br = acc.sudo().sync_imap_branch_mailboxes(folder_raw)
                             folder_branch_expand = True
                             imap_folder_sync.append({
@@ -995,6 +1010,7 @@ class LugalEmailController(http.Controller):
                             if br.get('parent_resolved'):
                                 folder_q = br['parent_resolved']
                         else:
+                            # Leaf folder or folder with its own messages — exact match only
                             res = acc.sudo().sync_custom_imap_folder(folder_raw)
                             imap_folder_sync.append({'account_id': acc.id, **res})
                             if res.get('resolved_path'):
