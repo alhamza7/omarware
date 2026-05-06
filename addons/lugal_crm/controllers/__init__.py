@@ -10,6 +10,7 @@ from . import customer_controller
 from . import delivery_controller
 from . import knowledge_controller
 from . import pos_bridge_controller
+from . import purchase_products_rest_controller
 from . import price_list_controller
 from . import qa_controller
 from . import supply_controller

@@ -186,9 +186,10 @@ _PO_STATUS_LABELS = {
 def _serialize_supply_po_line(line):
     """Shape aligned with frontends/44 PoLine."""
     cur = line.currency_id
-    return {
+    out = {
         'id': line.id,
         'sequence': line.sequence or 10,
+        'product_id': line.product_id.id if getattr(line, 'product_id', None) and line.product_id else None,
         'product_name': line.product_name or '',
         'item_code': line.item_code or '',
         'uom': line.uom or '',
@@ -207,6 +208,7 @@ def _serialize_supply_po_line(line):
         'min_qty': float(line.min_qty or 0.0),
         'max_qty': float(line.max_qty or 0.0),
     }
+    return out
 
 
 def _serialize_supply_po(po):
@@ -297,6 +299,8 @@ def _serialize_supply_po(po):
         out['shipping_method'] = po.shipping_method or ''
     if 'notes' in F:
         out['notes'] = po.notes or ''
+    if 'exchange_rate' in F:
+        out['exchange_rate'] = float(getattr(po, 'exchange_rate', 0.0) or 0.0)
     if 'order_confirmed_user_id' in F and po.order_confirmed_user_id:
         out['order_e_sign_user_id'] = po.order_confirmed_user_id.id
         out['order_e_sign_date'] = (

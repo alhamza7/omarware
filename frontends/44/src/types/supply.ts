@@ -172,11 +172,29 @@ export interface PoListFilter {
   division?:           'europe' | 'china' | '';
 }
 
-// ─── Container ───────────────────────────────────────────────
+// ─── Container / Shipment ───────────────────────────────────
 export type ContainerStatus = 'waiting' | 'active' | 'at_port' | 'completed';
+
+/** PO row from `GET /api/crm/supply/shipments/<id>/get` (`linked_orders`). */
+export interface ShipmentLinkedOrder {
+  id:                 number;
+  name:               string;
+  total_amount:       number;
+  status:             string;
+  currency_id:        number | null;
+  currency_name:      string;
+  item_request_id?:   number | null;
+  item_request_name?: string;
+  negotiation_id?:    number | null;
+  negotiation_name?:  string;
+}
 
 export interface Container {
   id:                          number;
+  /** Shipment reference from backend (e.g. SHP-00001). */
+  shipment_id?:                string;
+  shipment_tracking_state?:    string;
+  linked_orders?:              ShipmentLinkedOrder[];
   name:                        string;
   container_number:            string;
   bl_number:                   string;

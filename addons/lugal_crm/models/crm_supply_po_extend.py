@@ -60,6 +60,12 @@ class CrmSupplyPoExtend(models.Model):
         tracking=True,
     )
     notes = fields.Text(string='Notes', tracking=True)
+    exchange_rate = fields.Float(
+        string='Exchange Rate',
+        digits=(16, 6),
+        tracking=True,
+        help='Optional FX rate vs company currency (for display / reporting).',
+    )
     attachment_ids = fields.Many2many(
         'ir.attachment',
         'lugal_crm_supply_po_order_attachment_rel',

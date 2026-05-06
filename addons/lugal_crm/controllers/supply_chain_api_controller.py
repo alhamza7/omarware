@@ -30,6 +30,38 @@ from .upload_controller import _create_attachment
 _logger = __import__('logging').getLogger(__name__)
 
 
+# Valid `lugal.supply.vendor` division Selection keys (see lugal_supply_vendor.py)
+_VENDOR_DIVISION_KEYS = frozenset({'europe', 'china', 'other'})
+
+
+def _normalize_vendor_division_filter(raw):
+    """Map API/FE input to stored Selection key: europe | china | other, or None if unset/unknown.
+
+    Accepts case-insensitive labels and common aliases (EU, Europe, China, …).
+    """
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    key = s.lower().replace(' ', '')
+    # Direct keys + short aliases
+    if key in ('china', 'cn', 'prc'):
+        return 'china'
+    if key in ('europe', 'eu'):
+        return 'europe'
+    if key == 'other':
+        return 'other'
+    # Label-style (e.g. "Europe / أوروبا" stored nowhere, but users may type "Europe")
+    if 'china' in key or 'الصين' in s:
+        return 'china'
+    if 'europe' in key or 'euro' in key or 'أوروبا' in s:
+        return 'europe'
+    if key in _VENDOR_DIVISION_KEYS:
+        return key
+    return None
+
+
 def _pagination(kwargs):
     try:
         page = max(1, int(kwargs.get('page') or 1))
@@ -149,6 +181,18 @@ class CrmSupplyChainApiController(http.Controller):
             domain = [('is_deleted', '=', False), ('active', '=', True)]
             if search:
                 domain += ['|', '|', ('name', 'ilike', search), ('name_ar', 'ilike', search), ('phone', 'ilike', search)]
+            division_raw = kwargs.get('division')
+            division_key = _normalize_vendor_division_filter(division_raw)
+            if division_raw not in (None, '', False):
+                if division_key is not None:
+                    domain.append(('division', '=', division_key))
+                else:
+                    _logger.warning(
+                        'supply_vendors_list: unknown division filter %r — omitting division clause',
+                        division_raw,
+                    )
+            _logger.debug('supply_vendors_list incoming kwargs=%r', kwargs)
+            _logger.debug('supply_vendors_list final domain=%r', domain)
             Vendor = request.env['lugal.supply.vendor'].sudo()
             total = Vendor.search_count(domain)
             rows = Vendor.search(domain, order='name asc, id asc', limit=per_page, offset=offset)
@@ -193,7 +237,9 @@ class CrmSupplyChainApiController(http.Controller):
                 if kwargs.get(k) is not None:
                     vals[k] = kwargs[k]
             if kwargs.get('division'):
-                vals['division'] = kwargs['division']
+                div_norm = _normalize_vendor_division_filter(kwargs['division'])
+                if div_norm:
+                    vals['division'] = div_norm
             if kwargs.get('lead_time_days') is not None:
                 vals['lead_time_days'] = int(kwargs['lead_time_days'] or 0)
             if kwargs.get('min_order_value') is not None:
@@ -216,10 +262,18 @@ class CrmSupplyChainApiController(http.Controller):
             vals = {}
             for k in (
                 'name', 'name_ar', 'phone', 'email', 'website', 'whatsapp', 'telegram', 'wechat',
-                'city', 'address', 'payment_terms', 'notes', 'contact_name', 'division',
+                'city', 'address', 'payment_terms', 'notes', 'contact_name',
             ):
                 if k in kwargs:
                     vals[k] = kwargs[k]
+            if 'division' in kwargs:
+                div = kwargs['division']
+                if div in (False, None, ''):
+                    vals['division'] = False
+                else:
+                    div_norm = _normalize_vendor_division_filter(div)
+                    if div_norm:
+                        vals['division'] = div_norm
             if 'lead_time_days' in kwargs:
                 vals['lead_time_days'] = int(kwargs['lead_time_days'] or 0)
             if 'min_order_value' in kwargs:
@@ -519,23 +573,67 @@ class CrmSupplyChainApiController(http.Controller):
                 vals['shipping_method'] = kwargs['shipping_method']
             if kwargs.get('notes'):
                 vals['notes'] = kwargs['notes']
+            if kwargs.get('exchange_rate') is not None and 'exchange_rate' in Po._fields:
+                try:
+                    vals['exchange_rate'] = float(kwargs['exchange_rate'])
+                except (TypeError, ValueError):
+                    return {'success': False, 'error': 'exchange_rate must be a number', 'data': None}
             if kwargs.get('extra_fields') is not None:
                 vals['extra_fields'] = Po.sanitize_extra_fields_input(kwargs['extra_fields'])
             po = Po.create(vals)
             Line = request.env['lugal.crm.supply.po.line'].sudo()
-            for line in kwargs.get('lines') or []:
+            Product = request.env['product.product'].sudo()
+            line_rows = kwargs.get('lines')
+            if line_rows is None and kwargs.get('items') is not None:
+                line_rows = kwargs['items']
+            for line in line_rows or []:
                 lv = {
                     'po_id': po.id,
                     'product_name': line.get('product_name') or '',
                     'item_code': line.get('item_code') or '',
                     'uom': line.get('uom') or '',
-                    'quantity': float(line.get('quantity') or 1.0),
-                    'unit_price': float(line.get('unit_price') or 0.0),
+                    'quantity': float(line.get('quantity') or line.get('qty') or 1.0),
+                    'unit_price': float(line.get('unit_price') or line.get('price') or 0.0),
                     'min_qty': float(line.get('min_qty') or 0.0),
                     'max_qty': float(line.get('max_qty') or 0.0),
                 }
                 if line.get('currency_id'):
                     lv['currency_id'] = int(line['currency_id'])
+                if line.get('product_id'):
+                    try:
+                        pid = int(line['product_id'])
+                    except (TypeError, ValueError):
+                        return {'success': False, 'error': 'line product_id must be an integer', 'data': None}
+                    prod = Product.browse(pid).exists()
+                    if not prod or not prod.active or not prod.purchase_ok:
+                        return {
+                            'success': False,
+                            'error': f'Invalid or non-purchasable product_id: {pid}',
+                            'data': None,
+                        }
+                    uom = prod.uom_po_id or prod.uom_id
+                    lv['product_id'] = prod.id
+                    lv['product_name'] = prod.name or lv['product_name']
+                    lv['item_code'] = prod.default_code or lv['item_code']
+                    lv['uom'] = uom.name if uom else lv['uom']
+                    try:
+                        qty = float(line.get('qty') if line.get('qty') is not None else line.get('quantity') or 0.0)
+                    except (TypeError, ValueError):
+                        return {'success': False, 'error': 'line quantity/qty must be a number', 'data': None}
+                    if qty <= 0:
+                        return {'success': False, 'error': 'line quantity must be greater than 0', 'data': None}
+                    lv['quantity'] = qty
+                    try:
+                        base_price = float(line.get('unit_price') if line.get('unit_price') is not None else line.get('price') or 0.0)
+                    except (TypeError, ValueError):
+                        return {'success': False, 'error': 'line price/unit_price must be a number', 'data': None}
+                    try:
+                        discount = float(line.get('discount') or 0.0)
+                    except (TypeError, ValueError):
+                        return {'success': False, 'error': 'line discount must be a number', 'data': None}
+                    if discount < 0 or discount > 100:
+                        return {'success': False, 'error': 'line discount must be between 0 and 100', 'data': None}
+                    lv['unit_price'] = base_price * (1.0 - discount / 100.0)
                 Line.create(lv)
             po.invalidate_recordset()
             if supply_kwargs_has_attachments(kwargs):

@@ -13,6 +13,7 @@ import type {
   VendorListData,
   VendorCreateInput,
   Container,
+  ContainerStatus,
   ContainerListData,
   ContainerCreateInput,
   ContainerListFilter,
@@ -120,8 +121,18 @@ export async function login(username: string, password: string): Promise<JrpcRes
 // ═══════════════════════════════════════════════════════════════════════════
 // VENDORS
 // ═══════════════════════════════════════════════════════════════════════════
-export const vendorList = (search = '', page = 1, per_page = 50) =>
-  rpc<VendorListData>('/api/crm/supply/vendors/list', { search, page, per_page });
+export const vendorList = (
+  search = '',
+  page = 1,
+  per_page = 50,
+  division?: '' | 'europe' | 'china' | 'other',
+) =>
+  rpc<VendorListData>('/api/crm/supply/vendors/list', {
+    search,
+    page,
+    per_page,
+    ...(division ? { division } : {}),
+  });
 
 export const vendorGet = (id: number) =>
   rpc<Vendor>(`/api/crm/supply/vendors/${id}/get`, {});
@@ -136,28 +147,136 @@ export const vendorDelete = (id: number) =>
   rpc<{ id: number; deleted: boolean }>(`/api/crm/supply/vendors/${id}/delete`, {});
 
 // ═══════════════════════════════════════════════════════════════════════════
-// CONTAINERS
+// CONTAINERS / SHIPMENTS (CRUD uses `/shipments/*`; actions use `/containers/*`)
 // ═══════════════════════════════════════════════════════════════════════════
-export const containerList = (filter: ContainerListFilter = {}) =>
-  rpc<ContainerListData>('/api/crm/supply/containers/list', {
+
+const CRM_CONTAINER_STATUSES: readonly ContainerStatus[] = ['waiting', 'active', 'at_port', 'completed'];
+
+/** Map `/shipments/*` payload to the SPA `Container` shape (aliases + defaults). */
+function normalizeShipmentRow(raw: unknown): Container {
+  const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const stRaw = r.status;
+  const status: ContainerStatus =
+    typeof stRaw === 'string' && (CRM_CONTAINER_STATUSES as readonly string[]).includes(stRaw)
+      ? (stRaw as ContainerStatus)
+      : 'waiting';
+  const linked = r.linked_orders;
+  return {
+    id: Number(r.id ?? 0),
+    shipment_id: typeof r.shipment_id === 'string' ? r.shipment_id : undefined,
+    shipment_tracking_state: typeof r.shipment_tracking_state === 'string' ? r.shipment_tracking_state : undefined,
+    ...(Array.isArray(linked) ? { linked_orders: linked as Container['linked_orders'] } : {}),
+    name: String(r.name ?? ''),
+    container_number: String(r.container_number ?? ''),
+    bl_number: String(r.bl_number ?? ''),
+    clearance_company_id: (r.clearance_company_id as number | null) ?? null,
+    clearance_company_name: String(r.clearance_company_name ?? ''),
+    origin_location: String(r.origin_location ?? r.origin ?? ''),
+    destination_port: String(r.destination_port ?? r.destination ?? ''),
+    departure_date: (r.departure_date ?? r.etd ?? null) as string | null,
+    eta: (r.eta ?? null) as string | null,
+    arrived_at: (r.arrived_at ?? null) as string | null,
+    status,
+    division: String(r.division ?? ''),
+    tracking_url: String(r.tracking_url ?? ''),
+    total_weight_kg: Number(r.total_weight_kg ?? 0),
+    total_cbm: Number(r.total_cbm ?? 0),
+    driver_id: (r.driver_id as number | null) ?? null,
+    driver_name: String(r.driver_name ?? ''),
+    driver_phone: String(r.driver_phone ?? ''),
+    driver_assigned_at: (r.driver_assigned_at ?? null) as string | null,
+    driver_assigned_by: String(r.driver_assigned_by ?? ''),
+    clearance_info_delivered: Boolean(r.clearance_info_delivered),
+    clearance_info_delivered_at: (r.clearance_info_delivered_at ?? null) as string | null,
+    clearance_info_delivered_by: String(r.clearance_info_delivered_by ?? ''),
+    attachment_count: Number(r.attachment_count ?? 0),
+    penalty_count: Number(r.penalty_count ?? 0),
+    vendor_id: (r.vendor_id as number | null) ?? (r.supplier_id as number | null) ?? null,
+    vendor_name: String(r.vendor_name ?? r.supplier_name ?? ''),
+    reminder_date: (r.reminder_date ?? null) as string | null,
+    reminder_note: String(r.reminder_note ?? ''),
+    notes: String(r.notes ?? ''),
+    created_at: String(r.created_at ?? ''),
+    updated_at: String(r.updated_at ?? ''),
+  };
+}
+
+export async function containerList(filter: ContainerListFilter = {}): Promise<JrpcResult<ContainerListData>> {
+  const res = await rpc<ContainerListData>('/api/crm/supply/shipments/list', {
     page:      filter.page     ?? 1,
     per_page:  filter.per_page ?? 20,
     ...(filter.status   ? { status:   filter.status   } : {}),
     ...(filter.division ? { division: filter.division } : {}),
     ...(filter.search   ? { search:   filter.search   } : {}),
   });
+  if (!res.success || !res.data) return res;
+  const d = res.data;
+  return {
+    ...res,
+    data: {
+      ...d,
+      items: (d.items ?? []).map(normalizeShipmentRow),
+    },
+  };
+}
 
-export const containerGet = (id: number) =>
-  rpc<Container>(`/api/crm/supply/containers/${id}/get`, {});
+export async function containerGet(id: number): Promise<JrpcResult<Container>> {
+  const res = await rpc<Container>(`/api/crm/supply/shipments/${id}/get`, {});
+  if (!res.success || !res.data) return res;
+  return { ...res, data: normalizeShipmentRow(res.data) };
+}
 
-export const containerCreate = (input: ContainerCreateInput) =>
-  rpc<Container>('/api/crm/supply/containers/create', { ...input });
+export async function containerCreate(input: ContainerCreateInput): Promise<JrpcResult<Container>> {
+  const res = await rpc<Container>('/api/crm/supply/shipments/create', {
+    name:               input.name,
+    container_number:   input.container_number,
+    bl_number:          input.bl_number,
+    origin:             input.origin_location,
+    destination:        input.destination_port,
+    etd:                input.departure_date,
+    eta:                input.eta,
+    division:           input.division,
+    tracking_url:       input.tracking_url,
+    notes:              input.notes,
+  });
+  if (!res.success || !res.data) return res;
+  return { ...res, data: normalizeShipmentRow(res.data) };
+}
 
-export const containerUpdate = (id: number, vals: Partial<ContainerCreateInput>) =>
-  rpc<Container>(`/api/crm/supply/containers/${id}/update`, { ...vals });
+export async function containerUpdate(
+  id: number,
+  vals: Partial<ContainerCreateInput>,
+): Promise<JrpcResult<Container>> {
+  const payload: Record<string, unknown> = {};
+  if (vals.name !== undefined) payload.name = vals.name;
+  if (vals.container_number !== undefined) payload.container_number = vals.container_number;
+  if (vals.bl_number !== undefined) payload.bl_number = vals.bl_number;
+  if (vals.origin_location !== undefined) payload.origin = vals.origin_location;
+  if (vals.destination_port !== undefined) payload.destination = vals.destination_port;
+  if (vals.departure_date !== undefined) payload.etd = vals.departure_date;
+  if (vals.eta !== undefined) payload.eta = vals.eta;
+  if (vals.division !== undefined) payload.division = vals.division;
+  if (vals.tracking_url !== undefined) payload.tracking_url = vals.tracking_url;
+  if (vals.notes !== undefined) payload.notes = vals.notes;
+  const res = await rpc<Container>(`/api/crm/supply/shipments/${id}/update`, payload);
+  if (!res.success || !res.data) return res;
+  return { ...res, data: normalizeShipmentRow(res.data) };
+}
 
 export const containerDelete = (id: number) =>
-  rpc<{ id: number; deleted: boolean }>(`/api/crm/supply/containers/${id}/delete`, {});
+  rpc<{ id: number; deleted: boolean }>(`/api/crm/supply/shipments/${id}/delete`, {});
+
+/** Attach POs to a shipment/container (`order_ids` or `po_ids`). */
+export async function shipmentLinkOrders(
+  shipmentId: number,
+  orderIds: number[],
+): Promise<JrpcResult<Container>> {
+  const res = await rpc<Container>(`/api/crm/supply/shipments/${shipmentId}/link_orders`, {
+    order_ids: orderIds,
+  });
+  if (!res.success || !res.data) return res;
+  return { ...res, data: normalizeShipmentRow(res.data) };
+}
 
 export const containerMarkArrived = (id: number) =>
   rpc<Container>(`/api/crm/supply/containers/${id}/mark_arrived`, {});
@@ -349,6 +468,7 @@ const supplyApi = {
   vendorList, vendorGet, vendorCreate, vendorUpdate, vendorDelete,
   // containers
   containerList, containerGet, containerCreate, containerUpdate, containerDelete,
+  shipmentLinkOrders,
   containerMarkArrived, containerClearanceDelivered,
   containerAssignDriver, containerUnassignDriver, containerSetReminder,
   containerAttachList, containerAttachUpload, containerAttachUploadMultiple, containerAttachDelete,

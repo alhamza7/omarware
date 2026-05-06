@@ -354,9 +354,15 @@ def _serialize_payment(p):
 
 
 def _serialize_shipment_container(c):
-    """Shipment view over `lugal.supply.container` (+ CRM linked POs)."""
+    """Shipment view over `lugal.supply.container` (+ CRM linked POs).
+
+    Includes CRM container fields (`status`, `division`, clearance, …) so SPA
+    can use `/shipments/*` as the primary API while `containers/*` remains for
+    actions (mark arrived, driver, …).
+    """
     supplier = c.supplier_id
     agent = c.agent_id
+    delivered_by = c.clearance_info_delivered_by_id
     atts = [_serialize_attachment(a) for a in c.attachment_ids]
     linked_pos = []
     if 'purchase_order_ids' in c._fields:
@@ -383,6 +389,9 @@ def _serialize_shipment_container(c):
         'shipment_id': c.shipment_ref or c.name or '',
         'name': c.name or '',
         'container_number': c.container_number or '',
+        'bl_number': c.bl_number or '',
+        'clearance_company_id': None,
+        'clearance_company_name': c.clearance_company or '',
         'supplier_id': supplier.id if supplier else None,
         'supplier_name': supplier.name if supplier else '',
         'agent_id': agent.id if agent else None,
@@ -391,15 +400,39 @@ def _serialize_shipment_container(c):
         'shipping_method': c.transport_mode or '',
         'origin': c.origin_location or '',
         'destination': c.destination_location or '',
+        'origin_location': c.origin_location or '',
+        'destination_port': c.destination_location or '',
         'etd': c.departure_date.isoformat() if c.departure_date else None,
+        'departure_date': c.departure_date.isoformat() if c.departure_date else None,
         'eta': c.eta.isoformat() if c.eta else None,
-        'status': c.shipment_tracking_state or 'pending',
+        'arrived_at': c.arrived_at.isoformat() if c.arrived_at else None,
+        # CRM lifecycle status (SPA badges / filters)
+        'status': c.status or 'waiting',
         'shipment_tracking_state': c.shipment_tracking_state or 'pending',
+        'division': c.division or '',
         'shipping_line': c.shipping_line or '',
         'attachments': atts,
         'attachment_ids': c.attachment_ids.ids,
         'attachment_count': int(c.attachment_count or len(c.attachment_ids)),
+        'penalty_count': len(c.penalty_ids),
         'tracking_url': c.tracking_url or '',
+        'total_weight_kg': 0.0,
+        'total_cbm': 0.0,
+        'driver_id': None,
+        'driver_name': '',
+        'driver_phone': '',
+        'driver_assigned_at': None,
+        'driver_assigned_by': '',
+        'clearance_info_delivered': bool(c.clearance_info_delivered),
+        'clearance_info_delivered_at': (
+            c.clearance_info_delivered_at.isoformat() if c.clearance_info_delivered_at else None
+        ),
+        'clearance_info_delivered_by': delivered_by.name if delivered_by else '',
+        'vendor_id': supplier.id if supplier else None,
+        'vendor_name': supplier.name if supplier else '',
+        'reminder_date': None,
+        'reminder_note': '',
+        'notes': c.notes or '',
         'created_at': c.create_date.isoformat() if c.create_date else '',
         'updated_at': c.write_date.isoformat() if c.write_date else '',
     }
@@ -424,6 +457,21 @@ def _serialize_clearance_company(c):
         'notes': c.notes or '',
         'is_active': bool(c.is_active),
     }
+
+
+CLEARANCE_COMPANY_MODEL = 'lugal.supply.clearance.company'
+_CLEARANCE_COMPANY_MISSING = 'Clearance company model not configured'
+
+
+def _clearance_company_env():
+    """Sudo env for `lugal.supply.clearance.company`, or None if not registered (upgrade `lugal_supply`)."""
+    if CLEARANCE_COMPANY_MODEL not in request.env:
+        _logger.warning(
+            'Clearance company API: model %r missing from registry; run: odoo -u lugal_supply',
+            CLEARANCE_COMPANY_MODEL,
+        )
+        return None
+    return request.env[CLEARANCE_COMPANY_MODEL].sudo()
 
 
 def _serialize_inventory_minmax(r):
@@ -1142,6 +1190,9 @@ class CrmSupplyExtraApiController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized', 'data': None}
+            CC = _clearance_company_env()
+            if CC is None:
+                return {'success': False, 'error': _CLEARANCE_COMPANY_MISSING, 'data': None}
             page, per_page, offset = _pagination(kwargs)
             domain = [('is_deleted', '=', False)]
             if kwargs.get('is_active') is not None:
@@ -1149,7 +1200,6 @@ class CrmSupplyExtraApiController(http.Controller):
             search = (kwargs.get('search') or '').strip()
             if search:
                 domain += ['|', '|', ('name', 'ilike', search), ('city', 'ilike', search), ('contact_name', 'ilike', search)]
-            CC = request.env['lugal.supply.clearance.company'].sudo()
             total = CC.search_count(domain)
             rows = CC.search(domain, order='name asc, id asc', limit=per_page, offset=offset)
             return {
@@ -1167,7 +1217,10 @@ class CrmSupplyExtraApiController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized', 'data': None}
-            cc = request.env['lugal.supply.clearance.company'].sudo().browse(cc_id).exists()
+            CC = _clearance_company_env()
+            if CC is None:
+                return {'success': False, 'error': _CLEARANCE_COMPANY_MISSING, 'data': None}
+            cc = CC.browse(cc_id).exists()
             if not cc or cc.is_deleted:
                 return {'success': False, 'error': 'Clearance company not found', 'data': None}
             return {'success': True, 'data': _serialize_clearance_company(cc)}
@@ -1192,7 +1245,10 @@ class CrmSupplyExtraApiController(http.Controller):
                 vals['license_expiry'] = _parse_date(kwargs['license_expiry'])
             if kwargs.get('is_active') is not None:
                 vals['is_active'] = bool(kwargs['is_active'])
-            rec = request.env['lugal.supply.clearance.company'].sudo().create(vals)
+            CC = _clearance_company_env()
+            if CC is None:
+                return {'success': False, 'error': _CLEARANCE_COMPANY_MISSING, 'data': None}
+            rec = CC.create(vals)
             return {'success': True, 'data': _serialize_clearance_company(rec)}
         except Exception as e:
             return crm_error(e, 'supply_clearance_companies_create')
@@ -1202,7 +1258,10 @@ class CrmSupplyExtraApiController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized', 'data': None}
-            cc = request.env['lugal.supply.clearance.company'].sudo().browse(cc_id).exists()
+            CC = _clearance_company_env()
+            if CC is None:
+                return {'success': False, 'error': _CLEARANCE_COMPANY_MISSING, 'data': None}
+            cc = CC.browse(cc_id).exists()
             if not cc or cc.is_deleted:
                 return {'success': False, 'error': 'Clearance company not found', 'data': None}
             vals = {}
@@ -1226,7 +1285,10 @@ class CrmSupplyExtraApiController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized', 'data': None}
-            cc = request.env['lugal.supply.clearance.company'].sudo().browse(cc_id).exists()
+            CC = _clearance_company_env()
+            if CC is None:
+                return {'success': False, 'error': _CLEARANCE_COMPANY_MISSING, 'data': None}
+            cc = CC.browse(cc_id).exists()
             if not cc:
                 return {'success': False, 'error': 'Clearance company not found', 'data': None}
             cc.write({'is_deleted': True, 'active': False})
@@ -1645,7 +1707,13 @@ class CrmSupplyExtraApiController(http.Controller):
             page, per_page, offset = _pagination(kwargs)
             domain = [('is_deleted', '=', False), ('active', '=', True)]
             if kwargs.get('status'):
-                domain.append(('shipment_tracking_state', '=', kwargs['status']))
+                st = kwargs['status']
+                if st in ('waiting', 'active', 'at_port', 'completed'):
+                    domain.append(('status', '=', st))
+                else:
+                    domain.append(('shipment_tracking_state', '=', st))
+            if kwargs.get('division'):
+                domain.append(('division', '=', kwargs['division']))
             if kwargs.get('supplier_id'):
                 try:
                     domain.append(('supplier_id', '=', int(kwargs['supplier_id'])))
@@ -1715,9 +1783,21 @@ class CrmSupplyExtraApiController(http.Controller):
             if ed:
                 vals['eta'] = ed
             if kwargs.get('status'):
-                vals['shipment_tracking_state'] = kwargs['status']
+                st = kwargs['status']
+                if st in ('waiting', 'active', 'at_port', 'completed'):
+                    vals['status'] = st
+                else:
+                    vals['shipment_tracking_state'] = st
             if kwargs.get('shipping_line'):
                 vals['shipping_line'] = kwargs['shipping_line']
+            if kwargs.get('bl_number'):
+                vals['bl_number'] = kwargs['bl_number']
+            if kwargs.get('notes'):
+                vals['notes'] = kwargs['notes']
+            if kwargs.get('division'):
+                vals['division'] = kwargs['division']
+            if kwargs.get('tracking_url'):
+                vals['tracking_url'] = kwargs['tracking_url']
             c = request.env['lugal.supply.container'].sudo().create(vals)
             if supply_kwargs_has_attachments(kwargs):
                 try:
@@ -1762,9 +1842,21 @@ class CrmSupplyExtraApiController(http.Controller):
             if ed:
                 vals['eta'] = ed
             if kwargs.get('status'):
-                vals['shipment_tracking_state'] = kwargs['status']
+                st = kwargs['status']
+                if st in ('waiting', 'active', 'at_port', 'completed'):
+                    vals['status'] = st
+                else:
+                    vals['shipment_tracking_state'] = st
             if kwargs.get('shipping_line'):
                 vals['shipping_line'] = kwargs['shipping_line']
+            if kwargs.get('bl_number') is not None:
+                vals['bl_number'] = kwargs['bl_number']
+            if kwargs.get('notes') is not None:
+                vals['notes'] = kwargs['notes']
+            if kwargs.get('division'):
+                vals['division'] = kwargs['division']
+            if kwargs.get('tracking_url') is not None:
+                vals['tracking_url'] = kwargs['tracking_url']
             if vals:
                 c.write(vals)
             if supply_kwargs_has_attachments(kwargs):
