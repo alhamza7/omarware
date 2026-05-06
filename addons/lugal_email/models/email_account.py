@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import threading
+from contextlib import contextmanager
 import email as email_lib
 from email import policy
 from email.header import decode_header
@@ -25,6 +26,13 @@ def _get_upsert_lock(account_id: int) -> threading.Lock:
         if account_id not in _upsert_locks:
             _upsert_locks[account_id] = threading.Lock()
         return _upsert_locks[account_id]
+
+
+# Serialize IMAP logins for the same (host, port, login) within this OS process.
+# Parallel HTTP handlers, polling, and fire-and-forget MOVE/STORE threads otherwise
+# burst past mail_max_userip_connections on shared mail hosts.
+_IMAP_CRED_LOCKS: dict[tuple, threading.Lock] = {}
+_IMAP_CRED_LOCKS_GUARD = threading.Lock()
 
 # How many IMAP messages to pull on first / incremental catch-up (per sync call).
 SYNC_MAX_MESSAGES = 150
@@ -167,23 +175,91 @@ class LugalEmailAccount(models.Model):
 
         threading.Thread(target=_trigger, daemon=True, name='idle-on-test').start()
 
-    def _imap_connect(self):
-        """Return a logged-in IMAP connection."""
+    def _imap_credentials_key(self):
+        """Stable tuple for locking IMAP access (same login = one gate)."""
+        self.ensure_one()
+        host = (self.imap_host or '').strip().lower()
+        port = int(self.imap_port or (993 if self.imap_use_ssl else 143))
+        user = (self.username or self.email_address or '').strip().lower()
+        return host, port, user
+
+    def _imap_connect_unlocked(self):
+        """Open IMAP without taking the credential lock (internal use only)."""
         import imaplib
         conn_cls = imaplib.IMAP4_SSL if self.imap_use_ssl else imaplib.IMAP4
-        conn = conn_cls(self.imap_host, self.imap_port)
+        port = int(self.imap_port or (993 if self.imap_use_ssl else 143))
+        conn = conn_cls(self.imap_host, port)
         conn.login(self.username or self.email_address, self.password or '')
         return conn
 
+    @contextmanager
+    def _imap_session(self, connect_attempts=6, retry_delay=2.0):
+        """Serialize IMAP for this account's credentials; login, yield conn, logout.
+
+        Retries with backoff when the server returns connection-limit errors.
+        """
+        import time as _time
+        self.ensure_one()
+        key = self._imap_credentials_key()
+        with _IMAP_CRED_LOCKS_GUARD:
+            lock = _IMAP_CRED_LOCKS.setdefault(key, threading.Lock())
+        lock.acquire()
+        try:
+            for attempt in range(connect_attempts):
+                conn = None
+                try:
+                    conn = self._imap_connect_unlocked()
+                    try:
+                        yield conn
+                    finally:
+                        if conn is not None:
+                            try:
+                                conn.logout()
+                            except Exception:
+                                try:
+                                    conn.shutdown()
+                                except Exception:
+                                    pass
+                    return
+                except Exception as exc:
+                    if conn is not None:
+                        try:
+                            conn.logout()
+                        except Exception:
+                            try:
+                                conn.shutdown()
+                            except Exception:
+                                pass
+                    err = str(exc).lower()
+                    a0 = getattr(exc, 'args', (None,))[0]
+                    if isinstance(a0, bytes):
+                        err = a0.decode('utf-8', errors='replace').lower() + ' ' + err
+                    if attempt < connect_attempts - 1 and any(
+                        kw in err
+                        for kw in (
+                            'limit', 'maximum', 'too many', 'connection',
+                            'eof', 'socket', 'temporarily', 'unavailable',
+                        )
+                    ):
+                        _time.sleep(retry_delay * (attempt + 1))
+                        continue
+                    raise
+        finally:
+            lock.release()
+
     # ── Bidirectional IMAP sync helpers ──────────────────────────────────────
 
-    def _get_server_folder_name(self, purpose):
+    def _get_server_folder_name(self, purpose, existing_conn=None):
         """Return the IMAP server folder name for a logical purpose.
 
         purpose: 'trash' | 'archive' | 'sent' | 'drafts' | 'spam'
 
         Detects per-account folder names via IMAP LIST on first call, then caches
         in ir.config_parameter so subsequent calls are instant (no extra connection).
+
+        ``existing_conn``: when provided, LIST on this connection (caller must
+        already hold the credential lock via ``_imap_session``) to avoid nested
+        IMAP logins and deadlocks.
         """
         self.ensure_one()
         import re as _re
@@ -219,28 +295,41 @@ class LugalEmailAccount(models.Model):
             'drafts':  ['draft'],
             'spam':    ['spam', 'junk'],
         }
+
+        def _match_folder_from_listing(listing):
+            if not listing:
+                return None
+            for entry in listing:
+                if not entry:
+                    continue
+                raw = entry.decode('utf-8', errors='replace') if isinstance(entry, bytes) else str(entry)
+                m = _re.search(r'\(.*?\)\s+"[^"]+"\s+"?(.+?)"?\s*$', raw)
+                if not m:
+                    m = _re.search(r'\(.*?\)\s+\S+\s+"?(.+?)"?\s*$', raw)
+                folder_raw = m.group(1).strip().strip('"') if m else ''
+                if not folder_raw:
+                    continue
+                for kw in keywords.get(purpose, []):
+                    if kw in folder_raw.lower():
+                        return folder_raw
+            return None
+
         try:
-            conn = self._imap_connect()
-            typ, listing = conn.list()
-            conn.logout()
-            if typ == 'OK' and listing:
-                for entry in listing:
-                    if not entry:
-                        continue
-                    raw = entry.decode('utf-8', errors='replace') if isinstance(entry, bytes) else str(entry)
-                    # Strip the flags section "(...)" and delimiter, get the folder name
-                    # Handles both: (\Flags) "." INBOX.Trash
-                    #           and (\Flags) "/" "[Gmail]/Trash"
-                    m = _re.search(r'\(.*?\)\s+"[^"]+"\s+"?(.+?)"?\s*$', raw)
-                    if not m:
-                        m = _re.search(r'\(.*?\)\s+\S+\s+"?(.+?)"?\s*$', raw)
-                    folder_raw = m.group(1).strip().strip('"') if m else ''
-                    if not folder_raw:
-                        continue
-                    for kw in keywords.get(purpose, []):
-                        if kw in folder_raw.lower():
-                            ICP.set_param(cache_key, folder_raw)
-                            return folder_raw
+            if existing_conn is not None:
+                typ, listing = existing_conn.list()
+                if typ == 'OK' and listing:
+                    hit = _match_folder_from_listing(listing)
+                    if hit:
+                        ICP.set_param(cache_key, hit)
+                        return hit
+            else:
+                with self._imap_session() as conn:
+                    typ, listing = conn.list()
+                    if typ == 'OK' and listing:
+                        hit = _match_folder_from_listing(listing)
+                        if hit:
+                            ICP.set_param(cache_key, hit)
+                            return hit
         except Exception:
             pass  # fall through to defaults
 
@@ -269,14 +358,13 @@ class LugalEmailAccount(models.Model):
                 with _Registry(db_name).cursor() as cr:
                     env = _odoo.api.Environment(cr, _odoo.SUPERUSER_ID, {})
                     acc = env['lugal.email.account'].browse(acc_id)
-                    conn = acc._imap_connect()
-                    conn.select(imap_folder, readonly=False)
-                    uid_str = str(imap_uid)
-                    if add_flags:
-                        conn.uid('store', uid_str, '+FLAGS', '(' + ' '.join(add_flags) + ')')
-                    if remove_flags:
-                        conn.uid('store', uid_str, '-FLAGS', '(' + ' '.join(remove_flags) + ')')
-                    conn.logout()
+                    with acc._imap_session() as conn:
+                        conn.select(imap_folder, readonly=False)
+                        uid_str = str(imap_uid)
+                        if add_flags:
+                            conn.uid('store', uid_str, '+FLAGS', '(' + ' '.join(add_flags) + ')')
+                        if remove_flags:
+                            conn.uid('store', uid_str, '-FLAGS', '(' + ' '.join(remove_flags) + ')')
                     _logger.info(
                         'IMAP flags pushed for acc=%s uid=%s folder=%s +%s -%s',
                         acc_id, imap_uid, imap_folder, add_flags, remove_flags,
@@ -301,57 +389,39 @@ class LugalEmailAccount(models.Model):
         self.ensure_one()
 
         import threading
-        import imaplib
 
-        acc_id   = self.id
-        db_name  = self.env.cr.dbname
-        imap_host    = self.imap_host
-        imap_port    = int(self.imap_port or 993)
-        imap_use_ssl = bool(self.imap_use_ssl)
-        username     = self.username or self.email_address
-        password     = self.password or ''
+        acc_id  = self.id
+        db_name = self.env.cr.dbname
 
         def _do_append():
             try:
                 from odoo.modules.registry import Registry as _Registry
                 import odoo as _odoo
 
-                # Discover the server-side Sent folder name (cached after first run).
-                sent_folder = 'Sent'
-                try:
-                    with _Registry(db_name).cursor() as _cr:
-                        env = _odoo.api.Environment(_cr, _odoo.SUPERUSER_ID, {})
-                        acc = env['lugal.email.account'].browse(acc_id)
-                        if acc.exists():
-                            sent_folder = acc._get_server_folder_name('sent')
-                except Exception:
-                    pass  # fall back to 'Sent'
+                with _Registry(db_name).cursor() as _cr:
+                    env = _odoo.api.Environment(_cr, _odoo.SUPERUSER_ID, {})
+                    acc = env['lugal.email.account'].browse(acc_id)
+                    if not acc.exists():
+                        return
+                    with acc._imap_session() as conn:
+                        sent_folder = acc._get_server_folder_name('sent', existing_conn=conn)
+                        msg_bytes = (
+                            raw_message.encode('utf-8')
+                            if isinstance(raw_message, str)
+                            else raw_message
+                        )
+                        typ, data = conn.append(sent_folder, '(\\Seen)', None, msg_bytes)
 
-                conn_cls = imaplib.IMAP4_SSL if imap_use_ssl else imaplib.IMAP4
-                conn = conn_cls(imap_host, imap_port)
-                conn.login(username, password)
-
-                # APPEND expects bytes; encode if we received a string.
-                msg_bytes = (
-                    raw_message.encode('utf-8')
-                    if isinstance(raw_message, str)
-                    else raw_message
-                )
-
-                # Append to Sent with \Seen so the copy appears already-read.
-                typ, data = conn.append(sent_folder, '(\\Seen)', None, msg_bytes)
-                conn.logout()
-
-                if typ == 'OK':
-                    _logger.info(
-                        'IMAP APPEND to Sent succeeded: acc=%s folder=%s',
-                        acc_id, sent_folder,
-                    )
-                else:
-                    _logger.warning(
-                        'IMAP APPEND to Sent returned %s for acc=%s folder=%s: %s',
-                        typ, acc_id, sent_folder, data,
-                    )
+                    if typ == 'OK':
+                        _logger.info(
+                            'IMAP APPEND to Sent succeeded: acc=%s folder=%s',
+                            acc_id, sent_folder,
+                        )
+                    else:
+                        _logger.warning(
+                            'IMAP APPEND to Sent returned %s for acc=%s folder=%s: %s',
+                            typ, acc_id, sent_folder, data,
+                        )
             except Exception as exc:
                 _logger.warning(
                     'IMAP APPEND to Sent failed for acc=%s: %s',
@@ -386,24 +456,22 @@ class LugalEmailAccount(models.Model):
                     env = _odoo.api.Environment(cr, _odoo.SUPERUSER_ID, {})
                     acc = env['lugal.email.account'].browse(acc_id)
 
-                    if to_folder_purpose == 'inbox':
-                        dest_folder = 'INBOX'
-                    else:
-                        dest_folder = acc._get_server_folder_name(to_folder_purpose)
+                    with acc._imap_session() as conn:
+                        if to_folder_purpose == 'inbox':
+                            dest_folder = 'INBOX'
+                        else:
+                            dest_folder = acc._get_server_folder_name(
+                                to_folder_purpose, existing_conn=conn,
+                            )
+                        conn.select(from_folder, readonly=False)
+                        uid_str = str(imap_uid)
 
-                    conn = acc._imap_connect()
-                    conn.select(from_folder, readonly=False)
-                    uid_str = str(imap_uid)
+                        typ, data = conn.uid('move', uid_str, dest_folder)
+                        if typ != 'OK':
+                            conn.uid('copy', uid_str, dest_folder)
+                            conn.uid('store', uid_str, '+FLAGS', '(\\Deleted)')
+                            conn.expunge()
 
-                    # Prefer MOVE (atomic, server-side)
-                    typ, data = conn.uid('move', uid_str, dest_folder)
-                    if typ != 'OK':
-                        # Fall back: COPY + mark deleted + EXPUNGE
-                        conn.uid('copy', uid_str, dest_folder)
-                        conn.uid('store', uid_str, '+FLAGS', '(\\Deleted)')
-                        conn.expunge()
-
-                    conn.logout()
                     _logger.info(
                         'IMAP move acc=%s uid=%s %s → %s',
                         acc_id, imap_uid, from_folder, dest_folder,
@@ -438,17 +506,16 @@ class LugalEmailAccount(models.Model):
                 with _Registry(db_name).cursor() as cr:
                     env = _odoo.api.Environment(cr, _odoo.SUPERUSER_ID, {})
                     acc = env['lugal.email.account'].browse(acc_id)
-                    conn = acc._imap_connect()
-                    conn.select(from_folder, readonly=False)
-                    uid_str = str(imap_uid)
+                    with acc._imap_session() as conn:
+                        conn.select(from_folder, readonly=False)
+                        uid_str = str(imap_uid)
 
-                    typ, data = conn.uid('move', uid_str, dest_folder_path)
-                    if typ != 'OK':
-                        conn.uid('copy', uid_str, dest_folder_path)
-                        conn.uid('store', uid_str, '+FLAGS', '(\\Deleted)')
-                        conn.expunge()
+                        typ, data = conn.uid('move', uid_str, dest_folder_path)
+                        if typ != 'OK':
+                            conn.uid('copy', uid_str, dest_folder_path)
+                            conn.uid('store', uid_str, '+FLAGS', '(\\Deleted)')
+                            conn.expunge()
 
-                    conn.logout()
                     _logger.info(
                         'IMAP raw-move acc=%s uid=%s %s → %s',
                         acc_id, imap_uid, from_folder, dest_folder_path,
@@ -462,16 +529,16 @@ class LugalEmailAccount(models.Model):
         threading.Thread(target=_do_move, daemon=True,
                          name=f'imap-rawmove-{imap_uid}').start()
 
-    def _imap_ensure_folder(self, path):
+    def _imap_ensure_folder(self, path, existing_conn=None):
         """Create *path* on the IMAP server if it does not already exist.
 
         Returns the final folder path on success, raises on hard failure.
         Safe to call when the folder already exists (no-op in that case).
+
+        ``existing_conn``: optional open connection (same lock as caller's session).
         """
-        self.ensure_one()
-        conn = self._imap_connect()
-        try:
-            # LIST to check existence
+
+        def _ensure_on_conn(conn):
             typ, listing = conn.list('""', path)
             exists = typ == 'OK' and any(listing)
             if not exists:
@@ -480,12 +547,13 @@ class LugalEmailAccount(models.Model):
                 _logger.info('IMAP folder created: acc=%s path=%s', self.id, path)
             else:
                 _logger.info('IMAP folder already exists: acc=%s path=%s', self.id, path)
-        finally:
-            try:
-                conn.logout()
-            except Exception:
-                pass
-        return path
+            return path
+
+        self.ensure_one()
+        if existing_conn is not None:
+            return _ensure_on_conn(existing_conn)
+        with self._imap_session() as conn:
+            return _ensure_on_conn(conn)
 
     def _imap_expunge_async(self, imap_uid, imap_folder):
         """Mark a message \\Deleted on the server and EXPUNGE it (permanent delete)."""
@@ -504,11 +572,10 @@ class LugalEmailAccount(models.Model):
                 with _Registry(db_name).cursor() as cr:
                     env = _odoo.api.Environment(cr, _odoo.SUPERUSER_ID, {})
                     acc = env['lugal.email.account'].browse(acc_id)
-                    conn = acc._imap_connect()
-                    conn.select(imap_folder, readonly=False)
-                    conn.uid('store', str(imap_uid), '+FLAGS', '(\\Deleted)')
-                    conn.expunge()
-                    conn.logout()
+                    with acc._imap_session() as conn:
+                        conn.select(imap_folder, readonly=False)
+                        conn.uid('store', str(imap_uid), '+FLAGS', '(\\Deleted)')
+                        conn.expunge()
                     _logger.info('IMAP expunge acc=%s uid=%s folder=%s', acc_id, imap_uid, imap_folder)
             except Exception as exc:
                 _logger.warning('IMAP expunge failed acc=%s uid=%s: %s', acc_id, imap_uid, exc)
@@ -824,7 +891,7 @@ class LugalEmailAccount(models.Model):
         cursor_key = f'lugal.email.sent_max_uid.{self.id}'
 
         try:
-            sent_folder = self._get_server_folder_name('sent')
+            sent_folder = self._get_server_folder_name('sent', existing_conn=conn)
         except Exception:
             sent_folder = 'Sent'
 
@@ -840,7 +907,7 @@ class LugalEmailAccount(models.Model):
                 cache_key = f'lugal.email.folder.{self.id}.sent'
                 self.env['ir.config_parameter'].sudo().set_param(cache_key, '')
                 try:
-                    sent_folder = self._get_server_folder_name('sent')
+                    sent_folder = self._get_server_folder_name('sent', existing_conn=conn)
                     typ, data = conn.select(sent_folder, readonly=True)
                     if typ != 'OK' or not data:
                         _logger.warning(
@@ -986,103 +1053,102 @@ class LugalEmailAccount(models.Model):
 
         try:
             import imaplib
-            conn = self._imap_connect()
-            typ, data = conn.select('INBOX', readonly=True)
-            if typ != 'OK' or not data:
-                raise imaplib.IMAP4.error('INBOX select failed')
-            num_msgs = int(data[0])
-            max_uid_cursor = self.imap_inbox_max_uid or 0
-            uid_re = re.compile(br'UID\s+(\d+)')
+            with self._imap_session() as conn:
+                typ, data = conn.select('INBOX', readonly=True)
+                if typ != 'OK' or not data:
+                    raise imaplib.IMAP4.error('INBOX select failed')
+                num_msgs = int(data[0])
+                max_uid_cursor = self.imap_inbox_max_uid or 0
+                uid_re = re.compile(br'UID\s+(\d+)')
 
-            def _parse_batch_fetch(data_list):
-                """
-                Parse an imaplib FETCH response list into [(uid_int, raw_bytes, meta_bytes)].
-                Works for both conn.fetch(...) and conn.uid('fetch', ...) responses.
-                imaplib interleaves (meta, body) tuples with b')' separators; we skip
-                anything that is not a (meta, body) tuple with non-empty payload.
-                """
-                parsed = []
-                for item in data_list:
-                    if not isinstance(item, tuple) or len(item) < 2:
-                        continue
-                    meta, payload = item[0], item[1]
-                    if not isinstance(meta, bytes):
-                        continue
-                    if not isinstance(payload, (bytes, bytearray)) or len(payload) == 0:
-                        continue
-                    m = uid_re.search(meta)
-                    if m:
-                        parsed.append((int(m.group(1)), bytes(payload), meta))
-                return parsed
+                def _parse_batch_fetch(data_list):
+                    """
+                    Parse an imaplib FETCH response list into [(uid_int, raw_bytes, meta_bytes)].
+                    Works for both conn.fetch(...) and conn.uid('fetch', ...) responses.
+                    imaplib interleaves (meta, body) tuples with b')' separators; we skip
+                    anything that is not a (meta, body) tuple with non-empty payload.
+                    """
+                    parsed = []
+                    for item in data_list:
+                        if not isinstance(item, tuple) or len(item) < 2:
+                            continue
+                        meta, payload = item[0], item[1]
+                        if not isinstance(meta, bytes):
+                            continue
+                        if not isinstance(payload, (bytes, bytearray)) or len(payload) == 0:
+                            continue
+                        m = uid_re.search(meta)
+                        if m:
+                            parsed.append((int(m.group(1)), bytes(payload), meta))
+                    return parsed
 
-            imported = 0
-            max_seen = max_uid_cursor
+                imported = 0
+                max_seen = max_uid_cursor
 
-            def _upsert_batch(items, min_uid=0, headers_only=False):
-                """Upsert a parsed batch, skipping UIDs we already have."""
-                nonlocal imported, max_seen
-                for uid_val, raw, flags_meta in items:
-                    if uid_val <= min_uid:
-                        continue
-                    try:
-                        self._upsert_inbox_message(uid_val, raw, flags_meta, headers_only=headers_only)
-                        imported += 1
-                        if uid_val > max_seen:
-                            max_seen = uid_val
-                    except Exception:
-                        _logger.warning(
-                            'IMAP upsert failed uid=%s account=%s', uid_val, self.id, exc_info=True,
-                        )
+                def _upsert_batch(items, min_uid=0, headers_only=False):
+                    """Upsert a parsed batch, skipping UIDs we already have."""
+                    nonlocal imported, max_seen
+                    for uid_val, raw, flags_meta in items:
+                        if uid_val <= min_uid:
+                            continue
+                        try:
+                            self._upsert_inbox_message(uid_val, raw, flags_meta, headers_only=headers_only)
+                            imported += 1
+                            if uid_val > max_seen:
+                                max_seen = uid_val
+                        except Exception:
+                            _logger.warning(
+                                'IMAP upsert failed uid=%s account=%s', uid_val, self.id, exc_info=True,
+                            )
 
-            # IMAP fetch specs:
-            # • Header-only (fast, ~1 KB/msg) — used for initial bulk import
-            # • Full body  (slow, ~50 KB/msg) — used for incremental (typically 1-10 new msgs)
-            HEADERS_FETCH = '(UID FLAGS BODY.PEEK[HEADER.FIELDS (FROM TO CC REPLY-TO DATE SUBJECT MESSAGE-ID IN-REPLY-TO REFERENCES)])'
-            BODY_FETCH    = '(UID FLAGS BODY.PEEK[])'
+                # IMAP fetch specs:
+                # • Header-only (fast, ~1 KB/msg) — used for initial bulk import
+                # • Full body  (slow, ~50 KB/msg) — used for incremental (typically 1-10 new msgs)
+                HEADERS_FETCH = '(UID FLAGS BODY.PEEK[HEADER.FIELDS (FROM TO CC REPLY-TO DATE SUBJECT MESSAGE-ID IN-REPLY-TO REFERENCES)])'
+                BODY_FETCH    = '(UID FLAGS BODY.PEEK[])'
 
-            if max_uid_cursor == 0:
-                # ── First import: headers only ────────────────────────────────
-                # Avoids downloading MBs of body data for hundreds of old emails.
-                if num_msgs > 0:
-                    start_seq = max(1, num_msgs - SYNC_MAX_MESSAGES + 1)
-                    seq_range = f'{start_seq}:{num_msgs}'
-                    typ, data_list = conn.fetch(seq_range, HEADERS_FETCH)
-                    if typ == 'OK' and data_list:
-                        _upsert_batch(_parse_batch_fetch(data_list), min_uid=0, headers_only=True)
-            else:
-                # ── Incremental: only fetch new UIDs (full body, typically 1-10 msgs) ──
-                typ, uid_data = conn.uid('search', None, 'UID', '%d:*' % (max_uid_cursor + 1))
-                todo = []
-                if typ == 'OK' and uid_data and uid_data[0]:
-                    # Filter out Dovecot's quirk: UID N:* returns current max when N > max.
-                    todo = [
-                        u for u in sorted(int(x) for x in uid_data[0].split())
-                        if u > max_uid_cursor
-                    ][:SYNC_MAX_MESSAGES]
+                if max_uid_cursor == 0:
+                    # ── First import: headers only ────────────────────────────────
+                    # Avoids downloading MBs of body data for hundreds of old emails.
+                    if num_msgs > 0:
+                        start_seq = max(1, num_msgs - SYNC_MAX_MESSAGES + 1)
+                        seq_range = f'{start_seq}:{num_msgs}'
+                        typ, data_list = conn.fetch(seq_range, HEADERS_FETCH)
+                        if typ == 'OK' and data_list:
+                            _upsert_batch(_parse_batch_fetch(data_list), min_uid=0, headers_only=True)
+                else:
+                    # ── Incremental: only fetch new UIDs (full body, typically 1-10 msgs) ──
+                    typ, uid_data = conn.uid('search', None, 'UID', '%d:*' % (max_uid_cursor + 1))
+                    todo = []
+                    if typ == 'OK' and uid_data and uid_data[0]:
+                        # Filter out Dovecot's quirk: UID N:* returns current max when N > max.
+                        todo = [
+                            u for u in sorted(int(x) for x in uid_data[0].split())
+                            if u > max_uid_cursor
+                        ][:SYNC_MAX_MESSAGES]
 
-                if not todo and num_msgs > 0:
-                    # Fallback: server may not support UID range — batch tail scan (headers only).
-                    start_seq = max(1, num_msgs - SYNC_MAX_MESSAGES + 1)
-                    seq_range = f'{start_seq}:{num_msgs}'
-                    typ, data_list = conn.fetch(seq_range, HEADERS_FETCH)
-                    if typ == 'OK' and data_list:
-                        _upsert_batch(_parse_batch_fetch(data_list), min_uid=max_uid_cursor, headers_only=True)
-                elif todo:
-                    # Full body for new messages — few messages, typically fast.
-                    uid_set = ','.join(str(u) for u in todo)
-                    typ, data_list = conn.uid('fetch', uid_set, BODY_FETCH)
-                    if typ == 'OK' and data_list:
-                        _upsert_batch(_parse_batch_fetch(data_list), min_uid=max_uid_cursor, headers_only=False)
+                    if not todo and num_msgs > 0:
+                        # Fallback: server may not support UID range — batch tail scan (headers only).
+                        start_seq = max(1, num_msgs - SYNC_MAX_MESSAGES + 1)
+                        seq_range = f'{start_seq}:{num_msgs}'
+                        typ, data_list = conn.fetch(seq_range, HEADERS_FETCH)
+                        if typ == 'OK' and data_list:
+                            _upsert_batch(_parse_batch_fetch(data_list), min_uid=max_uid_cursor, headers_only=True)
+                    elif todo:
+                        # Full body for new messages — few messages, typically fast.
+                        uid_set = ','.join(str(u) for u in todo)
+                        typ, data_list = conn.uid('fetch', uid_set, BODY_FETCH)
+                        if typ == 'OK' and data_list:
+                            _upsert_batch(_parse_batch_fetch(data_list), min_uid=max_uid_cursor, headers_only=False)
 
-            # ── Sent folder sync ─────────────────────────────────────────────
-            # Reuse the same connection to also pull sent messages so they
-            # appear in our "sent" mailbox and match webmail / Outlook.
-            try:
-                self._sync_sent_folder(conn)
-            except Exception:
-                _logger.warning('Sent folder sync failed for acc=%s', self.id, exc_info=True)
+                # ── Sent folder sync ─────────────────────────────────────────────
+                # Reuse the same connection to also pull sent messages so they
+                # appear in our "sent" mailbox and match webmail / Outlook.
+                try:
+                    self._sync_sent_folder(conn)
+                except Exception:
+                    _logger.warning('Sent folder sync failed for acc=%s', self.id, exc_info=True)
 
-            conn.logout()
 
             unread = Msg.search_count([
                 ('account_id', '=', self.id),
@@ -1155,119 +1221,107 @@ class LugalEmailAccount(models.Model):
         diag = None
         try:
             import imaplib
-            conn = self._imap_connect()
-            typ, data = conn.select(path, readonly=True)
-            if typ != 'OK' or not data:
-                try:
-                    conn.logout()
-                except Exception:
-                    pass
-                return {'imported': 0, 'error': f'select failed typ={typ!r} path={path!r}', 'resolved_path': path}
+            with self._imap_session() as conn:
+                typ, data = conn.select(path, readonly=True)
+                if typ != 'OK' or not data:
+                    return {'imported': 0, 'error': f'select failed typ={typ!r} path={path!r}', 'resolved_path': path}
 
-            uid_re = re.compile(br'UID\s+(\d+)')
+                uid_re = re.compile(br'UID\s+(\d+)')
 
-            def _parse_batch_fetch(data_list):
-                parsed = []
-                if not data_list:
+                def _parse_batch_fetch(data_list):
+                    parsed = []
+                    if not data_list:
+                        return parsed
+                    for item in data_list:
+                        if not isinstance(item, tuple) or len(item) < 2:
+                            continue
+                        meta, payload = item[0], item[1]
+                        if not isinstance(meta, bytes):
+                            continue
+                        if isinstance(payload, str):
+                            payload = payload.encode('utf-8', errors='replace')
+                        if not isinstance(payload, (bytes, bytearray)) or len(payload) == 0:
+                            continue
+                        m = uid_re.search(meta)
+                        if m:
+                            parsed.append((int(m.group(1)), bytes(payload), meta))
                     return parsed
-                for item in data_list:
-                    if not isinstance(item, tuple) or len(item) < 2:
-                        continue
-                    meta, payload = item[0], item[1]
-                    if not isinstance(meta, bytes):
-                        continue
-                    if isinstance(payload, str):
-                        payload = payload.encode('utf-8', errors='replace')
-                    if not isinstance(payload, (bytes, bytearray)) or len(payload) == 0:
-                        continue
-                    m = uid_re.search(meta)
-                    if m:
-                        parsed.append((int(m.group(1)), bytes(payload), meta))
-                return parsed
 
-            # Prefer UID SEARCH + UID FETCH — sequence-number FETCH is unreliable on
-            # some Dovecot/cPanel builds when the mailbox was just created or after
-            # concurrent expunges.  This matches how we incrementally fetch INBOX.
-            HEADERS_FETCH = (
-                '(UID FLAGS BODY.PEEK[HEADER.FIELDS '
-                '(FROM TO CC BCC REPLY-TO DATE SUBJECT MESSAGE-ID IN-REPLY-TO REFERENCES)])'
-            )
-            FULL_HDR_FETCH = '(UID FLAGS BODY.PEEK[HEADER])'
+                # Prefer UID SEARCH + UID FETCH — sequence-number FETCH is unreliable on
+                # some Dovecot/cPanel builds when the mailbox was just created or after
+                # concurrent expunges.  This matches how we incrementally fetch INBOX.
+                HEADERS_FETCH = (
+                    '(UID FLAGS BODY.PEEK[HEADER.FIELDS '
+                    '(FROM TO CC BCC REPLY-TO DATE SUBJECT MESSAGE-ID IN-REPLY-TO REFERENCES)])'
+                )
+                FULL_HDR_FETCH = '(UID FLAGS BODY.PEEK[HEADER])'
 
-            typ_s, d_s = conn.uid('search', None, 'ALL')
-            uids = []
-            raw_search = b''
-            if typ_s == 'OK' and d_s and d_s[0] is not None:
-                raw_search = d_s[0] if isinstance(d_s[0], (bytes, bytearray)) else str(d_s[0]).encode()
-                parts = raw_search.split()
-                uids = sorted(int(x) for x in parts if x.isdigit())
+                typ_s, d_s = conn.uid('search', None, 'ALL')
+                uids = []
+                raw_search = b''
+                if typ_s == 'OK' and d_s and d_s[0] is not None:
+                    raw_search = d_s[0] if isinstance(d_s[0], (bytes, bytearray)) else str(d_s[0]).encode()
+                    parts = raw_search.split()
+                    uids = sorted(int(x) for x in parts if x.isdigit())
 
-            diag = {
-                'uid_search_typ': typ_s,
-                'uid_count':      len(uids),
-            }
-
-            if not uids:
-                try:
-                    conn.logout()
-                except Exception:
-                    pass
-                return {
-                    'imported': 0,
-                    'error':      None,
-                    'resolved_path': path,
-                    'note':       'mailbox_empty_or_uid_search_empty',
-                    'diagnostics': diag,
+                diag = {
+                    'uid_search_typ': typ_s,
+                    'uid_count':      len(uids),
                 }
 
-            tail = uids[-SYNC_MAX_MESSAGES:]
-            diag['fetch_uid_min'] = tail[0] if tail else None
-            diag['fetch_uid_max'] = tail[-1] if tail else None
+                if not uids:
+                    return {
+                        'imported': 0,
+                        'error':      None,
+                        'resolved_path': path,
+                        'note':       'mailbox_empty_or_uid_search_empty',
+                        'diagnostics': diag,
+                    }
 
-            def _do_fetch(uid_chunk, fetch_macro):
-                nonlocal imported
-                uid_csv = ','.join(str(u) for u in uid_chunk)
-                typ_f, data_list = conn.uid('fetch', uid_csv, fetch_macro)
-                diag.setdefault('fetch_typs', []).append(typ_f)
-                if typ_f != 'OK' or not data_list:
-                    return 0
-                parsed = _parse_batch_fetch(data_list)
-                diag.setdefault('parsed_per_fetch', []).append(len(parsed))
-                n = 0
-                for uid_val, raw, flags_meta in parsed:
-                    try:
-                        self._upsert_inbox_message(
-                            uid_val, raw, flags_meta,
-                            headers_only=headers_only,
-                            folder_key=path,
-                            run_rules=False,
-                        )
-                        n += 1
-                    except Exception:
-                        _logger.warning(
-                            'custom folder upsert failed uid=%s folder=%s acc=%s',
-                            uid_val, path, self.id, exc_info=True,
-                        )
-                imported += n
-                return n
+                tail = uids[-SYNC_MAX_MESSAGES:]
+                diag['fetch_uid_min'] = tail[0] if tail else None
+                diag['fetch_uid_max'] = tail[-1] if tail else None
 
-            # Chunk UID FETCH (some servers reject very long UID sets)
-            _BATCH = 45
-            for i in range(0, len(tail), _BATCH):
-                _do_fetch(tail[i:i + _BATCH], HEADERS_FETCH)
+                def _do_fetch(uid_chunk, fetch_macro):
+                    nonlocal imported
+                    uid_csv = ','.join(str(u) for u in uid_chunk)
+                    typ_f, data_list = conn.uid('fetch', uid_csv, fetch_macro)
+                    diag.setdefault('fetch_typs', []).append(typ_f)
+                    if typ_f != 'OK' or not data_list:
+                        return 0
+                    parsed = _parse_batch_fetch(data_list)
+                    diag.setdefault('parsed_per_fetch', []).append(len(parsed))
+                    n = 0
+                    for uid_val, raw, flags_meta in parsed:
+                        try:
+                            self._upsert_inbox_message(
+                                uid_val, raw, flags_meta,
+                                headers_only=headers_only,
+                                folder_key=path,
+                                run_rules=False,
+                            )
+                            n += 1
+                        except Exception:
+                            _logger.warning(
+                                'custom folder upsert failed uid=%s folder=%s acc=%s',
+                                uid_val, path, self.id, exc_info=True,
+                            )
+                    imported += n
+                    return n
 
-            # Fallback: HEADER.FIELDS response shape not parsed — try full RFC822 header
-            if imported == 0 and tail:
+                # Chunk UID FETCH (some servers reject very long UID sets)
+                _BATCH = 45
                 for i in range(0, len(tail), _BATCH):
-                    _do_fetch(tail[i:i + _BATCH], FULL_HDR_FETCH)
+                    _do_fetch(tail[i:i + _BATCH], HEADERS_FETCH)
 
-            if imported == 0 and tail:
-                diag['note'] = 'uid_search_ok_but_fetch_or_upsert_yielded_zero'
+                # Fallback: HEADER.FIELDS response shape not parsed — try full RFC822 header
+                if imported == 0 and tail:
+                    for i in range(0, len(tail), _BATCH):
+                        _do_fetch(tail[i:i + _BATCH], FULL_HDR_FETCH)
 
-            try:
-                conn.logout()
-            except Exception:
-                pass
+                if imported == 0 and tail:
+                    diag['note'] = 'uid_search_ok_but_fetch_or_upsert_yielded_zero'
+
         except Exception as exc:
             _logger.warning('sync_custom_imap_folder acc=%s path=%s: %s', self.id, path, exc)
             ret = {'imported': imported, 'error': str(exc), 'resolved_path': path}
@@ -1283,12 +1337,8 @@ class LugalEmailAccount(models.Model):
         """Return every mailbox path from IMAP LIST (raw server strings)."""
         self.ensure_one()
         try:
-            conn = self._imap_connect()
-            typ, raw_list = conn.list()
-            try:
-                conn.logout()
-            except Exception:
-                pass
+            with self._imap_session() as conn:
+                typ, raw_list = conn.list()
             if typ != 'OK' or not raw_list:
                 return []
             lr = re.compile(
@@ -1364,12 +1414,8 @@ class LugalEmailAccount(models.Model):
         if req.lower() in _LOGICAL:
             return req
         try:
-            conn = self._imap_connect()
-            typ, raw_list = conn.list()
-            try:
-                conn.logout()
-            except Exception:
-                pass
+            with self._imap_session() as conn:
+                typ, raw_list = conn.list()
             if typ != 'OK' or not raw_list:
                 return req
             # Delimiter may be quoted ("." or "/") or NIL on some servers.
@@ -1426,9 +1472,9 @@ class LugalEmailAccount(models.Model):
                         pass
                 continue
             cred = (
-                (acc.imap_host or '').strip(),
-                int(acc.imap_port or 993),
-                (acc.username or acc.email_address or '').strip(),
+                (acc.imap_host or '').strip().lower(),
+                int(acc.imap_port or (993 if acc.imap_use_ssl else 143)),
+                (acc.username or acc.email_address or '').strip().lower(),
             )
             if cred in synced_creds:
                 continue  # already synced this mailbox in this cron run
@@ -1528,26 +1574,22 @@ class LugalEmailAccount(models.Model):
 
         try:
             import imaplib
-            conn = self._imap_connect()
-            # Map logical folder names to real IMAP paths.
-            # msg.folder is stored as 'inbox'|'sent'|'drafts'|'trash'|'archive'|'spam'
-            # for standard folders, or the raw IMAP path for custom folders.
-            _LOGICAL = {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'}
-            raw_folder = msg.folder or 'inbox'
-            if raw_folder == 'inbox':
-                folder = 'INBOX'
-            elif raw_folder in _LOGICAL:
-                try:
-                    folder = self._get_server_folder_name(raw_folder)
-                except Exception:
-                    folder = raw_folder.capitalize()   # fallback e.g. 'Sent'
-            else:
-                folder = raw_folder   # already a real IMAP path (e.g. 'INBOX.AllFromUmar')
-            typ, _ = conn.select(folder, readonly=True)
-            if typ != 'OK':
-                return msg
-            typ, data_list = conn.uid('fetch', str(msg.imap_uid), '(FLAGS BODY.PEEK[])')
-            conn.logout()
+            with self._imap_session() as conn:
+                _LOGICAL = {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'}
+                raw_folder = msg.folder or 'inbox'
+                if raw_folder == 'inbox':
+                    folder = 'INBOX'
+                elif raw_folder in _LOGICAL:
+                    try:
+                        folder = self._get_server_folder_name(raw_folder, existing_conn=conn)
+                    except Exception:
+                        folder = raw_folder.capitalize()
+                else:
+                    folder = raw_folder
+                typ, _ = conn.select(folder, readonly=True)
+                if typ != 'OK':
+                    return msg
+                typ, data_list = conn.uid('fetch', str(msg.imap_uid), '(FLAGS BODY.PEEK[])')
             if typ != 'OK' or not data_list:
                 return msg
 

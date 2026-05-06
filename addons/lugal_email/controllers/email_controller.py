@@ -187,31 +187,17 @@ def _not_found(msg='Not found'):
     return _json_response({'success': False, 'error': msg}, status=404)
 
 
-def _imap_connect_with_retry(acc, attempts=3, delay=2.0):
-    """Open an IMAP connection, retrying on connection-limit errors.
+def _format_imap_error(exc):
+    """Turn imaplib errors (often bytes in .args[0]) into a clean API string."""
+    args = getattr(exc, 'args', None)
+    if args and isinstance(args[0], bytes):
+        return args[0].decode('utf-8', errors='replace')
+    return str(exc)
 
-    The polling watcher holds persistent IMAP connections; when a folder
-    management API call coincides with a sync, the server's
-    mail_max_userip_connections limit may be briefly exceeded.
-    Waiting a couple of seconds usually frees a slot.
 
-    Returns the open connection on success, or None after all retries fail.
-    """
-    import time as _time
-    last_exc = None
-    for attempt in range(attempts):
-        try:
-            return acc._imap_connect()
-        except Exception as exc:
-            last_exc = exc
-            err_lower = str(exc).lower()
-            if any(kw in err_lower for kw in ('limit', 'maximum', 'too many', 'connection')):
-                if attempt < attempts - 1:
-                    _time.sleep(delay)
-                    continue
-            raise  # non-limit errors propagate immediately
-    _logger.warning('_imap_connect_with_retry exhausted %d attempts: %s', attempts, last_exc)
-    return None
+def _is_imap_connection_limit_error(text: str) -> bool:
+    t = (text or '').lower()
+    return any(k in t for k in ('limit', 'maximum', 'too many', '[limit]', 'mail_max_userip'))
 
 
 def _resolve_imap_folder(account, local_folder):
@@ -2670,16 +2656,22 @@ class LugalEmailController(http.Controller):
             if not (acc.password or '').strip():
                 return _json_response({'success': False, 'error': 'No app password configured'}, 400)
 
-            import imaplib, time as _time
-            conn = _imap_connect_with_retry(acc)
-            if conn is None:
-                return _json_response(
-                    {'success': False,
-                     'error': 'Mail server connection limit reached. Please try again in a few seconds.'},
-                    503,
-                )
-            typ, raw_list = conn.list()
-            conn.logout()
+            import imaplib
+            try:
+                with acc._imap_session() as conn:
+                    typ, raw_list = conn.list()
+            except Exception as exc:
+                fe = _format_imap_error(exc)
+                if _is_imap_connection_limit_error(fe):
+                    return _json_response({
+                        'success': False,
+                        'error': (
+                            'Mail server refused another IMAP connection (per-IP / per-user limit). '
+                            'Wait a few seconds and retry; the app now queues IMAP access so this should be rare.'
+                        ),
+                        'error_detail': fe,
+                    }, 503)
+                return _json_response({'success': False, 'error': fe}, 502)
 
             if typ != 'OK':
                 return _json_response({'success': False, 'error': 'IMAP LIST failed'}, 502)
@@ -2813,7 +2805,7 @@ class LugalEmailController(http.Controller):
                 'delimiter': delimiter,
             }})
         except Exception as exc:
-            return _json_response({'success': False, 'error': str(exc)}, 500)
+            return _json_response({'success': False, 'error': _format_imap_error(exc)}, 500)
 
     # ── Create folder ──────────────────────────────────────────────────────────
 
@@ -2859,50 +2851,49 @@ class LugalEmailController(http.Controller):
                 return _json_response({'success': False, 'error': 'name must not contain double-quotes'}, 400)
 
             import imaplib, re as _re, time as _time
-            conn = _imap_connect_with_retry(acc)
-            if conn is None:
-                return _json_response(
-                    {'success': False,
-                     'error': 'Mail server connection limit reached. Please try again in a few seconds.'},
-                    503,
-                )
             try:
-                # ── Detect the server's hierarchy delimiter ──────────────────
-                # IMAP LIST "" "" returns a line like: (\Noselect) "." ""
-                # which tells us the delimiter (. or / or something else).
-                delimiter = '.'   # safe default for most corporate IMAP servers
-                try:
-                    _t, _l = conn.list('', '')
-                    if _t == 'OK' and _l:
-                        _dl = _l[0]
-                        if isinstance(_dl, bytes):
-                            _dl = _dl.decode('utf-8', errors='replace')
-                        _dm = _re.search(r'\)\s+"([^"]+)"', _dl)
-                        if _dm:
-                            delimiter = _dm.group(1)
-                except Exception:
-                    pass   # fallback to '.'
+                with acc._imap_session() as conn:
+                    # ── Detect the server's hierarchy delimiter ──────────────────
+                    delimiter = '.'   # safe default for most corporate IMAP servers
+                    try:
+                        _t, _l = conn.list('', '')
+                        if _t == 'OK' and _l:
+                            _dl = _l[0]
+                            if isinstance(_dl, bytes):
+                                _dl = _dl.decode('utf-8', errors='replace')
+                            _dm = _re.search(r'\)\s+"([^"]+)"', _dl)
+                            if _dm:
+                                delimiter = _dm.group(1)
+                    except Exception:
+                        pass   # fallback to '.'
 
-                # Reject names that contain the delimiter (would create sub-levels)
-                if delimiter in name:
-                    return _json_response(
-                        {'success': False,
-                         'error': f'name must not contain the hierarchy delimiter "{delimiter}"'},
-                        400,
-                    )
+                    # Reject names that contain the delimiter (would create sub-levels)
+                    if delimiter in name:
+                        return _json_response(
+                            {'success': False,
+                             'error': f'name must not contain the hierarchy delimiter "{delimiter}"'},
+                            400,
+                        )
 
-                # Build full IMAP path
-                if parent:
-                    folder_path = f'{parent}{delimiter}{name}'
-                else:
-                    folder_path = name   # top-level folder
+                    # Build full IMAP path
+                    if parent:
+                        folder_path = f'{parent}{delimiter}{name}'
+                    else:
+                        folder_path = name   # top-level folder
 
-                typ, data = conn.create(folder_path)
-            finally:
-                try:
-                    conn.logout()
-                except Exception:
-                    pass
+                    typ, data = conn.create(folder_path)
+            except Exception as exc:
+                fe = _format_imap_error(exc)
+                if _is_imap_connection_limit_error(fe):
+                    return _json_response({
+                        'success': False,
+                        'error': (
+                            'Mail server refused another IMAP connection (per-IP limit). '
+                            'Wait a few seconds and retry.'
+                        ),
+                        'error_detail': fe,
+                    }, 503)
+                return _json_response({'success': False, 'error': fe}, 502)
 
             if typ != 'OK':
                 err = data[0].decode('utf-8', errors='replace') if data else 'CREATE failed'
@@ -2915,7 +2906,7 @@ class LugalEmailController(http.Controller):
                 'delimiter': delimiter,
             }})
         except Exception as exc:
-            return _json_response({'success': False, 'error': str(exc)}, 500)
+            return _json_response({'success': False, 'error': _format_imap_error(exc)}, 500)
 
     # ── Rename folder ──────────────────────────────────────────────────────────
 
@@ -2952,20 +2943,21 @@ class LugalEmailController(http.Controller):
                 return _json_response({'success': False, 'error': 'Cannot rename INBOX'}, 400)
 
             import imaplib, time as _time
-            conn = _imap_connect_with_retry(acc)
-            if conn is None:
-                return _json_response(
-                    {'success': False,
-                     'error': 'Mail server connection limit reached. Please try again in a few seconds.'},
-                    503,
-                )
             try:
-                typ, data = conn.rename(old_path, new_path)
-            finally:
-                try:
-                    conn.logout()
-                except Exception:
-                    pass
+                with acc._imap_session() as conn:
+                    typ, data = conn.rename(old_path, new_path)
+            except Exception as exc:
+                fe = _format_imap_error(exc)
+                if _is_imap_connection_limit_error(fe):
+                    return _json_response({
+                        'success': False,
+                        'error': (
+                            'Mail server refused another IMAP connection (per-IP limit). '
+                            'Wait a few seconds and retry.'
+                        ),
+                        'error_detail': fe,
+                    }, 503)
+                return _json_response({'success': False, 'error': fe}, 502)
 
             if typ != 'OK':
                 msg = data[0].decode('utf-8', errors='replace') if data else 'RENAME failed'
@@ -2976,7 +2968,7 @@ class LugalEmailController(http.Controller):
                 'new_path': new_path,
             }})
         except Exception as exc:
-            return _json_response({'success': False, 'error': str(exc)}, 500)
+            return _json_response({'success': False, 'error': _format_imap_error(exc)}, 500)
 
     # ── Delete folder ──────────────────────────────────────────────────────────
 
@@ -3028,108 +3020,108 @@ class LugalEmailController(http.Controller):
                 )
 
             import imaplib, re as _re, time as _time
-            conn = _imap_connect_with_retry(acc)
-            if conn is None:
-                return _json_response(
-                    {'success': False,
-                     'error': 'Mail server connection limit reached. Please try again in a few seconds.'},
-                    503,
-                )
             deleted_paths = []
             try:
-                # List ALL folders once — we need this both for flag checks and to
-                # discover children.  Avoids pattern-based LIST which fails on many
-                # servers when the path contains dots.
-                _SYSTEM_FLAGS = {'\\sent', '\\drafts', '\\trash', '\\junk',
-                                 '\\spam', '\\archive', '\\all', '\\inbox'}
-                _LR = _re.compile(r'\((?P<flags>[^)]*)\)\s+"(?P<delim>[^"]*)"\s+"?(?P<name>.+?)"?\s*$')
-                typ_all, all_raw = conn.list()
+                with acc._imap_session() as conn:
+                    # List ALL folders once — we need this both for flag checks and to
+                    # discover children.  Avoids pattern-based LIST which fails on many
+                    # servers when the path contains dots.
+                    _SYSTEM_FLAGS = {'\\sent', '\\drafts', '\\trash', '\\junk',
+                                     '\\spam', '\\archive', '\\all', '\\inbox'}
+                    _LR = _re.compile(r'\((?P<flags>[^)]*)\)\s+"(?P<delim>[^"]*)"\s+"?(?P<name>.+?)"?\s*$')
+                    typ_all, all_raw = conn.list()
 
-                all_folder_names = []   # [(name, flags_set)]
-                delimiter = '.'
-                if typ_all == 'OK' and all_raw:
-                    for item in all_raw:
-                        if not item:
-                            continue
-                        line = item.decode('utf-8', errors='replace') \
-                               if isinstance(item, bytes) else item
-                        fm = _LR.search(line.strip())
-                        if not fm:
-                            continue
-                        fname  = fm.group('name').strip().strip('"')
-                        fdelim = fm.group('delim') or '.'
-                        fflags = {f.lower() for f in fm.group('flags').split()}
-                        all_folder_names.append((fname, fflags))
-                        delimiter = fdelim   # use last seen delimiter
+                    all_folder_names = []   # [(name, flags_set)]
+                    delimiter = '.'
+                    if typ_all == 'OK' and all_raw:
+                        for item in all_raw:
+                            if not item:
+                                continue
+                            line = item.decode('utf-8', errors='replace') \
+                                   if isinstance(item, bytes) else item
+                            fm = _LR.search(line.strip())
+                            if not fm:
+                                continue
+                            fname  = fm.group('name').strip().strip('"')
+                            fdelim = fm.group('delim') or '.'
+                            fflags = {f.lower() for f in fm.group('flags').split()}
+                            all_folder_names.append((fname, fflags))
+                            delimiter = fdelim   # use last seen delimiter
 
-                # Locate the target folder and check for system flags
-                target_flags = set()
-                for fname, fflags in all_folder_names:
-                    if fname.lower() == path.lower():
-                        target_flags = fflags
-                        break
+                    # Locate the target folder and check for system flags
+                    target_flags = set()
+                    for fname, fflags in all_folder_names:
+                        if fname.lower() == path.lower():
+                            target_flags = fflags
+                            break
 
-                if target_flags & _SYSTEM_FLAGS:
-                    conn.logout()
-                    return _json_response(
-                        {'success': False,
-                         'error': f'Cannot delete system folder: {path}'},
-                        400,
-                    )
+                    if target_flags & _SYSTEM_FLAGS:
+                        return _json_response(
+                            {'success': False,
+                             'error': f'Cannot delete system folder: {path}'},
+                            400,
+                        )
 
-                # Collect all folders to delete: the target itself + any descendants.
-                # Children are any folders whose path starts with "<path><delimiter>".
-                prefix_lower = path.lower() + delimiter
-                to_delete = [
-                    fname for fname, _ in all_folder_names
-                    if fname.lower() == path.lower()
-                    or fname.lower().startswith(prefix_lower)
-                ]
+                    # Collect all folders to delete: the target itself + any descendants.
+                    # Children are any folders whose path starts with "<path><delimiter>".
+                    prefix_lower = path.lower() + delimiter
+                    to_delete = [
+                        fname for fname, _ in all_folder_names
+                        if fname.lower() == path.lower()
+                        or fname.lower().startswith(prefix_lower)
+                    ]
 
-                # Sort deepest first so children are deleted before their parent.
-                # Depth = number of delimiter occurrences.
-                to_delete.sort(key=lambda p: p.count(delimiter), reverse=True)
+                    # Sort deepest first so children are deleted before their parent.
+                    # Depth = number of delimiter occurrences.
+                    to_delete.sort(key=lambda p: p.count(delimiter), reverse=True)
 
-                for folder_path in to_delete:
-                    try:
-                        conn.unsubscribe(folder_path)
-                    except Exception:
-                        pass
-                    typ_d, data_d = conn.delete(folder_path)
-                    if typ_d == 'OK':
-                        deleted_paths.append(folder_path)
-                        # Remove DB records for this folder so they stop appearing in
-                        # the messages list.
+                    for folder_path in to_delete:
                         try:
-                            request.env['lugal.email.message'].sudo().search([
-                                ('account_id', '=', account_id),
-                                ('folder',     '=', folder_path),
-                                ('is_deleted', '=', False),
-                            ]).write({'is_deleted': True})
-                            request.env.cr.commit()
+                            conn.unsubscribe(folder_path)
                         except Exception:
                             pass
-                    else:
-                        # If a virtual parent doesn't physically exist on the server,
-                        # the server returns NONEXISTENT — that's fine, just skip it.
-                        err_str = (data_d[0].decode('utf-8', errors='replace')
-                                   if data_d else '')
-                        if 'nonexistent' not in err_str.lower():
-                            _logger.warning(
-                                'IMAP DELETE %r returned %s: %s', folder_path, typ_d, err_str)
+                        typ_d, data_d = conn.delete(folder_path)
+                        if typ_d == 'OK':
+                            deleted_paths.append(folder_path)
+                            # Remove DB records for this folder so they stop appearing in
+                            # the messages list.
+                            try:
+                                request.env['lugal.email.message'].sudo().search([
+                                    ('account_id', '=', account_id),
+                                    ('folder',     '=', folder_path),
+                                    ('is_deleted', '=', False),
+                                ]).write({'is_deleted': True})
+                                request.env.cr.commit()
+                            except Exception:
+                                pass
+                        else:
+                            # If a virtual parent doesn't physically exist on the server,
+                            # the server returns NONEXISTENT — that's fine, just skip it.
+                            err_str = (data_d[0].decode('utf-8', errors='replace')
+                                       if data_d else '')
+                            if 'nonexistent' not in err_str.lower():
+                                _logger.warning(
+                                    'IMAP DELETE %r returned %s: %s', folder_path, typ_d, err_str)
 
-            finally:
-                try:
-                    conn.logout()
-                except Exception:
-                    pass
+            except Exception as exc:
+                fe = _format_imap_error(exc)
+                if _is_imap_connection_limit_error(fe):
+                    return _json_response({
+                        'success': False,
+                        'error': (
+                            'Mail server refused another IMAP connection (per-IP limit). '
+                            'Wait a few seconds and retry.'
+                        ),
+                        'error_detail': fe,
+                    }, 503)
+                return _json_response({'success': False, 'error': fe}, 502)
 
             return _json_response({'success': True, 'data': {
                 'deleted_path':  path,
                 'deleted_paths': deleted_paths,
             }})
         except Exception as exc:
-            return _json_response({'success': False, 'error': str(exc)}, 500)
+            return _json_response({'success': False, 'error': _format_imap_error(exc)}, 500)
 
     # ── Move to custom folder ──────────────────────────────────────────────────
 
@@ -3186,21 +3178,18 @@ class LugalEmailController(http.Controller):
 
                 def _bg_move():
                     try:
-                        import imaplib
                         from odoo.modules.registry import Registry as _Registry
                         with _Registry(db_name).cursor() as _cr:
                             from odoo.api import Environment
                             _env = Environment(_cr, 1, {})
                             _acc = _env['lugal.email.account'].browse(acc_id)
-                            conn = _acc._imap_connect()
-                            conn.select(imap_from)
-                            # Try MOVE (RFC 6851), fall back to COPY + STORE \Deleted + EXPUNGE
-                            result = conn.uid('move', str(imap_uid), imap_dest)
-                            if result[0] != 'OK':
-                                conn.uid('copy', str(imap_uid), imap_dest)
-                                conn.uid('store', str(imap_uid), '+FLAGS', '(\\Deleted)')
-                                conn.expunge()
-                            conn.logout()
+                            with _acc._imap_session() as conn:
+                                conn.select(imap_from)
+                                result = conn.uid('move', str(imap_uid), imap_dest)
+                                if result[0] != 'OK':
+                                    conn.uid('copy', str(imap_uid), imap_dest)
+                                    conn.uid('store', str(imap_uid), '+FLAGS', '(\\Deleted)')
+                                    conn.expunge()
                     except Exception as _e:
                         _logger.warning('message_move IMAP failed uid=%s: %s', imap_uid, _e)
 
@@ -3826,7 +3815,6 @@ def _send_via_smtp_async(acc, to_list, subject, body_html, body_text, cc=None, b
         try:
             from odoo.modules.registry import Registry as _Registry
             import odoo as _odoo
-            import imaplib as _imaplib
 
             # Open a fresh cursor to read attachment binary data.
             with _Registry(db_name).cursor() as _cr:
@@ -3849,68 +3837,31 @@ def _send_via_smtp_async(acc, to_list, subject, body_html, body_text, cc=None, b
             # folder so the message appears in webmail, Outlook, etc.
             if delivered:
                 try:
-                    # Discover the server-side Sent folder name (cached after first run).
-                    sent_folder = 'Sent'
-                    try:
-                        with _Registry(db_name).cursor() as _cr2:
-                            env2 = _odoo.api.Environment(_cr2, _odoo.SUPERUSER_ID, {})
-                            acc_rec = env2['lugal.email.account'].browse(acc_id)
-                            if acc_rec.exists():
-                                sent_folder = acc_rec._get_server_folder_name('sent')
-                    except Exception:
-                        pass  # fall back to 'Sent'
-
-                    # Throttle APPEND connections with the same per-server semaphore
-                    # used by IDLE threads so we don't exceed the server's
-                    # max-connections-per-user limit during bulk sends.
-                    _append_conn = None
-                    _append_sem = None
-                    _append_sem_acquired = False
-                    try:
-                        from odoo.addons.lugal_email.models.email_idle_watcher import _server_semaphore
-                        _append_sem = _server_semaphore(imap_host, imap_port, username)
-                        _append_sem_acquired = _append_sem.acquire(timeout=30)
-                        if not _append_sem_acquired:
-                            _logger.warning(
-                                'IMAP APPEND skipped (server %s:%s at capacity) for msg=%s',
-                                imap_host, imap_port, msg_id,
-                            )
-                            raise RuntimeError('semaphore timeout')
-                    except ImportError:
-                        pass  # watcher not loaded — no throttle, proceed anyway
-
-                    try:
-                        conn_cls = _imaplib.IMAP4_SSL if imap_use_ssl else _imaplib.IMAP4
-                        _append_conn = conn_cls(imap_host, imap_port)
-                        _append_conn.login(username, password)
-
+                    with _Registry(db_name).cursor() as _cr2:
+                        env2 = _odoo.api.Environment(_cr2, _odoo.SUPERUSER_ID, {})
+                        acc_rec = env2['lugal.email.account'].browse(acc_id)
+                        if not acc_rec.exists():
+                            raise RuntimeError('account missing')
                         msg_bytes = (
                             raw_message.encode('utf-8')
                             if isinstance(raw_message, str)
                             else raw_message
                         )
-                        typ, data = _append_conn.append(sent_folder, '(\\Seen)', None, msg_bytes)
-                        _append_conn.logout()
-                        _append_conn = None
-
-                        if typ == 'OK':
-                            _logger.info(
-                                'SMTP+APPEND: msg=%s appended to %s folder=%s',
-                                msg_id, imap_host, sent_folder,
+                        with acc_rec._imap_session() as _append_conn:
+                            sent_folder = acc_rec._get_server_folder_name('sent', existing_conn=_append_conn)
+                            typ, data = _append_conn.append(
+                                sent_folder, '(\\Seen)', None, msg_bytes,
                             )
-                        else:
-                            _logger.warning(
-                                'IMAP APPEND returned %s for msg=%s folder=%s: %s',
-                                typ, msg_id, sent_folder, data,
-                            )
-                    finally:
-                        if _append_conn:
-                            try:
-                                _append_conn.logout()
-                            except Exception:
-                                pass
-                        if _append_sem and _append_sem_acquired:
-                            _append_sem.release()
+                    if typ == 'OK':
+                        _logger.info(
+                            'SMTP+APPEND: msg=%s appended to %s folder=%s',
+                            msg_id, imap_host, sent_folder,
+                        )
+                    else:
+                        _logger.warning(
+                            'IMAP APPEND returned %s for msg=%s folder=%s: %s',
+                            typ, msg_id, sent_folder, data,
+                        )
                 except Exception as append_exc:
                     _logger.warning(
                         'IMAP APPEND to Sent failed for msg=%s acc=%s: %s',

@@ -497,11 +497,12 @@ class EmailRulesController(http.Controller):
 
             # ── Build IMAP folder paths ────────────────────────────────────────
             # Detect the IMAP hierarchy delimiter (usually '.' or '/').
-            try:
-                conn_probe = acc._imap_connect()
+            delimiter = '.'
+            child_name = tpl['child_name']
+            folders_created = []
+            is_move_template = bool(child_name) or template_key.startswith('move_')
+            with acc._imap_session() as conn_probe:
                 typ_d, listing_d = conn_probe.list('', '')
-                conn_probe.logout()
-                delimiter = '.'
                 if typ_d == 'OK' and listing_d:
                     first = listing_d[0]
                     if isinstance(first, bytes):
@@ -510,31 +511,25 @@ class EmailRulesController(http.Controller):
                     m = _re2.search(r'"([./])"', first)
                     if m:
                         delimiter = m.group(1)
-            except Exception:
-                delimiter = '.'
 
-            parent_path = f'INBOX{delimiter}{folder_slug}'
-            child_name  = tpl['child_name']
-            dest_path   = (f'{parent_path}{delimiter}{child_name}'
-                           if child_name else parent_path)
+                parent_path = f'INBOX{delimiter}{folder_slug}'
+                dest_path = (f'{parent_path}{delimiter}{child_name}'
+                             if child_name else parent_path)
 
-            # ── Create IMAP folders if needed ─────────────────────────────────
-            folders_created = []
-            is_move_template = bool(child_name) or template_key.startswith('move_')
-
-            if is_move_template:
-                try:
-                    acc._imap_ensure_folder(parent_path)
-                    folders_created.append(parent_path)
-                except Exception as fe:
-                    return _json_err(f'Could not create parent folder "{parent_path}": {fe}', 500)
-
-                if child_name:
+                # ── Create IMAP folders if needed (move templates only) ─────
+                if is_move_template:
                     try:
-                        acc._imap_ensure_folder(dest_path)
-                        folders_created.append(dest_path)
+                        acc._imap_ensure_folder(parent_path, existing_conn=conn_probe)
+                        folders_created.append(parent_path)
                     except Exception as fe:
-                        return _json_err(f'Could not create child folder "{dest_path}": {fe}', 500)
+                        return _json_err(f'Could not create parent folder "{parent_path}": {fe}', 500)
+
+                    if child_name:
+                        try:
+                            acc._imap_ensure_folder(dest_path, existing_conn=conn_probe)
+                            folders_created.append(dest_path)
+                        except Exception as fe:
+                            return _json_err(f'Could not create child folder "{dest_path}": {fe}', 500)
 
             # ── Build actions list ─────────────────────────────────────────────
             actions = list(tpl['mark_actions'])
@@ -607,6 +602,11 @@ class EmailRulesController(http.Controller):
                 'parent_folder':   parent_path if is_move_template else None,
                 'dest_folder':     dest_path   if is_move_template else None,
                 'folders_created': folders_created,
+                'client_guidance': (
+                    'Move templates create IMAP folders on the server in this request. '
+                    'You do not need to call POST …/folders/create first unless the UI '
+                    'builds a custom path or name outside the template.'
+                ),
                 'auto_applied':    {
                     'applied': applied_count,
                     'skipped': skipped_count,
