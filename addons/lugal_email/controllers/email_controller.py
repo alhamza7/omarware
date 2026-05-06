@@ -2753,6 +2753,9 @@ class LugalEmailController(http.Controller):
                 raw_name = m.group('name').strip().strip('"')
                 if '\\noselect' in flags:
                     continue
+                _INTERNAL_KEYWORDS = {'dovecot', 'sieve', 'courier', 'cyrus', '.subscriptions'}
+                if any(kw in raw_name.lower() for kw in _INTERNAL_KEYWORDS):
+                    continue
                 role = _resolve_role(raw_name, m.group('flags'))
 
                 # ── Count messages ──────────────────────────────────────────────
