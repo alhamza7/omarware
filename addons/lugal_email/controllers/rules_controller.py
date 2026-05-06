@@ -28,6 +28,27 @@ from odoo.http import request
 _logger = logging.getLogger(__name__)
 
 
+def _imap_exc_text(exc):
+    parts = []
+    for a in getattr(exc, 'args', ()) or ():
+        if isinstance(a, bytes):
+            parts.append(a.decode('utf-8', errors='replace'))
+        else:
+            parts.append(str(a))
+    return ' '.join(parts) if parts else str(exc)
+
+
+def _is_imap_userip_limit(exc) -> bool:
+    t = _imap_exc_text(exc).lower()
+    return any(
+        k in t
+        for k in (
+            '[limit]', 'mail_max_userip', 'maximum number of connections',
+            'too many connections',
+        )
+    )
+
+
 # ── Shared helpers ─────────────────────────────────────────────────────────────
 
 def _ensure_jwt():
@@ -378,8 +399,12 @@ class EmailRulesController(http.Controller):
         try:
             body         = json.loads(request.httprequest.data or '{}')
             template_key = (body.get('template_key') or '').strip()
-            sender_email = (body.get('sender_email') or '').strip()
-            sender_name  = (body.get('sender_name')  or sender_email or '').strip()
+            sender_email = (
+                (body.get('sender_email') or body.get('senderEmail') or '')
+            ).strip()
+            sender_name = (
+                (body.get('sender_name') or body.get('senderName') or sender_email or '')
+            ).strip()
             account_id   = body.get('account_id')
 
             if not template_key:
@@ -391,10 +416,20 @@ class EmailRulesController(http.Controller):
             if not acc.exists() or acc.user_id.id != uid:
                 return _json_err('Account not found or access denied', 404)
 
+            # Canonical address for rule conditions + folder slug (handles camelCase FE)
+            sender_addr = sender_email
+            if not sender_addr and sender_name and '@' in sender_name:
+                sender_addr = sender_name.strip()
+            if not sender_addr:
+                return _json_err(
+                    'sender_email is required (JSON key sender_email or senderEmail; '
+                    'or pass sender_name as a full address containing @)',
+                    400,
+                )
+
             # ── Folder path segment: derive from *email*, not display nickname ──
-            # Using sender_name alone strips dots ("syed.naqvi" → "syednaqvi") and
-            # breaks expectations; IMAP segments must stay stable and match the
-            # mailbox owner.  Optional body.folder_slug overrides (alphanumeric + _-).
+            # Fallback display names: turn "a.b" into "a_b" instead of merging to "ab".
+            # Optional body.folder_slug overrides (alphanumeric + _-).
             import re as _re
 
             def _folder_slug_from_email(addr: str) -> str:
@@ -408,11 +443,7 @@ class EmailRulesController(http.Controller):
                 slug = _re.sub(r'[^\w\-]+', '_', local, flags=_re.ASCII).strip('_') or 'sender'
                 return slug[:60].rstrip('_')
 
-            if sender_email:
-                folder_slug = _folder_slug_from_email(sender_email)
-            else:
-                folder_slug = _re.sub(r'[^\w\s\-]', '', (sender_name or 'Sender')).strip()
-                folder_slug = _re.sub(r'\s+', '_', folder_slug) or 'Sender'
+            folder_slug = _folder_slug_from_email(sender_addr)
 
             slug_override = (body.get('folder_slug') or '').strip()
             if slug_override:
@@ -422,17 +453,16 @@ class EmailRulesController(http.Controller):
             if sender_name and '@' not in sender_name:
                 sender_label = sender_name.strip()
             else:
-                sender_label = (sender_email or sender_name or 'Sender').strip()
+                sender_label = (sender_addr or sender_name or 'Sender').strip()
 
             # ── Template catalogue ─────────────────────────────────────────────
-            LOGICAL = {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'}
             TEMPLATES = {
                 'move_all_from_sender': {
                     'label':       f'Move all emails from {sender_label}',
                     'child_name':  None,   # goes straight into parent folder
                     'match_mode':  'all',
                     'conditions':  [{'field': 'from_address', 'operator': 'contains',
-                                     'value': sender_email}],
+                                     'value': sender_addr}],
                     'mark_actions': [],
                     'stop_processing': True,
                 },
@@ -441,7 +471,7 @@ class EmailRulesController(http.Controller):
                     'child_name':  'Important',
                     'match_mode':  'all',
                     'conditions':  [
-                        {'field': 'from_address', 'operator': 'contains', 'value': sender_email},
+                        {'field': 'from_address', 'operator': 'contains', 'value': sender_addr},
                         {'field': 'is_important', 'operator': 'equals',   'value': 'true'},
                     ],
                     'mark_actions': [],
@@ -452,7 +482,7 @@ class EmailRulesController(http.Controller):
                     'child_name':  'With Attachments',
                     'match_mode':  'all',
                     'conditions':  [
-                        {'field': 'from_address',   'operator': 'contains', 'value': sender_email},
+                        {'field': 'from_address',   'operator': 'contains', 'value': sender_addr},
                         {'field': 'has_attachments', 'operator': 'equals',  'value': 'true'},
                     ],
                     'mark_actions': [],
@@ -463,7 +493,7 @@ class EmailRulesController(http.Controller):
                     'child_name':  'CC and BCC',
                     'match_mode':  'all',
                     'conditions':  [
-                        {'field': 'from_address',   'operator': 'contains',     'value': sender_email},
+                        {'field': 'from_address',   'operator': 'contains',     'value': sender_addr},
                         {'field': 'cc_addresses',   'operator': 'is_not_empty', 'value': ''},
                         {'field': 'bcc_addresses',  'operator': 'is_not_empty', 'value': ''},
                     ],
@@ -475,7 +505,7 @@ class EmailRulesController(http.Controller):
                     'child_name':  None,   # no move; just mark
                     'match_mode':  'all',
                     'conditions':  [{'field': 'from_address', 'operator': 'contains',
-                                     'value': sender_email}],
+                                     'value': sender_addr}],
                     'mark_actions': [{'action': 'mark_important'}],
                     'stop_processing': False,
                 },
@@ -484,7 +514,7 @@ class EmailRulesController(http.Controller):
                     'child_name':  None,
                     'match_mode':  'all',
                     'conditions':  [{'field': 'from_address', 'operator': 'contains',
-                                     'value': sender_email}],
+                                     'value': sender_addr}],
                     'mark_actions': [{'action': 'mark_read'}],
                     'stop_processing': False,
                 },
@@ -496,40 +526,55 @@ class EmailRulesController(http.Controller):
                     f'Unknown template_key. Valid keys: {list(TEMPLATES)}', 400)
 
             # ── Build IMAP folder paths ────────────────────────────────────────
-            # Detect the IMAP hierarchy delimiter (usually '.' or '/').
+            # Detect delimiter + create mailboxes; outer retries on per-IP IMAP limits
+            # (multiple Odoo workers can still briefly exceed the server cap).
+            import time as _time_mod
+
             delimiter = '.'
             child_name = tpl['child_name']
             folders_created = []
             is_move_template = bool(child_name) or template_key.startswith('move_')
-            with acc._imap_session() as conn_probe:
-                typ_d, listing_d = conn_probe.list('', '')
-                if typ_d == 'OK' and listing_d:
-                    first = listing_d[0]
-                    if isinstance(first, bytes):
-                        first = first.decode('utf-8', errors='replace')
-                    import re as _re2
-                    m = _re2.search(r'"([./])"', first)
-                    if m:
-                        delimiter = m.group(1)
 
-                parent_path = f'INBOX{delimiter}{folder_slug}'
-                dest_path = (f'{parent_path}{delimiter}{child_name}'
-                             if child_name else parent_path)
+            parent_path = f'INBOX{delimiter}{folder_slug}'
+            dest_path = (f'{parent_path}{delimiter}{child_name}'
+                         if child_name else parent_path)
 
-                # ── Create IMAP folders if needed (move templates only) ─────
-                if is_move_template:
-                    try:
-                        acc._imap_ensure_folder(parent_path, existing_conn=conn_probe)
-                        folders_created.append(parent_path)
-                    except Exception as fe:
-                        return _json_err(f'Could not create parent folder "{parent_path}": {fe}', 500)
+            for outer_attempt in range(6):
+                folders_created = []
+                try:
+                    with acc._imap_session(connect_attempts=14, retry_delay=3.5) as conn_probe:
+                        typ_d, listing_d = conn_probe.list('', '')
+                        if typ_d == 'OK' and listing_d:
+                            first = listing_d[0]
+                            if isinstance(first, bytes):
+                                first = first.decode('utf-8', errors='replace')
+                            import re as _re2
+                            m = _re2.search(r'"([./])"', first)
+                            if m:
+                                delimiter = m.group(1)
 
-                    if child_name:
-                        try:
-                            acc._imap_ensure_folder(dest_path, existing_conn=conn_probe)
-                            folders_created.append(dest_path)
-                        except Exception as fe:
-                            return _json_err(f'Could not create child folder "{dest_path}": {fe}', 500)
+                        parent_path = f'INBOX{delimiter}{folder_slug}'
+                        dest_path = (f'{parent_path}{delimiter}{child_name}'
+                                     if child_name else parent_path)
+
+                        if is_move_template:
+                            acc._imap_ensure_folder(parent_path, existing_conn=conn_probe)
+                            folders_created.append(parent_path)
+                            if child_name:
+                                acc._imap_ensure_folder(dest_path, existing_conn=conn_probe)
+                                folders_created.append(dest_path)
+                    break
+                except Exception as fe:
+                    last_imap_err = fe
+                    if outer_attempt < 5 and _is_imap_userip_limit(fe):
+                        _time_mod.sleep(3.0 * (outer_attempt + 1))
+                        continue
+                    fe_disp = _imap_exc_text(fe)
+                    st = 503 if _is_imap_userip_limit(fe) else 500
+                    return _json_err(
+                        f'Could not prepare IMAP folders under "{parent_path}": {fe_disp}',
+                        st,
+                    )
 
             # ── Build actions list ─────────────────────────────────────────────
             actions = list(tpl['mark_actions'])
@@ -599,6 +644,7 @@ class EmailRulesController(http.Controller):
                 'rule':            _rule_dict(rule),
                 'folder_slug':     folder_slug,
                 'sender_label':    sender_label,
+                'sender_address':  sender_addr,
                 'parent_folder':   parent_path if is_move_template else None,
                 'dest_folder':     dest_path   if is_move_template else None,
                 'folders_created': folders_created,
