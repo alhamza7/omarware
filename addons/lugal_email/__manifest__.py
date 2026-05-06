@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'Lugal Email',
-    'version': '1.1.1',
+    'version': '1.1.2',
     'category': 'Communication',
     'summary': 'IMAP/SMTP email engine for the Lugal suite — accounts, inbox, send, notifications',
     'description': """
