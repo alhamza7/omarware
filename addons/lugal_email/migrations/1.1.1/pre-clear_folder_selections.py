@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# Component: Lugal Email — pre-migration 1.1.1 (clear folder field selection rows)
 """Allow lugal.email.message.folder to change from Selection to Char.
 
 Odoo's post-upgrade cleanup of ir.model.fields.selection rows can crash with

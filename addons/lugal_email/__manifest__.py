@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# Component: Lugal Email — module manifest (lugal_email / __manifest__.py)
 {
     'name': 'Lugal Email',
     'version': '1.1.2',

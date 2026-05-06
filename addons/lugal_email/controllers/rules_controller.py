@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# Component: Lugal Email — rules & quick steps REST API (rules_controller.py)
 """
 Email Rules  &  Quick Steps REST API
 =====================================

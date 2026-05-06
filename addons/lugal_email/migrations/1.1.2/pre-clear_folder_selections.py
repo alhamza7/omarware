@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# Component: Lugal Email — pre-migration 1.1.2 (clear folder field selection rows)
 """Idempotent: remove folder Selection rows if any remain (failed 1.1.1 upgrades)."""
 
 

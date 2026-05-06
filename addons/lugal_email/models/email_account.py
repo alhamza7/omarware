@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# Component: Lugal Email — lugal.email.account model (email_account.py)
 
 import json
 import logging

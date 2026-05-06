@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# Component: Lugal Email — lugal.email.message model (email_message.py)
 
 from odoo import models, fields, api
 import logging
