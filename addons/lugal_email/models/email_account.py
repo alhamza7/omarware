@@ -1157,10 +1157,12 @@ class LugalEmailAccount(models.Model):
             conn = self._imap_connect()
             typ, data = conn.select(path, readonly=True)
             if typ != 'OK' or not data:
-                conn.logout()
-                return {'imported': 0, 'error': f'select failed: {path}', 'resolved_path': path}
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+                return {'imported': 0, 'error': f'select failed typ={typ!r} path={path!r}', 'resolved_path': path}
 
-            num_msgs = int(data[0])
             uid_re = re.compile(br'UID\s+(\d+)')
 
             def _parse_batch_fetch(data_list):
@@ -1178,32 +1180,54 @@ class LugalEmailAccount(models.Model):
                         parsed.append((int(m.group(1)), bytes(payload), meta))
                 return parsed
 
+            # Prefer UID SEARCH + UID FETCH — sequence-number FETCH is unreliable on
+            # some Dovecot/cPanel builds when the mailbox was just created or after
+            # concurrent expunges.  This matches how we incrementally fetch INBOX.
             HEADERS_FETCH = (
                 '(UID FLAGS BODY.PEEK[HEADER.FIELDS '
-                '(FROM TO CC REPLY-TO DATE SUBJECT MESSAGE-ID IN-REPLY-TO REFERENCES)])'
+                '(FROM TO CC BCC REPLY-TO DATE SUBJECT MESSAGE-ID IN-REPLY-TO REFERENCES)])'
             )
 
-            if num_msgs > 0:
-                start_seq = max(1, num_msgs - SYNC_MAX_MESSAGES + 1)
-                seq_range = f'{start_seq}:{num_msgs}'
-                typ_f, data_list = conn.fetch(seq_range, HEADERS_FETCH)
-                if typ_f == 'OK' and data_list:
-                    for uid_val, raw, flags_meta in _parse_batch_fetch(data_list):
-                        try:
-                            self._upsert_inbox_message(
-                                uid_val, raw, flags_meta,
-                                headers_only=headers_only,
-                                folder_key=path,
-                                run_rules=False,
-                            )
-                            imported += 1
-                        except Exception:
-                            _logger.warning(
-                                'custom folder upsert failed uid=%s folder=%s acc=%s',
-                                uid_val, path, self.id, exc_info=True,
-                            )
+            typ_s, d_s = conn.uid('search', None, 'ALL')
+            uids = []
+            if typ_s == 'OK' and d_s and d_s[0]:
+                uids = sorted(int(x) for x in d_s[0].split() if x.isdigit())
 
-            conn.logout()
+            if not uids:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+                return {
+                    'imported': 0,
+                    'error':      None,
+                    'resolved_path': path,
+                    'note':       'mailbox_empty_or_uid_search_empty',
+                }
+
+            tail = uids[-SYNC_MAX_MESSAGES:]
+            uid_csv = ','.join(str(u) for u in tail)
+            typ_f, data_list = conn.uid('fetch', uid_csv, HEADERS_FETCH)
+            if typ_f == 'OK' and data_list:
+                for uid_val, raw, flags_meta in _parse_batch_fetch(data_list):
+                    try:
+                        self._upsert_inbox_message(
+                            uid_val, raw, flags_meta,
+                            headers_only=headers_only,
+                            folder_key=path,
+                            run_rules=False,
+                        )
+                        imported += 1
+                    except Exception:
+                        _logger.warning(
+                            'custom folder upsert failed uid=%s folder=%s acc=%s',
+                            uid_val, path, self.id, exc_info=True,
+                        )
+
+            try:
+                conn.logout()
+            except Exception:
+                pass
         except Exception as exc:
             _logger.warning('sync_custom_imap_folder acc=%s path=%s: %s', self.id, path, exc)
             return {'imported': imported, 'error': str(exc), 'resolved_path': path}
@@ -1226,7 +1250,12 @@ class LugalEmailAccount(models.Model):
                 pass
             if typ != 'OK' or not raw_list:
                 return req
-            lr = re.compile(r'\((?P<flags>[^)]*)\)\s+"(?P<delim>[^"]*)"\s+(?P<name>.+)')
+            # Delimiter may be quoted ("." or "/") or NIL on some servers.
+            lr = re.compile(
+                r'^\((?P<flags>[^)]*)\)\s+'
+                r'(?:"(?P<delim>[^"]*)"|NIL)\s+'
+                r'(?P<name>.+?)\s*$'
+            )
             req_lower = req.lower()
             for item in raw_list:
                 if not item:

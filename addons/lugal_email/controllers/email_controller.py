@@ -931,6 +931,7 @@ class LugalEmailController(http.Controller):
 
             _LOGICAL_MAILBOX = {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'}
             is_custom_mailbox = folder_raw.lower() not in _LOGICAL_MAILBOX
+            imap_folder_sync = None
 
             # Kick off IMAP sync if the account is stale, then wait for completion.
             # For accounts that have NEVER been synced (sync_status='never') we use
@@ -965,23 +966,37 @@ class LugalEmailController(http.Controller):
             # User-created IMAP folders (rule destinations) are not part of action_sync
             # (INBOX+Sent only).  Pull them on-demand so list/sync APIs return messages.
             if auto_sync and is_custom_mailbox:
-                targets = user_accounts.filtered(lambda a: a.id == int(account_id)) if account_id else user_accounts
+                imap_folder_sync = []
+                try:
+                    aid = int(str(account_id).strip()) if account_id else None
+                except (TypeError, ValueError):
+                    aid = None
+                targets = user_accounts.filtered(lambda a: a.id == aid) if aid else user_accounts
                 for acc in targets:
                     if not (acc.password or '').strip():
+                        imap_folder_sync.append({
+                            'account_id': acc.id,
+                            'imported': 0,
+                            'error': 'no password',
+                            'resolved_path': folder_raw,
+                        })
                         continue
                     try:
-                        acc.sudo().sync_custom_imap_folder(folder_raw)
+                        res = acc.sudo().sync_custom_imap_folder(folder_raw)
+                        imap_folder_sync.append({'account_id': acc.id, **res})
+                        if res.get('resolved_path'):
+                            folder_q = res['resolved_path']
                     except Exception:
                         _logger.exception(
                             'mailbox custom-folder sync failed acc=%s folder=%s',
                             acc.id, folder_raw,
                         )
-                if account_id:
-                    solo = user_accounts.filtered(lambda a: a.id == int(account_id))[:1]
-                    if solo:
-                        folder_q = solo._resolve_imap_mailbox_path(folder_raw)
-                elif user_accounts:
-                    folder_q = user_accounts[0]._resolve_imap_mailbox_path(folder_raw)
+                        imap_folder_sync.append({
+                            'account_id': acc.id,
+                            'imported': 0,
+                            'error': 'exception',
+                            'resolved_path': folder_raw,
+                        })
 
             base_domain = [
                 ('account_id', 'in', account_ids),
@@ -1068,12 +1083,13 @@ class LugalEmailController(http.Controller):
             return _json_response({
                 'success': True,
                 'data': {
-                    'folder':  folder_q,
-                    'total':   total,
-                    'limit':   limit,
-                    'offset':  offset,
-                    'max_id':  max_id,
-                    'items':   items,
+                    'folder':           folder_q,
+                    'total':            total,
+                    'limit':            limit,
+                    'offset':           offset,
+                    'max_id':           max_id,
+                    'items':            items,
+                    'imap_folder_sync': imap_folder_sync,
                 },
             })
         except Exception as exc:
