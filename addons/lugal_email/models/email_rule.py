@@ -95,9 +95,13 @@ class LugalEmailRule(models.Model):
 
         raw = msg_vals.get(field, '')
 
-        # Boolean-like fields
+        # Boolean-like fields (msg_vals may use real bools or legacy strings)
         if field in ('has_attachments', 'is_important', 'is_read', 'is_starred'):
-            raw_bool = bool(raw)
+            if isinstance(raw, bool):
+                raw_bool = raw
+            else:
+                s = str(raw).lower().strip()
+                raw_bool = s in ('true', '1', 'yes', 'on')
             if operator == 'equals':
                 return raw_bool == (value in ('true', '1', 'yes'))
             if operator == 'not_equals':
@@ -107,7 +111,18 @@ class LugalEmailRule(models.Model):
         raw_str = str(raw).lower() if raw else ''
 
         if operator == 'contains':
-            return value in raw_str
+            if value in raw_str:
+                return True
+            # from_address may be "Name <addr@host>"; match on parsed addr too
+            if field == 'from_address' and '@' in value:
+                try:
+                    from email.utils import parseaddr
+                    _, addr = parseaddr(str(raw or ''))
+                    if addr and value in addr.lower():
+                        return True
+                except Exception:
+                    pass
+            return False
         if operator == 'not_contains':
             return value not in raw_str
         if operator == 'starts_with':

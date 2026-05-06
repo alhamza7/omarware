@@ -21,14 +21,15 @@ class LugalEmailMessage(models.Model):
         'lugal.email.account', string='Email Account',
         required=True, ondelete='cascade', index=True,
     )
-    folder = fields.Selection([
-        ('inbox',   'Inbox'),
-        ('sent',    'Sent'),
-        ('drafts',  'Drafts'),
-        ('trash',   'Trash'),
-        ('archive', 'Archive'),
-        ('spam',    'Spam'),
-    ], string='Folder', default='inbox', index=True)
+    # Logical folders use lowercase names (inbox, sent, …).  Rules and moves may
+    # store a full IMAP path (e.g. INBOX.sender_Important) — must be Char, not
+    # Selection, or ORM writes silently fail and mail never leaves the inbox.
+    folder = fields.Char(
+        string='Folder',
+        default='inbox',
+        index=True,
+        help='Logical mailbox (inbox, sent, …) or full IMAP folder path for custom mailboxes.',
+    )
 
     # IMAP UID within the folder (used for dedup / incremental sync). Null for purely local rows.
     imap_uid       = fields.Integer(string='IMAP UID', index=True)

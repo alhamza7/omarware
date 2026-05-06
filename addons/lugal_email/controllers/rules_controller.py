@@ -449,11 +449,11 @@ class EmailRulesController(http.Controller):
             if slug_override:
                 folder_slug = _re.sub(r'[^\w\-]+', '', slug_override, flags=_re.ASCII)[:60] or folder_slug
 
-            # Human-readable name in rule titles (prefer real name; else email)
-            if sender_name and '@' not in sender_name:
-                sender_label = sender_name.strip()
+            # Human-readable rule title (include name when it is not just the email)
+            if sender_name and '@' not in sender_name and sender_name.strip():
+                sender_label = f'{sender_name.strip()} ({sender_addr})'
             else:
-                sender_label = (sender_addr or sender_name or 'Sender').strip()
+                sender_label = sender_addr
 
             # ── Template catalogue ─────────────────────────────────────────────
             TEMPLATES = {
@@ -467,12 +467,11 @@ class EmailRulesController(http.Controller):
                     'stop_processing': True,
                 },
                 'move_important_from_sender': {
-                    'label':       f'Move all important emails from {sender_label}',
+                    'label':       f'Move all emails from {sender_label} to Important',
                     'child_name':  'Important',
                     'match_mode':  'all',
                     'conditions':  [
                         {'field': 'from_address', 'operator': 'contains', 'value': sender_addr},
-                        {'field': 'is_important', 'operator': 'equals',   'value': 'true'},
                     ],
                     'mark_actions': [],
                     'stop_processing': True,
@@ -565,7 +564,6 @@ class EmailRulesController(http.Controller):
                                 folders_created.append(dest_path)
                     break
                 except Exception as fe:
-                    last_imap_err = fe
                     if outer_attempt < 5 and _is_imap_userip_limit(fe):
                         _time_mod.sleep(3.0 * (outer_attempt + 1))
                         continue
@@ -727,12 +725,16 @@ class EmailRulesController(http.Controller):
             },
             {
                 'key':         'move_important_from_sender',
-                'label':       f'Move all important emails from {sender_name}' if sender_email
-                               else 'Move all important emails from a specific sender',
-                'description': 'Move emails marked as high-importance from this sender to a chosen folder.',
+                'label':       f'Move all emails from {sender_name} to Important folder' if sender_email
+                               else 'Move all emails from a sender into an Important subfolder',
+                'description': (
+                    'Move every email from this sender into the account’s '
+                    'INBOX.<slug>.Important folder (the word Important is the mailbox name, '
+                    'not the message “starred/important” flag).'
+                ),
                 'match_mode':  'all',
-                'conditions':  sender_cond() + [{
-                    'field': 'is_important', 'operator': 'equals', 'value': 'true',
+                'conditions':  sender_cond() or [{
+                    'field': 'from_address', 'operator': 'contains', 'value': '',
                 }],
                 'actions':     move_action,
                 'stop_processing': True,
