@@ -417,6 +417,76 @@ class LugalEmailAccount(models.Model):
         threading.Thread(target=_do_move, daemon=True,
                          name=f'imap-move-{imap_uid}').start()
 
+    def _imap_move_to_raw_path_async(self, imap_uid, from_folder, dest_folder_path):
+        """Move a message to an arbitrary IMAP folder path (e.g. 'INBOX.AllFromUmar').
+
+        Unlike _imap_move_async, this accepts the raw IMAP destination path directly
+        instead of a logical purpose name.  Used by inbox rules that target custom folders.
+        """
+        self.ensure_one()
+        if not imap_uid:
+            return
+
+        import threading
+        acc_id  = self.id
+        db_name = self.env.cr.dbname
+
+        def _do_move():
+            try:
+                from odoo.modules.registry import Registry as _Registry
+                import odoo as _odoo
+                with _Registry(db_name).cursor() as cr:
+                    env = _odoo.api.Environment(cr, _odoo.SUPERUSER_ID, {})
+                    acc = env['lugal.email.account'].browse(acc_id)
+                    conn = acc._imap_connect()
+                    conn.select(from_folder, readonly=False)
+                    uid_str = str(imap_uid)
+
+                    typ, data = conn.uid('move', uid_str, dest_folder_path)
+                    if typ != 'OK':
+                        conn.uid('copy', uid_str, dest_folder_path)
+                        conn.uid('store', uid_str, '+FLAGS', '(\\Deleted)')
+                        conn.expunge()
+
+                    conn.logout()
+                    _logger.info(
+                        'IMAP raw-move acc=%s uid=%s %s → %s',
+                        acc_id, imap_uid, from_folder, dest_folder_path,
+                    )
+            except Exception as exc:
+                _logger.warning(
+                    'IMAP raw-move failed acc=%s uid=%s: %s',
+                    acc_id, imap_uid, exc,
+                )
+
+        threading.Thread(target=_do_move, daemon=True,
+                         name=f'imap-rawmove-{imap_uid}').start()
+
+    def _imap_ensure_folder(self, path):
+        """Create *path* on the IMAP server if it does not already exist.
+
+        Returns the final folder path on success, raises on hard failure.
+        Safe to call when the folder already exists (no-op in that case).
+        """
+        self.ensure_one()
+        conn = self._imap_connect()
+        try:
+            # LIST to check existence
+            typ, listing = conn.list('""', path)
+            exists = typ == 'OK' and any(listing)
+            if not exists:
+                conn.create(path)
+                conn.subscribe(path)
+                _logger.info('IMAP folder created: acc=%s path=%s', self.id, path)
+            else:
+                _logger.info('IMAP folder already exists: acc=%s path=%s', self.id, path)
+        finally:
+            try:
+                conn.logout()
+            except Exception:
+                pass
+        return path
+
     def _imap_expunge_async(self, imap_uid, imap_folder):
         """Mark a message \\Deleted on the server and EXPUNGE it (permanent delete)."""
         self.ensure_one()
@@ -497,8 +567,15 @@ class LugalEmailAccount(models.Model):
             s = str(meta_bytes)
         return '\\Seen' in s
 
-    def _upsert_inbox_message(self, uid_int, raw_bytes, flags_meta, headers_only=False):
-        """Create or update one inbox row from raw RFC822 bytes."""
+    def _upsert_inbox_message(self, uid_int, raw_bytes, flags_meta, headers_only=False,
+                              folder_key='inbox', run_rules=True):
+        """Create or update one mailbox row from raw RFC822 bytes.
+
+        folder_key: logical name ('inbox', 'sent', …) or full IMAP path for custom
+                    folders (e.g. 'INBOX.syednaqvi.Important').
+        run_rules:  when False, skip apply_inbox_rules (used when importing from
+                    a custom folder to avoid re-firing move rules).
+        """
         self.ensure_one()
         import email
         msg = email.message_from_bytes(raw_bytes, policy=policy.default)
@@ -524,6 +601,9 @@ class LugalEmailAccount(models.Model):
         cc_raw = msg.get_all('Cc', [])
         cc_pairs = getaddresses(cc_raw) if cc_raw else []
         cc_list = [{'name': self._decode_mime_header(n or ''), 'email': e} for n, e in cc_pairs if e]
+        bcc_raw = msg.get_all('Bcc', [])
+        bcc_pairs = getaddresses(bcc_raw) if bcc_raw else []
+        bcc_list = [{'name': self._decode_mime_header(n or ''), 'email': e} for n, e in bcc_pairs if e]
         # Reply-To: used by reply/reply_all to address the reply correctly
         reply_to_raw = msg.get('Reply-To', '')
         reply_to_addr = ''
@@ -556,13 +636,40 @@ class LugalEmailAccount(models.Model):
         to_emails_lower = [pair[1].lower() for pair in getaddresses(msg.get_all('To', [])) if pair[1]]
         is_mentioned = bool(own_email and own_email in to_emails_lower)
 
+        # is_important: parse standard priority/importance headers sent by the
+        # sender. Check in priority order:
+        #   1. Importance: high / normal / low  (RFC 2156 / Outlook)
+        #   2. X-Priority: 1 or 2 = high (Outlook, many clients)
+        #   3. X-MSMail-Priority: High / Normal / Low (Outlook legacy)
+        is_important = False
+        _importance_hdr = (msg.get('Importance') or '').strip().lower()
+        if _importance_hdr == 'high':
+            is_important = True
+        elif _importance_hdr not in ('', 'normal', 'low'):
+            # Some clients send numeric values in this header too
+            pass
+
+        if not is_important:
+            _xpriority = (msg.get('X-Priority') or '').strip()
+            try:
+                _xprio_int = int(_xpriority.split()[0]) if _xpriority else 3
+                if _xprio_int in (1, 2):
+                    is_important = True
+            except (ValueError, IndexError):
+                pass
+
+        if not is_important:
+            _msmail = (msg.get('X-MSMail-Priority') or '').strip().lower()
+            if _msmail == 'high':
+                is_important = True
+
         # message_size: approximate RFC-822 size in bytes
         message_size = len(raw_bytes) if raw_bytes else 0
 
         Message = self.env['lugal.email.message'].sudo()
         # Search by imap_uid first; also check message_id as a secondary key so
         # we never store the same RFC-2822 message twice even if the UID changed.
-        domain = [('account_id', '=', self.id), ('folder', '=', 'inbox'), ('imap_uid', '=', uid_int)]
+        domain = [('account_id', '=', self.id), ('folder', '=', folder_key), ('imap_uid', '=', uid_int)]
         existing = Message.search(domain, limit=1)
         if not existing and message_id:
             existing = Message.search(
@@ -571,13 +678,14 @@ class LugalEmailAccount(models.Model):
             )
         vals = {
             'account_id':    self.id,
-            'folder':        'inbox',
+            'folder':        folder_key,
             'imap_uid':      uid_int,
             'subject':       subject or '(no subject)',
             'from_name':     from_name or '',
             'from_address':  from_addr or '',
             'to_addresses':  json.dumps(to_list),
             'cc_addresses':  json.dumps(cc_list),
+            'bcc_addresses': json.dumps(bcc_list),
             'reply_to':      reply_to_addr or False,
             'message_id':    message_id,
             'in_reply_to':   in_reply_to_hdr or False,
@@ -588,6 +696,7 @@ class LugalEmailAccount(models.Model):
             'is_deleted':    False,
             'active':        True,
             'is_mentioned':  is_mentioned,
+            'is_important':  is_important,
             'message_size':  message_size,
         }
         if headers_only:
@@ -650,8 +759,8 @@ class LugalEmailAccount(models.Model):
                         if stored_msg and not (headers_only and stored_msg.body_fetched):
                             stored_msg.write(vals)
 
-                    # Run inbox rules only on genuinely new messages.
-                    if stored_msg:
+                    # Run inbox rules only on genuinely new messages (inbox ingest).
+                    if stored_msg and run_rules:
                         try:
                             self.env['lugal.email.rule'].sudo().apply_inbox_rules(stored_msg, vals)
                         except Exception as _re:
@@ -1020,6 +1129,119 @@ class LugalEmailAccount(models.Model):
             _logger.exception('action_sync failed for account %s', self.id)
             return {'sync_status': 'error', 'message': str(exc)}
 
+    def sync_custom_imap_folder(self, imap_folder_path, headers_only=True):
+        """Import messages from a single non-standard IMAP folder into Odoo.
+
+        ``action_sync`` only pulls INBOX + Sent.  User-created folders (rule
+        destinations like ``INBOX.syednaqvi.Important``) must be imported here
+        so ``GET …/sync?folder=…`` returns rows.
+
+        * ``imap_folder_path`` must match the LIST path (same casing as server).
+        * Uses the same header-only tail fetch strategy as first-time INBOX import.
+        * Does **not** run inbox rules on imported rows (avoids move loops).
+        """
+        self.ensure_one()
+        if not (self.password or '').strip():
+            return {'imported': 0, 'error': 'no password', 'resolved_path': ''}
+        if not (imap_folder_path or '').strip():
+            return {'imported': 0, 'error': 'empty path', 'resolved_path': ''}
+
+        path = self._resolve_imap_mailbox_path(imap_folder_path.strip())
+        _LOGICAL = {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'}
+        if path.lower() in _LOGICAL:
+            return {'imported': 0, 'error': 'use action_sync for standard folders', 'resolved_path': path}
+
+        imported = 0
+        try:
+            import imaplib
+            conn = self._imap_connect()
+            typ, data = conn.select(path, readonly=True)
+            if typ != 'OK' or not data:
+                conn.logout()
+                return {'imported': 0, 'error': f'select failed: {path}', 'resolved_path': path}
+
+            num_msgs = int(data[0])
+            uid_re = re.compile(br'UID\s+(\d+)')
+
+            def _parse_batch_fetch(data_list):
+                parsed = []
+                for item in data_list:
+                    if not isinstance(item, tuple) or len(item) < 2:
+                        continue
+                    meta, payload = item[0], item[1]
+                    if not isinstance(meta, bytes):
+                        continue
+                    if not isinstance(payload, (bytes, bytearray)) or len(payload) == 0:
+                        continue
+                    m = uid_re.search(meta)
+                    if m:
+                        parsed.append((int(m.group(1)), bytes(payload), meta))
+                return parsed
+
+            HEADERS_FETCH = (
+                '(UID FLAGS BODY.PEEK[HEADER.FIELDS '
+                '(FROM TO CC REPLY-TO DATE SUBJECT MESSAGE-ID IN-REPLY-TO REFERENCES)])'
+            )
+
+            if num_msgs > 0:
+                start_seq = max(1, num_msgs - SYNC_MAX_MESSAGES + 1)
+                seq_range = f'{start_seq}:{num_msgs}'
+                typ_f, data_list = conn.fetch(seq_range, HEADERS_FETCH)
+                if typ_f == 'OK' and data_list:
+                    for uid_val, raw, flags_meta in _parse_batch_fetch(data_list):
+                        try:
+                            self._upsert_inbox_message(
+                                uid_val, raw, flags_meta,
+                                headers_only=headers_only,
+                                folder_key=path,
+                                run_rules=False,
+                            )
+                            imported += 1
+                        except Exception:
+                            _logger.warning(
+                                'custom folder upsert failed uid=%s folder=%s acc=%s',
+                                uid_val, path, self.id, exc_info=True,
+                            )
+
+            conn.logout()
+        except Exception as exc:
+            _logger.warning('sync_custom_imap_folder acc=%s path=%s: %s', self.id, path, exc)
+            return {'imported': imported, 'error': str(exc), 'resolved_path': path}
+        return {'imported': imported, 'error': None, 'resolved_path': path}
+
+    def _resolve_imap_mailbox_path(self, requested_path: str) -> str:
+        """Return the server's exact mailbox name for a path (case / delimiter)."""
+        req = (requested_path or '').strip()
+        if not req:
+            return req
+        _LOGICAL = {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'}
+        if req.lower() in _LOGICAL:
+            return req
+        try:
+            conn = self._imap_connect()
+            typ, raw_list = conn.list()
+            try:
+                conn.logout()
+            except Exception:
+                pass
+            if typ != 'OK' or not raw_list:
+                return req
+            lr = re.compile(r'\((?P<flags>[^)]*)\)\s+"(?P<delim>[^"]*)"\s+(?P<name>.+)')
+            req_lower = req.lower()
+            for item in raw_list:
+                if not item:
+                    continue
+                line = item.decode('utf-8', errors='replace') if isinstance(item, bytes) else item
+                m = lr.match(line.strip())
+                if not m:
+                    continue
+                name = m.group('name').strip().strip('"')
+                if name.lower() == req_lower:
+                    return name
+        except Exception:
+            return req
+        return req
+
     @api.model
     def action_sync_all_accounts(self):
         """
@@ -1090,7 +1312,7 @@ class LugalEmailAccount(models.Model):
             # Only process attachment/inline parts with a filename
             disposition = part.get_content_disposition() or ''
             filename = part.get_filename()
-            if not filename and 'attachment' not in disposition:
+            if not filename and 'attachment' not in disposition and 'inline' not in disposition:
                 continue
             if not filename:
                 continue
@@ -1104,6 +1326,17 @@ class LugalEmailAccount(models.Model):
 
             mime = part.get_content_type() or _mimetypes.guess_type(filename)[0] or 'application/octet-stream'
             att_token = _uuid.uuid4().hex
+
+            # Detect inline (embedded) parts: Content-Disposition = inline AND has Content-ID.
+            # These are pasted / drag-dropped / signature images embedded in the body.
+            # We tag them with "__inline_cid__:<cid>" in the description field so the
+            # API response separates them into `inline_attachments` instead of `attachments`.
+            raw_cid = part.get('Content-ID') or ''
+            # Content-ID is usually wrapped in angle brackets: <img-abc@lugal.mail>
+            cid_value = raw_cid.strip('<> ')
+            is_inline_part = ('inline' in disposition) and bool(cid_value)
+            description = f'__inline_cid__:{cid_value}' if is_inline_part else None
+
             try:
                 IrAtt.create({
                     'name':         filename,
@@ -1113,11 +1346,12 @@ class LugalEmailAccount(models.Model):
                     'res_model':    'lugal.email.message',
                     'res_id':       msg_record.id,
                     'access_token': att_token,
+                    **(({'description': description}) if description else {}),
                 })
                 existing_names.add(filename)
                 _logger.debug(
-                    'Stored IMAP attachment %r (%d bytes) for msg=%s',
-                    filename, len(att_data), msg_record.id,
+                    'Stored IMAP attachment %r (%d bytes) for msg=%s inline=%s',
+                    filename, len(att_data), msg_record.id, is_inline_part,
                 )
             except Exception:
                 _logger.warning(
@@ -1144,7 +1378,20 @@ class LugalEmailAccount(models.Model):
         try:
             import imaplib
             conn = self._imap_connect()
-            folder = 'INBOX' if msg.folder == 'inbox' else msg.folder
+            # Map logical folder names to real IMAP paths.
+            # msg.folder is stored as 'inbox'|'sent'|'drafts'|'trash'|'archive'|'spam'
+            # for standard folders, or the raw IMAP path for custom folders.
+            _LOGICAL = {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'}
+            raw_folder = msg.folder or 'inbox'
+            if raw_folder == 'inbox':
+                folder = 'INBOX'
+            elif raw_folder in _LOGICAL:
+                try:
+                    folder = self._get_server_folder_name(raw_folder)
+                except Exception:
+                    folder = raw_folder.capitalize()   # fallback e.g. 'Sent'
+            else:
+                folder = raw_folder   # already a real IMAP path (e.g. 'INBOX.AllFromUmar')
             typ, _ = conn.select(folder, readonly=True)
             if typ != 'OK':
                 return msg

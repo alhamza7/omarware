@@ -163,12 +163,20 @@ def _run_imap_sync_bg(acc_id, db_name, force=False):
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _json_response(data, status=200):
-    """Return a plain JSON HTTP response (not JSON-RPC)."""
-    return Response(
+    """Return a plain JSON HTTP response with permissive CORS headers.
+
+    CORS headers are set unconditionally so any FE origin (any port, any host)
+    can consume these endpoints without needing a dev-proxy workaround.
+    """
+    resp = Response(
         json.dumps(data, default=str),
         status=status,
         mimetype='application/json',
     )
+    resp.headers['Access-Control-Allow-Origin']  = '*'
+    resp.headers['Access-Control-Allow-Headers'] = 'Authorization, Content-Type, X-Odoo-Database'
+    resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, PATCH, PUT, DELETE, OPTIONS'
+    return resp
 
 
 def _unauthorized():
@@ -177,6 +185,33 @@ def _unauthorized():
 
 def _not_found(msg='Not found'):
     return _json_response({'success': False, 'error': msg}, status=404)
+
+
+def _imap_connect_with_retry(acc, attempts=3, delay=2.0):
+    """Open an IMAP connection, retrying on connection-limit errors.
+
+    The polling watcher holds persistent IMAP connections; when a folder
+    management API call coincides with a sync, the server's
+    mail_max_userip_connections limit may be briefly exceeded.
+    Waiting a couple of seconds usually frees a slot.
+
+    Returns the open connection on success, or None after all retries fail.
+    """
+    import time as _time
+    last_exc = None
+    for attempt in range(attempts):
+        try:
+            return acc._imap_connect()
+        except Exception as exc:
+            last_exc = exc
+            err_lower = str(exc).lower()
+            if any(kw in err_lower for kw in ('limit', 'maximum', 'too many', 'connection')):
+                if attempt < attempts - 1:
+                    _time.sleep(delay)
+                    continue
+            raise  # non-limit errors propagate immediately
+    _logger.warning('_imap_connect_with_retry exhausted %d attempts: %s', attempts, last_exc)
+    return None
 
 
 def _resolve_imap_folder(account, local_folder):
@@ -252,36 +287,61 @@ def _message_to_dict(msg, full=False):
                         if msg.linked_ticket_id else None,
         },
     }
-    # Attachment summary — always present so FE can show paperclip icon in list view.
-    # Inline images (description starts with "__inline_cid__:") are excluded so they
-    # don't appear as downloadable attachments in the UI.
+    # Split attachments into two distinct buckets:
+    #   att_list        → files added via the paperclip/attachment UI (downloadable)
+    #   inline_att_list → images pasted / drag-dropped / inserted / signature images
+    #                     (embedded in the email body via Content-ID / CID)
+    # The split marker is the `description` field: inline items are tagged
+    # "__inline_cid__:<cid>" by the upload endpoint (for outgoing mail) or by
+    # _store_imap_attachments (for incoming mail with Content-Disposition: inline).
+    _CID_PREFIX = '__inline_cid__:'
     try:
         atts = msg.env['ir.attachment'].sudo().search([
             ('res_model', '=', 'lugal.email.message'),
             ('res_id',    '=', msg.id),
         ])
-        att_list = [{
-            'id':       a.id,
-            'name':     a.name or 'attachment',
-            'mimetype': a.mimetype or 'application/octet-stream',
-            'size':     a.file_size or 0,
-            'url': (
+
+        def _att_entry(a):
+            url = (
                 f'/web/content/{a.id}?access_token={a.access_token}'
                 if a.access_token
                 else f'/web/content/{a.id}?download=true'
-            ),
-        } for a in atts if not (a.description or '').startswith('__inline_cid__:')]
-    except Exception:
-        att_list = []
+            )
+            return {
+                'id':       a.id,
+                'name':     a.name or 'attachment',
+                'mimetype': a.mimetype or 'application/octet-stream',
+                'size':     a.file_size or 0,
+                'url':      url,
+            }
 
-    data['has_attachments']   = bool(att_list)
-    data['attachment_count']  = len(att_list)
+        att_list    = []
+        inline_list = []
+        for a in atts:
+            desc = a.description or ''
+            if desc.startswith(_CID_PREFIX):
+                cid_value = desc[len(_CID_PREFIX):]
+                entry = _att_entry(a)
+                entry['cid'] = f'cid:{cid_value}'
+                inline_list.append(entry)
+            else:
+                att_list.append(_att_entry(a))
+    except Exception:
+        att_list    = []
+        inline_list = []
+
+    # These counters are always in the response (list view needs them for icons)
+    data['has_attachments']         = bool(att_list)
+    data['attachment_count']        = len(att_list)
+    data['has_inline_attachments']  = bool(inline_list)
+    data['inline_attachment_count'] = len(inline_list)
 
     if full:
-        data['body_html']    = msg.body_html or ''
-        data['body_text']    = msg.body_text or ''
-        data['body_fetched'] = bool(msg.body_fetched)
-        data['attachments']  = att_list
+        data['body_html']          = msg.body_html or ''
+        data['body_text']          = msg.body_text or ''
+        data['body_fetched']       = bool(msg.body_fetched)
+        data['attachments']        = att_list      # paperclip-added files only
+        data['inline_attachments'] = inline_list   # pasted / dropped / inserted images
     return data
 
 
@@ -742,10 +802,16 @@ class LugalEmailController(http.Controller):
     #     "unread":5, "sync_status":"ok", "sync_error": null }] }
 
     @http.route('/api/lugal/email/sync',
-                type='http', auth='none', csrf=False, methods=['POST', 'OPTIONS'])
+                type='http', auth='none', csrf=False, methods=['GET', 'POST', 'OPTIONS'])
     def force_sync(self, **kwargs):
         if request.httprequest.method == 'OPTIONS':
             return _json_response({})
+
+        # GET /api/lugal/email/sync?account_id=&folder=&limit=&offset= →
+        # acts as an alias for GET /api/lugal/email/messages with the same params.
+        # Some FE builds use /sync as the message-list endpoint.
+        if request.httprequest.method == 'GET':
+            return self.messages_list(**kwargs)
         uid = ensure_jwt_user_id()
         if not uid:
             return _unauthorized()
@@ -834,7 +900,8 @@ class LugalEmailController(http.Controller):
             return _unauthorized()
         try:
             params      = request.httprequest.args
-            folder      = params.get('folder', folder_name) or 'inbox'
+            folder_raw  = (params.get('folder', folder_name) or 'inbox').strip()
+            folder_q    = folder_raw   # canonical path for DB queries (may change after IMAP resolve)
             account_id  = params.get('account_id')
             query       = params.get('query', '').strip()
             starred     = params.get('starred')
@@ -862,12 +929,15 @@ class LugalEmailController(http.Controller):
             user_accounts = _get_user_accounts(uid)
             account_ids   = user_accounts.ids
 
+            _LOGICAL_MAILBOX = {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'}
+            is_custom_mailbox = folder_raw.lower() not in _LOGICAL_MAILBOX
+
             # Kick off IMAP sync if the account is stale, then wait for completion.
             # For accounts that have NEVER been synced (sync_status='never') we use
             # force=True and a longer 15-second timeout so the first inbox load
             # always shows real emails rather than an empty list.
             # For routine syncs a 7-second timeout is sufficient.
-            if auto_sync and folder == 'inbox':
+            if auto_sync and folder_raw == 'inbox':
                 db_name = request.env.cr.dbname
                 sync_threads = []
                 has_never_synced = False
@@ -892,10 +962,31 @@ class LugalEmailController(http.Controller):
                 for t in sync_threads:
                     t.join(timeout=wait_secs)
 
+            # User-created IMAP folders (rule destinations) are not part of action_sync
+            # (INBOX+Sent only).  Pull them on-demand so list/sync APIs return messages.
+            if auto_sync and is_custom_mailbox:
+                targets = user_accounts.filtered(lambda a: a.id == int(account_id)) if account_id else user_accounts
+                for acc in targets:
+                    if not (acc.password or '').strip():
+                        continue
+                    try:
+                        acc.sudo().sync_custom_imap_folder(folder_raw)
+                    except Exception:
+                        _logger.exception(
+                            'mailbox custom-folder sync failed acc=%s folder=%s',
+                            acc.id, folder_raw,
+                        )
+                if account_id:
+                    solo = user_accounts.filtered(lambda a: a.id == int(account_id))[:1]
+                    if solo:
+                        folder_q = solo._resolve_imap_mailbox_path(folder_raw)
+                elif user_accounts:
+                    folder_q = user_accounts[0]._resolve_imap_mailbox_path(folder_raw)
+
             base_domain = [
                 ('account_id', 'in', account_ids),
                 ('is_deleted', '=', False),
-                ('folder', '=', folder),
+                ('folder', '=', folder_q),
             ]
             if account_id:
                 base_domain.append(('account_id', '=', int(account_id)))
@@ -949,7 +1040,7 @@ class LugalEmailController(http.Controller):
                 all_accs_domain = [
                     ('account_id', 'in', account_ids),
                     ('is_deleted', '=', False),
-                    ('folder',     '=', folder),
+                    ('folder',     '=', folder_q),
                     ('id',         '>',  since_id),
                 ]
                 new_msgs = Msg.search(all_accs_domain, order='id desc')
@@ -970,14 +1061,14 @@ class LugalEmailController(http.Controller):
             all_max = Msg.search([
                 ('account_id', 'in', account_ids),
                 ('is_deleted', '=', False),
-                ('folder',     '=', folder),
+                ('folder',     '=', folder_q),
             ], order='id desc', limit=1)
             max_id = all_max[0].id if all_max else 0
 
             return _json_response({
                 'success': True,
                 'data': {
-                    'folder':  folder,
+                    'folder':  folder_q,
                     'total':   total,
                     'limit':   limit,
                     'offset':  offset,
@@ -1062,7 +1153,7 @@ class LugalEmailController(http.Controller):
                     msg.account_id.sudo()._imap_move_async(msg.imap_uid, imap_from, 'trash')
                 return _json_response({'success': True})
             # Lazy-fetch full body if this message was imported headers-only.
-            if msg.folder == 'inbox' and not msg.body_fetched and msg.imap_uid:
+            if not msg.body_fetched and msg.imap_uid:
                 try:
                     msg.account_id.sudo().fetch_message_body(msg.id)
                     msg.invalidate_recordset()  # reload from DB
@@ -1197,9 +1288,9 @@ class LugalEmailController(http.Controller):
                 except Exception:
                     pass
 
-            # Lazy-fetch bodies that were imported as headers-only
+            # Lazy-fetch bodies that were imported as headers-only (any folder)
             for msg in msgs:
-                if msg.folder == 'inbox' and not msg.body_fetched and msg.imap_uid:
+                if not msg.body_fetched and msg.imap_uid:
                     try:
                         msg.account_id.sudo().fetch_message_body(msg.id)
                         msg.invalidate_recordset()
@@ -2523,8 +2614,14 @@ class LugalEmailController(http.Controller):
             if not (acc.password or '').strip():
                 return _json_response({'success': False, 'error': 'No app password configured'}, 400)
 
-            import imaplib
-            conn = acc._imap_connect()
+            import imaplib, time as _time
+            conn = _imap_connect_with_retry(acc)
+            if conn is None:
+                return _json_response(
+                    {'success': False,
+                     'error': 'Mail server connection limit reached. Please try again in a few seconds.'},
+                    503,
+                )
             typ, raw_list = conn.list()
             conn.logout()
 
@@ -2534,7 +2631,8 @@ class LugalEmailController(http.Controller):
             import re
             _LIST_RE = re.compile(r'\((?P<flags>[^)]*)\)\s+"(?P<delim>[^"]*)"\s+(?P<name>.+)')
 
-            # Map common folder names to semantic roles
+            # Map common folder names to semantic roles (checked against full path
+            # AND the last path segment so "INBOX.Sent", "INBOX/Sent", "Sent" all → "sent")
             _ROLE_MAP = {
                 'inbox':          'inbox',
                 'sent':           'sent', 'sent items': 'sent', 'sent messages': 'sent',
@@ -2544,7 +2642,55 @@ class LugalEmailController(http.Controller):
                 'archive':        'archive', 'archives': 'archive',
             }
 
+            # IMAP special-use flags → role (RFC 6154)
+            _FLAG_ROLE = {
+                '\\sent':    'sent',
+                '\\drafts':  'drafts',
+                '\\trash':   'trash',
+                '\\junk':    'spam',
+                '\\spam':    'spam',
+                '\\archive': 'archive',
+                '\\all':     'archive',
+                '\\inbox':   'inbox',
+                # Some servers use bare names without backslash
+                'sent':      'sent',
+                'drafts':    'drafts',
+                'trash':     'trash',
+                'junk':      'spam',
+                'spam':      'spam',
+                'archive':   'archive',
+            }
+
+            def _resolve_role(raw_name, flags_str):
+                """Determine semantic role from IMAP flags first, then folder name."""
+                # 1. Check IMAP special-use flags (most reliable)
+                for flag in flags_str.split():
+                    role = _FLAG_ROLE.get(flag.lower())
+                    if role:
+                        return role
+                # 2. Check full path
+                role = _ROLE_MAP.get(raw_name.lower())
+                if role:
+                    return role
+                # 3. Check last path segment (handles INBOX.Sent, INBOX/Trash, etc.)
+                last_seg = raw_name.replace('/', '.').rsplit('.', 1)[-1].lower()
+                return _ROLE_MAP.get(last_seg, 'custom')
+
             Msg = request.env['lugal.email.message'].sudo()
+
+            # Detect the hierarchy delimiter from the first folder entry.
+            delimiter = '.'
+            for item in raw_list:
+                if not item:
+                    continue
+                line = item.decode('utf-8', errors='replace') if isinstance(item, bytes) else item
+                dm = _LIST_RE.match(line.strip())
+                if dm:
+                    delimiter = dm.group('delim') or '.'
+                    break
+
+            _STANDARD_ROLES = {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'}
+
             folders = []
             for item in raw_list:
                 if not item:
@@ -2557,26 +2703,375 @@ class LugalEmailController(http.Controller):
                 raw_name = m.group('name').strip().strip('"')
                 if '\\noselect' in flags:
                     continue
-                role = _ROLE_MAP.get(raw_name.lower(), 'custom')
+                role = _resolve_role(raw_name, m.group('flags'))
 
-                # Count messages only for folders that match our local storage
-                local_folder_key = role if role in ('inbox', 'sent', 'drafts', 'trash', 'archive', 'spam') else None
-                if local_folder_key:
-                    total  = Msg.search_count([('account_id', '=', acc.id), ('folder', '=', local_folder_key), ('is_deleted', '=', False)])
-                    unread = Msg.search_count([('account_id', '=', acc.id), ('folder', '=', local_folder_key), ('is_read', '=', False), ('is_deleted', '=', False)])
-                else:
-                    total = unread = 0
+                # ── Count messages ──────────────────────────────────────────────
+                # Standard folders: DB stores logical key ('inbox', 'sent', …)
+                # Custom folders:   DB stores the raw IMAP path ('INBOX.omar.Important')
+                local_folder_key = role if role in _STANDARD_ROLES else raw_name
+                total  = Msg.search_count([
+                    ('account_id', '=', acc.id),
+                    ('folder',     '=', local_folder_key),
+                    ('is_deleted', '=', False),
+                ])
+                unread = Msg.search_count([
+                    ('account_id', '=', acc.id),
+                    ('folder',     '=', local_folder_key),
+                    ('is_read',    '=', False),
+                    ('is_deleted', '=', False),
+                ])
+
+                # ── Tree metadata ───────────────────────────────────────────────
+                # Split by the detected delimiter to compute depth and parent.
+                parts = raw_name.split(delimiter)
+                depth = len(parts) - 1   # INBOX → 0, INBOX.Sent → 1, INBOX.omar.Important → 2
+                parent_path = delimiter.join(parts[:-1]) if depth > 0 else None
 
                 folders.append({
                     'path':          raw_name,
-                    'name':          raw_name.split('/')[-1].split('.')[-1] or raw_name,
+                    'name':          parts[-1] or raw_name,
+                    'parent_path':   parent_path,
+                    'depth':         depth,
                     'role':          role,
                     'flags':         [f.strip().lstrip('\\') for f in m.group('flags').split() if f.strip()],
                     'message_count': total,
                     'unread_count':  unread,
                 })
 
-            return _json_response({'success': True, 'data': {'total': len(folders), 'items': folders}})
+            # ── Build nested tree ───────────────────────────────────────────────
+            # Index folders by path for O(1) child insertion.
+            by_path = {f['path']: dict(f, children=[]) for f in folders}
+            roots   = []
+            for f in folders:
+                node = by_path[f['path']]
+                pp   = f['parent_path']
+                if pp and pp in by_path:
+                    by_path[pp]['children'].append(node)
+                else:
+                    roots.append(node)
+
+            return _json_response({'success': True, 'data': {
+                'total':     len(folders),
+                'items':     folders,   # flat list (unchanged — FE may already use this)
+                'tree':      roots,     # nested tree (new — use for sidebar rendering)
+                'delimiter': delimiter,
+            }})
+        except Exception as exc:
+            return _json_response({'success': False, 'error': str(exc)}, 500)
+
+    # ── Create folder ──────────────────────────────────────────────────────────
+
+    @http.route('/api/lugal/email/accounts/<int:account_id>/folders/create',
+                type='http', auth='none', csrf=False, methods=['POST', 'OPTIONS'])
+    def folder_create(self, account_id, **kwargs):
+        """Create a new IMAP folder for an account.
+
+        Body:
+          {
+            "name":   "From Umar",   // required — display name (no separators)
+            "parent": "INBOX"        // optional — parent path.
+                                     //   Pass "" or omit → top-level folder.
+                                     //   The server's hierarchy delimiter is
+                                     //   detected automatically (. or /).
+          }
+
+        Returns:
+          { "path": "INBOX.From Umar", "name": "From Umar",
+            "parent": "INBOX", "delimiter": "." }
+        """
+        if request.httprequest.method == 'OPTIONS':
+            return _json_response({})
+        uid = ensure_jwt_user_id()
+        if not uid:
+            return _unauthorized()
+        try:
+            acc = request.env['lugal.email.account'].sudo().browse(account_id)
+            if not acc.exists() or acc.user_id.id != uid:
+                return _not_found('Account not found')
+            if not (acc.password or '').strip():
+                return _json_response({'success': False, 'error': 'No app password configured'}, 400)
+
+            body   = json.loads(request.httprequest.data or '{}')
+            name   = (body.get('name') or '').strip()
+            # parent=None / "" / missing → top-level folder (no parent prefix)
+            parent_raw = body.get('parent')
+            parent = (parent_raw or '').strip() if parent_raw is not None else None
+
+            if not name:
+                return _json_response({'success': False, 'error': 'name is required'}, 400)
+            if '"' in name:
+                return _json_response({'success': False, 'error': 'name must not contain double-quotes'}, 400)
+
+            import imaplib, re as _re, time as _time
+            conn = _imap_connect_with_retry(acc)
+            if conn is None:
+                return _json_response(
+                    {'success': False,
+                     'error': 'Mail server connection limit reached. Please try again in a few seconds.'},
+                    503,
+                )
+            try:
+                # ── Detect the server's hierarchy delimiter ──────────────────
+                # IMAP LIST "" "" returns a line like: (\Noselect) "." ""
+                # which tells us the delimiter (. or / or something else).
+                delimiter = '.'   # safe default for most corporate IMAP servers
+                try:
+                    _t, _l = conn.list('', '')
+                    if _t == 'OK' and _l:
+                        _dl = _l[0]
+                        if isinstance(_dl, bytes):
+                            _dl = _dl.decode('utf-8', errors='replace')
+                        _dm = _re.search(r'\)\s+"([^"]+)"', _dl)
+                        if _dm:
+                            delimiter = _dm.group(1)
+                except Exception:
+                    pass   # fallback to '.'
+
+                # Reject names that contain the delimiter (would create sub-levels)
+                if delimiter in name:
+                    return _json_response(
+                        {'success': False,
+                         'error': f'name must not contain the hierarchy delimiter "{delimiter}"'},
+                        400,
+                    )
+
+                # Build full IMAP path
+                if parent:
+                    folder_path = f'{parent}{delimiter}{name}'
+                else:
+                    folder_path = name   # top-level folder
+
+                typ, data = conn.create(folder_path)
+            finally:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+
+            if typ != 'OK':
+                err = data[0].decode('utf-8', errors='replace') if data else 'CREATE failed'
+                return _json_response({'success': False, 'error': err}, 502)
+
+            return _json_response({'success': True, 'data': {
+                'path':      folder_path,
+                'name':      name,
+                'parent':    parent or '',
+                'delimiter': delimiter,
+            }})
+        except Exception as exc:
+            return _json_response({'success': False, 'error': str(exc)}, 500)
+
+    # ── Rename folder ──────────────────────────────────────────────────────────
+
+    @http.route('/api/lugal/email/accounts/<int:account_id>/folders/rename',
+                type='http', auth='none', csrf=False, methods=['POST', 'OPTIONS'])
+    def folder_rename(self, account_id, **kwargs):
+        """Rename (or move) an IMAP folder.
+
+        Body: { "old_path": "INBOX/Projects", "new_path": "INBOX/Active Projects" }
+          old_path (required) — current full IMAP folder path
+          new_path (required) — desired full IMAP folder path
+
+        Note: renaming INBOX itself is not allowed by IMAP spec.
+        """
+        if request.httprequest.method == 'OPTIONS':
+            return _json_response({})
+        uid = ensure_jwt_user_id()
+        if not uid:
+            return _unauthorized()
+        try:
+            acc = request.env['lugal.email.account'].sudo().browse(account_id)
+            if not acc.exists() or acc.user_id.id != uid:
+                return _not_found('Account not found')
+            if not (acc.password or '').strip():
+                return _json_response({'success': False, 'error': 'No app password configured'}, 400)
+
+            body     = json.loads(request.httprequest.data or '{}')
+            old_path = (body.get('old_path') or '').strip()
+            new_path = (body.get('new_path') or '').strip()
+
+            if not old_path or not new_path:
+                return _json_response({'success': False, 'error': 'old_path and new_path are required'}, 400)
+            if old_path.upper() == 'INBOX':
+                return _json_response({'success': False, 'error': 'Cannot rename INBOX'}, 400)
+
+            import imaplib, time as _time
+            conn = _imap_connect_with_retry(acc)
+            if conn is None:
+                return _json_response(
+                    {'success': False,
+                     'error': 'Mail server connection limit reached. Please try again in a few seconds.'},
+                    503,
+                )
+            try:
+                typ, data = conn.rename(old_path, new_path)
+            finally:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+
+            if typ != 'OK':
+                msg = data[0].decode('utf-8', errors='replace') if data else 'RENAME failed'
+                return _json_response({'success': False, 'error': msg}, 502)
+
+            return _json_response({'success': True, 'data': {
+                'old_path': old_path,
+                'new_path': new_path,
+            }})
+        except Exception as exc:
+            return _json_response({'success': False, 'error': str(exc)}, 500)
+
+    # ── Delete folder ──────────────────────────────────────────────────────────
+
+    @http.route('/api/lugal/email/accounts/<int:account_id>/folders/delete',
+                type='http', auth='none', csrf=False, methods=['POST', 'OPTIONS'])
+    def folder_delete(self, account_id, **kwargs):
+        """Permanently delete an IMAP folder and all its messages.
+
+        Body: { "path": "INBOX/OldProjects" }
+          path (required) — full IMAP folder path to delete
+
+        Protected folders (INBOX, Sent, Drafts, Trash, Spam/Junk) cannot be deleted.
+        """
+        if request.httprequest.method == 'OPTIONS':
+            return _json_response({})
+        uid = ensure_jwt_user_id()
+        if not uid:
+            return _unauthorized()
+        try:
+            acc = request.env['lugal.email.account'].sudo().browse(account_id)
+            if not acc.exists() or acc.user_id.id != uid:
+                return _not_found('Account not found')
+            if not (acc.password or '').strip():
+                return _json_response({'success': False, 'error': 'No app password configured'}, 400)
+
+            body = json.loads(request.httprequest.data or '{}')
+            path = (body.get('path') or '').strip()
+
+            if not path:
+                return _json_response({'success': False, 'error': 'path is required'}, 400)
+
+            # Protected by full path match, last segment, OR any segment containing
+            # known system/server-internal names (e.g. Dovecot internal folders).
+            _PROTECTED_NAMES = {
+                'inbox', 'sent', 'sent items', 'sent messages',
+                'drafts', 'draft', 'trash', 'deleted', 'deleted items',
+                'spam', 'junk', 'junk e-mail', 'archive', 'archives',
+            }
+            # Server-internal prefixes/substrings — protect entire path if any segment matches
+            _INTERNAL_KEYWORDS = {'dovecot', 'sieve', 'courier', 'cyrus', '.subscriptions'}
+            path_lower = path.lower()
+            segments   = [s.lower() for s in path.replace('/', '.').split('.')]
+            if (path_lower in _PROTECTED_NAMES
+                    or segments[-1] in _PROTECTED_NAMES
+                    or any(kw in path_lower for kw in _INTERNAL_KEYWORDS)):
+                return _json_response(
+                    {'success': False, 'error': f'Cannot delete protected/system folder: {path}'},
+                    400,
+                )
+
+            import imaplib, re as _re, time as _time
+            conn = _imap_connect_with_retry(acc)
+            if conn is None:
+                return _json_response(
+                    {'success': False,
+                     'error': 'Mail server connection limit reached. Please try again in a few seconds.'},
+                    503,
+                )
+            deleted_paths = []
+            try:
+                # List ALL folders once — we need this both for flag checks and to
+                # discover children.  Avoids pattern-based LIST which fails on many
+                # servers when the path contains dots.
+                _SYSTEM_FLAGS = {'\\sent', '\\drafts', '\\trash', '\\junk',
+                                 '\\spam', '\\archive', '\\all', '\\inbox'}
+                _LR = _re.compile(r'\((?P<flags>[^)]*)\)\s+"(?P<delim>[^"]*)"\s+"?(?P<name>.+?)"?\s*$')
+                typ_all, all_raw = conn.list()
+
+                all_folder_names = []   # [(name, flags_set)]
+                delimiter = '.'
+                if typ_all == 'OK' and all_raw:
+                    for item in all_raw:
+                        if not item:
+                            continue
+                        line = item.decode('utf-8', errors='replace') \
+                               if isinstance(item, bytes) else item
+                        fm = _LR.search(line.strip())
+                        if not fm:
+                            continue
+                        fname  = fm.group('name').strip().strip('"')
+                        fdelim = fm.group('delim') or '.'
+                        fflags = {f.lower() for f in fm.group('flags').split()}
+                        all_folder_names.append((fname, fflags))
+                        delimiter = fdelim   # use last seen delimiter
+
+                # Locate the target folder and check for system flags
+                target_flags = set()
+                for fname, fflags in all_folder_names:
+                    if fname.lower() == path.lower():
+                        target_flags = fflags
+                        break
+
+                if target_flags & _SYSTEM_FLAGS:
+                    conn.logout()
+                    return _json_response(
+                        {'success': False,
+                         'error': f'Cannot delete system folder: {path}'},
+                        400,
+                    )
+
+                # Collect all folders to delete: the target itself + any descendants.
+                # Children are any folders whose path starts with "<path><delimiter>".
+                prefix_lower = path.lower() + delimiter
+                to_delete = [
+                    fname for fname, _ in all_folder_names
+                    if fname.lower() == path.lower()
+                    or fname.lower().startswith(prefix_lower)
+                ]
+
+                # Sort deepest first so children are deleted before their parent.
+                # Depth = number of delimiter occurrences.
+                to_delete.sort(key=lambda p: p.count(delimiter), reverse=True)
+
+                for folder_path in to_delete:
+                    try:
+                        conn.unsubscribe(folder_path)
+                    except Exception:
+                        pass
+                    typ_d, data_d = conn.delete(folder_path)
+                    if typ_d == 'OK':
+                        deleted_paths.append(folder_path)
+                        # Remove DB records for this folder so they stop appearing in
+                        # the messages list.
+                        try:
+                            request.env['lugal.email.message'].sudo().search([
+                                ('account_id', '=', account_id),
+                                ('folder',     '=', folder_path),
+                                ('is_deleted', '=', False),
+                            ]).write({'is_deleted': True})
+                            request.env.cr.commit()
+                        except Exception:
+                            pass
+                    else:
+                        # If a virtual parent doesn't physically exist on the server,
+                        # the server returns NONEXISTENT — that's fine, just skip it.
+                        err_str = (data_d[0].decode('utf-8', errors='replace')
+                                   if data_d else '')
+                        if 'nonexistent' not in err_str.lower():
+                            _logger.warning(
+                                'IMAP DELETE %r returned %s: %s', folder_path, typ_d, err_str)
+
+            finally:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+
+            return _json_response({'success': True, 'data': {
+                'deleted_path':  path,
+                'deleted_paths': deleted_paths,
+            }})
         except Exception as exc:
             return _json_response({'success': False, 'error': str(exc)}, 500)
 

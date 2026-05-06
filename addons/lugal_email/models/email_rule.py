@@ -10,7 +10,8 @@ A rule has:
 Conditions JSON schema (list):
   [{"field": "from_address", "operator": "contains", "value": "boss@"}, ...]
 
-  Supported fields:    from_address | to_addresses | cc_addresses | subject | body_text
+  Supported fields:    from_address | to_addresses | cc_addresses | bcc_addresses
+                       | subject | body_text
                        has_attachments | is_important | folder
   Supported operators: contains | not_contains | starts_with | ends_with
                        equals | not_equals | is_empty | is_not_empty
@@ -140,11 +141,15 @@ class LugalEmailRule(models.Model):
         Returns True if stop_processing should halt further rules.
         """
         write_vals = {}
-        stop = self.stop_processing
+        stop       = self.stop_processing
+        # Track any IMAP move we need to fire after writing the DB row.
+        _imap_moves = []   # list of (imap_uid, from_imap_path, to_imap_path)
+
+        LOGICAL = {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'}
 
         for act in self._get_actions():
             action = act.get('action', '')
-            value  = act.get('value', '')
+            value  = (act.get('value') or '').strip()
             try:
                 if action == 'mark_read':
                     write_vals['is_read'] = True
@@ -155,11 +160,39 @@ class LugalEmailRule(models.Model):
                 elif action == 'mark_starred':
                     write_vals['is_starred'] = True
                 elif action == 'move_folder':
-                    LOGICAL = {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'}
+                    if not value:
+                        continue
                     if value.lower() in LOGICAL:
+                        # Logical folder — just update local DB column.
                         write_vals['folder'] = value.lower()
-                    # Custom IMAP folders are moved asynchronously by the controller;
-                    # here we just update the local field to a meaningful label.
+                        # Also fire the IMAP move for standard folders.
+                        if msg_record.imap_uid and msg_record.account_id:
+                            acc = msg_record.account_id
+                            from_imap = acc._get_server_folder_name(
+                                msg_record.folder) if msg_record.folder not in LOGICAL \
+                                else ('INBOX' if msg_record.folder == 'inbox'
+                                      else acc._get_server_folder_name(msg_record.folder))
+                            _imap_moves.append(('logical', msg_record.imap_uid, from_imap, value.lower()))
+                    else:
+                        # Custom IMAP folder path (e.g. "INBOX.AllFromUmar").
+                        # Store the raw path in the folder field so the messages
+                        # list endpoint can query it with folder=INBOX.AllFromUmar.
+                        write_vals['folder'] = value
+                        # Queue an async IMAP MOVE to the raw path.
+                        if msg_record.imap_uid and msg_record.account_id:
+                            acc = msg_record.account_id
+                            # Determine the current IMAP folder path for the source.
+                            cur_folder = msg_record.folder or 'inbox'
+                            if cur_folder.lower() == 'inbox':
+                                from_imap = 'INBOX'
+                            elif cur_folder.lower() in LOGICAL:
+                                try:
+                                    from_imap = acc._get_server_folder_name(cur_folder.lower())
+                                except Exception:
+                                    from_imap = 'INBOX'
+                            else:
+                                from_imap = cur_folder   # already a raw IMAP path
+                            _imap_moves.append(('raw', msg_record.imap_uid, from_imap, value))
                 elif action == 'stop_processing':
                     stop = True
             except Exception as _e:
@@ -170,6 +203,18 @@ class LugalEmailRule(models.Model):
                 msg_record.write(write_vals)
             except Exception as _e:
                 _logger.warning('Email rule write failed: %s', _e)
+
+        # Fire IMAP moves after the DB write so the row is committed.
+        for move in _imap_moves:
+            try:
+                kind, imap_uid, from_imap, dest = move
+                acc = msg_record.account_id
+                if kind == 'raw':
+                    acc._imap_move_to_raw_path_async(imap_uid, from_imap, dest)
+                else:
+                    acc._imap_move_async(imap_uid, from_imap, dest)
+            except Exception as _me:
+                _logger.warning('Email rule IMAP move failed: %s', _me)
 
         # Audit
         try:
