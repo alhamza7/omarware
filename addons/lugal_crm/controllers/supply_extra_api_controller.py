@@ -474,6 +474,21 @@ def _clearance_company_env():
     return request.env[CLEARANCE_COMPANY_MODEL].sudo()
 
 
+SUPPLY_NOTIFICATION_MODEL = 'lugal.supply.notification'
+_SUPPLY_NOTIFICATION_MISSING = 'Notifications feature not configured'
+
+
+def _supply_notification_env():
+    """Sudo env for supply notifications, or None if model not registered (upgrade `lugal_supply`)."""
+    if SUPPLY_NOTIFICATION_MODEL not in request.env:
+        _logger.warning(
+            'Supply notifications API: model %r missing from registry; run: odoo -u lugal_supply',
+            SUPPLY_NOTIFICATION_MODEL,
+        )
+        return None
+    return request.env[SUPPLY_NOTIFICATION_MODEL].sudo()
+
+
 def _serialize_inventory_minmax(r):
     product = r.product_id
     branch = r.branch_id
@@ -1392,12 +1407,14 @@ class CrmSupplyExtraApiController(http.Controller):
             uid = ensure_jwt_user_id()
             if not uid:
                 return {'success': False, 'error': 'Unauthorized', 'data': None}
+            Notif = _supply_notification_env()
+            if Notif is None:
+                return {'success': False, 'error': _SUPPLY_NOTIFICATION_MISSING, 'data': None}
             page, per_page, offset = _pagination(kwargs)
             domain = [('user_id', '=', uid), ('is_deleted', '=', False)]
             is_read = kwargs.get('is_read')
             if is_read is not None and str(is_read).lower() not in ('', 'none', 'null'):
                 domain.append(('is_read', '=', bool(is_read)))
-            Notif = request.env['lugal.supply.notification'].sudo()
             total = Notif.search_count(domain)
             unread_count = Notif.search_count(
                 [('user_id', '=', uid), ('is_deleted', '=', False), ('is_read', '=', False)]
@@ -1421,6 +1438,9 @@ class CrmSupplyExtraApiController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized', 'data': None}
+            Notif = _supply_notification_env()
+            if Notif is None:
+                return {'success': False, 'error': _SUPPLY_NOTIFICATION_MISSING, 'data': None}
             user_id = kwargs.get('user_id')
             notif_type = (kwargs.get('notif_type') or '').strip()
             title = (kwargs.get('title') or '').strip()
@@ -1433,7 +1453,7 @@ class CrmSupplyExtraApiController(http.Controller):
                 vals['related_id'] = int(kwargs['related_id'])
             if kwargs.get('related_type'):
                 vals['related_type'] = kwargs['related_type']
-            rec = request.env['lugal.supply.notification'].sudo().create(vals)
+            rec = Notif.create(vals)
             return {'success': True, 'data': _serialize_supply_notification(rec)}
         except Exception as e:
             return crm_error(e, 'supply_notifications_create')
@@ -1444,7 +1464,10 @@ class CrmSupplyExtraApiController(http.Controller):
             uid = ensure_jwt_user_id()
             if not uid:
                 return {'success': False, 'error': 'Unauthorized', 'data': None}
-            n = request.env['lugal.supply.notification'].sudo().browse(notif_id).exists()
+            Notif = _supply_notification_env()
+            if Notif is None:
+                return {'success': False, 'error': _SUPPLY_NOTIFICATION_MISSING, 'data': None}
+            n = Notif.browse(notif_id).exists()
             if not n or n.is_deleted:
                 return {'success': False, 'error': 'Notification not found', 'data': None}
             n.write({'is_read': True, 'read_at': fields.Datetime.now()})
@@ -1458,7 +1481,9 @@ class CrmSupplyExtraApiController(http.Controller):
             uid = ensure_jwt_user_id()
             if not uid:
                 return {'success': False, 'error': 'Unauthorized', 'data': None}
-            Notif = request.env['lugal.supply.notification'].sudo()
+            Notif = _supply_notification_env()
+            if Notif is None:
+                return {'success': False, 'error': _SUPPLY_NOTIFICATION_MISSING, 'data': None}
             unread = Notif.search(
                 [('user_id', '=', uid), ('is_read', '=', False), ('is_deleted', '=', False)]
             )
@@ -1474,7 +1499,10 @@ class CrmSupplyExtraApiController(http.Controller):
             uid = ensure_jwt_user_id()
             if not uid:
                 return {'success': False, 'error': 'Unauthorized', 'data': None}
-            n = request.env['lugal.supply.notification'].sudo().browse(notif_id).exists()
+            Notif = _supply_notification_env()
+            if Notif is None:
+                return {'success': False, 'error': _SUPPLY_NOTIFICATION_MISSING, 'data': None}
+            n = Notif.browse(notif_id).exists()
             if not n:
                 return {'success': False, 'error': 'Notification not found', 'data': None}
             n.write({'is_deleted': True})

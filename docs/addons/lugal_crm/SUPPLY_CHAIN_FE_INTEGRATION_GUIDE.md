@@ -151,6 +151,8 @@ Unless noted: **`POST`**, JSON-RPC, **`type=jsonrpc`**.
 | `/api/crm/supply/po/<id>/lines/<line_id>/delete` | Delete line |
 | `/api/crm/supply/po/<id>/attachments/list` | List order attachments |
 | `/api/crm/supply/po/<id>/attachments/link` | Link attachment ids |
+| `GET /api/products/search` | Product picker (REST + JWT) — see **`docs/addons/lugal_crm/SUPPLY_PO_REST_FE_INTEGRATION.md`** |
+| `POST /api/purchase-orders` | Create supply PO with **`items[].product_id`** from search — same short guide |
 
 ### 5.4 Payments
 
@@ -220,6 +222,8 @@ The SPA already centralizes many calls in:
 `frontends/44/src/services/supplyApi.ts`
 
 Extend that module (or add `supplyWorkflowApi.ts`) for new paths (`item_requests`, `negotiations`, `payments`, `shipments`) using the same **`rpc()`** helper pattern.
+
+**REST product search + PO create** (plain `fetch` / `axios`, not JSON-RPC): see **`docs/addons/lugal_crm/SUPPLY_PO_REST_FE_INTEGRATION.md`**.
 
 ---
 

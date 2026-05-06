@@ -30,6 +30,27 @@ from .upload_controller import _create_attachment
 _logger = __import__('logging').getLogger(__name__)
 
 
+def _resolve_supply_line_product(product_id_raw, Product):
+    """Return browsed ``product.product`` or ``(False, error_message)``."""
+    try:
+        pid = int(product_id_raw)
+    except (TypeError, ValueError):
+        return False, 'product_id must be an integer'
+    prod = Product.browse(pid).exists()
+    if not prod or not prod.active or not prod.purchase_ok:
+        return False, f'Invalid or non-purchasable product_id: {pid}'
+    return prod, None
+
+
+def _apply_product_to_supply_line_vals(prod, lv):
+    """Fill ``product_id``, ``product_name``, ``item_code``, ``uom`` from ``product.product``."""
+    uom = prod.uom_po_id or prod.uom_id
+    lv['product_id'] = prod.id
+    lv['product_name'] = prod.name or lv.get('product_name') or ''
+    lv['item_code'] = prod.default_code or lv.get('item_code') or ''
+    lv['uom'] = uom.name if uom else (lv.get('uom') or '')
+
+
 # Valid `lugal.supply.vendor` division Selection keys (see lugal_supply_vendor.py)
 _VENDOR_DIVISION_KEYS = frozenset({'europe', 'china', 'other'})
 
@@ -889,16 +910,40 @@ class CrmSupplyChainApiController(http.Controller):
             if not po or po.is_deleted:
                 return {'success': False, 'error': 'PO not found', 'data': None}
             Line = request.env['lugal.crm.supply.po.line'].sudo()
+            Product = request.env['product.product'].sudo()
             lv = {
                 'po_id': po.id,
                 'product_name': kwargs.get('product_name') or '',
                 'item_code': kwargs.get('item_code') or '',
                 'uom': kwargs.get('uom') or '',
-                'quantity': float(kwargs.get('quantity') or 1.0),
-                'unit_price': float(kwargs.get('unit_price') or 0.0),
                 'min_qty': float(kwargs.get('min_qty') or 0.0),
                 'max_qty': float(kwargs.get('max_qty') or 0.0),
             }
+            if kwargs.get('product_id') is not None:
+                prod, err = _resolve_supply_line_product(kwargs['product_id'], Product)
+                if err:
+                    return {'success': False, 'error': err, 'data': None}
+                _apply_product_to_supply_line_vals(prod, lv)
+            try:
+                qty = float(kwargs.get('quantity') if kwargs.get('quantity') is not None else kwargs.get('qty') or 1.0)
+            except (TypeError, ValueError):
+                return {'success': False, 'error': 'quantity/qty must be a number', 'data': None}
+            if qty <= 0:
+                return {'success': False, 'error': 'quantity must be greater than 0', 'data': None}
+            lv['quantity'] = qty
+            try:
+                base_price = float(
+                    kwargs.get('unit_price') if kwargs.get('unit_price') is not None else kwargs.get('price') or 0.0
+                )
+            except (TypeError, ValueError):
+                return {'success': False, 'error': 'unit_price/price must be a number', 'data': None}
+            try:
+                discount = float(kwargs.get('discount') if kwargs.get('discount') is not None else 0.0)
+            except (TypeError, ValueError):
+                return {'success': False, 'error': 'discount must be a number', 'data': None}
+            if discount < 0 or discount > 100:
+                return {'success': False, 'error': 'discount must be between 0 and 100', 'data': None}
+            lv['unit_price'] = base_price * (1.0 - discount / 100.0)
             if kwargs.get('currency_id'):
                 lv['currency_id'] = int(kwargs['currency_id'])
             line = Line.create(lv)
@@ -916,6 +961,21 @@ class CrmSupplyChainApiController(http.Controller):
             if not line or line.po_id.id != po_id:
                 return {'success': False, 'error': 'Line not found', 'data': None}
             vals = {}
+            Product = request.env['product.product'].sudo()
+            if 'product_id' in kwargs:
+                pid_raw = kwargs['product_id']
+                if pid_raw in (False, None, ''):
+                    vals['product_id'] = False
+                else:
+                    prod, err = _resolve_supply_line_product(pid_raw, Product)
+                    if err:
+                        return {'success': False, 'error': err, 'data': None}
+                    tmp = {'product_name': line.product_name or '', 'item_code': line.item_code or '', 'uom': line.uom or ''}
+                    _apply_product_to_supply_line_vals(prod, tmp)
+                    vals['product_id'] = tmp['product_id']
+                    vals['product_name'] = tmp['product_name']
+                    vals['item_code'] = tmp['item_code']
+                    vals['uom'] = tmp['uom']
             for k in (
                 'product_name', 'item_code', 'uom', 'min_qty', 'max_qty',
                 'sequence', 'size', 'capacity',
