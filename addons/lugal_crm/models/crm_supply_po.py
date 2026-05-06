@@ -80,11 +80,20 @@ class CrmSupplyPo(models.Model):
             po.total_amount = sum(line.total_price for line in po.line_ids)
 
     def init(self):
-        """Legacy statuses shipped/received map to confirmed (upgrade safety)."""
-        self._cr.execute(
+        """Legacy status cleanup; ensure columns for extended PO fields exist (DB sync safety)."""
+        cr = self._cr
+        cr.execute(
             """
             UPDATE lugal_crm_supply_po
             SET status = 'confirmed'
             WHERE status IN ('shipped', 'received');
+            """
+        )
+        # Field `exchange_rate` is defined on `crm_supply_po_extend`; if code was deployed
+        # without `-u lugal_crm`, PostgreSQL may lack the column and /po/list will fail.
+        cr.execute(
+            """
+            ALTER TABLE lugal_crm_supply_po
+            ADD COLUMN IF NOT EXISTS exchange_rate DOUBLE PRECISION;
             """
         )
