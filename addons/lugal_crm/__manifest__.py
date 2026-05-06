@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'Lugal CRM',
-    'version': '1.0.8',
+    'version': '1.0.9',
     'category': 'CRM',
     'summary': 'Custom CRM module for Lugal platform',
     'description': """
@@ -38,5 +38,4 @@ Requirements and specifications are in addons/lugal_crm/requirements/
     'installable': True,
     'application': True,
     'auto_install': False,
-    'post_init_hook': 'post_init_hook',
 }

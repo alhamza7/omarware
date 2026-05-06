@@ -63,9 +63,24 @@ class CrmSupplyPoExtend(models.Model):
     exchange_rate = fields.Float(
         string='Exchange Rate',
         digits=(16, 6),
-        tracking=True,
-        help='Optional FX rate vs company currency (for display / reporting).',
+        compute='_compute_exchange_rate',
+        inverse='_inverse_exchange_rate',
+        store=False,
+        help='Optional FX rate vs company currency (stored in extra_fields; no DB column).',
     )
+
+    @api.depends('extra_fields')
+    def _compute_exchange_rate(self):
+        for rec in self:
+            v = rec.get_dynamic_field('exchange_rate', 0.0)
+            try:
+                rec.exchange_rate = float(v or 0.0)
+            except (TypeError, ValueError):
+                rec.exchange_rate = 0.0
+
+    def _inverse_exchange_rate(self):
+        for rec in self:
+            rec.set_dynamic_field('exchange_rate', float(rec.exchange_rate or 0.0))
     attachment_ids = fields.Many2many(
         'ir.attachment',
         'lugal_crm_supply_po_order_attachment_rel',

@@ -89,11 +89,3 @@ class CrmSupplyPo(models.Model):
             WHERE status IN ('shipped', 'received');
             """
         )
-        # Field `exchange_rate` is defined on `crm_supply_po_extend`; if code was deployed
-        # without `-u lugal_crm`, PostgreSQL may lack the column and /po/list will fail.
-        cr.execute(
-            """
-            ALTER TABLE lugal_crm_supply_po
-            ADD COLUMN IF NOT EXISTS exchange_rate DOUBLE PRECISION;
-            """
-        )
