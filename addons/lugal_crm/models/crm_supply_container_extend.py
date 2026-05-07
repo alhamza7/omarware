@@ -23,3 +23,12 @@ class LugalSupplyContainerExtend(models.Model):
         string='Actual gate-in',
         tracking=True,
     )
+    reminder_date = fields.Datetime(
+        string='Reminder date',
+        tracking=True,
+        help='When to follow up on this container/shipment.',
+    )
+    reminder_note = fields.Text(
+        string='Reminder note',
+        tracking=True,
+    )

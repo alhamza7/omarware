@@ -25,7 +25,7 @@ from .supply_attachment_api import (
     supply_kwargs_has_attachments,
     supply_sync_item_request_attachment_m2m,
 )
-from .supply_chain_api_controller import _pagination, _parse_date
+from .supply_chain_api_controller import _container_reminder_api_dict, _pagination, _parse_date
 from .supply_controller import _serialize_attachment
 
 _logger = __import__('logging').getLogger(__name__)
@@ -363,6 +363,7 @@ def _serialize_shipment_container(c):
     supplier = c.supplier_id
     agent = c.agent_id
     delivered_by = c.clearance_info_delivered_by_id
+    rem = _container_reminder_api_dict(c)
     atts = [_serialize_attachment(a) for a in c.attachment_ids]
     linked_pos = []
     if 'purchase_order_ids' in c._fields:
@@ -430,8 +431,8 @@ def _serialize_shipment_container(c):
         'clearance_info_delivered_by': delivered_by.name if delivered_by else '',
         'vendor_id': supplier.id if supplier else None,
         'vendor_name': supplier.name if supplier else '',
-        'reminder_date': None,
-        'reminder_note': '',
+        'reminder_date': rem['reminder_date'],
+        'reminder_note': rem['reminder_note'],
         'notes': c.notes or '',
         'created_at': c.create_date.isoformat() if c.create_date else '',
         'updated_at': c.write_date.isoformat() if c.write_date else '',

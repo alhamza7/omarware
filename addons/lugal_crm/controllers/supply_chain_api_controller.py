@@ -110,6 +110,70 @@ def _parse_date(val):
         return False
 
 
+_SUPPLY_REMINDER_CORS = [
+    ('Access-Control-Allow-Origin', '*'),
+    ('Access-Control-Allow-Methods', 'GET, DELETE, OPTIONS'),
+    ('Access-Control-Allow-Headers', 'Authorization, Content-Type'),
+]
+
+
+def _supply_reminder_http_json(payload, status=200):
+    headers = [('Content-Type', 'application/json')] + _SUPPLY_REMINDER_CORS
+    return Response(json.dumps(payload), status=status, headers=headers)
+
+
+def _reminder_datetime_to_api_string(dt_value):
+    if not dt_value:
+        return None
+    if isinstance(dt_value, datetime):
+        return dt_value.strftime('%Y-%m-%d %H:%M:%S')
+    return None
+
+
+def _container_reminder_api_dict(container):
+    """Reminder-only payload for GET /containers/<id>/reminder."""
+    if 'reminder_date' not in container._fields:
+        return {
+            'container_id': container.id,
+            'reminder_date': None,
+            'reminder_note': '',
+        }
+    rd = container.reminder_date
+    return {
+        'container_id': container.id,
+        'reminder_date': _reminder_datetime_to_api_string(rd) if rd else None,
+        'reminder_note': (container.reminder_note or '').strip(),
+    }
+
+
+def _parse_reminder_datetime_in(raw):
+    """Return ``datetime`` when valid, ``False`` when empty, ``None`` when invalid."""
+    if raw is None or raw is False:
+        return False
+    if isinstance(raw, datetime):
+        return raw
+    s = str(raw).strip()
+    if not s:
+        return False
+    try:
+        conv = fields.Datetime.to_datetime(s)
+        if conv:
+            return conv
+    except Exception:
+        pass
+    normalized = s.replace('T', ' ')[:19]
+    for fmt in ('%Y-%m-%d %H:%M:%S',):
+        try:
+            return datetime.strptime(normalized, fmt)
+        except ValueError:
+            pass
+    try:
+        return datetime.strptime(s[:10], '%Y-%m-%d')
+    except ValueError:
+        pass
+    return None
+
+
 def _serialize_vendor(v):
     country = v.country_id
     cur = v.currency_id
@@ -142,6 +206,7 @@ def _serialize_vendor(v):
 def _serialize_container(c):
     delivered_by = c.clearance_info_delivered_by_id
     supplier = c.supplier_id
+    rem = _container_reminder_api_dict(c)
     return {
         'id': c.id,
         'name': c.name or '',
@@ -173,8 +238,8 @@ def _serialize_container(c):
         'penalty_count': len(c.penalty_ids),
         'vendor_id': supplier.id if supplier else None,
         'vendor_name': supplier.name if supplier else '',
-        'reminder_date': None,
-        'reminder_note': '',
+        'reminder_date': rem['reminder_date'],
+        'reminder_note': rem['reminder_note'],
         'notes': c.notes or '',
         'created_at': c.create_date.isoformat() if c.create_date else '',
         'updated_at': c.write_date.isoformat() if c.write_date else '',
@@ -518,16 +583,85 @@ class CrmSupplyChainApiController(http.Controller):
 
     @http.route('/api/crm/supply/containers/<int:container_id>/set_reminder', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def supply_containers_set_reminder(self, container_id, **kwargs):
-        """Reminder fields not on model — no-op success for API compatibility."""
+        """Create or update container reminder (``reminder_date``, ``reminder_note``)."""
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized', 'data': None}
             c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
             if not c or c.is_deleted:
                 return {'success': False, 'error': 'Container not found', 'data': None}
+            if 'reminder_date' not in c._fields:
+                return {'success': False, 'error': 'Reminder fields not available on container model', 'data': None}
+
+            note_raw = kwargs.get('reminder_note')
+            if note_raw is None:
+                reminder_note = ''
+            else:
+                reminder_note = str(note_raw).strip()
+
+            date_in = kwargs.get('reminder_date')
+            parsed = _parse_reminder_datetime_in(date_in)
+            if parsed is None:
+                return {
+                    'success': False,
+                    'error': 'Invalid reminder_date; use ISO or YYYY-MM-DD HH:MM:SS',
+                    'data': None,
+                }
+            if parsed is False:
+                if c.reminder_date:
+                    c.write({'reminder_note': reminder_note})
+                else:
+                    return {'success': False, 'error': 'reminder_date is required', 'data': None}
+            else:
+                c.write({'reminder_date': parsed, 'reminder_note': reminder_note})
+            c.invalidate_recordset()
             return {'success': True, 'data': _serialize_container(c)}
         except Exception as e:
             return crm_error(e, 'supply_containers_set_reminder')
+
+    @http.route(
+        '/api/crm/supply/containers/<int:container_id>/reminder',
+        type='http',
+        auth='none',
+        methods=['GET', 'DELETE', 'OPTIONS'],
+        csrf=False,
+        cors='*',
+    )
+    def supply_containers_reminder_http(self, container_id, **kwargs):
+        """GET: reminder payload for edit modal. DELETE: clear reminder."""
+        if request.httprequest.method == 'OPTIONS':
+            return Response(status=204, headers=_SUPPLY_REMINDER_CORS)
+        try:
+            if not ensure_jwt_user_id():
+                return _supply_reminder_http_json({'success': False, 'error': 'Unauthorized'}, 401)
+            c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
+            if not c or c.is_deleted:
+                return _supply_reminder_http_json(
+                    {'success': False, 'error': 'Container not found', 'data': None},
+                    404,
+                )
+            if 'reminder_date' not in c._fields:
+                return _supply_reminder_http_json(
+                    {'success': False, 'error': 'Reminder fields not available on container model', 'data': None},
+                    501,
+                )
+
+            if request.httprequest.method == 'GET':
+                return _supply_reminder_http_json(
+                    {'success': True, 'data': _container_reminder_api_dict(c)},
+                    200,
+                )
+
+            # DELETE
+            c.write({'reminder_date': False, 'reminder_note': ''})
+            c.invalidate_recordset()
+            return _supply_reminder_http_json(
+                {'success': True, 'message': 'Reminder deleted successfully'},
+                200,
+            )
+        except Exception as e:
+            _logger.exception('supply_containers_reminder_http')
+            return _supply_reminder_http_json({'success': False, 'error': str(e)}, 500)
 
     # -------------------------------------------------------------------------
     # Purchase orders (register specific paths before generic /<id>/get)
