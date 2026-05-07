@@ -1056,15 +1056,18 @@ class LugalEmailController(http.Controller):
                 base_domain += [('linked_model', '=', linked_model), ('linked_record_id', '=', int(linked_id))]
 
             # Optional server-side filters
-            if filter_unread == '1':
+            def _truthy(v):
+                return str(v or '').lower() in ('1', 'true', 'yes')
+
+            if _truthy(filter_unread):
                 base_domain.append(('is_read', '=', False))
-            if filter_flagged == '1':
+            if _truthy(filter_flagged):
                 base_domain.append(('is_starred', '=', True))
-            if filter_important == '1':
+            if _truthy(filter_important):
                 base_domain.append(('is_important', '=', True))
-            if filter_mentioned == '1':
+            if _truthy(filter_mentioned):
                 base_domain.append(('is_mentioned', '=', True))
-            if filter_has_attachment == '1':
+            if _truthy(filter_has_attachment):
                 att_msg_ids = request.env['ir.attachment'].sudo().search([
                     ('res_model', '=', 'lugal.email.message'),
                 ]).mapped('res_id')
@@ -3272,12 +3275,10 @@ class LugalEmailController(http.Controller):
             imap_from   = _resolve_imap_folder(msg.account_id, prev_folder)
 
             # Update local DB record
-            msg.write({
-                'folder':     target_logical if target_logical != 'custom' else prev_folder,
-                'custom_folder': target_raw if target_logical == 'custom' else False,
-            } if hasattr(msg, 'custom_folder') else {
-                'folder': target_logical if target_logical != 'custom' else prev_folder,
-            })
+            # For logical folders store the logical key; for custom IMAP paths
+            # store the raw path so the messages_list query can find them.
+            new_folder = target_logical if target_logical != 'custom' else target_raw
+            msg.write({'folder': new_folder})
 
             # Push IMAP move asynchronously
             if msg.imap_uid:

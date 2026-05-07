@@ -777,15 +777,17 @@ class SupplyChatController(http.Controller):
                 return {'success': False, 'error': 'Can only remove members from group conversations'}
             if uid not in conv.participant_ids.ids:
                 return {'success': False, 'error': 'Forbidden'}
-            # Only admins (and creator) can remove members
+            # Super admin rule: only the group CREATOR can remove other members.
+            # Regular admins can add members but cannot remove them.
+            # Any member can remove themselves (leave the group).
             creator_id = conv.created_by_id.id if conv.created_by_id else None
-            admin_ids = conv.group_admin_ids.ids if hasattr(conv, 'group_admin_ids') else []
-            is_admin = (uid == creator_id) or (uid in admin_ids)
-            # A member can always remove themselves (leave)
             target_uid = int(user_id)
-            if target_uid != uid and not is_admin:
-                return {'success': False, 'error': 'Only admins can remove other members'}
-            if target_uid == creator_id and uid != creator_id:
+            is_self_remove = (target_uid == uid)
+            is_creator = (uid == creator_id)
+
+            if not is_self_remove and not is_creator:
+                return {'success': False, 'error': 'Only the group creator can remove other members'}
+            if target_uid == creator_id and not is_self_remove:
                 return {'success': False, 'error': 'Cannot remove the group creator'}
             conv.write({'participant_ids': [(3, target_uid)]})
             return {'success': True, 'data': _serialize_conversation(conv, uid)}
