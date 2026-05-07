@@ -17,6 +17,7 @@ from odoo import http
 from odoo.http import request, Response
 
 from ._auth import ensure_jwt_user_id
+from ._product_helpers import safe_product_purchase_uom
 from .supply_controller import _serialize_supply_po
 
 _logger = logging.getLogger(__name__)
@@ -60,9 +61,8 @@ def _unauthorized():
 
 
 def _purchase_unit(product):
-    """Purchase UoM when ``purchase`` adds ``uom_po_id``; else sale UoM."""
-    po_uom = getattr(product, 'uom_po_id', False)
-    return po_uom or product.uom_id
+    """Purchase UoM when declared on the model; else sale UoM."""
+    return safe_product_purchase_uom(product)
 
 
 def _purchase_price(product):

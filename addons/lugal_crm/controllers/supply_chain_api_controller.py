@@ -14,6 +14,7 @@ from odoo import fields, http
 from odoo.http import request, Response
 
 from ._auth import ensure_jwt_user_id
+from ._product_helpers import safe_product_purchase_uom
 from ._error import crm_error
 from .supply_attachment_api import supply_build_attachment_m2m_write, supply_kwargs_has_attachments
 from .supply_controller import (
@@ -44,7 +45,7 @@ def _resolve_supply_line_product(product_id_raw, Product):
 
 def _apply_product_to_supply_line_vals(prod, lv):
     """Fill ``product_id``, ``product_name``, ``item_code``, ``uom`` from ``product.product``."""
-    uom = getattr(prod, 'uom_po_id', False) or prod.uom_id
+    uom = safe_product_purchase_uom(prod)
     lv['product_id'] = prod.id
     lv['product_name'] = prod.name or lv.get('product_name') or ''
     lv['item_code'] = prod.default_code or lv.get('item_code') or ''
@@ -632,7 +633,7 @@ class CrmSupplyChainApiController(http.Controller):
                             'error': f'Invalid or non-purchasable product_id: {pid}',
                             'data': None,
                         }
-                    uom = getattr(prod, 'uom_po_id', False) or prod.uom_id
+                    uom = safe_product_purchase_uom(prod)
                     lv['product_id'] = prod.id
                     lv['product_name'] = prod.name or lv['product_name']
                     lv['item_code'] = prod.default_code or lv['item_code']
