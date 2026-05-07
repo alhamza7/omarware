@@ -1013,8 +1013,12 @@ class LugalEmailController(http.Controller):
                             # Leaf folder or folder with its own messages — exact match only
                             res = acc.sudo().sync_custom_imap_folder(folder_raw)
                             imap_folder_sync.append({'account_id': acc.id, **res})
-                            if res.get('resolved_path'):
-                                folder_q = res['resolved_path']
+                            # Only accept resolved_path if it matches the requested folder
+                            # exactly (case differences only). Never allow it to become a
+                            # parent path which would expand the query to sibling folders.
+                            resolved = (res.get('resolved_path') or '').strip()
+                            if resolved and resolved.lower() == folder_raw.lower():
+                                folder_q = resolved
                     except Exception:
                         _logger.exception(
                             'mailbox custom-folder sync failed acc=%s folder=%s',
