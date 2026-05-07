@@ -972,44 +972,40 @@ class LugalEmailController(http.Controller):
                             'resolved_path': folder_raw,
                         })
                         continue
-                    try:
-                        children_paths = acc.sudo().imap_child_mailboxes(folder_raw)
-                    except Exception:
-                        _logger.exception(
-                            'imap_child_mailboxes failed acc=%s parent=%s',
-                            acc.id, folder_raw,
-                        )
-                        children_paths = []
-
-                    # A folder is a namespace parent (expand to children) only when:
-                    # 1. It has child mailboxes on the server, AND
-                    # 2. It has NO messages of its own stored in the DB
-                    # This prevents leaf folders like INBOX.sender.Important from
-                    # incorrectly pulling in sibling folders' messages.
+                    # Determine if this is a namespace parent using the DB only —
+                    # no IMAP call needed and avoids connection limit issues.
+                    # A folder is a namespace parent when:
+                    #   - It has NO messages of its own in the DB, AND
+                    #   - Other messages exist whose folder starts with folder_raw + '.'
                     Msg = request.env['lugal.email.message'].sudo()
                     has_own_messages = Msg.search_count([
                         ('account_id', 'in', account_ids),
                         ('folder',     '=', folder_raw),
                         ('is_deleted', '=', False),
                     ]) > 0
-                    _logger.warning('FOLDER_DEBUG: folder_raw=%r children=%r has_own=%r folder_q=%r', folder_raw, children_paths, has_own_messages, folder_q)
-                    is_namespace_parent = bool(children_paths) and not has_own_messages
+                    has_child_messages = Msg.search_count([
+                        ('account_id', 'in', account_ids),
+                        ('folder',     'like', folder_raw + '.%'),
+                        ('is_deleted', '=', False),
+                    ]) > 0
+                    is_namespace_parent = has_child_messages and not has_own_messages
+                    children_paths = []  # only used for imap_folder_sync reporting
 
                     try:
                         if is_namespace_parent:
-                            br = acc.sudo().sync_imap_branch_mailboxes(folder_raw)
+                            # Namespace parent — expand query to all children.
+                            # No IMAP sync needed; messages already in DB from leaf syncs.
                             folder_branch_expand = True
+                            folder_q = folder_raw
                             imap_folder_sync.append({
-                                'account_id':       acc.id,
-                                'branch':           True,
-                                'child_mailboxes':  br.get('children', []),
-                                'imported':         br.get('imported_total', 0),
-                                'error':            None,
-                                'resolved_path':    br.get('parent_resolved', folder_raw),
-                                'per_mailbox':      br.get('per_mailbox', []),
+                                'account_id':      acc.id,
+                                'branch':          True,
+                                'child_mailboxes': [],
+                                'imported':        0,
+                                'error':           None,
+                                'resolved_path':   folder_raw,
+                                'per_mailbox':     [],
                             })
-                            if br.get('parent_resolved'):
-                                folder_q = br['parent_resolved']
                         else:
                             # Leaf folder or folder with its own messages — exact match only
                             res = acc.sudo().sync_custom_imap_folder(folder_raw)
