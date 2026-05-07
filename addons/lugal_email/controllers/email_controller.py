@@ -992,6 +992,7 @@ class LugalEmailController(http.Controller):
                         ('folder',     '=', folder_raw),
                         ('is_deleted', '=', False),
                     ]) > 0
+                    _logger.warning('FOLDER_DEBUG: folder_raw=%r children=%r has_own=%r folder_q=%r', folder_raw, children_paths, has_own_messages, folder_q)
                     is_namespace_parent = bool(children_paths) and not has_own_messages
 
                     try:
