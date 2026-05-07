@@ -190,7 +190,17 @@ class PurchaseProductsRestController(http.Controller):
         if not pos_ctrl._pos_rest_auth():
             return _unauthorized()
         pget = _pget_from_params(params)
-        payload = pos_ctrl._rest_products_catalog(pget)
+        try:
+            payload = pos_ctrl._rest_products_catalog(pget)
+        except AttributeError as err:
+            # Core/pricelist may still touch removed ``product.product.uom_po_id`` (e.g. Odoo 19+).
+            if getattr(err, 'name', None) != 'uom_po_id' and 'uom_po_id' not in str(err):
+                raise
+            _logger.warning(
+                'products_search: POS catalog failed on uom_po_id (%s); using legacy search',
+                err,
+            )
+            return None
         if payload.get('_error'):
             return _err(payload['message'], payload.get('code', 400))
         rows = [_map_pos_catalog_row_to_po_search(r) for r in payload.get('items') or []]

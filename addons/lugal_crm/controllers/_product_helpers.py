@@ -11,6 +11,9 @@ def safe_product_purchase_uom(product):
     if not product:
         return False
     if 'uom_po_id' in product._fields:
-        u = product.uom_po_id
-        return u or product.uom_id
+        try:
+            u = product.uom_po_id
+            return u or product.uom_id
+        except AttributeError:
+            return product.uom_id
     return product.uom_id

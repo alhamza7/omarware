@@ -17,6 +17,15 @@ _PREFIX = "/api/pos_perfume/v1"
 _READ = ("GET", "POST")
 
 
+def _is_missing_uom_po_id_attribute_error(exc):
+    """True when core/pricelist code touches ``product.product.uom_po_id`` but the field is gone (e.g. Odoo 19+)."""
+    if not isinstance(exc, AttributeError):
+        return False
+    if getattr(exc, "name", None) == "uom_po_id":
+        return True
+    return "uom_po_id" in str(exc)
+
+
 def _json(data, status=200):
     body = json.dumps(data, ensure_ascii=False, default=str)
     return Response(
@@ -247,7 +256,13 @@ class PosPerfumeRestController(http.Controller):
                 qty_in_product_uom = quantity
         else:
             qty_in_product_uom = quantity
-        rules = pl_rec._get_applicable_rules(product, date)
+        try:
+            rules = pl_rec._get_applicable_rules(product, date)
+        except AttributeError as err:
+            if _is_missing_uom_po_id_attribute_error(err):
+                _logger.debug("REST _get_applicable_rules skipped (uom_po_id): %s", err)
+                return 0.0
+            raise
         for rule in rules:
             if not rule._is_applicable_for(product, qty_in_product_uom):
                 continue
@@ -255,19 +270,17 @@ class PosPerfumeRestController(http.Controller):
                 return float(
                     rule._compute_price(product, quantity, pu, date=date, currency=cur)
                 )
+            except AttributeError as err:
+                if _is_missing_uom_po_id_attribute_error(err):
+                    _logger.debug("REST rule._compute_price skipped (uom_po_id): %s", err)
+                    continue
+                raise
             except Exception:
                 continue
         return 0.0
 
-    def _rest_product_unit_price(self, product, pl_rec, price_uom):
-        """
-        Match ``product.product.search_products_for_pos`` (right panel): use Odoo
-        ``pricelist._get_product_price`` first on sudo records so API users without
-        ``product.pricelist.item`` read rights still get the same numbers as the UI.
-
-        Then fall back to POS UoM-group / packaging mapping (``get_product_data`` path)
-        and rule chain when the standard engine returns 0.
-        """
+    def _rest_product_unit_price_impl(self, product, pl_rec, price_uom):
+        """Inner price resolution (see ``_rest_product_unit_price`` wrapper)."""
         prod = product.sudo()
         pu = price_uom or prod.uom_id
         pl = pl_rec.sudo() if pl_rec else False
@@ -322,6 +335,27 @@ class PosPerfumeRestController(http.Controller):
 
         return float(prod.list_price or 0.0)
 
+    def _rest_product_unit_price(self, product, pl_rec, price_uom):
+        """
+        Match ``product.product.search_products_for_pos`` (right panel): use Odoo
+        ``pricelist._get_product_price`` first on sudo records so API users without
+        ``product.pricelist.item`` read rights still get the same numbers as the UI.
+
+        Then fall back to POS UoM-group / packaging mapping (``get_product_data`` path)
+        and rule chain when the standard engine returns 0.
+        """
+        try:
+            return self._rest_product_unit_price_impl(product, pl_rec, price_uom)
+        except AttributeError as err:
+            if not _is_missing_uom_po_id_attribute_error(err):
+                raise
+            _logger.warning(
+                "pos_perfume REST: price resolution fallback (missing uom_po_id): %s",
+                err,
+            )
+            prod = product.sudo()
+            return float(prod.list_price or 0.0)
+
     def _strict_pricelist_flag(self, get_arg):
         v = (get_arg("strict_pricelist") or "").strip().lower()
         return v in ("1", "true", "yes", "on")
@@ -352,6 +386,18 @@ class PosPerfumeRestController(http.Controller):
         if not fn and prod.product_tmpl_id:
             fn = getattr(prod.product_tmpl_id, "foreign_name", None) or ""
         return fn or ""
+
+    def _rest_safe_qty_available(self, prod):
+        """``qty_available`` can trigger code paths that reference removed ``uom_po_id``."""
+        try:
+            return float(prod.qty_available)
+        except AttributeError as err:
+            if _is_missing_uom_po_id_attribute_error(err):
+                _logger.debug("REST qty_available fallback (uom_po_id): %s", err)
+                return 0.0
+            raise
+        except Exception:
+            return 0.0
 
     def _rest_category_type_payload(self, prod, ext):
         """Shape used by the development mobile catalog (fragrances + properties)."""
@@ -418,7 +464,16 @@ class PosPerfumeRestController(http.Controller):
                 pl_uom = cand
 
         ctrl = PosPerfumeController()
-        raw_uoms = ctrl._get_uoms_from_pricelist(prod, pl_uom)
+        try:
+            raw_uoms = ctrl._get_uoms_from_pricelist(prod, pl_uom)
+        except AttributeError as err:
+            if not _is_missing_uom_po_id_attribute_error(err):
+                raise
+            _logger.warning(
+                "pos_perfume REST: _get_uoms_from_pricelist fallback (missing uom_po_id): %s",
+                err,
+            )
+            raw_uoms = []
         available_uoms = [
             {"id": u["id"], "name": u["name"], "price": float(u.get("price") or 0.0)}
             for u in raw_uoms
@@ -472,7 +527,7 @@ class PosPerfumeRestController(http.Controller):
             "uom_id": uom_payload,
             "uom_name": (pu.name or "") if pu else "",
             "list_price": list_price,
-            "qty_available": float(prod.qty_available),
+            "qty_available": self._rest_safe_qty_available(prod),
             "color_class": color_class or "",
             "badge_text": badge_text or "",
             "active": bool(prod.active),
