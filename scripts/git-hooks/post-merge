@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# After a successful merge (e.g. git pull), restart Odoo when on the tracked branch.
+# Install once: ./scripts/install_odoo_restart_git_hooks.sh
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ -z "$REPO_ROOT" ]]; then
+  exit 0
+fi
+
+BRANCH="$(git branch --show-current 2>/dev/null || true)"
+TARGET_BRANCH="${ODOO_RESTART_GIT_BRANCH:-development}"
+
+if [[ "$BRANCH" != "$TARGET_BRANCH" ]]; then
+  exit 0
+fi
+
+if [[ ! -x "$REPO_ROOT/scripts/restart_odoo_ws.sh" ]]; then
+  exit 0
+fi
+
+echo "[git hook post-merge] Branch $BRANCH: restarting Odoo (odoo_ws.conf)..."
+"$REPO_ROOT/scripts/restart_odoo_ws.sh" || {
+  echo "[git hook post-merge] restart script failed (merge already completed)." >&2
+  exit 0
+}
