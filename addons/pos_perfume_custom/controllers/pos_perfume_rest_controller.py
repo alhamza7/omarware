@@ -850,12 +850,22 @@ class PosPerfumeRestController(http.Controller):
 
     # --- products ----------------------------------------------------------
 
-    @http.route(f"{_PREFIX}/products", type="http", auth="none", methods=list(_READ), csrf=False, cors="*")
-    def products(self, **kwargs):
-        if not self._pos_rest_auth():
-            return self._fail("Unauthorized", 401)
+    def _rest_products_catalog(self, pget):
+        """Build the same payload as ``GET /api/pos_perfume/v1/products`` (for reuse by CRM purchase search).
+
+        ``pget(key, default=None)`` behaves like ``_rest_products_query_params()`` output.
+
+        Extra keys (optional, for internal callers):
+
+        - ``purchase_po_only`` (bool): restrict to ``purchase_ok`` variants.
+        - ``hide_zero_stock`` (bool): drop rows with ``qty_available`` ≤ 0 (paginate after filter;
+          when no brand/category/has_price filters, scan is capped at 5000 rows for safety).
+        - ``supplier_partner_id`` (int): restrict to templates that list this ``res.partner`` in
+          ``seller_ids`` (requires Purchase / ``seller_ids`` on ``product.template``).
+
+        On error returns ``{"_error": True, "message": str, "code": int}`` instead of items.
+        """
         Product = request.env["product.product"].sudo()
-        pget = self._rest_products_query_params()
         q = (pget("query") or "").strip()
 
         lim_raw = self._rest_int_param(pget, "limit", None)
@@ -874,6 +884,26 @@ class PosPerfumeRestController(http.Controller):
             domain.append(("active", "=", True))
         if not self._rest_query_bool(pget, "include_non_sale", False):
             domain.append(("sale_ok", "=", True))
+        if self._rest_query_bool(pget, "purchase_po_only", False):
+            domain.append(("purchase_ok", "=", True))
+
+        sp_raw = pget("supplier_partner_id")
+        if sp_raw not in (None, "", False):
+            try:
+                spid = int(sp_raw)
+            except (TypeError, ValueError):
+                return {"_error": True, "message": "supplier_partner_id must be an integer", "code": 400}
+            Template = request.env["product.template"].sudo()
+            if "seller_ids" not in Template._fields:
+                return {
+                    "_error": True,
+                    "message": (
+                        "supplier_partner_id filter is not available: product templates have no vendor links "
+                        "(install the Purchase app or configure seller_ids)."
+                    ),
+                    "code": 501,
+                }
+            domain = ["&"] + domain + [("product_tmpl_id.seller_ids.partner_id", "=", spid)]
 
         if q:
             or_terms = [
@@ -895,10 +925,11 @@ class PosPerfumeRestController(http.Controller):
                 Cat = request.env["product.category"].sudo().with_context(active_test=False)
                 root = Cat.browse(cid)
                 if not root.exists():
-                    return self._fail(
-                        "Unknown product category for categ_id / category_id.",
-                        404,
-                    )
+                    return {
+                        "_error": True,
+                        "message": "Unknown product category for categ_id / category_id.",
+                        "code": 404,
+                    }
                 subtree = Cat.search([("id", "child_of", root.ids)])
                 domain = ["&"] + domain + [("categ_id", "in", subtree.ids)]
 
@@ -912,10 +943,11 @@ class PosPerfumeRestController(http.Controller):
         if self._rest_query_bool(pget, "uom_filter_catalog", False):
             uom_rec = self._rest_resolve_catalog_uom(pget)
             if not uom_rec or not uom_rec.exists():
-                return self._fail(
-                    "uom_filter_catalog=1 requires a resolvable uom or uom_id (e.g. uom=kg).",
-                    400,
-                )
+                return {
+                    "_error": True,
+                    "message": "uom_filter_catalog=1 requires a resolvable uom or uom_id (e.g. uom=kg).",
+                    "code": 400,
+                }
             align = self._rest_query_bool(pget, "uom_align_sap_sales_unit", True)
             narrowed = self._rest_product_ids_for_uom_filter(
                 request.env, uom_rec.id, align_sap_sales_unit=align
@@ -927,7 +959,8 @@ class PosPerfumeRestController(http.Controller):
         has_price_only = self._rest_query_bool(pget, "has_price_only", False) or str(
             pget("has_price_only") or ""
         ).strip() == "1"
-        use_python_filters = bool(brand_raw or cat_type_raw or has_price_only)
+        hide_zero_stock = self._rest_query_bool(pget, "hide_zero_stock", False)
+        use_python_filters = bool(brand_raw or cat_type_raw or has_price_only or hide_zero_stock)
 
         pl_rec = False
         if pl_id:
@@ -951,7 +984,10 @@ class PosPerfumeRestController(http.Controller):
             return out
 
         if use_python_filters:
-            all_recs = Product.search(domain, order="name")
+            if hide_zero_stock and not (brand_raw or cat_type_raw or has_price_only):
+                all_recs = Product.search(domain, order="name", limit=5000)
+            else:
+                all_recs = Product.search(domain, order="name")
             seq_prods = []
             for prod in all_recs:
                 if brand_raw and not self._rest_product_matches_brand_param(prod, brand_raw):
@@ -964,6 +1000,8 @@ class PosPerfumeRestController(http.Controller):
             rows = _rows_for_products(seq_prods)
             if has_price_only:
                 rows = [r for r in rows if r.get("has_price")]
+            if hide_zero_stock:
+                rows = [r for r in rows if float(r.get("qty_available") or 0) > 0.0001]
             total = len(rows)
             if limit is None:
                 items = rows
@@ -986,17 +1024,25 @@ class PosPerfumeRestController(http.Controller):
                 offset_out = offset
                 limit_out = limit
 
-        return self._ok(
-            {
-                "items": items,
-                "total": total,
-                "offset": offset_out,
-                "limit": limit_out,
-                "returned": len(items),
-                "fetch_all": bool(limit is None),
-                "pricelist_id": pl_used_id,
-            }
-        )
+        return {
+            "items": items,
+            "total": total,
+            "offset": offset_out,
+            "limit": limit_out,
+            "returned": len(items),
+            "fetch_all": bool(limit is None),
+            "pricelist_id": pl_used_id,
+        }
+
+    @http.route(f"{_PREFIX}/products", type="http", auth="none", methods=list(_READ), csrf=False, cors="*")
+    def products(self, **kwargs):
+        if not self._pos_rest_auth():
+            return self._fail("Unauthorized", 401)
+        pget = self._rest_products_query_params()
+        result = self._rest_products_catalog(pget)
+        if result.get("_error"):
+            return self._fail(result["message"], result.get("code", 400))
+        return self._ok(result)
 
     @http.route(
         f"{_PREFIX}/products/<int:product_id>",
