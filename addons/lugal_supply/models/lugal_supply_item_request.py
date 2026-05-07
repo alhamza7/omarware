@@ -5,7 +5,7 @@ from odoo.exceptions import UserError
 
 
 class LugalSupplyItemRequest(models.Model):
-    """Internal procurement item request (Notion: request order)."""
+    """Internal procurement item request (Notion: request order)............................................................."""
     _name = 'lugal.supply.item.request'
     _description = 'Supply Item Request'
     _inherit = [
