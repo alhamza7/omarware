@@ -195,8 +195,20 @@ class PosBridgeController(http.Controller):
                 else:
                     domain += ['|', ('name', 'ilike', text), ('default_code', 'ilike', text)]
 
-            Product = request.env['product.product']
+            Product = request.env['product.product'].sudo()
             total = Product.search_count(domain)
+
+            # When the user types something that looks like an exact item code
+            # (no spaces), also include any product whose default_code matches
+            # case-insensitively — even if it is archived or has sale_ok=False.
+            # This ensures items like LOC00516 that are deactivated in Odoo but
+            # still exist in SAP are always findable by their exact code.
+            _extra_by_code_ids: set = set()
+            if text and ' ' not in text:
+                extra = Product.with_context(active_test=False).search([
+                    ('default_code', '=ilike', text),
+                ], order='name asc')
+                _extra_by_code_ids = set(extra.ids)
 
             fetch_all_flag = bool(fetch_all) or kwargs.get('fetch_all') is True
 
@@ -237,8 +249,18 @@ class PosBridgeController(http.Controller):
                 offset_out = off
                 limit_out = lim
 
+            # Merge exact-code matches (including inactive) that weren't already
+            # returned by the normal domain search.
+            seen_ids = set(products.ids)
+            extra_records = Product.browse()
+            if _extra_by_code_ids:
+                missing = _extra_by_code_ids - seen_ids
+                if missing:
+                    extra_records = Product.with_context(active_test=False).browse(list(missing))
+                    total += len(extra_records)
+
             items = []
-            for p in products:
+            for p in list(products) + list(extra_records):
                 foreign_name = getattr(p, 'foreign_name', '') or ''
                 sales_uom = _get_sales_uom(p)
                 items.append({
@@ -249,6 +271,7 @@ class PosBridgeController(http.Controller):
                     'uom_id': {'id': sales_uom.id, 'name': sales_uom.name},
                     'list_price': p.list_price,
                     'qty_available': p.qty_available,
+                    'active': p.active,
                 })
             return {
                 'success': True,
