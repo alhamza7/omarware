@@ -1267,6 +1267,7 @@ class LugalEmailController(http.Controller):
 
                 if 'is_read' in body:
                     is_read = bool(body['is_read'])
+                    was_already_read = bool(msg.read_at)
                     vals['is_read'] = is_read
                     if is_read and not msg.read_at:
                         from datetime import datetime
@@ -1280,6 +1281,23 @@ class LugalEmailController(http.Controller):
                             msg.account_id.sudo()._imap_store_async(
                                 imap_uid, imap_folder, remove_flags=['\\Seen']
                             )
+                    # Send MDN if marking inbox message as read for the first time
+                    # and sender requested a read receipt.
+                    if (is_read and not was_already_read
+                            and msg.request_read_receipt
+                            and msg.folder in ('inbox',)
+                            and msg.from_address
+                            and msg.message_id):
+                        try:
+                            _send_mdn_async(
+                                acc=msg.account_id,
+                                to_address=msg.from_address,
+                                original_message_id=msg.message_id,
+                                original_subject=msg.subject or '',
+                                recipient_email=msg.account_id.email_address,
+                            )
+                        except Exception as _mdn_exc:
+                            _logger.warning('MDN trigger failed (patch): %s', _mdn_exc)
 
                 if not vals:
                     return _json_response(
@@ -2176,6 +2194,8 @@ class LugalEmailController(http.Controller):
                 return _not_found()
             body     = json.loads(request.httprequest.data or '{}')
             is_read  = body.get('is_read', True)
+            # Capture pre-write state before the write() override may stamp read_at
+            was_already_read = bool(msg.read_at)
             msg.write({'is_read': is_read})
             # Push \Seen / -\Seen flag to IMAP server
             if msg.imap_uid:
@@ -2188,6 +2208,23 @@ class LugalEmailController(http.Controller):
                     msg.account_id.sudo()._imap_store_async(
                         msg.imap_uid, imap_folder, remove_flags=['\\Seen']
                     )
+            # Send MDN if: marking as read for the first time, the original
+            # sender requested a receipt, and this is an inbox message.
+            if (is_read and not was_already_read
+                    and msg.request_read_receipt
+                    and msg.folder in ('inbox',)
+                    and msg.from_address
+                    and msg.message_id):
+                try:
+                    _send_mdn_async(
+                        acc=msg.account_id,
+                        to_address=msg.from_address,
+                        original_message_id=msg.message_id,
+                        original_subject=msg.subject or '',
+                        recipient_email=msg.account_id.email_address,
+                    )
+                except Exception as _mdn_exc:
+                    _logger.warning('MDN trigger failed (toggle_read): %s', _mdn_exc)
             return _json_response({'success': True, 'data': {
                 'is_read': is_read,
                 'read_at': _to_riyadh_iso(msg.read_at) if msg.read_at else None,
@@ -4189,6 +4226,102 @@ def _do_smtp_send(smtp_host, smtp_port, smtp_use_tls, username, password,
             _logger.warning('_do_smtp_send: write-back failed for msg %s: %s', msg_id, write_exc)
 
     return delivered, error_msg, refused
+
+
+def _send_mdn_async(acc, to_address, original_message_id, original_subject, recipient_email):
+    """
+    Send a Message Disposition Notification (MDN / read receipt) asynchronously.
+
+    Called when a user marks an inbox message as read and the original sender
+    requested a receipt (Disposition-Notification-To header, RFC 3798).
+
+    acc                  – lugal.email.account (sender's / recipient's account)
+    to_address           – RFC-2822 address to deliver the MDN to (original From / DNT)
+    original_message_id  – Message-ID of the email being acknowledged
+    original_subject     – Subject of the original email
+    recipient_email      – Email address of the person who read the message
+    """
+    import threading
+
+    db_name      = acc.env.cr.dbname
+    acc_id       = acc.id
+    smtp_host    = acc.smtp_host
+    smtp_port    = acc.smtp_port
+    smtp_use_tls = acc.smtp_use_tls
+    username     = acc.username or acc.email_address
+    password     = acc.password or ''
+    from_address = acc.email_address
+    display_name = (acc.display_name_field or '').strip()
+
+    def _bg():
+        import smtplib
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+        from email.mime.base import MIMEBase
+        from email.utils import formatdate, make_msgid
+
+        try:
+            # RFC 3798 MDN structure:
+            #   multipart/report; report-type=disposition-notification
+            #     ├── text/plain            (human-readable notice)
+            #     └── message/disposition-notification  (machine-readable fields)
+            mdn = MIMEMultipart('report', report_type='disposition-notification')
+            from_hdr = f'{display_name} <{from_address}>' if display_name else from_address
+            mdn['From']       = from_hdr
+            mdn['To']         = to_address
+            mdn['Subject']    = f'Read: {original_subject}' if original_subject else 'Read: (no subject)'
+            mdn['Date']       = formatdate(localtime=True)
+            mdn['Message-ID'] = make_msgid(
+                domain=from_address.split('@')[-1] if '@' in from_address else 'mail'
+            )
+
+            # Part 1: Human-readable text (required by RFC 3798)
+            human_text = (
+                f'Your message "{original_subject}" was read by {recipient_email}.'
+            )
+            mdn.attach(MIMEText(human_text, 'plain', 'utf-8'))
+
+            # Part 2: Machine-readable notification
+            notif_body = (
+                f'Reporting-UA: LugalAI Mail Server\r\n'
+                f'Final-Recipient: rfc822; {recipient_email}\r\n'
+                f'Original-Recipient: rfc822; {recipient_email}\r\n'
+                f'Original-Message-ID: {original_message_id}\r\n'
+                f'Disposition: manual-action/MDN-sent-automatically; displayed\r\n'
+            )
+            notif_part = MIMEBase('message', 'disposition-notification')
+            notif_part.set_payload(notif_body)
+            mdn.attach(notif_part)
+
+            raw_mdn = mdn.as_string()
+
+            # Send via SMTP (same credentials as the receiver's outbound SMTP)
+            if smtp_port == 465:
+                server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=30)
+                server.ehlo()
+            elif smtp_use_tls:
+                server = smtplib.SMTP(smtp_host, smtp_port, timeout=30)
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+            else:
+                server = smtplib.SMTP(smtp_host, smtp_port, timeout=30)
+                server.ehlo()
+
+            server.login(username, password)
+            server.sendmail(from_address, [to_address], raw_mdn)
+            server.quit()
+            _logger.info(
+                'MDN sent: from=%s to=%s orig_mid=%s',
+                from_address, to_address, original_message_id,
+            )
+        except Exception as exc:
+            _logger.warning(
+                'MDN send failed: from=%s to=%s orig_mid=%s error=%s',
+                from_address, to_address, original_message_id, exc,
+            )
+
+    threading.Thread(target=_bg, daemon=True, name=f'mdn-acc{acc_id}').start()
 
 
 def _send_via_smtp_async(acc, to_list, subject, body_html, body_text, cc=None, bcc=None,

@@ -761,6 +761,20 @@ class LugalEmailAccount(models.Model):
             rt_pairs = getaddresses([reply_to_raw])
             reply_to_addr = rt_pairs[0][1] if rt_pairs else ''
 
+        # Detect whether the sender requested a read receipt (RFC 3798).
+        # We honour both the standard header and the legacy Return-Receipt-To.
+        # Setting request_read_receipt=True on the received message tells the
+        # mark-read endpoints to send back an MDN when the user reads this email.
+        _dnt_raw = (msg.get('Disposition-Notification-To') or
+                    msg.get('Return-Receipt-To') or '').strip()
+        _incoming_request_receipt = bool(_dnt_raw)
+        # Also store the notification address so we know exactly where to send
+        # the MDN (usually identical to From, but not always).
+        _dnt_address = ''
+        if _dnt_raw:
+            _dnt_pairs = getaddresses([_dnt_raw])
+            _dnt_address = _dnt_pairs[0][1] if _dnt_pairs else ''
+
         # References: chain of ancestor Message-IDs used for thread grouping
         references_raw = (msg.get('References') or msg.get('references') or '').strip()
         references_ids = references_raw.split() if references_raw else []
@@ -886,27 +900,30 @@ class LugalEmailAccount(models.Model):
                 limit=1,
             )
         vals = {
-            'account_id':    self.id,
-            'folder':        folder_key,
-            'imap_uid':      uid_int,
-            'subject':       subject or '(no subject)',
-            'from_name':     from_name or '',
-            'from_address':  from_addr or '',
-            'to_addresses':  json.dumps(to_list),
-            'cc_addresses':  json.dumps(cc_list),
-            'bcc_addresses': json.dumps(bcc_list),
-            'reply_to':      reply_to_addr or False,
-            'message_id':    message_id,
-            'in_reply_to':   in_reply_to_hdr or False,
-            'references':    references_raw or False,
-            'thread_id':     thread_id or False,
-            'date':          dt,
-            'is_read':       is_read,
-            'is_deleted':    False,
-            'active':        True,
-            'is_mentioned':  is_mentioned,
-            'is_important':  is_important,
-            'message_size':  message_size,
+            'account_id':           self.id,
+            'folder':               folder_key,
+            'imap_uid':             uid_int,
+            'subject':              subject or '(no subject)',
+            'from_name':            from_name or '',
+            'from_address':         from_addr or '',
+            'to_addresses':         json.dumps(to_list),
+            'cc_addresses':         json.dumps(cc_list),
+            'bcc_addresses':        json.dumps(bcc_list),
+            'reply_to':             reply_to_addr or False,
+            'message_id':           message_id,
+            'in_reply_to':          in_reply_to_hdr or False,
+            'references':           references_raw or False,
+            'thread_id':            thread_id or False,
+            'date':                 dt,
+            'is_read':              is_read,
+            'is_deleted':           False,
+            'active':               True,
+            'is_mentioned':         is_mentioned,
+            'is_important':         is_important,
+            'message_size':         message_size,
+            # True when the sender included Disposition-Notification-To.
+            # The mark-read endpoints use this to send an MDN back.
+            'request_read_receipt': _incoming_request_receipt,
         }
         if headers_only:
             if not existing:
@@ -950,6 +967,12 @@ class LugalEmailAccount(models.Model):
             # race where the new message hasn't been matched yet.
             if not vals.get('thread_id') and existing.thread_id:
                 vals.pop('thread_id', None)
+
+            # Don't downgrade request_read_receipt from True to False on
+            # re-sync (e.g. a sent record set True by the send endpoint, but
+            # the Sent folder IMAP copy was imported before the fix landed).
+            if not vals.get('request_read_receipt') and existing.request_read_receipt:
+                vals.pop('request_read_receipt', None)
 
             existing.write(vals)
             stored_msg = existing
