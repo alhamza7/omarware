@@ -41,11 +41,15 @@ PO_STATUS_LABEL = {
 
 
 def _json_http(payload, status=200):
-    return Response(
+    resp = Response(
         json.dumps(payload, ensure_ascii=False, default=str),
         status=status,
         headers=[('Content-Type', 'application/json; charset=utf-8')],
     )
+    resp.headers['Access-Control-Allow-Origin']  = '*'
+    resp.headers['Access-Control-Allow-Headers'] = 'Authorization, Content-Type, X-Odoo-Database'
+    resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, PATCH, PUT, DELETE, OPTIONS'
+    return resp
 
 
 def _allowed_upload_mime(mime):

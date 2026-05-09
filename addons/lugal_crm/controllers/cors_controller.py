@@ -1,15 +1,20 @@
 # -*- coding: utf-8 -*-
 """
-CORS preflight handler for all /api/crm/* and /lugal/* routes.
+CORS preflight handler for all API routes.
 
-In development the Vite proxy handles CORS transparently — these headers
-are only needed when the frontend communicates directly with Odoo (staging
-/ production or when testing via tools like curl / Postman).
+Covers:
+  /api/crm/*     — CRM / supply / chat endpoints
+  /api/lugal/*   — Email, rules, quick-steps endpoints
+  /lugal/*       — Auth (login, refresh, logout, password reset)
+
+CORS headers are also added to every actual response via each controller's
+_json_response helper, so both preflight (OPTIONS) and real requests work
+regardless of which port or host the frontend is served from.
 """
 
 import logging
 from odoo import http
-from odoo.http import request, Response
+from odoo.http import Response
 
 _logger = logging.getLogger(__name__)
 
@@ -20,9 +25,10 @@ _ALLOW_HEADERS = ', '.join([
     'Accept',
     'Origin',
     'X-Requested-With',
+    'X-Odoo-Database',
 ])
 
-# Allowed origins — restrict to your domain in production
+# Allowed origins — open to any origin so any FE port works
 _ALLOW_ORIGINS = '*'
 
 
@@ -33,19 +39,22 @@ def _cors_response(status=200, body=''):
         status=status,
         headers={
             'Access-Control-Allow-Origin':      _ALLOW_ORIGINS,
-            'Access-Control-Allow-Methods':     'GET, POST, OPTIONS',
+            'Access-Control-Allow-Methods':     'GET, POST, PATCH, PUT, DELETE, OPTIONS',
             'Access-Control-Allow-Headers':     _ALLOW_HEADERS,
             'Access-Control-Max-Age':           '86400',
-            'Access-Control-Allow-Credentials': 'true',
         },
     )
 
 
 class CorsController(http.Controller):
-    """Handle HTTP OPTIONS preflight for CRM and auth API routes."""
+    """Handle HTTP OPTIONS preflight for all Lugal API routes."""
 
     @http.route(
-        ['/api/crm/<path:subpath>', '/lugal/<path:subpath>'],
+        [
+            '/api/crm/<path:subpath>',   # CRM / supply / chat
+            '/api/lugal/<path:subpath>', # Email, rules, quick-steps
+            '/lugal/<path:subpath>',     # Auth endpoints
+        ],
         type='http',
         auth='none',
         csrf=False,

@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-# File: addons/lugal_email/models/email_rule.py
 # Component: Lugal Email — lugal.email.rule model (email_rule.py)
 """
 lugal.email.rule  — per-user / per-account inbox rules.
@@ -35,6 +34,12 @@ import logging
 from odoo import models, fields, api
 
 _logger = logging.getLogger(__name__)
+
+# Folders that are valid sources for inbox rule execution.
+# Rules only fire when a message arrives in one of these folders.
+# This prevents rules from re-firing on messages that were already
+# moved to a custom folder (e.g. by a previous rule application).
+_RULE_SOURCE_FOLDERS = {'inbox'}
 
 
 class LugalEmailRule(models.Model):
@@ -159,8 +164,7 @@ class LugalEmailRule(models.Model):
         """
         write_vals = {}
         stop       = self.stop_processing
-        # Track any IMAP move we need to fire after writing the DB row.
-        _imap_moves = []   # list of (imap_uid, from_imap_path, to_imap_path)
+        _imap_moves = []   # list of (kind, imap_uid, from_imap_path, dest)
 
         LOGICAL = {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'}
 
@@ -180,35 +184,32 @@ class LugalEmailRule(models.Model):
                     if not value:
                         continue
                     if value.lower() in LOGICAL:
-                        # Logical folder — just update local DB column.
                         write_vals['folder'] = value.lower()
-                        # Also fire the IMAP move for standard folders.
                         if msg_record.imap_uid and msg_record.account_id:
                             acc = msg_record.account_id
-                            from_imap = acc._get_server_folder_name(
-                                msg_record.folder) if msg_record.folder not in LOGICAL \
-                                else ('INBOX' if msg_record.folder == 'inbox'
-                                      else acc._get_server_folder_name(msg_record.folder))
+                            cur = msg_record.folder or 'inbox'
+                            if cur.lower() == 'inbox':
+                                from_imap = 'INBOX'
+                            elif cur.lower() in LOGICAL:
+                                from_imap = acc._get_server_folder_name(cur.lower())
+                            else:
+                                from_imap = cur
                             _imap_moves.append(('logical', msg_record.imap_uid, from_imap, value.lower()))
                     else:
-                        # Custom IMAP folder path (e.g. "INBOX.AllFromUmar").
-                        # Store the raw path in the folder field so the messages
-                        # list endpoint can query it with folder=INBOX.AllFromUmar.
+                        # Custom IMAP path — store raw path in folder field
                         write_vals['folder'] = value
-                        # Queue an async IMAP MOVE to the raw path.
                         if msg_record.imap_uid and msg_record.account_id:
                             acc = msg_record.account_id
-                            # Determine the current IMAP folder path for the source.
-                            cur_folder = msg_record.folder or 'inbox'
-                            if cur_folder.lower() == 'inbox':
+                            cur = msg_record.folder or 'inbox'
+                            if cur.lower() == 'inbox':
                                 from_imap = 'INBOX'
-                            elif cur_folder.lower() in LOGICAL:
+                            elif cur.lower() in LOGICAL:
                                 try:
-                                    from_imap = acc._get_server_folder_name(cur_folder.lower())
+                                    from_imap = acc._get_server_folder_name(cur.lower())
                                 except Exception:
                                     from_imap = 'INBOX'
                             else:
-                                from_imap = cur_folder   # already a raw IMAP path
+                                from_imap = cur
                             _imap_moves.append(('raw', msg_record.imap_uid, from_imap, value))
                 elif action == 'stop_processing':
                     stop = True
@@ -221,7 +222,7 @@ class LugalEmailRule(models.Model):
             except Exception as _e:
                 _logger.warning('Email rule write failed: %s', _e)
 
-        # Fire IMAP moves after the DB write so the row is committed.
+        # Fire IMAP moves after the DB write
         for move in _imap_moves:
             try:
                 kind, imap_uid, from_imap, dest = move
@@ -248,10 +249,24 @@ class LugalEmailRule(models.Model):
 
     @api.model
     def apply_inbox_rules(self, msg_record, msg_vals: dict):
-        """Run all active rules for the message owner against a freshly-created message.
+        """Run all active rules for the message owner against a freshly-imported message.
+
+        IMPORTANT: Rules only fire when the message is in the inbox folder.
+        This prevents:
+          1. Rules re-firing on messages already moved to custom folders
+          2. New emails being immediately swept out of inbox before the FE
+             can display them (which was causing the "notifications show but
+             inbox is empty" bug)
 
         msg_vals: plain dict with the same keys as the create() vals dict.
         """
+        # Guard: only run rules on messages landing in inbox.
+        # Messages imported into sent, custom folders, etc. should not
+        # trigger move rules — they are already where they belong.
+        current_folder = (msg_vals.get('folder') or '').lower().strip()
+        if current_folder not in _RULE_SOURCE_FOLDERS:
+            return
+
         account_id = msg_vals.get('account_id')
         if not account_id:
             return
@@ -261,8 +276,7 @@ class LugalEmailRule(models.Model):
             return
         owner_uid = acc.user_id.id
 
-        # Augment vals with boolean has_attachments sentinel (attachments not yet
-        # linked when this runs, but rules can test other fields).
+        # Augment vals with boolean has_attachments sentinel
         msg_vals_aug = dict(msg_vals, has_attachments=False)
 
         rules = self.sudo().search([
