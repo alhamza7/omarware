@@ -1820,10 +1820,29 @@ class LugalEmailController(http.Controller):
             # the quoted block is assembled here so raw HTML never appears in the editor.
             user_html   = (body.get('body_html', '') or '').strip()
             user_text   = (body.get('body_text', '') or '').strip()
-            quoted_html = _build_quoted_html(orig)
-            quoted_text = _build_quoted_text(orig)
-            final_html  = (user_html + quoted_html) if user_html else quoted_html
-            final_text  = (user_text + '\n\n' + quoted_text) if user_text else quoted_text
+
+            # skip_auto_quote=true → FE has already embedded the quoted block
+            # inside body_html itself.  In that case, don't append it a second
+            # time or the email will contain double quoted sections and double
+            # signatures.  FE should set this flag whenever it places the
+            # quoted_body_html from the GET prefill directly into the editable
+            # composer field that it sends back on POST.
+            skip_auto_quote = bool(body.get('skip_auto_quote', False))
+
+            # Heuristic safety-net: even without the explicit flag, if the
+            # submitted body_html already contains a blockquote we assume the
+            # FE included the quote and skip appending it again.
+            if not skip_auto_quote and user_html:
+                skip_auto_quote = '</blockquote>' in user_html.lower()
+
+            if skip_auto_quote:
+                final_html = user_html
+                final_text = user_text
+            else:
+                quoted_html = _build_quoted_html(orig)
+                quoted_text = _build_quoted_text(orig)
+                final_html  = (user_html + quoted_html) if user_html else quoted_html
+                final_text  = (user_text + '\n\n' + quoted_text) if user_text else quoted_text
 
             thread_vals = _thread_vals_for_reply(orig)
             importance_raw       = (body.get('importance') or 'normal').lower()
@@ -1999,10 +2018,19 @@ class LugalEmailController(http.Controller):
             # Build complete email body: user's content + quoted original.
             user_html   = (body.get('body_html', '') or '').strip()
             user_text   = (body.get('body_text', '') or '').strip()
-            quoted_html = _build_quoted_html(orig)
-            quoted_text = _build_quoted_text(orig)
-            final_html  = (user_html + quoted_html) if user_html else quoted_html
-            final_text  = (user_text + '\n\n' + quoted_text) if user_text else quoted_text
+
+            skip_auto_quote = bool(body.get('skip_auto_quote', False))
+            if not skip_auto_quote and user_html:
+                skip_auto_quote = '</blockquote>' in user_html.lower()
+
+            if skip_auto_quote:
+                final_html = user_html
+                final_text = user_text
+            else:
+                quoted_html = _build_quoted_html(orig)
+                quoted_text = _build_quoted_text(orig)
+                final_html  = (user_html + quoted_html) if user_html else quoted_html
+                final_text  = (user_text + '\n\n' + quoted_text) if user_text else quoted_text
 
             importance_raw       = (body.get('importance') or 'normal').lower()
             request_read_receipt = bool(body.get('request_read_receipt', False))

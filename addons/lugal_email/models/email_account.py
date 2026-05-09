@@ -769,6 +769,43 @@ class LugalEmailAccount(models.Model):
         message_size = len(raw_bytes) if raw_bytes else 0
 
         Message = self.env['lugal.email.message'].sudo()
+
+        # ── Subject-based thread linking (fallback) ───────────────────────────
+        # Some email clients (mobile apps, certain web mailers) do NOT include
+        # References or In-Reply-To headers on reply emails even when the subject
+        # carries the "Re:" prefix.  Without this fallback every incoming "Re:"
+        # email without headers becomes its own thread root, causing back-and-forth
+        # conversations to appear as separate unrelated inbox items.
+        #
+        # Rule: only activate when:
+        #  1. thread_id == message_id  (no parent was found via standard headers)
+        #  2. subject starts with a reply/forward prefix ("Re:", "Fwd:", …)
+        #  3. a matching message exists in this account with the same normalised subject
+        #
+        # We look for the OLDEST matching message (order by id asc, limit 1) so
+        # all subsequent replies converge on the true root thread_id.
+        _REPLY_PREFIXES = re.compile(
+            r'^(?:re|fwd?|aw|rif|sv|vs|antw|回复|回覆|答复|返回)[\s:]+',
+            re.IGNORECASE,
+        )
+        if thread_id == (message_id or '') and _REPLY_PREFIXES.match(subject or ''):
+            _norm_subj = _REPLY_PREFIXES.sub('', subject or '').strip()
+            if _norm_subj:
+                try:
+                    _root = Message.search([
+                        ('account_id', '=', self.id),
+                        ('subject',    'ilike', _norm_subj),
+                        ('is_deleted', '=', False),
+                    ], order='id asc', limit=1)
+                    if _root and _root.thread_id and _root.thread_id != (message_id or ''):
+                        thread_id = _root.thread_id
+                        _logger.debug(
+                            'subject-thread-link: msg_id=%s subject=%r → thread_id=%s (root msg id=%s)',
+                            message_id, _norm_subj, thread_id, _root.id,
+                        )
+                except Exception:
+                    pass  # never fail message import due to thread-link search error
+
         # Search by imap_uid first; also check message_id as a secondary key so
         # we never store the same RFC-2822 message twice even if the UID changed.
         domain = [('account_id', '=', self.id), ('folder', '=', folder_key), ('imap_uid', '=', uid_int)]
