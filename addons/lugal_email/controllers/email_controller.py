@@ -304,6 +304,9 @@ def _message_to_dict(msg, full=False):
         'smtp_status':    msg.smtp_status or 'pending',
         'thread_id':      msg.thread_id or None,
         'in_reply_to':    msg.in_reply_to or None,
+        # Read receipt tracking fields
+        'request_read_receipt': bool(msg.request_read_receipt),
+        'recipient_read_at':    _to_riyadh_iso(msg.recipient_read_at) if msg.recipient_read_at else None,
         'crm_links': {
             'customer': {'id': msg.linked_customer_id, 'name': msg.linked_customer_name}
                         if msg.linked_customer_id else None,
@@ -1710,21 +1713,25 @@ class LugalEmailController(http.Controller):
                 if not acc:
                     return _json_response({'success': False, 'error': 'No email account configured'}, 400)
 
+            importance_raw       = (body.get('importance') or 'normal').lower()
+            request_read_receipt = bool(body.get('request_read_receipt', False))
+
             # Store in sent folder
             msg = request.env['lugal.email.message'].sudo().create({
-                'account_id':   acc.id,
-                'folder':       'sent',
-                'subject':      subject,
-                'from_name':    acc.display_name_field or acc.email_address,
-                'from_address': acc.email_address,
-                'to_addresses': json.dumps([{'email': e} for e in to_emails]),
-                'cc_addresses': json.dumps([{'email': e} for e in cc_emails]),
-                'bcc_addresses': json.dumps([{'email': e} for e in bcc_emails]),
-                'body_html':    body_html,
-                'body_text':    body_text,
-                'is_read':      True,
-                'body_fetched': True,
-                'date':         __import__('odoo').fields.Datetime.now(),
+                'account_id':          acc.id,
+                'folder':              'sent',
+                'subject':             subject,
+                'from_name':           acc.display_name_field or acc.email_address,
+                'from_address':        acc.email_address,
+                'to_addresses':        json.dumps([{'email': e} for e in to_emails]),
+                'cc_addresses':        json.dumps([{'email': e} for e in cc_emails]),
+                'bcc_addresses':       json.dumps([{'email': e} for e in bcc_emails]),
+                'body_html':           body_html,
+                'body_text':           body_text,
+                'is_read':             True,
+                'body_fetched':        True,
+                'date':                __import__('odoo').fields.Datetime.now(),
+                'request_read_receipt': request_read_receipt,
             })
             # New compose: this message IS the root of its own thread.
             if msg.message_id and not msg.thread_id:
@@ -1743,9 +1750,6 @@ class LugalEmailController(http.Controller):
             # Commit NOW so the background SMTP thread can see the message row
             # and attachments immediately via its own fresh cursor.
             request.env.cr.commit()
-
-            importance_raw       = (body.get('importance') or 'normal').lower()
-            request_read_receipt = bool(body.get('request_read_receipt', False))
 
             # Fire SMTP in background — all file I/O + network happens in daemon
             # thread; the HTTP response is returned without waiting.
@@ -1848,20 +1852,21 @@ class LugalEmailController(http.Controller):
             importance_raw       = (body.get('importance') or 'normal').lower()
             request_read_receipt = bool(body.get('request_read_receipt', False))
             vals = {
-                'account_id':    acc.id,
-                'folder':        'sent',
-                'subject':       subject,
-                'from_name':     acc.display_name_field or acc.email_address,
-                'from_address':  acc.email_address,
-                'to_addresses':  json.dumps([{'email': e} for e in to_addr]),
-                'cc_addresses':  json.dumps([{'email': e} for e in _norm_addr_list(body.get('cc', []))]),
-                'bcc_addresses': json.dumps([{'email': e} for e in _norm_addr_list(body.get('bcc', []))]),
-                'body_html':     final_html,
-                'body_text':     final_text,
-                'is_read':       True,
-                'body_fetched':  True,
-                'is_important':  importance_raw == 'high',
-                'date':          __import__('odoo').fields.Datetime.now(),
+                'account_id':          acc.id,
+                'folder':              'sent',
+                'subject':             subject,
+                'from_name':           acc.display_name_field or acc.email_address,
+                'from_address':        acc.email_address,
+                'to_addresses':        json.dumps([{'email': e} for e in to_addr]),
+                'cc_addresses':        json.dumps([{'email': e} for e in _norm_addr_list(body.get('cc', []))]),
+                'bcc_addresses':       json.dumps([{'email': e} for e in _norm_addr_list(body.get('bcc', []))]),
+                'body_html':           final_html,
+                'body_text':           final_text,
+                'is_read':             True,
+                'body_fetched':        True,
+                'is_important':        importance_raw == 'high',
+                'date':                __import__('odoo').fields.Datetime.now(),
+                'request_read_receipt': request_read_receipt,
                 **thread_vals,
             }
             if orig.linked_customer_id:
@@ -2036,20 +2041,21 @@ class LugalEmailController(http.Controller):
             request_read_receipt = bool(body.get('request_read_receipt', False))
             thread_vals = _thread_vals_for_reply(orig)
             vals = {
-                'account_id':    acc.id,
-                'folder':        'sent',
-                'subject':       subject,
-                'from_name':     acc.display_name_field or acc.email_address,
-                'from_address':  acc.email_address,
-                'to_addresses':  json.dumps(to_entries),
-                'cc_addresses':  json.dumps(cc_entries),
-                'bcc_addresses': json.dumps([{'email': e} for e in bcc_addrs]),
-                'body_html':     final_html,
-                'body_text':     final_text,
-                'is_read':       True,
-                'body_fetched':  True,
-                'is_important':  importance_raw == 'high',
-                'date':          __import__('odoo').fields.Datetime.now(),
+                'account_id':          acc.id,
+                'folder':              'sent',
+                'subject':             subject,
+                'from_name':           acc.display_name_field or acc.email_address,
+                'from_address':        acc.email_address,
+                'to_addresses':        json.dumps(to_entries),
+                'cc_addresses':        json.dumps(cc_entries),
+                'bcc_addresses':       json.dumps([{'email': e} for e in bcc_addrs]),
+                'body_html':           final_html,
+                'body_text':           final_text,
+                'is_read':             True,
+                'body_fetched':        True,
+                'is_important':        importance_raw == 'high',
+                'date':                __import__('odoo').fields.Datetime.now(),
+                'request_read_receipt': request_read_receipt,
                 **thread_vals,
             }
             if orig.linked_customer_id:
@@ -2110,28 +2116,29 @@ class LugalEmailController(http.Controller):
             fwd_quoted    = _build_quoted_html(orig)
             fwd_body      = (fwd_user_html + fwd_quoted) if fwd_user_html else fwd_quoted
             fwd_thread = _thread_vals_for_forward(orig)
+            fwd_attachment_ids   = body.get('attachment_ids', [])
+            request_read_receipt = bool(body.get('request_read_receipt', False))
             msg = request.env['lugal.email.message'].sudo().create({
-                'account_id':    acc.id,
-                'folder':        'sent',
-                'subject':       subject,
-                'from_name':     acc.display_name_field or acc.email_address,
-                'from_address':  acc.email_address,
-                'to_addresses':  json.dumps([{'email': e} for e in to_fwd]),
-                'cc_addresses':  json.dumps([{'email': e} for e in cc_fwd]),
-                'bcc_addresses': json.dumps([{'email': e} for e in bcc_fwd]),
-                'body_html':     fwd_body,
-                'body_text':     body.get('body_text', ''),
-                'is_read':       True,
-                'body_fetched':  True,
-                'is_important':  importance_raw == 'high',
-                'date':          __import__('odoo').fields.Datetime.now(),
+                'account_id':          acc.id,
+                'folder':              'sent',
+                'subject':             subject,
+                'from_name':           acc.display_name_field or acc.email_address,
+                'from_address':        acc.email_address,
+                'to_addresses':        json.dumps([{'email': e} for e in to_fwd]),
+                'cc_addresses':        json.dumps([{'email': e} for e in cc_fwd]),
+                'bcc_addresses':       json.dumps([{'email': e} for e in bcc_fwd]),
+                'body_html':           fwd_body,
+                'body_text':           body.get('body_text', ''),
+                'is_read':             True,
+                'body_fetched':        True,
+                'is_important':        importance_raw == 'high',
+                'date':                __import__('odoo').fields.Datetime.now(),
+                'request_read_receipt': request_read_receipt,
                 **fwd_thread,
             })
             # Forward is the root of a new thread on OUR side — use its own msg-id
             if not msg.thread_id and msg.message_id:
                 msg.write({'thread_id': msg.message_id})
-            fwd_attachment_ids   = body.get('attachment_ids', [])
-            request_read_receipt = bool(body.get('request_read_receipt', False))
             if fwd_attachment_ids:
                 try:
                     request.env['ir.attachment'].sudo().browse(

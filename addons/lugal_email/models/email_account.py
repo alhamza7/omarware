@@ -702,6 +702,50 @@ class LugalEmailAccount(models.Model):
                 dt = None
         if not dt:
             dt = fields.Datetime.now()
+
+        # ── MDN (Message Disposition Notification / read receipt) detection ──
+        # When a recipient's mail client returns a read receipt, it arrives as a
+        # multipart/report email with report-type=disposition-notification.
+        # We parse the Original-Message-ID from the notification part, find the
+        # corresponding outbound sent message, stamp its recipient_read_at, and
+        # silently discard the MDN so it never appears as a regular inbox item.
+        try:
+            _ct = (msg.get_content_type() or '').lower()
+            _report_type = (msg.get_param('report-type') or '').lower()
+            if 'report' in _ct and 'disposition-notification' in _report_type:
+                _orig_mid = None
+                for _part in msg.walk():
+                    if 'disposition-notification' in (_part.get_content_type() or '').lower():
+                        try:
+                            _notif_text = _part.get_payload(decode=True)
+                            if isinstance(_notif_text, bytes):
+                                _notif_text = _notif_text.decode('utf-8', errors='replace')
+                            for _line in (_notif_text or '').splitlines():
+                                _key, _, _val = _line.partition(':')
+                                if _key.strip().lower() == 'original-message-id':
+                                    _orig_mid = _val.strip()
+                                    break
+                        except Exception:
+                            pass
+                        break
+                if _orig_mid:
+                    _sent = self.env['lugal.email.message'].sudo().search([
+                        ('account_id', '=', self.id),
+                        ('message_id', '=', _orig_mid),
+                        ('folder',     '=', 'sent'),
+                        ('is_deleted', '=', False),
+                    ], limit=1)
+                    if _sent:
+                        _read_ts = dt or fields.Datetime.now()
+                        _sent.write({'recipient_read_at': _read_ts})
+                        _logger.info(
+                            'MDN: marked sent msg id=%s (mid=%s) recipient_read_at=%s',
+                            _sent.id, _orig_mid, _read_ts,
+                        )
+                    # Discard MDN — do not store it as a regular inbox message
+                    return None
+        except Exception:
+            pass  # never let MDN parsing block regular email import
         to_raw = msg.get_all('To', [])
         pairs = getaddresses(to_raw) if to_raw else []
         to_list = [{'name': self._decode_mime_header(n or ''), 'email': e} for n, e in pairs if e]

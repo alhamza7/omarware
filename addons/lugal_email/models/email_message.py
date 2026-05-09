@@ -121,9 +121,32 @@ class LugalEmailMessage(models.Model):
     # ── RFC-822 message size in bytes (approx; populated on full-body sync) ──
     message_size = fields.Integer(string='Message Size (bytes)', default=0)
 
+    # ── Read receipt (MDN) tracking ───────────────────────────────────────────
+    # True when the sender requested a read receipt (Disposition-Notification-To).
+    request_read_receipt = fields.Boolean(
+        string='Read Receipt Requested', default=False,
+        help='True when the outgoing message included a Disposition-Notification-To header.',
+    )
+    # Populated when an MDN (Message Disposition Notification) is received from
+    # the recipient confirming they opened the message.  Null until that event.
+    recipient_read_at = fields.Datetime(
+        string='Recipient Read At',
+        help='Timestamp from the MDN returned by the recipient\'s email client.',
+    )
+
     # ── Soft delete ───────────────────────────────────────────────────────────
     active     = fields.Boolean(default=True)
     is_deleted = fields.Boolean(default=False, index=True)
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        now = fields.Datetime.now()
+        for vals in vals_list:
+            # Auto-stamp read_at when a new message is created already marked as
+            # read (e.g. outgoing sent/reply messages composed by the user).
+            if vals.get('is_read') and not vals.get('read_at'):
+                vals['read_at'] = now
+        return super().create(vals_list)
 
     def write(self, vals):
         # Auto-stamp read_at the first time is_read transitions to True.
