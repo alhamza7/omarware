@@ -792,16 +792,42 @@ class LugalEmailAccount(models.Model):
             _norm_subj = _REPLY_PREFIXES.sub('', subject or '').strip()
             if _norm_subj:
                 try:
+                    # Step 1: prefer an existing message that already has a thread_id.
                     _root = Message.search([
                         ('account_id', '=', self.id),
                         ('subject',    'ilike', _norm_subj),
                         ('is_deleted', '=', False),
+                        ('thread_id',  '!=', False),
                     ], order='id asc', limit=1)
-                    if _root and _root.thread_id and _root.thread_id != (message_id or ''):
+
+                    if _root and _root.thread_id != (message_id or ''):
                         thread_id = _root.thread_id
+                    else:
+                        # Step 2: no message with thread_id yet — find the earliest
+                        # message by normalized subject and bootstrap a thread_id
+                        # from its message_id (or generate one from its DB id).
+                        _any = Message.search([
+                            ('account_id', '=', self.id),
+                            ('subject',    'ilike', _norm_subj),
+                            ('is_deleted', '=', False),
+                            ('id',         '!=', 0),  # force fresh search, not cached
+                        ], order='id asc', limit=1)
+                        if _any and _any.id:
+                            # Use existing message_id if available, else synthesize one.
+                            _root_tid = (_any.message_id or '').strip() or f'<local.thread.{_any.id}@lugalai>'
+                            if _root_tid != (message_id or ''):
+                                # Bootstrap thread_id on the root message if not set.
+                                if not _any.thread_id:
+                                    try:
+                                        _any.write({'thread_id': _root_tid})
+                                    except Exception:
+                                        pass
+                                thread_id = _root_tid
+
+                    if thread_id != (message_id or ''):
                         _logger.debug(
-                            'subject-thread-link: msg_id=%s subject=%r → thread_id=%s (root msg id=%s)',
-                            message_id, _norm_subj, thread_id, _root.id,
+                            'subject-thread-link: msg_id=%s subject=%r → thread_id=%s',
+                            message_id, _norm_subj, thread_id,
                         )
                 except Exception:
                     pass  # never fail message import due to thread-link search error
