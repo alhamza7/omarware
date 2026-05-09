@@ -69,44 +69,55 @@ def _product_to_dict(product, pricelist=None, available_uoms=None):
 def _get_uoms_for_product(product, pricelist):
     """
     Collect all UoMs for a product from pricelist items, with their prices.
-    Ensures the sales UoM (from sap.product.extended) is always included first,
-    even when the pricelist item has uom_id = False (base price linked to sales unit).
+
+    Design decisions:
+    - Searches BOTH template-level (applied_on=1_product) AND variant-level
+      (applied_on=0_product_variant) items so UoMs set at variant level appear.
+    - Includes ALL compute_price types (fixed, percentage, formula), not just
+      'fixed', because SAP-synced pricelists may use percentage rules.
+    - Uses `sequence asc, write_date desc` ordering so more-specific / more-recent
+      rules take priority when two items share the same UoM.  The FIRST entry wins
+      per UoM — never the "higher price" heuristic, which was incorrect.
+    - The sales UoM (from sap.product.extended) is always included even when no
+      explicit pricelist item references it.
     """
     if not pricelist or not pricelist.exists():
         return []
 
     sales_uom = _get_sales_uom(product)
-    seen_uom_ids = set()
-    result = []
 
-    # All fixed-price pricelist items for this product.
-    # Items are stored against product_tmpl_id (applied_on=1_product), not product_id.
-    # Order: zero-price rows first so that if a non-zero row exists for the same UoM,
-    # it wins (seen_uom_ids de-duplication keeps only the first encounter per UoM,
-    # so we process zero-price rows first and let non-zero rows overwrite them).
-    items = request.env['product.pricelist.item'].search([
+    # Variant-level items are more specific → searched first so they win dedup.
+    # Template-level items come second.
+    PItem = request.env['product.pricelist.item'].sudo()
+    variant_items = PItem.search([
+        ('pricelist_id', '=', pricelist.id),
+        ('product_id', '=', product.id),
+    ], order='sequence asc, write_date desc, id desc')
+    template_items = PItem.search([
         ('pricelist_id', '=', pricelist.id),
         ('product_tmpl_id', '=', product.product_tmpl_id.id),
-        ('compute_price', '=', 'fixed'),
-    ], order='fixed_price asc, write_date asc, id asc')
+        ('product_id', '=', False),   # exclude rows already matched as variant
+    ], order='sequence asc, write_date desc, id desc')
 
-    # Build a dict keyed by uom_id so non-zero prices overwrite zeros for the same UoM
     uom_price_map = {}
-    for item in items:
+
+    for item in list(variant_items) + list(template_items):
         uom = item.product_uom_id if item.product_uom_id else sales_uom
         if not uom:
+            continue
+        if uom.id in uom_price_map:
+            # More-specific rule already recorded for this UoM — skip.
             continue
         try:
             uom_price = pricelist._get_product_price(product, 1.0, uom=uom)
         except Exception:
-            uom_price = product.list_price
-        # Always keep the higher price for the same UoM
-        if uom.id not in uom_price_map or uom_price > uom_price_map[uom.id]['price']:
-            uom_price_map[uom.id] = {'uom_id': uom.id, 'uom_name': uom.name, 'price': uom_price}
+            # Fallback: use fixed_price directly if available, else list_price.
+            uom_price = float(item.fixed_price) if item.compute_price == 'fixed' else product.list_price
+        uom_price_map[uom.id] = {'uom_id': uom.id, 'uom_name': uom.name, 'price': uom_price}
 
     result = list(uom_price_map.values())
 
-    # Guarantee the sales UoM is in the list even with no explicit pricelist items
+    # Guarantee the sales UoM is always present, even with no explicit pricelist item.
     if sales_uom and sales_uom.id not in uom_price_map:
         try:
             uom_price = pricelist._get_product_price(product, 1.0, uom=sales_uom)
@@ -289,9 +300,13 @@ class PriceListController(http.Controller):
             text = (search or query or '').strip()
             domain = []
 
-            if not include_inactive:
+            # When the caller provides explicit item_codes, be more permissive:
+            # include inactive products so that archived/deactivated SAP items
+            # are still found by their code instead of silently returning empty.
+            has_explicit_codes = bool(_normalize_str_list(item_codes, max_len=1))
+            if not include_inactive and not has_explicit_codes:
                 domain.append(('active', '=', True))
-            if sale_ok is not False and sale_ok is not None:
+            if sale_ok is not False and sale_ok is not None and not has_explicit_codes:
                 domain.append(('sale_ok', '=', True))
 
             cat_ids = _normalize_int_list(category_ids, max_len=200)
@@ -305,7 +320,15 @@ class PriceListController(http.Controller):
 
             codes = _normalize_str_list(item_codes, max_len=500)
             if codes:
-                domain.append(('default_code', 'in', codes))
+                # Use =ilike (case-insensitive exact match) because SAP item codes
+                # may be stored uppercase (S01548) while the client sends lowercase
+                # (s01548).  The 'in' operator is case-sensitive in PostgreSQL.
+                if len(codes) == 1:
+                    domain.append(('default_code', '=ilike', codes[0]))
+                else:
+                    code_clauses = [('default_code', '=ilike', c) for c in codes]
+                    or_prefix = ['|'] * (len(code_clauses) - 1)
+                    domain += or_prefix + code_clauses
 
             if default_code_prefix:
                 pref = str(default_code_prefix).strip()
@@ -319,6 +342,8 @@ class PriceListController(http.Controller):
                 domain.append(('id', 'in', pids))
 
             if text:
+                # default_code ilike is already case-insensitive in Odoo/PostgreSQL
+                # (ilike maps to ILIKE); no extra =ilike needed for text search.
                 ProductMeta = request.env['product.product']
                 if ProductMeta._fields.get('foreign_name'):
                     domain += ['|', '|',
