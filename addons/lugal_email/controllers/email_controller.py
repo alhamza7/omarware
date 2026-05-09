@@ -55,6 +55,32 @@ def _norm_addr_list(raw):
             result.append(addr.strip())
     return result
 
+def _imap_quote_mailbox(path):
+    """Return an IMAP-safe quoted mailbox name for use in raw imaplib commands.
+
+    Python's imaplib does NOT quote mailbox names automatically.  Folder names
+    that contain spaces, parentheses, or other IMAP atom-special characters MUST
+    be wrapped in double-quotes before being sent to the server.  Without quoting,
+    ``conn.create("INBOX.MailsFrom Weird guy")`` sends::
+
+        C: TAG CREATE INBOX.MailsFrom Weird guy
+
+    …and the server sees ``INBOX.MailsFrom`` as the mailbox name, truncating at
+    the first space.  Quoting fixes this::
+
+        C: TAG CREATE "INBOX.MailsFrom Weird guy"
+
+    Only characters that require quoting trigger the wrapper; plain names are
+    returned as-is so there is no regression for existing clean folder paths.
+    """
+    # IMAP atom-specials that force quoting (RFC 3501 §9)
+    _NEEDS_QUOTE = set(' \t()\\"[]%*\x00\r\n')
+    if any(c in _NEEDS_QUOTE for c in path):
+        escaped = path.replace('\\', '\\\\').replace('"', '\\"')
+        return f'"{escaped}"'
+    return path
+
+
 # ── Background IMAP sync state ────────────────────────────────────────────────
 # Per-account lock: prevents the same account running two syncs simultaneously.
 _sync_lock = threading.Lock()
@@ -1108,13 +1134,55 @@ class LugalEmailController(http.Controller):
 
             page_msgs = Msg.search(base_domain, limit=limit, offset=offset, order=sort_order)
 
+            include_thread = params.get('include_thread', '0') == '1'
+
             if new_msgs:
                 new_ids  = set(new_msgs.ids)
                 # New messages pinned at top; de-duplicate from paginated list
                 combined = list(new_msgs) + [m for m in page_msgs if m.id not in new_ids]
-                items = [_message_to_dict(m) for m in combined[:limit]]
+                display_msgs = combined[:limit]
             else:
-                items = [_message_to_dict(m) for m in page_msgs]
+                display_msgs = list(page_msgs)
+
+            # ── Thread enrichment ─────────────────────────────────────────────
+            # Collect unique thread_ids from this page so we can batch-count
+            # (and optionally batch-fetch) thread messages in one DB round-trip.
+            thread_ids_on_page = list({
+                m.thread_id for m in display_msgs if m.thread_id
+            })
+
+            # thread_count per thread_id (across all user accounts, all folders)
+            thread_count_map: dict = {}
+            thread_msgs_map: dict = {}   # populated only when include_thread=1
+
+            if thread_ids_on_page:
+                # Batch fetch all thread members across all folders in one query.
+                all_thread_members = Msg.search([
+                    ('account_id', 'in', account_ids),
+                    ('is_deleted', '=', False),
+                    ('thread_id',  'in', thread_ids_on_page),
+                ], order='date asc, id asc')
+
+                # Group by thread_id in Python — O(n) over thread members
+                from collections import defaultdict as _defaultdict
+                _groups: dict = _defaultdict(list)
+                for tm in all_thread_members:
+                    _groups[tm.thread_id].append(tm)
+
+                for tid, members in _groups.items():
+                    thread_count_map[tid] = len(members)
+                    if include_thread:
+                        thread_msgs_map[tid] = [_message_to_dict(tm, full=False) for tm in members]
+
+            def _enrich(m):
+                d = _message_to_dict(m)
+                tid = m.thread_id or None
+                d['thread_count'] = thread_count_map.get(tid, 1) if tid else 1
+                if include_thread and tid and tid in thread_msgs_map:
+                    d['thread_messages'] = thread_msgs_map[tid]
+                return d
+
+            items = [_enrich(m) for m in display_msgs]
 
             # Include the highest message ID across all user accounts so the FE
             # can poll with ?since_id=<max_id> to discover newly arrived messages
@@ -2906,7 +2974,7 @@ class LugalEmailController(http.Controller):
                     else:
                         folder_path = name   # top-level folder
 
-                    typ, data = conn.create(folder_path)
+                    typ, data = conn.create(_imap_quote_mailbox(folder_path))
             except Exception as exc:
                 fe = _format_imap_error(exc)
                 if _is_imap_connection_limit_error(fe):
@@ -2970,7 +3038,10 @@ class LugalEmailController(http.Controller):
             import imaplib, time as _time
             try:
                 with acc._imap_session() as conn:
-                    typ, data = conn.rename(old_path, new_path)
+                    typ, data = conn.rename(
+                        _imap_quote_mailbox(old_path),
+                        _imap_quote_mailbox(new_path),
+                    )
             except Exception as exc:
                 fe = _format_imap_error(exc)
                 if _is_imap_connection_limit_error(fe):
@@ -3102,10 +3173,10 @@ class LugalEmailController(http.Controller):
 
                     for folder_path in to_delete:
                         try:
-                            conn.unsubscribe(folder_path)
+                            conn.unsubscribe(_imap_quote_mailbox(folder_path))
                         except Exception:
                             pass
-                        typ_d, data_d = conn.delete(folder_path)
+                        typ_d, data_d = conn.delete(_imap_quote_mailbox(folder_path))
                         if typ_d == 'OK':
                             deleted_paths.append(folder_path)
                             # Remove DB records for this folder so they stop appearing in
@@ -3296,10 +3367,14 @@ class LugalEmailController(http.Controller):
                             _env = Environment(_cr, 1, {})
                             _acc = _env['lugal.email.account'].browse(acc_id)
                             with _acc._imap_session() as conn:
-                                conn.select(imap_from)
-                                result = conn.uid('move', str(imap_uid), imap_dest)
+                                conn.select(_imap_quote_mailbox(imap_from))
+                                result = conn.uid(
+                                    'move', str(imap_uid),
+                                    _imap_quote_mailbox(imap_dest),
+                                )
                                 if result[0] != 'OK':
-                                    conn.uid('copy', str(imap_uid), imap_dest)
+                                    conn.uid('copy', str(imap_uid),
+                                             _imap_quote_mailbox(imap_dest))
                                     conn.uid('store', str(imap_uid), '+FLAGS', '(\\Deleted)')
                                     conn.expunge()
                     except Exception as _e:
@@ -3311,6 +3386,170 @@ class LugalEmailController(http.Controller):
                 'id': msg.id, 'folder': target_raw,
             }})
         except Exception as exc:
+            return _json_response({'success': False, 'error': str(exc)}, 500)
+
+    # ── Bulk move by sender ────────────────────────────────────────────────────
+
+    @http.route('/api/lugal/email/messages/bulk_move_by_sender',
+                type='http', auth='none', csrf=False, methods=['POST', 'OPTIONS'])
+    def bulk_move_by_sender(self, **kwargs):
+        """Move ALL messages from one or more senders into a target folder.
+
+        Body (JSON):
+          {
+            "account_id":    22,                           // required
+            "senders":       ["foo@bar.com", "baz@x.com"], // required, 1–50 addresses
+            "target_folder": "INBOX.MailsFrom Weird guy",  // required — raw IMAP path
+                                                           // OR logical name (inbox/sent/…)
+            "source_folder": "inbox"                       // optional — restrict to one folder
+                                                           //   (default: all non-deleted msgs)
+          }
+
+        Returns:
+          { "success": true, "data": { "moved": 42, "senders": [...], "target_folder": "..." } }
+
+        The DB is updated synchronously; IMAP moves are executed asynchronously
+        in a background thread (fire-and-forget, best-effort).
+        """
+        if request.httprequest.method == 'OPTIONS':
+            return _json_response({})
+        uid = ensure_jwt_user_id()
+        if not uid:
+            return _unauthorized()
+        try:
+            body = json.loads(request.httprequest.data or '{}')
+
+            account_id    = body.get('account_id')
+            senders_raw   = body.get('senders') or []
+            target_folder = (body.get('target_folder') or '').strip()
+            source_folder = (body.get('source_folder') or '').strip() or None
+
+            # ── Validate inputs ──────────────────────────────────────────────
+            if not account_id:
+                return _json_response({'success': False, 'error': 'account_id is required'}, 400)
+            if not isinstance(senders_raw, list) or not senders_raw:
+                return _json_response({'success': False, 'error': 'senders must be a non-empty array'}, 400)
+            if len(senders_raw) > 50:
+                return _json_response({'success': False, 'error': 'senders may not exceed 50 per request'}, 400)
+            if not target_folder:
+                return _json_response({'success': False, 'error': 'target_folder is required'}, 400)
+
+            senders = [s.strip().lower() for s in senders_raw if isinstance(s, str) and s.strip()]
+            if not senders:
+                return _json_response({'success': False, 'error': 'senders contains no valid email addresses'}, 400)
+
+            # ── Authorise account ────────────────────────────────────────────
+            try:
+                aid = int(account_id)
+            except (TypeError, ValueError):
+                return _json_response({'success': False, 'error': 'account_id must be an integer'}, 400)
+
+            acc = request.env['lugal.email.account'].sudo().browse(aid)
+            if not acc.exists() or acc.user_id.id != uid:
+                return _not_found('Account not found')
+
+            # ── Resolve logical → IMAP folder name ──────────────────────────
+            _LOGICAL = {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'}
+            if target_folder.lower() in _LOGICAL:
+                target_logical = target_folder.lower()
+                imap_dest      = acc.sudo()._get_server_folder_name(target_logical)
+                db_folder      = target_logical
+            else:
+                target_logical = 'custom'
+                imap_dest      = target_folder
+                db_folder      = target_folder   # raw IMAP path stored in DB
+
+            # ── Find messages matching any of the senders ────────────────────
+            Msg = request.env['lugal.email.message'].sudo()
+
+            # Build OR domain: ('from_address', 'ilike', s1) OR ('from_address', 'ilike', s2) …
+            sender_clauses = [('from_address', 'ilike', s) for s in senders]
+            if len(sender_clauses) == 1:
+                sender_domain = sender_clauses
+            else:
+                or_prefix     = ['|'] * (len(sender_clauses) - 1)
+                sender_domain = or_prefix + sender_clauses
+
+            base = [
+                ('account_id', '=', aid),
+                ('is_deleted', '=', False),
+            ]
+            if source_folder:
+                base.append(('folder', '=', source_folder))
+
+            msgs = Msg.search(base + sender_domain)
+
+            if not msgs:
+                return _json_response({'success': True, 'data': {
+                    'moved': 0, 'senders': senders, 'target_folder': target_folder,
+                }})
+
+            # ── Capture per-message IMAP state before writing ────────────────
+            # Store (imap_uid, current_imap_folder_key) pairs for IMAP moves.
+            imap_tasks = []
+            for m in msgs:
+                if m.imap_uid:
+                    imap_tasks.append((m.imap_uid, m.folder))
+
+            # ── Update DB atomically ──────────────────────────────────────────
+            msgs.write({'folder': db_folder})
+
+            moved_count = len(msgs)
+
+            # ── Async IMAP moves (best-effort, fire-and-forget) ───────────────
+            if imap_tasks and (acc.password or '').strip():
+                db_name = request.env.cr.dbname
+
+                def _bg_bulk_move():
+                    try:
+                        from odoo.modules.registry import Registry as _Registry
+                        with _Registry(db_name).cursor() as _cr:
+                            from odoo.api import Environment as _Env
+                            _env = _Env(_cr, 1, {})
+                            _acc = _env['lugal.email.account'].browse(aid)
+                            with _acc._imap_session() as conn:
+                                # Group UIDs by source folder so we do one SELECT per folder
+                                from collections import defaultdict as _dd
+                                by_src = _dd(list)
+                                for uid_val, src_folder in imap_tasks:
+                                    # Resolve logical folder key → IMAP path
+                                    if src_folder in _LOGICAL:
+                                        imap_src = _acc._get_server_folder_name(src_folder)
+                                    else:
+                                        imap_src = src_folder
+                                    by_src[imap_src].append(str(uid_val))
+
+                                _quoted_dest = _imap_quote_mailbox(imap_dest)
+                                for imap_src, uid_list in by_src.items():
+                                    try:
+                                        conn.select(_imap_quote_mailbox(imap_src))
+                                        uid_set = ','.join(uid_list)
+                                        res = conn.uid('move', uid_set, _quoted_dest)
+                                        if res[0] != 'OK':
+                                            # Fallback: COPY + DELETE
+                                            conn.uid('copy', uid_set, _quoted_dest)
+                                            conn.uid('store', uid_set, '+FLAGS', '(\\Deleted)')
+                                            conn.expunge()
+                                    except Exception as _se:
+                                        _logger.warning(
+                                            'bulk_move_by_sender IMAP src=%s: %s', imap_src, _se)
+                    except Exception as _e:
+                        _logger.warning('bulk_move_by_sender IMAP thread error: %s', _e)
+
+                import threading as _thr
+                _thr.Thread(
+                    target=_bg_bulk_move, daemon=True,
+                    name=f'imap-bulk-move-{aid}',
+                ).start()
+
+            return _json_response({'success': True, 'data': {
+                'moved':         moved_count,
+                'senders':       senders,
+                'target_folder': target_folder,
+                'db_folder':     db_folder,
+            }})
+        except Exception as exc:
+            _logger.exception('bulk_move_by_sender error')
             return _json_response({'success': False, 'error': str(exc)}, 500)
 
     # ── Related messages ───────────────────────────────────────────────────────
