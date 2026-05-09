@@ -945,6 +945,12 @@ class LugalEmailAccount(models.Model):
                 # Keep existing read_at as well — don't nullify it.
                 vals.pop('read_at', None)
 
+            # Never wipe a thread_id that was already bootstrapped (e.g. by
+            # the SMTP async write-back) with a None from a subject-fallback
+            # race where the new message hasn't been matched yet.
+            if not vals.get('thread_id') and existing.thread_id:
+                vals.pop('thread_id', None)
+
             existing.write(vals)
             stored_msg = existing
         else:

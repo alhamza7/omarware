@@ -2729,17 +2729,22 @@ class LugalEmailController(http.Controller):
 
             # Move draft → sent
             import odoo as _odoo
+            acc = draft.account_id
             draft.write({
-                'folder':       'sent',
-                'is_draft':     False,
-                'subject':      subject,
-                'to_addresses': json.dumps([{'email': e} for e in to_emails]),
-                'cc_addresses': json.dumps([{'email': e} for e in cc_emails]),
-                'bcc_addresses': json.dumps([{'email': e} for e in bcc_emails]),
-                'body_html':    body_html,
-                'body_text':    body_text,
-                'is_important': importance_raw == 'high',
-                'date':         _odoo.fields.Datetime.now(),
+                'folder':                'sent',
+                'is_draft':              False,
+                'is_read':               True,   # sender always "reads" their own sent mail
+                'subject':               subject,
+                'from_name':             acc.display_name_field or acc.email_address,
+                'from_address':          acc.email_address,
+                'to_addresses':          json.dumps([{'email': e} for e in to_emails]),
+                'cc_addresses':          json.dumps([{'email': e} for e in cc_emails]),
+                'bcc_addresses':         json.dumps([{'email': e} for e in bcc_emails]),
+                'body_html':             body_html,
+                'body_text':             body_text,
+                'is_important':          importance_raw == 'high',
+                'date':                  _odoo.fields.Datetime.now(),
+                'request_read_receipt':  request_read_receipt,
             })
             # Link any extra attachments
             if extra_att_ids:
@@ -2752,7 +2757,6 @@ class LugalEmailController(http.Controller):
 
             request.env.cr.commit()
 
-            acc = draft.account_id
             _send_via_smtp_async(
                 acc, to_emails, subject, body_html, body_text,
                 cc=cc_emails, bcc=bcc_emails,
@@ -3967,7 +3971,10 @@ def _build_mime_message(from_header, to_list, subject, body_html, body_text,
                         cc, att_parts, from_address, importance='normal',
                         inline_parts=None, request_read_receipt=False):
     """
-    Build a MIME message from pre-loaded data. Returns raw RFC-2822 string.
+    Build a MIME message from pre-loaded data.
+
+    Returns a tuple (raw_rfc2822_string, generated_message_id) so callers can
+    persist the Message-ID back to the DB record and enable IMAP deduplication.
 
     att_parts     – list of (filename, mimetype, raw_bytes) for regular attachments
     inline_parts  – list of (cid, filename, mimetype, raw_bytes) for CID-embedded images.
@@ -4036,13 +4043,14 @@ def _build_mime_message(from_header, to_list, subject, body_html, body_text,
     else:
         mime_msg = body_part
 
+    generated_msg_id = make_msgid(
+        domain=from_address.split('@')[-1] if '@' in from_address else 'mail'
+    )
     mime_msg['Subject']    = subject
     mime_msg['From']       = from_header
     mime_msg['To']         = ', '.join(to_list)
     mime_msg['Date']       = formatdate(localtime=True)
-    mime_msg['Message-ID'] = make_msgid(
-        domain=from_address.split('@')[-1] if '@' in from_address else 'mail'
-    )
+    mime_msg['Message-ID'] = generated_msg_id
     if cc:
         mime_msg['Cc'] = ', '.join(cc)
 
@@ -4058,15 +4066,22 @@ def _build_mime_message(from_header, to_list, subject, body_html, body_text,
         mime_msg['Disposition-Notification-To'] = from_address
         mime_msg['Return-Receipt-To']           = from_address
 
-    return mime_msg.as_string()
+    return mime_msg.as_string(), generated_msg_id
 
 
 def _do_smtp_send(smtp_host, smtp_port, smtp_use_tls, username, password,
-                  from_address, all_recipients, raw_message, msg_id, db_name):
+                  from_address, all_recipients, raw_message, msg_id, db_name,
+                  generated_msg_id=None):
     """
     Perform the actual SMTP send and write result back to lugal.email.message.
     Safe to call from a background thread — uses its own Registry cursor for
     the write-back so it never touches the HTTP request cursor.
+
+    generated_msg_id – the RFC-2822 Message-ID that was embedded in the outgoing
+                       MIME message.  Written back to the DB record so that when
+                       the IMAP Sent folder is synced the upsert logic can match
+                       on message_id and update the existing row instead of
+                       creating a duplicate.
 
     Returns (delivered: bool, error_msg: str|None, refused: dict).
     """
@@ -4140,11 +4155,20 @@ def _do_smtp_send(smtp_host, smtp_port, smtp_use_tls, username, password,
                 env = _odoo.api.Environment(_cr, _odoo.SUPERUSER_ID, {})
                 record = env['lugal.email.message'].browse(msg_id)
                 if record.exists():
-                    record.write({
+                    write_vals = {
                         'smtp_delivered': final_delivered,
                         'smtp_error':     error_msg or False,
                         'smtp_status':    'delivered' if final_delivered else 'failed',
-                    })
+                    }
+                    # Persist the generated RFC-2822 Message-ID so the IMAP Sent
+                    # folder sync can find this exact row by message_id and update
+                    # it (stamping imap_uid) instead of creating a duplicate record.
+                    if generated_msg_id and not record.message_id:
+                        write_vals['message_id'] = generated_msg_id
+                        # Bootstrap thread_id from message_id if not yet set.
+                        if not record.thread_id:
+                            write_vals['thread_id'] = generated_msg_id
+                    record.write(write_vals)
                     # Push a real-time failure notification so the FE can show a
                     # "delivery failed" banner without waiting for the next poll.
                     if not final_delivered:
@@ -4216,7 +4240,7 @@ def _send_via_smtp_async(acc, to_list, subject, body_html, body_text, cc=None, b
             with _Registry(db_name).cursor() as _cr:
                 att_parts, inline_parts = _read_att_parts(att_ids, _cr, db_name)
 
-            raw_message = _build_mime_message(
+            raw_message, generated_msg_id = _build_mime_message(
                 from_header, to_list, subject, body_html, body_text, cc, att_parts,
                 from_address, importance=importance,
                 inline_parts=inline_parts,
@@ -4226,6 +4250,7 @@ def _send_via_smtp_async(acc, to_list, subject, body_html, body_text, cc=None, b
             delivered, error_msg, refused = _do_smtp_send(
                 smtp_host, smtp_port, smtp_use_tls, username, password,
                 from_address, all_recipients, raw_message, msg_id, db_name,
+                generated_msg_id=generated_msg_id,
             )
 
             # ── IMAP APPEND ───────────────────────────────────────────────────
@@ -4288,11 +4313,12 @@ def _send_via_smtp(acc, to_list, subject, body_html, body_text, cc=None, bcc=Non
 
     att_parts, inline_parts = _read_att_parts(attachment_ids or [], acc.env.cr, db_name)
     all_recipients = list(to_list) + list(cc or []) + list(bcc or [])
-    raw_message    = _build_mime_message(
+    raw_message, generated_msg_id = _build_mime_message(
         from_header, to_list, subject, body_html, body_text, cc, att_parts, from_address,
         inline_parts=inline_parts,
     )
     return _do_smtp_send(
         smtp_host, smtp_port, smtp_use_tls, username, password,
         from_address, all_recipients, raw_message, msg_id, db_name,
+        generated_msg_id=generated_msg_id,
     )
