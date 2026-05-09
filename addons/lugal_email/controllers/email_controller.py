@@ -231,16 +231,26 @@ def _is_imap_connection_limit_error(text: str) -> bool:
 def _resolve_imap_folder(account, local_folder):
     """Map a local folder label to the real IMAP server folder name.
 
-    Uses the account's cached folder discovery so the result is correct for
-    Gmail ('[Gmail]/Sent Mail'), Dovecot ('Sent'), cPanel ('INBOX.Sent'), etc.
-    Falls back to a sensible default if discovery is unavailable.
+    Logical names ('inbox', 'sent', 'trash', …) are resolved through the
+    account's cached per-server mapping so Gmail/Dovecot/cPanel differences
+    are handled transparently.
+
+    Custom IMAP paths (anything not in _LOGICAL_FOLDERS, e.g.
+    'INBOX.syed_naqvi.Important') are returned AS-IS — they are already the
+    correct server-side path and must NEVER be passed to _get_server_folder_name
+    which would `capitalize()` them and produce a wrong name like
+    'Inbox.syed_naqvi.important', causing silent IMAP flag-push failures.
     """
-    if local_folder == 'inbox':
+    _LOGICAL_FOLDERS = {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'}
+    if local_folder.lower() == 'inbox':
         return 'INBOX'
-    try:
-        return account.sudo()._get_server_folder_name(local_folder)
-    except Exception:
-        return local_folder.capitalize()
+    if local_folder.lower() in _LOGICAL_FOLDERS:
+        try:
+            return account.sudo()._get_server_folder_name(local_folder.lower())
+        except Exception:
+            return local_folder.capitalize()
+    # Custom folder — the raw IMAP path is stored verbatim in the DB; use it directly.
+    return local_folder
 
 
 def _account_to_dict(acc):

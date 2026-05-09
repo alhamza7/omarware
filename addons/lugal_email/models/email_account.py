@@ -824,6 +824,20 @@ class LugalEmailAccount(models.Model):
                 vals.pop('body_text', None)
                 vals.pop('body_html', None)
                 vals.pop('body_fetched', None)
+
+            # Protect is_read from the async-flag-push race condition.
+            # Scenario: user marks message read in Odoo → DB is_read=True →
+            # _imap_store_async pushes +\Seen to IMAP in background → next
+            # sync runs before the push completes → IMAP still reports
+            # \Seen=False → without this guard, sync would write is_read=False,
+            # erasing the user's action.
+            # Rule: NEVER downgrade is_read from True (DB) to False (IMAP).
+            # Upgrading False→True (user read in webmail) is always allowed.
+            if not is_read and existing.is_read:
+                vals.pop('is_read', None)
+                # Keep existing read_at as well — don't nullify it.
+                vals.pop('read_at', None)
+
             existing.write(vals)
             stored_msg = existing
         else:
@@ -1178,9 +1192,11 @@ class LugalEmailAccount(models.Model):
                 except Exception:
                     _logger.warning('Sent folder sync failed for acc=%s', self.id, exc_info=True)
 
+            # Count unread across ALL folders (inbox + custom user folders).
+            # Previously only counted inbox, so custom-folder unread messages
+            # were silently excluded from the account badge shown in the FE.
             unread = Msg.search_count([
                 ('account_id', '=', self.id),
-                ('folder', '=', 'inbox'),
                 ('is_read', '=', False),
                 ('is_deleted', '=', False),
             ])
