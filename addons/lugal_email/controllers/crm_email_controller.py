@@ -26,6 +26,11 @@ def _to_riyadh_iso(dt):
     return dt.astimezone(_RIYADH_TZ).isoformat(timespec='seconds')
 
 
+def _folder_role(folder):
+    value = (folder or 'inbox').strip().lower()
+    return value if value in {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'} else 'custom'
+
+
 def _crm_error(exc, handler=''):
     _logger.exception('%s error', handler)
     try:
@@ -41,13 +46,17 @@ def _msg_to_dict(msg, full=False):
         'id':           msg.id,
         'account_id':   msg.account_id.id,
         'folder':       msg.folder,
+        'folder_role':  _folder_role(msg.folder),
         'subject':      msg.subject or '(no subject)',
         'from_name':    msg.from_name or '',
         'from_address': msg.from_address or '',
         'to_addresses': msg.to_addresses or '[]',
         'date':         _to_riyadh_iso(msg.date),
+        'read_at':      _to_riyadh_iso(msg.read_at) if msg.read_at else None,
         'is_read':      msg.is_read,
         'is_starred':   msg.is_starred,
+        'version':      _to_riyadh_iso(msg.write_date),
+        'write_date':   _to_riyadh_iso(msg.write_date),
         'crm_links': {
             'customer': {'id': msg.linked_customer_id, 'name': msg.linked_customer_name}
                         if msg.linked_customer_id else None,
@@ -176,10 +185,25 @@ class CrmEmailController(http.Controller):
             if not uid:
                 return {'success': False, 'error': 'Unauthorized'}
             msg = request.env['lugal.email.message'].sudo().browse(message_id)
-            if not msg.exists():
+            if not msg.exists() or msg.account_id.user_id.id != uid or msg.is_deleted:
                 return {'success': False, 'error': 'Not found'}
             if not preview and not msg.is_read:
-                msg.write({'is_read': True})
+                from datetime import datetime
+                msg.write({'is_read': True, 'read_at': datetime.utcnow()})
+                try:
+                    from odoo.addons.lugal_email.controllers.email_controller import (
+                        _refresh_account_unread_count,
+                        _resolve_imap_folder,
+                    )
+                    _refresh_account_unread_count(msg.account_id)
+                    if msg.imap_uid:
+                        msg.account_id.sudo()._imap_store_async(
+                            msg.imap_uid,
+                            _resolve_imap_folder(msg.account_id, msg.folder),
+                            add_flags=['\\Seen'],
+                        )
+                except Exception:
+                    _logger.warning('CRM email detail read sync failed msg=%s', msg.id)
             return {'success': True, 'data': _msg_to_dict(msg, full=True)}
         except Exception as exc:
             return _crm_error(exc, 'message_detail')

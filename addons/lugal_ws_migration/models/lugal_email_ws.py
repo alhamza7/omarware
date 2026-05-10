@@ -17,6 +17,11 @@ def _to_riyadh_iso(dt):
     return dt.astimezone(_RIYADH_TZ).isoformat(timespec='seconds')
 
 
+def _folder_role(folder):
+    value = (folder or 'inbox').strip().lower()
+    return value if value in {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'} else 'custom'
+
+
 def _build_message_preview(record):
     """
     Build a complete inbox-ready message dict from an ORM record.
@@ -32,19 +37,35 @@ def _build_message_preview(record):
             ('res_model', '=', 'lugal.email.message'),
             ('res_id',    '=', record.id),
         ])
-        attachments = [{
-            'id':       a.id,
-            'name':     a.name or 'attachment',
-            'mimetype': a.mimetype or 'application/octet-stream',
-            'size':     a.file_size or 0,
-        } for a in atts]
+        attachments = []
+        inline_attachments = []
+        cid_prefix = '__inline_cid__:'
+        for a in atts:
+            item = {
+                'id':       a.id,
+                'name':     a.name or 'attachment',
+                'mimetype': a.mimetype or 'application/octet-stream',
+                'size':     a.file_size or 0,
+                'inline':   False,
+            }
+            desc = a.description or ''
+            if desc.startswith(cid_prefix):
+                cid_value = desc[len(cid_prefix):].strip()
+                item['inline'] = True
+                item['cid'] = f'cid:{cid_value}'
+                item['content_id'] = cid_value
+                inline_attachments.append(item)
+            else:
+                attachments.append(item)
     except Exception:
         attachments = []
+        inline_attachments = []
 
     return {
         'id':             record.id,
         'account_id':     record.account_id.id,
         'folder':         record.folder,
+        'folder_role':    _folder_role(record.folder),
         'subject':        record.subject or '(no subject)',
         'from_name':      record.from_name or '',
         'from_address':   record.from_address or '',
@@ -52,7 +73,7 @@ def _build_message_preview(record):
         'cc_addresses':   record.cc_addresses or '[]',
         'date':           _to_riyadh_iso(record.date),
         'received_at':    _to_riyadh_iso(record.create_date),
-        'read_at':        None,
+        'read_at':        _to_riyadh_iso(record.read_at) if record.read_at else None,
         'is_read':        record.is_read,
         'is_starred':     record.is_starred,
         'is_flagged':     record.is_flagged,
@@ -61,8 +82,11 @@ def _build_message_preview(record):
         'smtp_delivered': record.smtp_delivered,
         'smtp_error':     record.smtp_error or None,
         'smtp_status':    record.smtp_status or 'pending',
+        'version':        _to_riyadh_iso(record.write_date),
+        'write_date':     _to_riyadh_iso(record.write_date),
         'body_fetched':   bool(getattr(record, 'body_fetched', False)),
         'attachments':    attachments,
+        'inline_attachments': inline_attachments,
         'crm_links': {
             'customer': None,
             'ticket':   None,
@@ -126,6 +150,8 @@ class LugalEmailMessageWs(models.Model):
                             'message_id':   record.id,
                             'account_id':   record.account_id.id,
                             'mailbox':      record.folder or 'inbox',
+                            'folder':       record.folder or 'inbox',
+                            'folder_role':  _folder_role(record.folder),
                             'subject':      record.subject or '(no subject)',
                             'from_name':    record.from_name or '',
                             'from_address': record.from_address or '',
@@ -133,6 +159,7 @@ class LugalEmailMessageWs(models.Model):
                             'received_at':  _to_riyadh_iso(record.date),
                             'unread_count': unread_count,
                             'uid':          uid,
+                            'version':      _to_riyadh_iso(record.write_date),
                             # Full row — FE should prepend this to the inbox
                             # list rather than re-fetching /messages.
                             'message_data': message_data,

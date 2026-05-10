@@ -539,11 +539,62 @@ def _sync_unread_custom_folders(accounts, max_folders=12):
     return synced
 
 
+def _folder_role(folder):
+    """Canonical role name the client can use across list/detail/realtime rows."""
+    value = (folder or 'inbox').strip()
+    low = value.lower()
+    logical = {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'}
+    return low if low in logical else 'custom'
+
+
+def _attachment_payload(att, inline=False, cid_value=None):
+    url = (
+        f'/web/content/{att.id}?access_token={att.access_token}'
+        if att.access_token
+        else f'/web/content/{att.id}?download=true'
+    )
+    data = {
+        'id':       att.id,
+        'name':     att.name or 'attachment',
+        'mimetype': att.mimetype or 'application/octet-stream',
+        'size':     att.file_size or 0,
+        'url':      url,
+        'inline':   bool(inline),
+    }
+    if cid_value:
+        data['cid'] = f'cid:{cid_value}'
+        data['content_id'] = cid_value
+    return data
+
+
+def _message_attachment_buckets(msg):
+    """Return (regular_attachments, inline_attachments) with CID metadata."""
+    _CID_PREFIX = '__inline_cid__:'
+    att_list = []
+    inline_list = []
+    try:
+        atts = msg.env['ir.attachment'].sudo().search([
+            ('res_model', '=', 'lugal.email.message'),
+            ('res_id',    '=', msg.id),
+        ])
+        for att in atts:
+            desc = att.description or ''
+            if desc.startswith(_CID_PREFIX):
+                cid_value = desc[len(_CID_PREFIX):].strip()
+                inline_list.append(_attachment_payload(att, inline=True, cid_value=cid_value))
+            else:
+                att_list.append(_attachment_payload(att, inline=False))
+    except Exception:
+        pass
+    return att_list, inline_list
+
+
 def _message_to_dict(msg, full=False):
     data = {
         'id':             msg.id,
         'account_id':     msg.account_id.id,
         'folder':         msg.folder,
+        'folder_role':    _folder_role(msg.folder),
         'subject':        msg.subject or '(no subject)',
         'from_name':      msg.from_name or '',
         'from_address':   msg.from_address or '',
@@ -566,6 +617,8 @@ def _message_to_dict(msg, full=False):
         'smtp_status':    msg.smtp_status or 'pending',
         'thread_id':      msg.thread_id or None,
         'in_reply_to':    msg.in_reply_to or None,
+        'version':        _to_riyadh_iso(msg.write_date),
+        'write_date':     _to_riyadh_iso(msg.write_date),
         # Read receipt tracking fields
         'request_read_receipt': bool(msg.request_read_receipt),
         'recipient_read_at':    _to_riyadh_iso(msg.recipient_read_at) if msg.recipient_read_at else None,
@@ -576,48 +629,7 @@ def _message_to_dict(msg, full=False):
                         if msg.linked_ticket_id else None,
         },
     }
-    # Split attachments into two distinct buckets:
-    #   att_list        → files added via the paperclip/attachment UI (downloadable)
-    #   inline_att_list → images pasted / drag-dropped / inserted / signature images
-    #                     (embedded in the email body via Content-ID / CID)
-    # The split marker is the `description` field: inline items are tagged
-    # "__inline_cid__:<cid>" by the upload endpoint (for outgoing mail) or by
-    # _store_imap_attachments (for incoming mail with Content-Disposition: inline).
-    _CID_PREFIX = '__inline_cid__:'
-    try:
-        atts = msg.env['ir.attachment'].sudo().search([
-            ('res_model', '=', 'lugal.email.message'),
-            ('res_id',    '=', msg.id),
-        ])
-
-        def _att_entry(a):
-            url = (
-                f'/web/content/{a.id}?access_token={a.access_token}'
-                if a.access_token
-                else f'/web/content/{a.id}?download=true'
-            )
-            return {
-                'id':       a.id,
-                'name':     a.name or 'attachment',
-                'mimetype': a.mimetype or 'application/octet-stream',
-                'size':     a.file_size or 0,
-                'url':      url,
-            }
-
-        att_list    = []
-        inline_list = []
-        for a in atts:
-            desc = a.description or ''
-            if desc.startswith(_CID_PREFIX):
-                cid_value = desc[len(_CID_PREFIX):]
-                entry = _att_entry(a)
-                entry['cid'] = f'cid:{cid_value}'
-                inline_list.append(entry)
-            else:
-                att_list.append(_att_entry(a))
-    except Exception:
-        att_list    = []
-        inline_list = []
+    att_list, inline_list = _message_attachment_buckets(msg)
 
     # These counters are always in the response (list view needs them for icons)
     data['has_attachments']         = bool(att_list)
@@ -1225,6 +1237,12 @@ class LugalEmailController(http.Controller):
             # scope to this user's accounts
             user_accounts = _get_user_accounts(uid)
             account_ids   = user_accounts.ids
+            try:
+                requested_account_id = int(str(account_id).strip()) if account_id else None
+            except (TypeError, ValueError):
+                return _json_response({'success': False, 'error': 'account_id must be an integer'}, 400)
+            if requested_account_id and requested_account_id not in account_ids:
+                return _json_response({'success': False, 'error': 'Account not found'}, 404)
 
             _LOGICAL_MAILBOX = {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'}
             is_custom_mailbox = folder_raw.lower() not in _LOGICAL_MAILBOX
@@ -1265,10 +1283,7 @@ class LugalEmailController(http.Controller):
             # (INBOX+Sent only).  Pull them on-demand so list/sync APIs return messages.
             if auto_sync and is_custom_mailbox:
                 imap_folder_sync = []
-                try:
-                    aid = int(str(account_id).strip()) if account_id else None
-                except (TypeError, ValueError):
-                    aid = None
+                aid = requested_account_id
                 targets = user_accounts.filtered(lambda a: a.id == aid) if aid else user_accounts
                 folder_branch_expand = False
 
@@ -1359,10 +1374,7 @@ class LugalEmailController(http.Controller):
                 ('is_deleted', '=', False),
             ] + _folder_domain
             if account_id:
-                try:
-                    base_domain.append(('account_id', '=', int(str(account_id).strip())))
-                except (TypeError, ValueError):
-                    pass
+                base_domain.append(('account_id', '=', requested_account_id))
             if query:
                 base_domain += ['|', ('subject', 'ilike', query), ('body_text', 'ilike', query)]
             if starred:
@@ -1421,13 +1433,9 @@ class LugalEmailController(http.Controller):
 
             new_msgs = Msg.browse()
             if since_id:
-                # When since_id is provided we intentionally search across ALL of
-                # the user's accounts, ignoring any ?account_id= filter, so that
-                # a new message for account A is still returned even when the
-                # caller currently has account B selected.  The regular paginated
-                # list still respects the account_id filter.
+                since_account_ids = [requested_account_id] if requested_account_id else account_ids
                 all_accs_domain = [
-                    ('account_id', 'in', account_ids),
+                    ('account_id', 'in', since_account_ids),
                     ('is_deleted', '=', False),
                 ] + _folder_domain + [
                     ('id',         '>',  since_id),
@@ -1486,11 +1494,10 @@ class LugalEmailController(http.Controller):
 
             items = [_enrich(m) for m in display_msgs]
 
-            # Include the highest message ID across all user accounts so the FE
-            # can poll with ?since_id=<max_id> to discover newly arrived messages
-            # regardless of which account_id filter is active.
+            # Include the highest message ID in the current account scope so
+            # account-scoped sent/inbox requests never receive cross-account rows.
             all_max = Msg.search([
-                ('account_id', 'in', account_ids),
+                ('account_id', 'in', [requested_account_id] if requested_account_id else account_ids),
                 ('is_deleted', '=', False),
             ] + _folder_domain, order='id desc', limit=1)
             max_id = all_max[0].id if all_max else 0
@@ -1752,34 +1759,22 @@ class LugalEmailController(http.Controller):
                     except Exception:
                         _logger.exception('Bulk lazy body fetch failed for message %s', msg.id)
 
-            # Pre-fetch all attachments for the batch in one SQL query
-            msg_ids_found = list(found_ids)
-            IrAtt = request.env['ir.attachment'].sudo()
-            all_atts = IrAtt.search([
-                ('res_model', '=', 'lugal.email.message'),
-                ('res_id',    'in', msg_ids_found),
-            ])
-            att_by_msg: dict = {}
-            for a in all_atts:
-                att_by_msg.setdefault(a.res_id, []).append({
-                    'id':       a.id,
-                    'name':     a.name or 'attachment',
-                    'mimetype': a.mimetype or 'application/octet-stream',
-                    'size':     a.file_size or 0,
-                    'url': (
-                        f'/web/content/{a.id}?access_token={a.access_token}'
-                        if a.access_token
-                        else f'/web/content/{a.id}?download=true'
-                    ),
-                })
-
             items = []
             for msg in msgs:
+                attachments, inline_attachments = _message_attachment_buckets(msg)
                 items.append({
-                    'id':          msg.id,
-                    'body_html':   msg.body_html or '',
-                    'body_text':   msg.body_text or '',
-                    'attachments': att_by_msg.get(msg.id, []),
+                    'id':                  msg.id,
+                    'account_id':          msg.account_id.id,
+                    'folder':              msg.folder,
+                    'folder_role':         _folder_role(msg.folder),
+                    'is_read':             msg.is_read,
+                    'read_at':             _to_riyadh_iso(msg.read_at) if msg.read_at else None,
+                    'version':             _to_riyadh_iso(msg.write_date),
+                    'write_date':          _to_riyadh_iso(msg.write_date),
+                    'body_html':           msg.body_html or '',
+                    'body_text':           msg.body_text or '',
+                    'attachments':         attachments,
+                    'inline_attachments':  inline_attachments,
                 })
 
             return _json_response({
@@ -3052,6 +3047,26 @@ class LugalEmailController(http.Controller):
                 )
 
             body = json.loads(request.httprequest.data or '{}')
+            requested_account_id = body.get('account_id')
+            if requested_account_id not in (None, '', False):
+                try:
+                    requested_account_id = int(requested_account_id)
+                except (TypeError, ValueError):
+                    return _json_response(
+                        {'success': False, 'error': 'account_id must be an integer'},
+                        400,
+                    )
+                if requested_account_id != draft.account_id.id:
+                    return _json_response(
+                        {
+                            'success': False,
+                            'error': (
+                                'Draft account_id mismatch: this draft belongs to '
+                                f'account {draft.account_id.id}'
+                            ),
+                        },
+                        409,
+                    )
 
             # Apply any last-minute overrides
             to_emails  = _norm_addr_list(body['to']) if 'to' in body \
