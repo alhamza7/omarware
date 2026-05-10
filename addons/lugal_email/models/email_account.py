@@ -949,10 +949,26 @@ class LugalEmailAccount(models.Model):
             _norm_subj = _REPLY_PREFIXES.sub('', subject or '').strip()
             if _norm_subj:
                 try:
+                    # Build candidate subject strings for an exact-match search.
+                    # The stored subject in the DB may or may not carry a Re:/Fwd:
+                    # prefix itself, so we check all common prefix variants plus the
+                    # bare subject.  We use '=ilike' (case-insensitive exact equality)
+                    # deliberately — 'ilike' (contains) would match any message whose
+                    # subject contains _norm_subj as a substring, wrongly merging
+                    # unrelated historical threads.
+                    _subject_candidates = list({
+                        _norm_subj,
+                        f'Re: {_norm_subj}',
+                        f'RE: {_norm_subj}',
+                        f'Fwd: {_norm_subj}',
+                        f'FWD: {_norm_subj}',
+                        f'Fw: {_norm_subj}',
+                    })
+
                     # Step 1: prefer an existing message that already has a thread_id.
                     _root = Message.search([
                         ('account_id', '=', self.id),
-                        ('subject',    'ilike', _norm_subj),
+                        ('subject',    'in', _subject_candidates),
                         ('is_deleted', '=', False),
                         ('thread_id',  '!=', False),
                     ], order='id asc', limit=1)
@@ -961,13 +977,12 @@ class LugalEmailAccount(models.Model):
                         thread_id = _root.thread_id
                     else:
                         # Step 2: no message with thread_id yet — find the earliest
-                        # message by normalized subject and bootstrap a thread_id
-                        # from its message_id (or generate one from its DB id).
+                        # message by exact subject and bootstrap a thread_id from its
+                        # message_id (or generate one from its DB id).
                         _any = Message.search([
                             ('account_id', '=', self.id),
-                            ('subject',    'ilike', _norm_subj),
+                            ('subject',    'in', _subject_candidates),
                             ('is_deleted', '=', False),
-                            ('id',         '!=', 0),  # force fresh search, not cached
                         ], order='id asc', limit=1)
                         if _any and _any.id:
                             # Use existing message_id if available, else synthesize one.
