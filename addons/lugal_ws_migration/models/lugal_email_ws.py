@@ -119,14 +119,9 @@ class LugalEmailMessageWs(models.Model):
     """
     _inherit = 'lugal.email.message'
 
-    @api.model_create_multi
-    def create(self, vals_list):
-        records = super().create(vals_list)
-        for record in records:
-            # Push notifications for unread inbound messages, including custom
-            # rule folders.  Some rules move mail immediately to
-            # INBOX.<sender> / INBOX.<sender>.Important, so inbox-only logic
-            # causes toast-only arrivals with stale bell/tab counts.
+    def _lugal_send_new_email_notification(self):
+        """Push realtime notification after the message reaches its final folder."""
+        for record in self:
             if (
                 not record.is_read
                 and (record.folder or '') not in ('sent', 'drafts', 'trash', 'spam')
@@ -160,14 +155,14 @@ class LugalEmailMessageWs(models.Model):
                             'unread_count': unread_count,
                             'uid':          uid,
                             'version':      _to_riyadh_iso(record.write_date),
-                            # Full row — FE should prepend this to the inbox
-                            # list rather than re-fetching /messages.
+                            # Full row — FE should prepend this to the correct
+                            # mailbox/folder using message_data.folder.
                             'message_data': message_data,
                         }
                         _logger.info(
                             '[EmailWS] bus._sendone uid=%s channel=supply_user.%s '
-                            'message_id=%s at %.3f',
-                            uid, uid, record.id, time.time(),
+                            'message_id=%s folder=%s at %.3f',
+                            uid, uid, record.id, record.folder, time.time(),
                         )
                         self.env['bus.bus'].sudo()._sendone(
                             f'supply_user.{uid}',
@@ -190,9 +185,16 @@ class LugalEmailMessageWs(models.Model):
                                 'type':       'email',
                                 'message_id': record.id,
                                 'account_id': record.account_id.id,
+                                'folder':     record.folder or 'inbox',
                                 'url':        '/emails',
                             },
                         )
                     except Exception:
                         pass
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        records = super().create(vals_list)
+        if not self.env.context.get('lugal_email_defer_new_message_ws'):
+            records._lugal_send_new_email_notification()
         return records

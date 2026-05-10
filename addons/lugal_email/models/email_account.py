@@ -1093,7 +1093,7 @@ class LugalEmailAccount(models.Model):
             uid_for_write = vals.get('imap_uid')
             folder_for_write = vals.get('folder') or existing.folder
             if uid_for_write and folder_for_write:
-                _uid_holder = Message.search([
+                _uid_holder = Message.with_context(active_test=False).search([
                     ('account_id', '=', self.id),
                     ('folder', '=', folder_for_write),
                     ('imap_uid', '=', uid_for_write),
@@ -1164,7 +1164,9 @@ class LugalEmailAccount(models.Model):
                     # only the inner block and leaves the cursor usable.
                     try:
                         with self.env.cr.savepoint():
-                            stored_msg = Message.create(vals)
+                            stored_msg = Message.with_context(
+                                lugal_email_defer_new_message_ws=True,
+                            ).create(vals)
                             created_new = True
                     except Exception as dup_exc:
                         # Unique-constraint violation from a concurrent INSERT —
@@ -1200,6 +1202,17 @@ class LugalEmailAccount(models.Model):
                 self.env['lugal.email.rule'].sudo().apply_inbox_rules(stored_msg, rule_vals)
             except Exception as _re:
                 _logger.warning('Inbox rule execution failed for msg %s: %s', stored_msg.id, _re)
+
+        if stored_msg and created_new:
+            try:
+                notifier = getattr(stored_msg.sudo(), '_lugal_send_new_email_notification', None)
+                if callable(notifier):
+                    notifier()
+            except Exception:
+                _logger.debug(
+                    '_upsert_inbox_message: deferred realtime notification failed msg=%s',
+                    stored_msg.id, exc_info=True,
+                )
 
         return stored_msg
 
@@ -1449,7 +1462,8 @@ class LugalEmailAccount(models.Model):
                         if uid_val <= min_uid:
                             continue
                         try:
-                            self._upsert_inbox_message(uid_val, raw, flags_meta, headers_only=headers_only)
+                            with self.env.cr.savepoint():
+                                self._upsert_inbox_message(uid_val, raw, flags_meta, headers_only=headers_only)
                             imported += 1
                             if uid_val > max_seen:
                                 max_seen = uid_val

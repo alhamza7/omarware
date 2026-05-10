@@ -92,6 +92,7 @@ _syncing_accounts: set = set()
 # fires 15 simultaneous connections → server limit exceeded → IDLE crashes.
 _cred_sync_lock = threading.Lock()
 _syncing_credentials: set = set()   # set of (imap_host, imap_port, username)
+_cred_wait_timeout = 25.0
 
 # Throttle mirrors (kept here so the controller doesn't import from the model).
 _IMAP_THROTTLE_SECONDS = 30        # min gap between syncs when inbox has messages
@@ -157,22 +158,32 @@ def _run_imap_sync_bg(acc_id, db_name, force=False):
                 username  = (acc.username or acc.email_address or '').strip()
                 cred_key  = (imap_host, imap_port, username)
 
-                # Credential-level check: skip if another sync is already open
-                # for this IMAP username+server combination.
-                with _cred_sync_lock:
-                    if cred_key in _syncing_credentials:
-                        _logger.debug(
-                            'Skipping bg sync for acc %s — credential %s already syncing',
+                # Credential-level gate: wait briefly instead of dropping the
+                # sync request. Under load, silently skipping here makes the FE
+                # depend on a later manual resync even though a notification was
+                # already delivered.
+                import time as _time
+                wait_started = _time.monotonic()
+                while True:
+                    with _cred_sync_lock:
+                        if cred_key not in _syncing_credentials:
+                            _syncing_credentials.add(cred_key)
+                            break
+                    if _time.monotonic() - wait_started >= _cred_wait_timeout:
+                        _logger.warning(
+                            'Timed out waiting for IMAP credential sync gate '
+                            'acc=%s credential=%s',
                             acc_id, cred_key,
                         )
-                        cred_key = None  # don't discard it on exit — we didn't add it
+                        cred_key = None
                         return
-                    _syncing_credentials.add(cred_key)
+                    _time.sleep(0.25)
 
                 if force:
                     acc.action_sync()
                 else:
                     acc.action_sync_if_stale()
+                cr.commit()
 
         except Exception:
             _logger.exception('Background IMAP sync failed account_id=%s', acc_id)
@@ -1826,24 +1837,29 @@ class LugalEmailController(http.Controller):
                 ('folder', 'not in', ['sent', 'drafts', 'trash', 'spam']),
             ]
 
-            # ── Auto-sync for accounts that have never been synced or errored ─
+            # ── Auto-sync for accounts that are stale/never synced/errored ─
             # The notifications endpoint is often called before the inbox is opened.
-            # Without this, a newly-configured account (sync_status='never') would
-            # show 0 emails indefinitely until the user navigates to the inbox view.
+            # Without this, notifications can show stale counts/messages until
+            # the user manually hits resync.
             db_name = request.env.cr.dbname
             sync_threads = []
             for acc in accs:
                 needs_urgent_sync = (
                     (acc.password or '').strip() and
-                    (acc.sync_status in ('never', 'error') or not acc.last_sync_date)
+                    (
+                        acc.sync_status in ('never', 'error')
+                        or not acc.last_sync_date
+                        or _needs_imap_sync(acc)
+                    )
                 )
                 if needs_urgent_sync:
                     try:
-                        t = _run_imap_sync_bg(acc.id, db_name, force=True)
+                        force_now = acc.sync_status in ('never', 'error') or not acc.last_sync_date
+                        t = _run_imap_sync_bg(acc.id, db_name, force=force_now)
                         if t:
                             sync_threads.append(t)
                             _logger.info(
-                                'notifications: triggered urgent sync for account %s '
+                                'notifications: triggered freshness sync for account %s '
                                 '(sync_status=%s)', acc.id, acc.sync_status,
                             )
                     except Exception:
@@ -1851,11 +1867,16 @@ class LugalEmailController(http.Controller):
                             'notifications: urgent sync kick failed for account %s', acc.id,
                         )
 
-            # Wait up to 8 seconds for urgent syncs so the response contains fresh counts.
+            # Wait briefly for syncs so the response contains fresh counts.
             # If the sync takes longer the FE will get the cached (possibly stale) counts
             # and the sync will complete in the background.
+            has_cold_sync = any(
+                a.sync_status in ('never', 'error') or not a.last_sync_date
+                for a in accs
+            )
+            wait_timeout = 8.0 if has_cold_sync else 3.0
             for t in sync_threads:
-                t.join(timeout=8.0)
+                t.join(timeout=wait_timeout)
 
             # Re-read accounts after sync to pick up updated unread_count / sync_status.
             accs = _get_user_accounts(uid)

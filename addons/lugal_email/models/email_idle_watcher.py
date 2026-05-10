@@ -119,6 +119,7 @@ def _sync_account(acc_id: int, db_name: str):
             acc = env['lugal.email.account'].browse(acc_id)
             if acc.exists() and acc.is_active and not acc.is_deleted and (acc.password or '').strip():
                 acc.action_sync()
+                cr.commit()
     except Exception:
         _logger.exception('Poll sync failed for account %s', acc_id)
 
