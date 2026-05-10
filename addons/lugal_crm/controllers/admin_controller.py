@@ -168,30 +168,47 @@ def _build_fe_schema() -> dict:
     return {k: copy.deepcopy(v) for k, v in PERMISSION_TREE.items() if not k.startswith('_')}
 
 def _filter_to_fe_schema(perms: dict) -> dict:
-    """Filter an effective-permissions dict to only the FE-visible keys."""
+    """
+    Filter an effective-permissions dict to only FE-visible action keys.
+    Also preserves the '_route_visibility' override map so the route
+    computation picks it up correctly.
+    """
     def _pick(definition, src):
         if not isinstance(definition, dict):
             return bool(src)
-        # Nested section?
         if any(isinstance(v, dict) for v in definition.values()):
             return {sub: _pick(sub_def, (src or {}).get(sub) or {})
                     for sub, sub_def in definition.items()}
-        # Flat section — copy only the known action keys
         return {action: bool((src or {}).get(action, False)) for action in definition}
 
-    return {
+    result = {
         section: _pick(definition, perms.get(section))
         for section, definition in PERMISSION_TREE.items()
         if not section.startswith('_')
     }
+    # Carry route-level overrides through so _compute_route_visibility can use them
+    if '_route_visibility' in perms:
+        result['_route_visibility'] = copy.deepcopy(perms['_route_visibility'])
+    return result
+
 
 def _compute_route_visibility(perms: dict) -> dict:
     """
     Flat map of route paths → bool for FE navigation visibility.
-    A route is True when at least one action leaf in its subtree is True.
-    Internal keys (starting with '_') are excluded.
+
+    Step 1 — compute from actions: a route is accessible when at least one
+             action leaf in its subtree is True.
+    Step 2 — apply explicit overrides from perms['_route_visibility']:
+             an override of False always hides the route (even if actions would
+             make it True), an override of True always shows it (even if all
+             actions are False).
+
     Both section-level ('supply_chain') and subsection-level
     ('supply_chain.containers') keys are included.
+    Internal keys (starting with '_') are excluded from the output.
+
+    Admin sets route overrides via the `route_visibility` param of
+    /api/crm/admin/users/<id>/permissions/set.
     """
     def _any_true(node) -> bool:
         if isinstance(node, bool):
@@ -204,7 +221,6 @@ def _compute_route_visibility(perms: dict) -> dict:
     for section, value in perms.items():
         if section.startswith('_') or not isinstance(value, dict):
             continue
-        # Is this a nested section (some sub-values are dicts)?
         if any(isinstance(v, dict) for v in value.values()):
             section_accessible = False
             for sub, sub_val in value.items():
@@ -217,7 +233,26 @@ def _compute_route_visibility(perms: dict) -> dict:
             routes[section] = section_accessible
         else:
             routes[section] = _any_true(value)
+
+    # Apply explicit route-level overrides (admin-set, highest priority)
+    for path, visible in (perms.get('_route_visibility') or {}).items():
+        routes[path] = bool(visible)
+
     return routes
+
+
+def _all_route_paths() -> list:
+    """Return every settable route path (section + subsection level)."""
+    paths = []
+    for section, value in PERMISSION_TREE.items():
+        if section.startswith('_') or not isinstance(value, dict):
+            continue
+        paths.append(section)
+        if any(isinstance(v, dict) for v in value.values()):
+            for sub, sub_val in value.items():
+                if isinstance(sub_val, dict):
+                    paths.append(f'{section}.{sub}')
+    return paths
 
 # ─── Role-level baseline permissions ─────────────────────────────────────────
 # Aligned to the new PERMISSION_TREE structure. Higher roles are supersets.
@@ -726,6 +761,9 @@ class CrmAdminController(http.Controller):
                     'future_edits_crm_tree': internal_schema,
                     'roles':                 roles,
                     'role_baselines':        role_baselines,
+                    # All paths the FE can pass in `route_visibility` to
+                    # explicitly show/hide a nav section or sub-section
+                    'settable_route_paths':  _all_route_paths(),
                 },
             }
         except Exception as e:
@@ -1066,6 +1104,15 @@ class CrmAdminController(http.Controller):
                   "crm": { "analytics": { "export": true } }
                 }
 
+          route_visibility (obj, optional)
+              — Explicit route-level on/off map. Takes the highest priority
+                over computed route visibility from action permissions.
+                Keys are route paths (section or section.subsection).
+                  { "supply_chain": false, "conversations.email": false }
+                false = always hide this nav route regardless of actions.
+                true  = always show this nav route regardless of actions.
+                Omit a key to fall back to computed (any action True → visible).
+
           apply_to_all_same_crm_role (bool, optional, default false)
               — If TRUE: saves these overrides as the CRM-role template for the
                 user's current role (step 3 in the resolution chain). Stored
@@ -1093,12 +1140,28 @@ class CrmAdminController(http.Controller):
                 return {'success': False, 'error': 'User not found'}
 
             new_overrides       = kwargs.get('permissions') or {}
+            route_vis_input     = kwargs.get('route_visibility')
             apply_to_all        = bool(kwargs.get('apply_to_all_same_crm_role'))
             job_title_override  = (kwargs.get('job_title_override') or '').strip() or None
             notes               = (kwargs.get('notes') or '').strip()
 
             if not isinstance(new_overrides, dict):
                 return {'success': False, 'error': '`permissions` must be an object'}
+
+            if route_vis_input is not None and not isinstance(route_vis_input, dict):
+                return {'success': False, 'error': '`route_visibility` must be an object'}
+
+            # Merge route_visibility into the overrides under the reserved key
+            if route_vis_input:
+                valid_paths = set(_all_route_paths())
+                bad = [k for k in route_vis_input if k not in valid_paths]
+                if bad:
+                    return {'success': False,
+                            'error': f'Unknown route path(s) in route_visibility: {bad}'}
+                new_overrides = dict(new_overrides)   # shallow copy before mutating
+                new_overrides['_route_visibility'] = {
+                    k: bool(v) for k, v in route_vis_input.items()
+                }
 
             Override = request.env['lugal.crm.user.permission'].sudo()
 

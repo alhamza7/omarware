@@ -133,9 +133,63 @@ Every permission response includes a `routes` object. Use this for **navigation 
 }
 ```
 
-**Route visibility rule:** A route key is `true` when at least one action leaf anywhere in that section is `true`. The FE can use this without having to inspect every individual permission.
+### Route visibility — how it's computed
 
-**Admin UX tip:** When the admin toggles an entire section off (e.g. "hide supply_chain"), set all actions under that section to `false`. The next permissions fetch will return `routes["supply_chain"] = false`.
+Each route key goes through **two steps** in priority order:
+
+| Priority | Source | Wins when |
+|----------|--------|-----------|
+| 1 (low) | Computed from actions | `any(actions) == True` → route visible |
+| 2 (high) | **Explicit `route_visibility` override** | Admin set an explicit `true`/`false` for that path |
+
+An explicit override **always wins** over the computed value. This is how an admin can hide an entire section even though the user still has individual action permissions inside it.
+
+### Setting route visibility (admin)
+
+Pass `route_visibility` alongside `permissions` in the `/permissions/set` call:
+
+```json
+{
+  "params": {
+    "permissions": {
+      "supply_chain": { "containers": { "list": true, "view": true } }
+    },
+    "route_visibility": {
+      "supply_chain.purchase_orders": false,
+      "supply_chain.negotiations":    false,
+      "conversations.email":          false,
+      "event_log":                    false
+    }
+  }
+}
+```
+
+- `false` → **always hide** this nav route for this user, even if they have action permissions inside it.
+- `true` → **always show** this nav route, even if all action permissions are currently `false`.
+- **Omit a key** → fall back to computed (route shown if any action in it is `true`).
+
+> **Important:** Route visibility overrides are per-user (or per-role when `apply_to_all_same_crm_role: true`). The same API call, same endpoint — just add the `route_visibility` field.
+
+### Getting all valid route paths
+
+The schema endpoint returns `settable_route_paths` — the complete list of paths the FE can use in `route_visibility`:
+
+```
+POST /api/crm/admin/permissions/schema
+→ data.settable_route_paths: [
+    "dashboard", "customers", "products", "orders", "omni_channel",
+    "tickets", "tasks", "employees", "sales_pipeline", "forecasting",
+    "supply_chain", "supply_chain.containers", "supply_chain.purchase_orders",
+    "supply_chain.negotiations", "supply_chain.item_requests", "supply_chain.vendors",
+    "conversations", "conversations.chat", "conversations.email",
+    "conversations.stories", "conversations.localsend",
+    "promotions", "analytics", "knowledge_base", "call_centre",
+    "event_log", "admin_dashboard",
+    "settings", "settings.general", "settings.permissions",
+    "settings.templates", "settings.rules", "settings.channels",
+    "settings.sla", "settings.shifts", "settings.omni_channels"
+  ]
+```
 
 ---
 
@@ -218,11 +272,22 @@ Content-Type: application/json
       "customers":   { "delete": true, "export": true },
       "supply_chain":{ "purchase_orders": { "confirm": true, "ship": true } }
     },
+    "route_visibility": {
+      "supply_chain.negotiations": false,
+      "conversations.email":       false,
+      "event_log":                 false
+    },
     "apply_to_all_same_crm_role": false,
     "notes": "Manager review — expanded access approved by John"
   }
 }
 ```
+
+**`route_visibility`** (object, optional) — explicit route-level show/hide map.
+- Keys must be valid paths from `data.settable_route_paths` (returned by the schema endpoint).
+- `false` → **always hide** this nav section for the user, even if they have action permissions inside it.
+- `true` → **always show** this nav section, even if all action permissions inside it are `false`.
+- **Omit a key** → computed automatically: route visible if at least one action inside is `true`.
 
 **`apply_to_all_same_crm_role`** (boolean, default `false`):
 - `false` → Save as this user's individual override only.
