@@ -127,8 +127,8 @@ def _rule_matches_shape(rule, conditions, actions) -> bool:
         return False
 
 
-def _find_existing_move_rule(uid, account_id, conditions, actions):
-    Rule = request.env['lugal.email.rule'].sudo()
+def _find_existing_move_rule(uid, account_id, conditions, actions, env=None):
+    Rule = (env or request.env)['lugal.email.rule'].sudo()
     for rule in Rule.search([
         ('user_id', '=', uid),
         ('account_id', '=', int(account_id)),
@@ -151,6 +151,16 @@ def _rule_move_destinations(rule):
     ]
 
 
+def _message_already_in_destination_branch(msg, rule):
+    current = (msg.folder or '').strip()
+    if not current:
+        return False
+    for dest in _rule_move_destinations(rule):
+        if current == dest or current.startswith(dest + '.') or current.startswith(dest + '/'):
+            return True
+    return False
+
+
 def _apply_move_rule_to_existing(rule, uid, account_id=None, limit=5000):
     """Move existing inbound mail for a newly created move rule."""
     if not _rule_move_destinations(rule):
@@ -170,6 +180,8 @@ def _apply_move_rule_to_existing(rule, uid, account_id=None, limit=5000):
     for msg in Msg.search(domain, order='date desc, id desc', limit=limit):
         msg_vals = _message_rule_vals(msg)
         if not rule._matches(msg_vals):
+            continue
+        if _message_already_in_destination_branch(msg, rule):
             continue
         matched += 1
         try:
@@ -227,6 +239,10 @@ def _apply_account_move_rules_to_existing(rule, uid, account_id=None, limit=1000
             try:
                 if not candidate._matches(msg_vals):
                     continue
+                if _message_already_in_destination_branch(msg, candidate):
+                    if candidate.stop_processing:
+                        break
+                    continue
                 matched += 1
                 before_folder = msg.folder
                 affected_accounts |= msg.account_id
@@ -259,6 +275,93 @@ def _apply_account_move_rules_to_existing(rule, uid, account_id=None, limit=1000
         'skipped': skipped,
         'rules_considered': len(move_rules),
     }
+
+
+def _sender_values_from_conditions(conditions):
+    return [
+        (c.get('value') or '').strip().lower()
+        for c in (conditions or [])
+        if c.get('field') == 'from_address'
+        and c.get('operator') == 'contains'
+        and (c.get('value') or '').strip()
+    ]
+
+
+def _mirror_sender_move_rule_to_user_accounts(rule, uid, source_account_id=None):
+    """Keep sender move rules consistent across all of a user's mail accounts.
+
+    Users expect "move all from this sender" to follow the sender, not only the
+    mailbox where the rule was first created.  If the same sender later emails a
+    second account for the same user, that account must also have the destination
+    folder/rule and historical mail moved.
+    """
+    try:
+        conditions = json.loads(rule.conditions_json or '[]') or []
+        actions = json.loads(rule.actions_json or '[]') or []
+    except Exception:
+        return []
+    if not _sender_values_from_conditions(conditions):
+        return []
+    move_destinations = [
+        (a.get('value') or '').strip()
+        for a in actions
+        if a.get('action') == 'move_folder' and (a.get('value') or '').strip()
+    ]
+    if not move_destinations:
+        return []
+
+    Acc = rule.env['lugal.email.account'].sudo()
+    Rule = rule.env['lugal.email.rule'].sudo()
+    accounts = Acc.search([
+        ('user_id', '=', uid),
+        ('is_active', '=', True),
+        ('is_deleted', '=', False),
+    ])
+    mirrored = []
+    for acc in accounts:
+        if source_account_id and acc.id == int(source_account_id):
+            continue
+
+        # Ensure IMAP folders exist per account; creating a folder on one mailbox
+        # does not create it on the user's other mailboxes.
+        if (acc.password or '').strip():
+            try:
+                with acc._imap_session(connect_attempts=4, retry_delay=1.5) as conn:
+                    for dest in move_destinations:
+                        if dest.lower() not in {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'}:
+                            acc._imap_ensure_folder(dest, existing_conn=conn)
+            except Exception:
+                _logger.warning(
+                    'mirror sender rule: could not ensure folders for acc=%s rule=%s',
+                    acc.id, rule.id, exc_info=True,
+                )
+
+        existing = _find_existing_move_rule(uid, acc.id, conditions, actions, env=rule.env)
+        if existing:
+            mirrored_rule = existing
+            created = False
+        else:
+            mirrored_rule = Rule.create({
+                'name':            rule.name,
+                'user_id':         uid,
+                'account_id':      acc.id,
+                'is_active':       True,
+                'sequence':        rule.sequence,
+                'match_mode':      rule.match_mode,
+                'conditions_json': json.dumps(conditions),
+                'actions_json':    json.dumps(actions),
+                'stop_processing': rule.stop_processing,
+            })
+            created = True
+
+        applied = _apply_account_move_rules_to_existing(mirrored_rule, uid, acc.id)
+        mirrored.append({
+            'account_id': acc.id,
+            'rule_id': mirrored_rule.id,
+            'created': created,
+            'auto_applied_existing': applied,
+        })
+    return mirrored
 
 
 def _qs_dict(qs):
@@ -325,9 +428,11 @@ class EmailRulesController(http.Controller):
                 'stop_processing':  bool(body.get('stop_processing', False)),
             })
             auto_applied = _apply_account_move_rules_to_existing(rule, uid, account_id)
+            mirrored_rules = _mirror_sender_move_rule_to_user_accounts(rule, uid, account_id)
             request.env.cr.commit()
             data = _rule_dict(rule)
             data['auto_applied_existing'] = auto_applied
+            data['mirrored_rules'] = mirrored_rules
             return _json_ok(data, status=201)
         except Exception as exc:
             return _json_err(str(exc), 500)
@@ -888,6 +993,16 @@ class EmailRulesController(http.Controller):
                         name=f'imap-bulk-move-{acc_id}',
                     ).start()
 
+            mirrored_rules = []
+            if is_move_template:
+                if parent_rule:
+                    mirrored_rules.extend(
+                        _mirror_sender_move_rule_to_user_accounts(parent_rule, uid, account_id)
+                    )
+                mirrored_rules.extend(
+                    _mirror_sender_move_rule_to_user_accounts(rule, uid, account_id)
+                )
+
             return _json_ok({
                 'rule':            _rule_dict(rule),
                 'parent_rule':     _rule_dict(parent_rule) if parent_rule else None,
@@ -907,6 +1022,7 @@ class EmailRulesController(http.Controller):
                     'skipped':          skipped_count,
                     'imap_move_queued': bool(to_move_imap) if is_move_template else False,
                 },
+                'mirrored_rules':   mirrored_rules,
             }, status=201)
 
         except Exception as exc:

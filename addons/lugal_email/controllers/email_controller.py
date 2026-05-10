@@ -423,6 +423,16 @@ def _apply_sender_move_to_existing(msg, target_folder):
         return {'rule_id': None, 'applied_existing': 0}
 
     rule = _find_or_create_sender_move_rule(msg, target_folder)
+    mirrored_rules = []
+    try:
+        from odoo.addons.lugal_email.controllers.rules_controller import (
+            _mirror_sender_move_rule_to_user_accounts,
+        )
+        if rule:
+            mirrored_rules = _mirror_sender_move_rule_to_user_accounts(
+                rule, msg.account_id.user_id.id, msg.account_id.id)
+    except Exception:
+        _logger.warning('manual sender move rule mirror failed msg=%s', msg.id, exc_info=True)
     Msg = msg.env['lugal.email.message'].sudo()
     LOGICAL = {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'}
     matches = Msg.search([
@@ -488,6 +498,7 @@ def _apply_sender_move_to_existing(msg, target_folder):
         'rule_id': rule.id if rule else None,
         'applied_existing': len(matches),
         'unread_count': unread_count,
+        'mirrored_rules': mirrored_rules,
     }
 
 
@@ -3893,6 +3904,7 @@ class LugalEmailController(http.Controller):
                 'unread_count': unread_count,
                 'rule_id': rule_info.get('rule_id'),
                 'applied_existing': rule_info.get('applied_existing', 0),
+                'mirrored_rules': rule_info.get('mirrored_rules', []),
             }})
         except Exception as exc:
             return _json_response({'success': False, 'error': str(exc)}, 500)
