@@ -80,6 +80,29 @@ class LugalEmailRule(models.Model):
 
     # ── Helpers ────────────────────────────────────────────────────────────────
 
+    @api.model
+    def _message_has_attachments(self, msg_record=None, msg_vals=None) -> bool:
+        """Return whether a message has stored or MIME-detected attachments.
+
+        Attachment rules are evaluated in two places:
+        - live IMAP import, where attachments may only exist in the parsed MIME
+          payload at rule-evaluation time;
+        - retroactive apply-all/template flows, where attachments are already
+          stored as ir.attachment rows.
+        """
+        msg_vals = msg_vals or {}
+        raw = msg_vals.get('has_attachments')
+        if isinstance(raw, bool) and raw:
+            return True
+        if isinstance(raw, str) and raw.strip().lower() in ('1', 'true', 'yes', 'on'):
+            return True
+        if msg_record and msg_record.exists():
+            return bool(self.env['ir.attachment'].sudo().search_count([
+                ('res_model', '=', 'lugal.email.message'),
+                ('res_id', '=', msg_record.id),
+            ]))
+        return False
+
     def _get_conditions(self):
         try:
             return json.loads(self.conditions_json or '[]') or []
@@ -183,6 +206,11 @@ class LugalEmailRule(models.Model):
                 elif action == 'move_folder':
                     if not value:
                         continue
+                    if value.replace('/', '.').split('.')[-1].lower() == 'important':
+                        # Folder semantics are authoritative.  Anything routed
+                        # into an Important child folder must remain visible in
+                        # that folder's API, which filters on is_important.
+                        write_vals['is_important'] = True
                     if value.lower() in LOGICAL:
                         write_vals['folder'] = value.lower()
                         if msg_record.imap_uid and msg_record.account_id:
@@ -219,6 +247,16 @@ class LugalEmailRule(models.Model):
         if write_vals:
             try:
                 msg_record.write(write_vals)
+                if msg_record.account_id and (
+                    'folder' in write_vals or 'is_read' in write_vals
+                ):
+                    unread_count = self.env['lugal.email.message'].sudo().search_count([
+                        ('account_id', '=', msg_record.account_id.id),
+                        ('folder', 'not in', ['sent', 'drafts', 'trash', 'spam']),
+                        ('is_read', '=', False),
+                        ('is_deleted', '=', False),
+                    ])
+                    msg_record.account_id.sudo().write({'unread_count': unread_count})
             except Exception as _e:
                 _logger.warning('Email rule write failed: %s', _e)
 
@@ -276,8 +314,13 @@ class LugalEmailRule(models.Model):
             return
         owner_uid = acc.user_id.id
 
-        # Augment vals with boolean has_attachments sentinel
-        msg_vals_aug = dict(msg_vals, has_attachments=False)
+        # Augment vals with a real attachment sentinel.  This must not default
+        # to False blindly, otherwise attachment rules never match during IMAP
+        # import or retroactive apply-all.
+        msg_vals_aug = dict(
+            msg_vals,
+            has_attachments=self._message_has_attachments(msg_record, msg_vals),
+        )
 
         rules = self.sudo().search([
             ('is_active', '=', True),

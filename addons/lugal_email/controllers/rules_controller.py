@@ -92,6 +92,106 @@ def _rule_dict(rule):
     }
 
 
+def _message_has_attachments(msg) -> bool:
+    if not msg or not msg.exists():
+        return False
+    return bool(msg.env['ir.attachment'].sudo().search_count([
+        ('res_model', '=', 'lugal.email.message'),
+        ('res_id', '=', msg.id),
+    ]))
+
+
+def _message_rule_vals(msg) -> dict:
+    return {
+        'from_address':    msg.from_address or '',
+        'to_addresses':    msg.to_addresses or '',
+        'cc_addresses':    msg.cc_addresses or '',
+        'bcc_addresses':   msg.bcc_addresses or '',
+        'subject':         msg.subject or '',
+        'body_text':       msg.body_text or '',
+        'has_attachments': _message_has_attachments(msg),
+        'is_important':    msg.is_important,
+        'is_read':         msg.is_read,
+        'is_starred':      msg.is_starred,
+        'folder':          msg.folder or '',
+    }
+
+
+def _rule_matches_shape(rule, conditions, actions) -> bool:
+    try:
+        return (
+            json.loads(rule.conditions_json or '[]') == conditions
+            and json.loads(rule.actions_json or '[]') == actions
+        )
+    except Exception:
+        return False
+
+
+def _find_existing_move_rule(uid, account_id, conditions, actions):
+    Rule = request.env['lugal.email.rule'].sudo()
+    for rule in Rule.search([
+        ('user_id', '=', uid),
+        ('account_id', '=', int(account_id)),
+        ('is_active', '=', True),
+    ], order='sequence asc, id asc'):
+        if _rule_matches_shape(rule, conditions, actions):
+            return rule
+    return Rule.browse()
+
+
+def _rule_move_destinations(rule):
+    try:
+        actions = json.loads(rule.actions_json or '[]') or []
+    except Exception:
+        return []
+    return [
+        (act.get('value') or '').strip()
+        for act in actions
+        if act.get('action') == 'move_folder' and (act.get('value') or '').strip()
+    ]
+
+
+def _apply_move_rule_to_existing(rule, uid, account_id=None, limit=5000):
+    """Move existing inbound mail for a newly created move rule."""
+    if not _rule_move_destinations(rule):
+        return {'matched': 0, 'applied': 0, 'skipped': 0}
+
+    Msg = rule.env['lugal.email.message'].sudo()
+    domain = [
+        ('account_id.user_id', '=', uid),
+        ('folder', 'not in', ['sent', 'drafts', 'trash', 'spam']),
+        ('is_deleted', '=', False),
+    ]
+    if account_id:
+        domain.append(('account_id', '=', int(account_id)))
+
+    matched = applied = skipped = 0
+    affected_accounts = rule.env['lugal.email.account'].sudo().browse()
+    for msg in Msg.search(domain, order='date desc, id desc', limit=limit):
+        msg_vals = _message_rule_vals(msg)
+        if not rule._matches(msg_vals):
+            continue
+        matched += 1
+        try:
+            affected_accounts |= msg.account_id
+            rule._apply_actions(msg)
+            applied += 1
+        except Exception:
+            skipped += 1
+            _logger.warning('apply move rule to existing failed rule=%s msg=%s', rule.id, msg.id)
+
+    for acc in affected_accounts:
+        unread = Msg.search_count([
+            ('account_id', '=', acc.id),
+            ('folder', 'not in', ['sent', 'drafts', 'trash', 'spam']),
+            ('is_read', '=', False),
+            ('is_deleted', '=', False),
+        ])
+        acc.sudo().write({'unread_count': unread})
+
+    return {'matched': matched, 'applied': applied, 'skipped': skipped}
+
+
 def _qs_dict(qs):
     return {
         'id':          qs.id,
@@ -155,8 +255,11 @@ class EmailRulesController(http.Controller):
                 'actions_json':     json.dumps(body.get('actions', [])),
                 'stop_processing':  bool(body.get('stop_processing', False)),
             })
+            auto_applied = _apply_move_rule_to_existing(rule, uid, account_id)
             request.env.cr.commit()
-            return _json_ok(_rule_dict(rule), status=201)
+            data = _rule_dict(rule)
+            data['auto_applied_existing'] = auto_applied
+            return _json_ok(data, status=201)
         except Exception as exc:
             return _json_err(str(exc), 500)
 
@@ -263,27 +366,13 @@ class EmailRulesController(http.Controller):
                 domain.append(('folder', '=', folder))
 
             messages  = request.env['lugal.email.message'].sudo().search(domain, order='id desc', limit=5000)
-            RuleModel = request.env['lugal.email.rule'].sudo()
-
             matched = applied = skipped = 0
             for msg in messages:
-                msg_vals = {
-                    'from_address':   msg.from_address or '',
-                    'to_addresses':   msg.to_addresses or '',
-                    'cc_addresses':   msg.cc_addresses or '',
-                    'bcc_addresses':  msg.bcc_addresses or '',
-                    'subject':        msg.subject or '',
-                    'body_text':      msg.body_text or '',
-                    'has_attachments': bool(msg.has_attachments if hasattr(msg, 'has_attachments') else False),
-                    'is_important':   msg.is_important,
-                    'is_read':        msg.is_read,
-                    'is_starred':     msg.is_starred,
-                    'folder':         msg.folder or '',
-                }
+                msg_vals = _message_rule_vals(msg)
                 if rule._matches(msg_vals):
                     matched += 1
                     try:
-                        RuleModel.apply_inbox_rules(msg, msg_vals)
+                        rule._apply_actions(msg)
                         applied += 1
                     except Exception:
                         skipped += 1
@@ -316,19 +405,7 @@ class EmailRulesController(http.Controller):
             msg = request.env['lugal.email.message'].sudo().browse(int(message_id))
             if not msg.exists() or msg.account_id.user_id.id != uid:
                 return _json_err('Message not found', 404)
-            msg_vals = {
-                'from_address':   msg.from_address or '',
-                'to_addresses':   msg.to_addresses or '',
-                'cc_addresses':   msg.cc_addresses or '',
-                'bcc_addresses':  msg.bcc_addresses or '',
-                'subject':        msg.subject or '',
-                'body_text':      msg.body_text or '',
-                'has_attachments': False,
-                'is_important':   msg.is_important,
-                'is_read':        msg.is_read,
-                'is_starred':     msg.is_starred,
-                'folder':         msg.folder or '',
-            }
+            msg_vals = _message_rule_vals(msg)
             matched     = rule._matches(msg_vals)
             would_apply = []
             if matched:
@@ -429,13 +506,9 @@ class EmailRulesController(http.Controller):
                 sender_label = sender_addr
 
             # ── Template catalogue ─────────────────────────────────────────────
-            # IMPORTANT: move_important_from_sender uses only from_address condition.
-            # The word "Important" is the FOLDER NAME, not the is_important flag.
-            # Requiring is_important=true would silently skip most emails because
-            # very few senders set Importance: high headers.
             TEMPLATES = {
                 'move_all_from_sender': {
-                    'label':       f'Move all emails from {sender_label}',
+                    'label':       f'Move all emails from {sender_label} to sender parent folder',
                     'child_name':  None,
                     'match_mode':  'all',
                     'conditions':  [
@@ -445,20 +518,19 @@ class EmailRulesController(http.Controller):
                     'stop_processing': True,
                 },
                 'move_important_from_sender': {
-                    'label':       f'Move all emails from {sender_label} to Important',
+                    'label':       f'Move all important emails from {sender_label} to Important child folder',
                     'child_name':  'Important',
                     'match_mode':  'all',
-                    # Only match on sender address — "Important" is the folder name,
-                    # NOT the is_important flag. Do not add is_important condition here.
                     'conditions':  [
                         {'field': 'from_address', 'operator': 'contains', 'value': sender_addr},
+                        {'field': 'is_important', 'operator': 'equals', 'value': 'true'},
                     ],
                     'mark_actions': [],
                     'stop_processing': True,
                 },
                 'move_with_attachments_from_sender': {
-                    'label':       f'Move all emails with attachments from {sender_label}',
-                    'child_name':  'With Attachments',
+                    'label':       f'Move all emails with attachments from {sender_label} to Attachments child folder',
+                    'child_name':  'Attachments',
                     'match_mode':  'all',
                     'conditions':  [
                         {'field': 'from_address',    'operator': 'contains', 'value': sender_addr},
@@ -468,7 +540,7 @@ class EmailRulesController(http.Controller):
                     'stop_processing': True,
                 },
                 'move_with_cc_bcc_from_sender': {
-                    'label':       f'Move all emails with CC and BCC from {sender_label}',
+                    'label':       f'Move all emails with CC and BCC from {sender_label} to CC and BCC child folder',
                     'child_name':  'CC and BCC',
                     'match_mode':  'all',
                     'conditions':  [
@@ -478,26 +550,6 @@ class EmailRulesController(http.Controller):
                     ],
                     'mark_actions': [],
                     'stop_processing': True,
-                },
-                'mark_important_from_sender': {
-                    'label':       f'Mark all emails from {sender_label} as important',
-                    'child_name':  None,
-                    'match_mode':  'all',
-                    'conditions':  [
-                        {'field': 'from_address', 'operator': 'contains', 'value': sender_addr},
-                    ],
-                    'mark_actions': [{'action': 'mark_important'}],
-                    'stop_processing': False,
-                },
-                'mark_read_from_sender': {
-                    'label':       f'Auto-mark all emails from {sender_label} as read',
-                    'child_name':  None,
-                    'match_mode':  'all',
-                    'conditions':  [
-                        {'field': 'from_address', 'operator': 'contains', 'value': sender_addr},
-                    ],
-                    'mark_actions': [{'action': 'mark_read'}],
-                    'stop_processing': False,
                 },
             }
 
@@ -562,18 +614,51 @@ class EmailRulesController(http.Controller):
             if is_move_template:
                 actions.append({'action': 'move_folder', 'value': dest_path})
 
-            # ── Create the rule ────────────────────────────────────────────────
-            rule = request.env['lugal.email.rule'].sudo().create({
-                'name':             tpl['label'],
-                'user_id':          uid,
-                'account_id':       int(account_id),
-                'is_active':        True,
-                'sequence':         10,
-                'match_mode':       tpl['match_mode'],
-                'conditions_json':  json.dumps(tpl['conditions']),
-                'actions_json':     json.dumps(actions),
-                'stop_processing':  tpl['stop_processing'],
-            })
+            Rule = request.env['lugal.email.rule'].sudo()
+            parent_rule = Rule.browse()
+            parent_conditions = [
+                {'field': 'from_address', 'operator': 'contains', 'value': sender_addr},
+            ]
+            parent_actions = [{'action': 'move_folder', 'value': parent_path}]
+
+            # ── Create/reuse rules ────────────────────────────────────────────
+            # Any nested sender rule must have exactly one parent rule:
+            #   INBOX.<sender>            -> all mail from sender
+            #   INBOX.<sender>.Important  -> important subset
+            #   INBOX.<sender>.<Sibling>  -> another subset
+            # Child subset rules run first and stop.  The parent catch-all runs
+            # later so non-matching sender mail still lands in the parent.
+            if is_move_template and child_name:
+                parent_rule = _find_existing_move_rule(
+                    uid, account_id, parent_conditions, parent_actions)
+                if not parent_rule:
+                    parent_rule = Rule.create({
+                        'name':             f'Move all emails from {sender_label}',
+                        'user_id':          uid,
+                        'account_id':       int(account_id),
+                        'is_active':        True,
+                        'sequence':         90,
+                        'match_mode':       'all',
+                        'conditions_json':  json.dumps(parent_conditions),
+                        'actions_json':     json.dumps(parent_actions),
+                        'stop_processing':  True,
+                    })
+
+            existing_child_rule = _find_existing_move_rule(uid, account_id, tpl['conditions'], actions)
+            if existing_child_rule:
+                rule = existing_child_rule
+            else:
+                rule = Rule.create({
+                    'name':             tpl['label'],
+                    'user_id':          uid,
+                    'account_id':       int(account_id),
+                    'is_active':        True,
+                    'sequence':         10 if child_name else 90,
+                    'match_mode':       tpl['match_mode'],
+                    'conditions_json':  json.dumps(tpl['conditions']),
+                    'actions_json':     json.dumps(actions),
+                    'stop_processing':  tpl['stop_processing'],
+                })
             request.env.cr.commit()
 
             # ── Auto-apply: update DB immediately, move on IMAP in background ──
@@ -593,28 +678,22 @@ class EmailRulesController(http.Controller):
                     ('is_deleted', '=', False),
                 ], order='id desc', limit=2000)
 
-                # Find matching messages and collect (msg_id, imap_uid, from_folder)
+                # Find matching messages and collect (msg_id, imap_uid, from_folder, dest)
                 to_move_db  = []   # ORM records for DB update
-                to_move_imap = []  # (imap_uid, from_imap_path) for background thread
+                to_move_imap = []  # (imap_uid, from_imap_path, dest_path) for background thread
                 _LOGICAL = {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'}
 
                 for msg in existing:
-                    msg_vals = {
-                        'from_address':    msg.from_address or '',
-                        'to_addresses':    msg.to_addresses or '',
-                        'cc_addresses':    msg.cc_addresses or '',
-                        'bcc_addresses':   msg.bcc_addresses or '',
-                        'subject':         msg.subject or '',
-                        'body_text':       msg.body_text or '',
-                        'has_attachments': False,
-                        'is_important':    msg.is_important,
-                        'is_read':         msg.is_read,
-                        'is_starred':      msg.is_starred,
-                        'folder':          msg.folder or '',
-                    }
+                    msg_vals = _message_rule_vals(msg)
                     try:
-                        if rule._matches(msg_vals):
-                            to_move_db.append(msg)
+                        target_path = None
+                        if child_name and parent_rule and parent_rule._matches(msg_vals):
+                            target_path = dest_path if rule._matches(msg_vals) else parent_path
+                        elif rule._matches(msg_vals):
+                            target_path = dest_path
+
+                        if target_path:
+                            to_move_db.append((msg, target_path))
                             # Determine IMAP source path for this message
                             cur = msg.folder or 'inbox'
                             if cur.lower() == 'inbox':
@@ -625,26 +704,50 @@ class EmailRulesController(http.Controller):
                             else:
                                 imap_from = cur
                             if msg.imap_uid:
-                                to_move_imap.append((msg.imap_uid, imap_from))
+                                to_move_imap.append((msg.imap_uid, imap_from, target_path))
                     except Exception:
                         skipped_count += 1
 
                 # Step 1: update DB immediately so FE sees messages in new folder
                 if to_move_db:
                     try:
-                        # Batch write is much faster than one write() per record
-                        Msg.browse([m.id for m in to_move_db]).write({'folder': dest_path})
+                        import collections as _collections
+                        by_dest = _collections.defaultdict(list)
+                        for m, target_path in to_move_db:
+                            by_dest[target_path].append(m.id)
+                        for target_path, ids in by_dest.items():
+                            write_vals = {'folder': target_path}
+                            if target_path.replace('/', '.').split('.')[-1].lower() == 'important':
+                                write_vals['is_important'] = True
+                            Msg.browse(ids).write(write_vals)
+                        unread_count = Msg.search_count([
+                            ('account_id', '=', int(account_id)),
+                            ('folder', 'not in', ['sent', 'drafts', 'trash', 'spam']),
+                            ('is_read', '=', False),
+                            ('is_deleted', '=', False),
+                        ])
+                        acc.sudo().write({'unread_count': unread_count})
                         request.env.cr.commit()
                         applied_count = len(to_move_db)
                     except Exception as dbe:
                         _logger.warning('from_template DB batch update failed: %s', dbe)
-                        for msg in to_move_db:
+                        for msg, target_path in to_move_db:
                             try:
-                                msg.write({'folder': dest_path})
+                                write_vals = {'folder': target_path}
+                                if target_path.replace('/', '.').split('.')[-1].lower() == 'important':
+                                    write_vals['is_important'] = True
+                                msg.write(write_vals)
                                 applied_count += 1
                             except Exception:
                                 skipped_count += 1
                         try:
+                            unread_count = Msg.search_count([
+                                ('account_id', '=', int(account_id)),
+                                ('folder', 'not in', ['sent', 'drafts', 'trash', 'spam']),
+                                ('is_read', '=', False),
+                                ('is_deleted', '=', False),
+                            ])
+                            acc.sudo().write({'unread_count': unread_count})
                             request.env.cr.commit()
                         except Exception:
                             pass
@@ -656,12 +759,11 @@ class EmailRulesController(http.Controller):
                     import collections as _collections
                     db_name = request.env.cr.dbname
                     acc_id  = acc.id
-                    _dest   = dest_path
 
                     # Group by source folder for efficiency
                     by_folder = _collections.defaultdict(list)
-                    for uid, from_folder in to_move_imap:
-                        by_folder[from_folder].append(uid)
+                    for uid, from_folder, target_path in to_move_imap:
+                        by_folder[(from_folder, target_path)].append(uid)
 
                     def _bg_imap_move():
                         try:
@@ -671,7 +773,7 @@ class EmailRulesController(http.Controller):
                                 _env = _odoo.api.Environment(_cr, _odoo.SUPERUSER_ID, {})
                                 _acc = _env['lugal.email.account'].browse(acc_id)
                                 with _acc._imap_session() as conn:
-                                    for src_folder, uids in by_folder.items():
+                                    for (src_folder, target_path), uids in by_folder.items():
                                         # Resolve logical names to real IMAP paths
                                         if src_folder.lower() == 'inbox':
                                             imap_src = 'INBOX'
@@ -694,20 +796,20 @@ class EmailRulesController(http.Controller):
                                             batch = uids[i:i + _BATCH]
                                             uid_set = ','.join(str(u) for u in batch)
                                             try:
-                                                typ_m, _ = conn.uid('move', uid_set, _dest)
+                                                typ_m, _ = conn.uid('move', uid_set, target_path)
                                                 if typ_m != 'OK':
                                                     # Fallback: COPY + mark deleted + expunge
-                                                    conn.uid('copy', uid_set, _dest)
+                                                    conn.uid('copy', uid_set, target_path)
                                                     conn.uid('store', uid_set, '+FLAGS', '(\\Deleted)')
                                                     conn.expunge()
                                                 _logger.info(
                                                     'bg_imap_move: moved %d uids from %s → %s',
-                                                    len(batch), imap_src, _dest,
+                                                    len(batch), imap_src, target_path,
                                                 )
                                             except Exception as me:
                                                 _logger.warning(
                                                     'bg_imap_move: batch move failed %s → %s: %s',
-                                                    imap_src, _dest, me,
+                                                    imap_src, target_path, me,
                                                 )
                         except Exception as exc:
                             _logger.warning('bg_imap_move thread failed acc=%s: %s', acc_id, exc)
@@ -719,6 +821,7 @@ class EmailRulesController(http.Controller):
 
             return _json_ok({
                 'rule':            _rule_dict(rule),
+                'parent_rule':     _rule_dict(parent_rule) if parent_rule else None,
                 'folder_slug':     folder_slug,
                 'sender_label':    sender_label,
                 'sender_address':  sender_addr,
@@ -758,8 +861,23 @@ class EmailRulesController(http.Controller):
         sender_name  = (kwargs.get('sender_name')  or sender_email or 'sender').strip()
         folder       = (kwargs.get('folder')        or '').strip()
 
-        move_action = [{'action': 'move_folder', 'value': folder}] if folder else \
-                      [{'action': 'move_folder', 'value': ''}]
+        import re as _re
+
+        def _folder_slug_from_email(addr: str) -> str:
+            addr = (addr or '').strip().lower()
+            if not addr:
+                return 'sender'
+            local, _, domain = addr.partition('@')
+            local = (local or (domain.split('.')[0] if domain else '') or 'sender')
+            local = local.replace('.', '_')
+            return _re.sub(r'[^\w\-]+', '_', local, flags=_re.ASCII).strip('_')[:60] or 'sender'
+
+        folder_slug = _folder_slug_from_email(sender_email)
+        parent_folder = folder or f'INBOX.{folder_slug}'
+
+        def move_action_for(child_name=None):
+            target = parent_folder if not child_name else f'{parent_folder}.{child_name}'
+            return [{'action': 'move_folder', 'value': target}]
 
         def sender_cond():
             return [{
@@ -768,74 +886,65 @@ class EmailRulesController(http.Controller):
                 'value':    sender_email,
             }] if sender_email else []
 
-        templates = [
-            {
-                'key':         'move_all_from_sender',
-                'label':       f'Move all emails from {sender_name}' if sender_email
-                               else 'Move all emails from a specific sender',
-                'description': 'Automatically move every email from this sender to a chosen folder.',
-                'match_mode':  'all',
-                'conditions':  sender_cond() or [{'field': 'from_address', 'operator': 'contains', 'value': ''}],
-                'actions':     move_action,
-                'stop_processing': True,
-            },
-            {
-                'key':         'move_important_from_sender',
-                'label':       f'Move all emails from {sender_name} to Important folder' if sender_email
-                               else 'Move all emails from a sender into an Important subfolder',
-                'description': (
-                    'Move every email from this sender into the account\'s '
-                    'INBOX.<slug>.Important folder. Note: "Important" is the mailbox '
-                    'name — all emails from this sender are moved, not just flagged ones.'
+        def template_item(key, label, description, conditions, child_name=None):
+            destination = parent_folder if not child_name else f'{parent_folder}.{child_name}'
+            return {
+                'key':                     key,
+                'label':                   label,
+                'description':             description,
+                'match_mode':              'all',
+                'conditions':              conditions,
+                'actions':                 move_action_for(child_name),
+                'stop_processing':         True,
+                'creates_folder':          True,
+                'parent_folder':           parent_folder,
+                'child_folder':            child_name,
+                'destination_folder':      destination,
+                'destination_description': (
+                    'Sender parent folder' if not child_name else f'{child_name} child folder'
                 ),
-                'match_mode':  'all',
-                'conditions':  sender_cond() or [{'field': 'from_address', 'operator': 'contains', 'value': ''}],
-                'actions':     move_action,
-                'stop_processing': True,
-            },
-            {
-                'key':         'move_with_attachments_from_sender',
-                'label':       f'Move all emails with attachments from {sender_name}' if sender_email
-                               else 'Move all emails with attachments from a specific sender',
-                'description': 'Move emails that contain attachments from this sender.',
-                'match_mode':  'all',
-                'conditions':  sender_cond() + [{'field': 'has_attachments', 'operator': 'equals', 'value': 'true'}],
-                'actions':     move_action,
-                'stop_processing': True,
-            },
-            {
-                'key':         'move_with_cc_bcc_from_sender',
-                'label':       f'Move all emails with CC and BCC from {sender_name}' if sender_email
-                               else 'Move all emails with CC and BCC from a specific sender',
-                'description': 'Move only when both CC and BCC lists are non-empty.',
-                'match_mode':  'all',
-                'conditions':  sender_cond() + [
+            }
+
+        templates = [
+            template_item(
+                'move_all_from_sender',
+                f'Move all emails from {sender_name} to sender parent folder' if sender_email
+                else 'Move all emails from a sender to sender parent folder',
+                'Create/reuse the sender parent folder and move every email from this sender into it.',
+                sender_cond() or [{'field': 'from_address', 'operator': 'contains', 'value': ''}],
+            ),
+            template_item(
+                'move_important_from_sender',
+                f'Move all important emails from {sender_name} to Important child folder' if sender_email
+                else 'Move all important emails from a sender to Important child folder',
+                'Create/reuse the sender parent folder plus its Important child folder, then move only important emails from this sender into that child folder.',
+                (sender_cond() + [
+                    {'field': 'is_important', 'operator': 'equals', 'value': 'true'},
+                ]) if sender_email else [
+                    {'field': 'from_address', 'operator': 'contains', 'value': ''},
+                    {'field': 'is_important', 'operator': 'equals', 'value': 'true'},
+                ],
+                child_name='Important',
+            ),
+            template_item(
+                'move_with_attachments_from_sender',
+                f'Move all emails with attachments from {sender_name} to Attachments child folder' if sender_email
+                else 'Move all emails with attachments from a sender to Attachments child folder',
+                'Create/reuse the sender parent folder plus its Attachments child folder, then move only emails with attachments from this sender into that child folder.',
+                sender_cond() + [{'field': 'has_attachments', 'operator': 'equals', 'value': 'true'}],
+                child_name='Attachments',
+            ),
+            template_item(
+                'move_with_cc_bcc_from_sender',
+                f'Move all emails with CC and BCC from {sender_name} to CC and BCC child folder' if sender_email
+                else 'Move all emails with CC and BCC from a sender to CC and BCC child folder',
+                'Create/reuse the sender parent folder plus its CC and BCC child folder, then move only emails with both CC and BCC values into that child folder.',
+                sender_cond() + [
                     {'field': 'cc_addresses',  'operator': 'is_not_empty', 'value': ''},
                     {'field': 'bcc_addresses', 'operator': 'is_not_empty', 'value': ''},
                 ],
-                'actions':     move_action,
-                'stop_processing': True,
-            },
-            {
-                'key':         'mark_important_from_sender',
-                'label':       f'Mark all emails from {sender_name} as important' if sender_email
-                               else 'Mark all emails from a specific sender as important',
-                'description': 'Automatically flag every email from this sender as high-importance.',
-                'match_mode':  'all',
-                'conditions':  sender_cond() or [{'field': 'from_address', 'operator': 'contains', 'value': ''}],
-                'actions':     [{'action': 'mark_important'}],
-                'stop_processing': False,
-            },
-            {
-                'key':         'mark_read_from_sender',
-                'label':       f'Auto-mark all emails from {sender_name} as read' if sender_email
-                               else 'Auto-mark all emails from a specific sender as read',
-                'description': 'Silently mark every incoming email from this sender as already read.',
-                'match_mode':  'all',
-                'conditions':  sender_cond() or [{'field': 'from_address', 'operator': 'contains', 'value': ''}],
-                'actions':     [{'action': 'mark_read'}],
-                'stop_processing': False,
-            },
+                child_name='CC and BCC',
+            ),
         ]
 
         return _json_ok(templates)

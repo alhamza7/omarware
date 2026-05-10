@@ -824,7 +824,35 @@ class LugalEmailAccount(models.Model):
             if _msmail == 'high':
                 is_important = True
 
+        if not is_important:
+            # Some clients/users do not send RFC priority headers but mark the
+            # message in the subject itself.  Honour common spellings/typos used
+            # in this product flow so "Important from sender" rules still route
+            # the message into the Important child folder.
+            _subj_l = (subject or '').lower()
+            if any(token in _subj_l for token in (
+                'important', 'imporant', 'imporatn', 'imporatnt', 'importnat',
+            )):
+                is_important = True
+
+        if not is_important:
+            # Folder context is authoritative: if the message is being imported
+            # from an Important child mailbox, keep the DB flag aligned so the
+            # Important API does not hide it.
+            _folder_tail = (folder_key or '').replace('/', '.').split('.')[-1].lower()
+            if _folder_tail == 'important':
+                is_important = True
+
         message_size = len(raw_bytes) if raw_bytes else 0
+        has_mime_attachments = False
+        try:
+            for _part in msg.walk():
+                _disp = (_part.get_content_disposition() or '').lower()
+                if _part.get_filename() or 'attachment' in _disp:
+                    has_mime_attachments = True
+                    break
+        except Exception:
+            has_mime_attachments = False
 
         Message = self.env['lugal.email.message'].sudo()
 
@@ -894,11 +922,23 @@ class LugalEmailAccount(models.Model):
         # we never store the same RFC-2822 message twice even if the UID changed.
         domain = [('account_id', '=', self.id), ('folder', '=', folder_key), ('imap_uid', '=', uid_int)]
         existing = Message.search(domain, limit=1)
+        existing_found_by_uid = bool(existing)
+        existing_found_by_message_id_only = False
+        if not existing and message_id:
+            existing = Message.search(
+                [
+                    ('account_id', '=', self.id),
+                    ('folder', '=', folder_key),
+                    ('message_id', '=', message_id),
+                ],
+                limit=1,
+            )
         if not existing and message_id:
             existing = Message.search(
                 [('account_id', '=', self.id), ('message_id', '=', message_id)],
                 limit=1,
             )
+            existing_found_by_message_id_only = bool(existing)
         vals = {
             'account_id':           self.id,
             'folder':               folder_key,
@@ -942,7 +982,62 @@ class LugalEmailAccount(models.Model):
         if is_read and not existing:
             vals['read_at'] = dt
 
+        created_new = False
+
         if existing:
+            existing_identity_changed = bool(
+                existing_found_by_uid
+                and message_id
+                and existing.message_id
+                and existing.message_id != message_id
+            )
+
+            if existing_identity_changed:
+                # Some custom folders have stale DB rows whose IMAP UID now
+                # points at a different RFC message.  Treat this as a new
+                # message occupying the old row: do not inherit read/body/thread
+                # state from the previous occupant.
+                vals['read_at'] = dt if is_read else False
+                if headers_only:
+                    vals['body_text'] = ''
+                    vals['body_html'] = False
+                    vals['body_fetched'] = False
+
+            # Merge historical duplicates for the same RFC Message-ID.  Older
+            # versions could create one row from source INBOX and another from a
+            # custom-folder sync.  The custom-folder UID-holder is the row that
+            # should survive, but it must inherit read/important state from the
+            # duplicate so unread badges do not resurrect after reload.
+            if message_id and not existing_identity_changed:
+                _dupes = Message.search([
+                    ('account_id', '=', self.id),
+                    ('message_id', '=', message_id),
+                    ('id', '!=', existing.id),
+                    ('is_deleted', '=', False),
+                ])
+                if _dupes:
+                    _read_dupe = _dupes.filtered(lambda d: d.is_read or d.read_at)[:1]
+                    if _read_dupe:
+                        vals['is_read'] = True
+                        vals['read_at'] = _read_dupe.read_at or fields.Datetime.now()
+                    if any(_dupes.mapped('is_important')):
+                        vals['is_important'] = True
+                    if not vals.get('thread_id'):
+                        _thread_dupe = _dupes.filtered(lambda d: bool(d.thread_id))[:1]
+                        if _thread_dupe:
+                            vals['thread_id'] = _thread_dupe.thread_id
+                    try:
+                        # Do not clear imap_uid through ORM.  Integer False is
+                        # written as 0 in this Odoo version, which can collide
+                        # with the unique (account_id, imap_uid, folder) index.
+                        _dupes.write({'is_deleted': True, 'active': False})
+                    except Exception:
+                        _logger.warning(
+                            '_upsert_inbox_message: duplicate merge cleanup failed '
+                            'account=%s message_id=%s',
+                            self.id, message_id, exc_info=True,
+                        )
+
             # Never downgrade a fully-fetched body to headers-only.
             if headers_only and existing.body_fetched:
                 vals.pop('body_text', None)
@@ -957,22 +1052,74 @@ class LugalEmailAccount(models.Model):
             # erasing the user's action.
             # Rule: NEVER downgrade is_read from True (DB) to False (IMAP).
             # Upgrading False→True (user read in webmail) is always allowed.
-            if not is_read and existing.is_read:
+            stale_read_marker = bool(
+                existing.read_at
+                and dt
+                and existing.read_at < dt
+            )
+            if (
+                not existing_identity_changed
+                and not stale_read_marker
+                and not is_read
+                and existing.is_read
+            ):
                 vals.pop('is_read', None)
                 # Keep existing read_at as well — don't nullify it.
                 vals.pop('read_at', None)
+            elif stale_read_marker and not is_read:
+                vals['read_at'] = False
 
             # Never wipe a thread_id that was already bootstrapped (e.g. by
             # the SMTP async write-back) with a None from a subject-fallback
             # race where the new message hasn't been matched yet.
-            if not vals.get('thread_id') and existing.thread_id:
+            if not existing_identity_changed and not vals.get('thread_id') and existing.thread_id:
                 vals.pop('thread_id', None)
 
             # Don't downgrade request_read_receipt from True to False on
             # re-sync (e.g. a sent record set True by the send endpoint, but
             # the Sent folder IMAP copy was imported before the fix landed).
-            if not vals.get('request_read_receipt') and existing.request_read_receipt:
+            if (
+                not existing_identity_changed
+                and not vals.get('request_read_receipt')
+                and existing.request_read_receipt
+            ):
                 vals.pop('request_read_receipt', None)
+
+            # Guard the DB unique constraint (account_id, imap_uid, folder).
+            # Historical duplicate rows can share Message-ID but have older UIDs
+            # from previous custom-folder sync bugs.  If assigning this UID to
+            # the selected row would collide, update the UID-holder instead and
+            # soft-delete the stale duplicate.
+            uid_for_write = vals.get('imap_uid')
+            folder_for_write = vals.get('folder') or existing.folder
+            if uid_for_write and folder_for_write:
+                _uid_holder = Message.search([
+                    ('account_id', '=', self.id),
+                    ('folder', '=', folder_for_write),
+                    ('imap_uid', '=', uid_for_write),
+                    ('id', '!=', existing.id),
+                ], limit=1)
+                if _uid_holder:
+                    try:
+                        # Do not clear imap_uid through ORM; Integer False is
+                        # stored as 0 and can violate the unique UID constraint.
+                        existing.write({'is_deleted': True, 'active': False})
+                    except Exception:
+                        pass
+                    existing = _uid_holder
+
+            # If a rule already moved a message to a custom folder in the DB but
+            # the source INBOX still contains the server copy until async UID MOVE
+            # completes, do not let a later INBOX sync move the DB row back to
+            # inbox or replace the destination folder's UID with the source UID.
+            if (
+                existing_found_by_message_id_only
+                and (existing.folder or '') != folder_key
+                and (folder_key or '').lower() == 'inbox'
+                and (existing.folder or '').lower() != 'inbox'
+            ):
+                vals.pop('folder', None)
+                vals.pop('imap_uid', None)
 
             existing.write(vals)
             stored_msg = existing
@@ -986,6 +1133,15 @@ class LugalEmailAccount(models.Model):
                 stored_msg = Message.search(domain, limit=1)
                 if not stored_msg and message_id:
                     stored_msg = Message.search(
+                        [
+                            ('account_id', '=', self.id),
+                            ('folder', '=', folder_key),
+                            ('message_id', '=', message_id),
+                        ],
+                        limit=1,
+                    )
+                if not stored_msg and message_id:
+                    stored_msg = Message.search(
                         [('account_id', '=', self.id), ('message_id', '=', message_id)],
                         limit=1,
                     )
@@ -993,7 +1149,15 @@ class LugalEmailAccount(models.Model):
                 if stored_msg:
                     # Another thread won the race — just update.
                     if not (headers_only and stored_msg.body_fetched):
-                        stored_msg.write(vals)
+                        write_vals = dict(vals)
+                        if (
+                            (stored_msg.folder or '') != folder_key
+                            and (folder_key or '').lower() == 'inbox'
+                            and (stored_msg.folder or '').lower() != 'inbox'
+                        ):
+                            write_vals.pop('folder', None)
+                            write_vals.pop('imap_uid', None)
+                        stored_msg.write(write_vals)
                 else:
                     # We are the first — create, using a SAVEPOINT so a concurrent
                     # INSERT at the DB level (unlikely but possible) rolls back
@@ -1001,6 +1165,7 @@ class LugalEmailAccount(models.Model):
                     try:
                         with self.env.cr.savepoint():
                             stored_msg = Message.create(vals)
+                            created_new = True
                     except Exception as dup_exc:
                         # Unique-constraint violation from a concurrent INSERT —
                         # fall back to search and update.
@@ -1016,16 +1181,25 @@ class LugalEmailAccount(models.Model):
                                 limit=1,
                             )
                         if stored_msg and not (headers_only and stored_msg.body_fetched):
-                            stored_msg.write(vals)
-
-                    if stored_msg and run_rules:
-                        try:
-                            self.env['lugal.email.rule'].sudo().apply_inbox_rules(stored_msg, vals)
-                        except Exception as _re:
-                            _logger.warning('Inbox rule execution failed for msg %s: %s', stored_msg.id, _re)
+                            write_vals = dict(vals)
+                            if (
+                                (stored_msg.folder or '') != folder_key
+                                and (folder_key or '').lower() == 'inbox'
+                                and (stored_msg.folder or '').lower() != 'inbox'
+                            ):
+                                write_vals.pop('folder', None)
+                                write_vals.pop('imap_uid', None)
+                            stored_msg.write(write_vals)
 
         if not headers_only:
             self._store_imap_attachments(stored_msg, msg)
+
+        if stored_msg and created_new and run_rules:
+            try:
+                rule_vals = dict(vals, has_attachments=has_mime_attachments)
+                self.env['lugal.email.rule'].sudo().apply_inbox_rules(stored_msg, rule_vals)
+            except Exception as _re:
+                _logger.warning('Inbox rule execution failed for msg %s: %s', stored_msg.id, _re)
 
         return stored_msg
 
@@ -1328,11 +1502,12 @@ class LugalEmailAccount(models.Model):
                 except Exception:
                     _logger.warning('Sent folder sync failed for acc=%s', self.id, exc_info=True)
 
-            # Count unread across ALL folders (inbox + custom user folders).
-            # Previously only counted inbox, so custom-folder unread messages
-            # were silently excluded from the account badge shown in the FE.
+            # Count unread across inbound folders (inbox + custom user folders).
+            # Exclude outbound/system folders so this cache matches notifications,
+            # folder badges, and account DTOs.
             unread = Msg.search_count([
                 ('account_id', '=', self.id),
+                ('folder', 'not in', ['sent', 'drafts', 'trash', 'spam']),
                 ('is_read', '=', False),
                 ('is_deleted', '=', False),
             ])
@@ -1460,12 +1635,13 @@ class LugalEmailAccount(models.Model):
                     n = 0
                     for uid_val, raw, flags_meta in parsed:
                         try:
-                            self._upsert_inbox_message(
-                                uid_val, raw, flags_meta,
-                                headers_only=headers_only,
-                                folder_key=path,
-                                run_rules=False,
-                            )
+                            with self.env.cr.savepoint():
+                                self._upsert_inbox_message(
+                                    uid_val, raw, flags_meta,
+                                    headers_only=headers_only,
+                                    folder_key=path,
+                                    run_rules=False,
+                                )
                             n += 1
                         except Exception:
                             _logger.warning(

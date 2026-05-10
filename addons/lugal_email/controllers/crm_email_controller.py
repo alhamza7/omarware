@@ -358,7 +358,7 @@ class CrmEmailController(http.Controller):
             try:
                 total_unread = request.env['lugal.email.message'].sudo().search_count([
                     ('account_id', 'in', accounts.ids),
-                    ('folder', '=', 'inbox'),
+                    ('folder', 'not in', ['sent', 'drafts', 'trash', 'spam']),
                     ('is_read', '=', False),
                     ('is_deleted', '=', False),
                 ])
@@ -385,7 +385,7 @@ class CrmEmailController(http.Controller):
         are skipped (reported in skipped_ids) without raising an error.
 
         Params (JSON-RPC):
-          message_ids: list[int]  — max 50 per call, required.
+          message_ids: list[int]  — max 1000 per call, required.
 
         Response:
           { "success": true, "data": { "deleted_ids": [...], "skipped_ids": [...] } }
@@ -396,8 +396,8 @@ class CrmEmailController(http.Controller):
                 return {'success': False, 'error': 'Unauthorized'}
             if not message_ids or not isinstance(message_ids, list):
                 return {'success': False, 'error': 'message_ids must be a non-empty list'}
-            if len(message_ids) > 50:
-                return {'success': False, 'error': 'message_ids may not exceed 50 per request'}
+            if len(message_ids) > 1000:
+                return {'success': False, 'error': 'message_ids may not exceed 1000 per request'}
 
             user_accounts = request.env['lugal.email.account'].sudo().search([
                 ('user_id', '=', uid),

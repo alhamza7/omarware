@@ -254,6 +254,16 @@ def _resolve_imap_folder(account, local_folder):
 
 
 def _account_to_dict(acc):
+    unread_count = acc.unread_count
+    try:
+        unread_count = acc.env['lugal.email.message'].sudo().search_count([
+            ('account_id', '=', acc.id),
+            ('folder', 'not in', ['sent', 'drafts', 'trash', 'spam']),
+            ('is_read', '=', False),
+            ('is_deleted', '=', False),
+        ])
+    except Exception:
+        pass
     return {
         'id':                  acc.id,
         'name':                acc.name,
@@ -270,11 +280,263 @@ def _account_to_dict(acc):
         'is_active':           acc.is_active,
         'sync_status':         acc.sync_status or 'never',
         'last_sync_date':      _to_riyadh_iso(acc.last_sync_date),
-        'unread_count':        acc.unread_count,
+        'unread_count':        unread_count,
         # password_set lets the FE know whether the app password has been entered
         # without ever exposing the actual credential value.
         'password_set':        bool(acc.password),
     }
+
+
+def _refresh_account_unread_count(account):
+    """Keep cached account unread_count aligned after read/unread actions."""
+    if not account:
+        return 0
+    unread_count = account.env['lugal.email.message'].sudo().search_count([
+        ('account_id', '=', account.id),
+        ('folder', 'not in', ['sent', 'drafts', 'trash', 'spam']),
+        ('is_read', '=', False),
+        ('is_deleted', '=', False),
+    ])
+    account.sudo().write({'unread_count': unread_count})
+    return unread_count
+
+
+def _folder_tail(folder_path):
+    return (folder_path or '').replace('/', '.').split('.')[-1].lower()
+
+
+def _folder_move_vals(folder_path):
+    vals = {'folder': folder_path}
+    if _folder_tail(folder_path) == 'important':
+        vals['is_important'] = True
+    return vals
+
+
+def _extract_email_address(raw):
+    try:
+        from email.utils import parseaddr
+        return (parseaddr(raw or '')[1] or raw or '').strip().lower()
+    except Exception:
+        return (raw or '').strip().lower()
+
+
+def _rewrite_folder_references(env, account_id, old_path, new_path):
+    """Rewrite DB message folders and rule destinations after an IMAP rename."""
+    Msg = env['lugal.email.message'].sudo()
+    Rule = env['lugal.email.rule'].sudo()
+    renamed_msgs = 0
+    rules_updated = 0
+    seen_msg_ids = set()
+    seps = []
+    for sep in ('.', '/', '/' if '.' in old_path else '.'):
+        if sep not in seps:
+            seps.append(sep)
+
+    exact_msgs = Msg.search([
+        ('account_id', '=', account_id),
+        ('folder', '=', old_path),
+    ])
+    if exact_msgs:
+        seen_msg_ids.update(exact_msgs.ids)
+        exact_msgs.write(_folder_move_vals(new_path))
+
+    for sep in seps:
+        old_prefix = old_path + sep
+        new_prefix = new_path + sep
+        child_msgs = Msg.search([
+            ('account_id', '=', account_id),
+            ('folder', 'like', old_prefix + '%'),
+        ])
+        for child_msg in child_msgs:
+            if child_msg.id in seen_msg_ids:
+                continue
+            child_msg.write(_folder_move_vals(new_prefix + child_msg.folder[len(old_prefix):]))
+            seen_msg_ids.add(child_msg.id)
+
+    renamed_msgs = len(seen_msg_ids)
+
+    for rule in Rule.search([('account_id', '=', account_id)]):
+        try:
+            actions = json.loads(rule.actions_json or '[]')
+        except Exception:
+            continue
+        changed = False
+        for act in actions:
+            if act.get('action') != 'move_folder':
+                continue
+            value = (act.get('value') or '').strip()
+            if value == old_path:
+                act['value'] = new_path
+                changed = True
+            else:
+                for sep in seps:
+                    old_prefix = old_path + sep
+                    if value.startswith(old_prefix):
+                        act['value'] = new_path + sep + value[len(old_prefix):]
+                        changed = True
+                        break
+        if changed:
+            rule.write({'actions_json': json.dumps(actions)})
+            rules_updated += 1
+
+    return {'messages_updated': renamed_msgs, 'rules_updated': rules_updated}
+
+
+def _find_or_create_sender_move_rule(msg, target_folder):
+    """Manual custom-folder moves become sender rules for future mail."""
+    sender_addr = _extract_email_address(msg.from_address)
+    if not sender_addr or not msg.account_id:
+        return None
+    Rule = msg.env['lugal.email.rule'].sudo()
+    conditions = [{'field': 'from_address', 'operator': 'contains', 'value': sender_addr}]
+    actions = [{'action': 'move_folder', 'value': target_folder}]
+    for rule in Rule.search([
+        ('user_id', '=', msg.account_id.user_id.id),
+        ('account_id', '=', msg.account_id.id),
+        ('is_active', '=', True),
+    ], order='sequence asc, id asc'):
+        try:
+            if (
+                json.loads(rule.conditions_json or '[]') == conditions
+                and json.loads(rule.actions_json or '[]') == actions
+            ):
+                return rule
+        except Exception:
+            continue
+    return Rule.create({
+        'name':            f'Move all emails from {sender_addr} to {target_folder}',
+        'user_id':         msg.account_id.user_id.id,
+        'account_id':      msg.account_id.id,
+        'is_active':       True,
+        'sequence':        90,
+        'match_mode':      'all',
+        'conditions_json': json.dumps(conditions),
+        'actions_json':    json.dumps(actions),
+        'stop_processing': True,
+    })
+
+
+def _apply_sender_move_to_existing(msg, target_folder):
+    """Move historical inbound messages from the same sender into target_folder."""
+    sender_addr = _extract_email_address(msg.from_address)
+    if not sender_addr or not msg.account_id:
+        return {'rule_id': None, 'applied_existing': 0}
+
+    rule = _find_or_create_sender_move_rule(msg, target_folder)
+    Msg = msg.env['lugal.email.message'].sudo()
+    LOGICAL = {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'}
+    matches = Msg.search([
+        ('account_id', '=', msg.account_id.id),
+        ('from_address', 'ilike', sender_addr),
+        ('folder', 'not in', ['sent', 'drafts', 'trash', 'spam']),
+        ('folder', '!=', target_folder),
+        ('is_deleted', '=', False),
+    ], limit=5000)
+
+    imap_tasks = [(m.imap_uid, m.folder) for m in matches if m.imap_uid]
+    if matches:
+        matches.write(_folder_move_vals(target_folder))
+
+    if imap_tasks and (msg.account_id.password or '').strip():
+        db_name = msg.env.cr.dbname
+        acc_id = msg.account_id.id
+
+        def _bg_bulk_sender_move():
+            try:
+                from collections import defaultdict
+                from odoo.modules.registry import Registry as _Registry
+                from odoo.api import Environment as _Env
+                by_src = defaultdict(list)
+                for uid_val, src_folder in imap_tasks:
+                    by_src[src_folder].append(str(uid_val))
+                with _Registry(db_name).cursor() as _cr:
+                    _env = _Env(_cr, 1, {})
+                    _acc = _env['lugal.email.account'].browse(acc_id)
+                    with _acc._imap_session() as conn:
+                        for src_folder, uid_list in by_src.items():
+                            try:
+                                if (src_folder or '').lower() == 'inbox':
+                                    imap_src = 'INBOX'
+                                elif (src_folder or '').lower() in LOGICAL:
+                                    imap_src = _acc._get_server_folder_name(src_folder.lower(), existing_conn=conn)
+                                else:
+                                    imap_src = src_folder
+                                conn.select(_imap_quote_mailbox(imap_src), readonly=False)
+                                uid_set = ','.join(uid_list)
+                                dest = _imap_quote_mailbox(target_folder)
+                                res = conn.uid('move', uid_set, dest)
+                                if res[0] != 'OK':
+                                    conn.uid('copy', uid_set, dest)
+                                    conn.uid('store', uid_set, '+FLAGS', '(\\Deleted)')
+                                    conn.expunge()
+                            except Exception as exc:
+                                _logger.warning(
+                                    'manual move rule IMAP batch failed src=%s dest=%s: %s',
+                                    src_folder, target_folder, exc,
+                                )
+            except Exception as exc:
+                _logger.warning('manual move rule background thread failed: %s', exc)
+
+        threading.Thread(
+            target=_bg_bulk_sender_move,
+            daemon=True,
+            name=f'imap-sender-rule-{msg.account_id.id}',
+        ).start()
+
+    unread_count = _refresh_account_unread_count(msg.account_id)
+    return {
+        'rule_id': rule.id if rule else None,
+        'applied_existing': len(matches),
+        'unread_count': unread_count,
+    }
+
+
+def _sync_unread_custom_folders(accounts, max_folders=12):
+    """Refresh IMAP flags for custom folders that currently have unread badges."""
+    if not accounts:
+        return []
+    Msg = accounts.env['lugal.email.message'].sudo()
+    ICP = accounts.env['ir.config_parameter'].sudo()
+    rows = Msg.search([
+        ('account_id', 'in', accounts.ids),
+        ('folder', 'not in', ['inbox', 'sent', 'drafts', 'trash', 'archive', 'spam']),
+        ('is_read', '=', False),
+        ('is_deleted', '=', False),
+    ], order='write_date desc', limit=500)
+    pairs = []
+    seen = set()
+    for row in rows:
+        key = (row.account_id.id, row.folder)
+        if key not in seen:
+            seen.add(key)
+            pairs.append((row.account_id, row.folder))
+        if len(pairs) >= max_folders:
+            break
+
+    synced = []
+    import time as _time
+    now = int(_time.time())
+    for acc, folder in pairs:
+        if not (acc.password or '').strip():
+            continue
+        throttle_key = f'lugal_email.custom_unread_sync.{acc.id}.{folder}'
+        try:
+            last = int(ICP.get_param(throttle_key, '0') or '0')
+        except Exception:
+            last = 0
+        if now - last < 45:
+            continue
+        try:
+            ICP.set_param(throttle_key, str(now))
+            res = acc.sudo().sync_custom_imap_folder(folder, headers_only=True)
+            _refresh_account_unread_count(acc)
+            synced.append({'account_id': acc.id, 'folder': folder, 'result': res})
+        except Exception:
+            _logger.warning(
+                'notifications custom unread sync failed acc=%s folder=%s',
+                acc.id, folder, exc_info=True,
+            )
+    return synced
 
 
 def _message_to_dict(msg, full=False):
@@ -610,6 +872,9 @@ class LugalEmailController(http.Controller):
             return _unauthorized()
         try:
             accs = _get_user_accounts(uid)
+            notification_folder_domain = [
+                ('folder', 'not in', ['sent', 'drafts', 'trash', 'spam']),
+            ]
             db_name = request.env.cr.dbname
             results = []
             for acc in accs:
@@ -882,7 +1147,7 @@ class LugalEmailController(http.Controller):
                     request.env.cr.commit()
                     unread = request.env['lugal.email.message'].sudo().search_count([
                         ('account_id', '=', acc.id),
-                        ('folder', '=', 'inbox'),
+                        ('folder', 'not in', ['sent', 'drafts', 'trash', 'spam']),
                         ('is_read', '=', False),
                         ('is_deleted', '=', False),
                     ])
@@ -930,7 +1195,12 @@ class LugalEmailController(http.Controller):
             folder_raw  = (params.get('folder', folder_name) or 'inbox').strip()
             folder_q    = folder_raw   # canonical path for DB queries (may change after IMAP resolve)
             account_id  = params.get('account_id')
-            query       = params.get('query', '').strip()
+            query       = (
+                params.get('query')
+                or params.get('q')
+                or params.get('search')
+                or ''
+            ).strip()
             starred     = params.get('starred')
             linked_model = params.get('linked_model')
             linked_id   = params.get('linked_id')
@@ -1013,49 +1283,55 @@ class LugalEmailController(http.Controller):
                         continue
                     # Determine if this is a namespace parent using the DB only —
                     # no IMAP call needed and avoids connection limit issues.
-                    # A folder is a namespace parent when:
-                    #   - It has NO messages of its own in the DB, AND
-                    #   - Other messages exist whose folder starts with folder_raw + '.'
+                    # A folder is a namespace parent when child folders exist,
+                    # regardless of whether the parent also has direct messages.
+                    # Example:
+                    #   INBOX.syed_naqvi              -> all Syed mail
+                    #   INBOX.syed_naqvi.Important    -> only important Syed mail
                     Msg = request.env['lugal.email.message'].sudo()
-                    has_own_messages = Msg.search_count([
-                        ('account_id', 'in', account_ids),
-                        ('folder',     '=', folder_raw),
-                        ('is_deleted', '=', False),
-                    ]) > 0
                     has_child_messages = Msg.search_count([
                         ('account_id', 'in', account_ids),
                         ('folder',     'like', folder_raw + '.%'),
                         ('is_deleted', '=', False),
                     ]) > 0
-                    is_namespace_parent = has_child_messages and not has_own_messages
+                    is_namespace_parent = has_child_messages
                     children_paths = []  # only used for imap_folder_sync reporting
 
                     try:
-                        if is_namespace_parent:
-                            # Namespace parent — expand query to all children.
-                            # No IMAP sync needed; messages already in DB from leaf syncs.
-                            folder_branch_expand = True
-                            folder_q = folder_raw
-                            imap_folder_sync.append({
-                                'account_id':      acc.id,
-                                'branch':          True,
-                                'child_mailboxes': [],
-                                'imported':        0,
-                                'error':           None,
-                                'resolved_path':   folder_raw,
-                                'per_mailbox':     [],
-                            })
-                        else:
-                            # Leaf folder or folder with its own messages — exact match only
-                            res = acc.sudo().sync_custom_imap_folder(folder_raw)
-                            imap_folder_sync.append({'account_id': acc.id, **res})
-                            # Only accept resolved_path if it matches the requested folder
-                            # exactly (case differences only). Never allow it to become a
-                            # parent path which would expand the query to sibling folders.
-                            resolved = (res.get('resolved_path') or '').strip()
-                            if resolved and resolved.lower() == folder_raw.lower():
-                                folder_q = resolved
+                        # Keep custom-folder sync isolated.  IMAP/body import can
+                        # hit uniqueness or server-state errors; if that happens,
+                        # the list endpoint must still return cached DB rows
+                        # instead of leaving the request cursor aborted.
+                        with request.env.cr.savepoint():
+                            if is_namespace_parent:
+                                # Namespace parent — expand query to all children.
+                                # No IMAP sync needed; messages already in DB from leaf syncs.
+                                folder_branch_expand = True
+                                folder_q = folder_raw
+                                imap_folder_sync.append({
+                                    'account_id':      acc.id,
+                                    'branch':          True,
+                                    'child_mailboxes': [],
+                                    'imported':        0,
+                                    'error':           None,
+                                    'resolved_path':   folder_raw,
+                                    'per_mailbox':     [],
+                                })
+                            else:
+                                # Leaf folder or folder with its own messages — exact match only
+                                res = acc.sudo().sync_custom_imap_folder(folder_raw)
+                                imap_folder_sync.append({'account_id': acc.id, **res})
+                                # Only accept resolved_path if it matches the requested folder
+                                # exactly (case differences only). Never allow it to become a
+                                # parent path which would expand the query to sibling folders.
+                                resolved = (res.get('resolved_path') or '').strip()
+                                if resolved and resolved.lower() == folder_raw.lower():
+                                    folder_q = resolved
                     except Exception:
+                        try:
+                            request.env.cr.rollback()
+                        except Exception:
+                            pass
                         _logger.exception(
                             'mailbox custom-folder sync failed acc=%s folder=%s',
                             acc.id, folder_raw,
@@ -1104,6 +1380,14 @@ class LugalEmailController(http.Controller):
                 base_domain.append(('is_starred', '=', True))
             if _truthy(filter_important):
                 base_domain.append(('is_important', '=', True))
+            # Folder paths created by the "important from sender" template must
+            # not display stale/non-important duplicates.  This keeps
+            # INBOX.<sender>.Important semantically consistent even if older
+            # rows were imported before the rule/move hardening landed.
+            if is_custom_mailbox:
+                _folder_tail = (folder_q or '').replace('/', '.').split('.')[-1].lower()
+                if _folder_tail == 'important':
+                    base_domain.append(('is_important', '=', True))
             if _truthy(filter_mentioned):
                 base_domain.append(('is_mentioned', '=', True))
             if _truthy(filter_has_attachment):
@@ -1124,11 +1408,16 @@ class LugalEmailController(http.Controller):
             Msg   = request.env['lugal.email.message'].sudo()
             total = Msg.search_count(base_domain)
 
-            # Sort by create_date desc (when Odoo stored the message) then id desc.
-            # Using create_date instead of the email Date header avoids future-dated
-            # messages (mail servers with wrong clocks) from appearing above genuinely
-            # newer messages that arrived later.
-            sort_order = 'create_date desc, id desc'
+            # Default inbox sorting uses create_date so brand-new arrivals appear
+            # first even if a sender has a bad clock.  Custom rule folders are
+            # different: historical/stale DB rows may be re-used during IMAP
+            # custom-folder sync, so create_date can be old while the email Date
+            # is current.  For custom folders, sort by the email Date first.
+            sort_order = (
+                'date desc, create_date desc, id desc'
+                if is_custom_mailbox
+                else 'create_date desc, id desc'
+            )
 
             new_msgs = Msg.browse()
             if since_id:
@@ -1305,11 +1594,14 @@ class LugalEmailController(http.Controller):
                         400,
                     )
                 msg.write(vals)
+                if 'is_read' in vals:
+                    _refresh_account_unread_count(msg.account_id)
                 return _json_response({'success': True, 'data': _message_to_dict(msg)})
 
             if request.httprequest.method == 'DELETE':
                 prev_folder = msg.folder
                 msg.write({'folder': 'trash'})
+                _refresh_account_unread_count(msg.account_id)
                 # Push move to IMAP server (fire-and-forget)
                 if msg.imap_uid:
                     imap_from = _resolve_imap_folder(msg.account_id, prev_folder)
@@ -1524,6 +1816,9 @@ class LugalEmailController(http.Controller):
             last_seen_id = int(params.get('last_seen_id', 0) or 0)
 
             accs = _get_user_accounts(uid)
+            notification_folder_domain = [
+                ('folder', 'not in', ['sent', 'drafts', 'trash', 'spam']),
+            ]
 
             # ── Auto-sync for accounts that have never been synced or errored ─
             # The notifications endpoint is often called before the inbox is opened.
@@ -1558,17 +1853,19 @@ class LugalEmailController(http.Controller):
 
             # Re-read accounts after sync to pick up updated unread_count / sync_status.
             accs = _get_user_accounts(uid)
+            custom_folder_sync = _sync_unread_custom_folders(accs)
 
             per_account = []
             total_unread = 0
             for acc in accs:
-                # Count unread inbox messages from DB (source of truth)
+                # Count unread inbound messages from DB (source of truth).
+                # Includes custom rule folders such as INBOX.syed_naqvi and
+                # INBOX.syed_naqvi.Important, not only literal inbox.
                 unread = request.env['lugal.email.message'].sudo().search_count([
                     ('account_id', '=', acc.id),
-                    ('folder', '=', 'inbox'),
                     ('is_read', '=', False),
                     ('is_deleted', '=', False),
-                ])
+                ] + notification_folder_domain)
                 total_unread += unread
                 has_pw     = bool((acc.password or '').strip())
                 err_msg    = acc.sync_error_msg or ''
@@ -1599,6 +1896,11 @@ class LugalEmailController(http.Controller):
                     ('is_read', '=', False),
                     ('is_deleted', '=', False),
                 ])
+            per_folder['inbound'] = request.env['lugal.email.message'].sudo().search_count([
+                ('account_id', 'in', account_ids),
+                ('is_read', '=', False),
+                ('is_deleted', '=', False),
+            ] + notification_folder_domain)
 
             last_sync = None
             if accs:
@@ -1608,17 +1910,17 @@ class LugalEmailController(http.Controller):
 
             Msg = request.env['lugal.email.message'].sudo()
 
-            # ── New inbox messages (for browser/in-app notifications) ──────────
-            # Returns up to 10 most recent UNREAD inbox messages.
+            # ── New inbound messages (for browser/in-app notifications) ────────
+            # Returns up to 10 most recent UNREAD inbound messages, including
+            # custom rule folders.
             # If `?since=<ISO datetime>` is supplied only messages received after
             # that timestamp are returned, so the FE can detect new arrivals
             # without comparing counts.
             new_msg_domain = [
                 ('account_id', 'in', account_ids),
-                ('folder', '=', 'inbox'),
                 ('is_read', '=', False),
                 ('is_deleted', '=', False),
-            ]
+            ] + notification_folder_domain
             if since_str:
                 try:
                     from odoo.fields import Datetime as OdooDatetime
@@ -1643,6 +1945,7 @@ class LugalEmailController(http.Controller):
                     'from_address': m.from_address or '',
                     'date':         _to_riyadh_iso(m.date),
                     'is_read':      m.is_read,
+                    'folder':       m.folder or 'inbox',
                 }
                 for m in new_inbox
             ]
@@ -1684,6 +1987,7 @@ class LugalEmailController(http.Controller):
                     # Use this value as the `?since=` param on your next poll.
                     'checked_at':         _nowdt.now(tz=_RIYADH_TZ).strftime('%Y-%m-%dT%H:%M:%S+03:00'),
                     'new_messages':       new_messages,
+                    'custom_folder_sync': custom_folder_sync,
                     'recently_sent':      sent_status,
                 },
             })
@@ -2197,6 +2501,7 @@ class LugalEmailController(http.Controller):
             # Capture pre-write state before the write() override may stamp read_at
             was_already_read = bool(msg.read_at)
             msg.write({'is_read': is_read})
+            unread_count = _refresh_account_unread_count(msg.account_id)
             # Push \Seen / -\Seen flag to IMAP server
             if msg.imap_uid:
                 imap_folder = _resolve_imap_folder(msg.account_id, msg.folder)
@@ -2228,6 +2533,7 @@ class LugalEmailController(http.Controller):
             return _json_response({'success': True, 'data': {
                 'is_read': is_read,
                 'read_at': _to_riyadh_iso(msg.read_at) if msg.read_at else None,
+                'unread_count': unread_count,
             }})
         except Exception as exc:
             return _json_response({'success': False, 'error': str(exc)}, 500)
@@ -2275,11 +2581,12 @@ class LugalEmailController(http.Controller):
                 return _not_found()
             prev_folder = msg.folder
             msg.write({'folder': 'inbox'})
+            unread_count = _refresh_account_unread_count(msg.account_id)
             # Move back to INBOX on the IMAP server
             if msg.imap_uid:
                 imap_from = _resolve_imap_folder(msg.account_id, prev_folder)
                 msg.account_id.sudo()._imap_move_async(msg.imap_uid, imap_from, 'inbox')
-            return _json_response({'success': True})
+            return _json_response({'success': True, 'unread_count': unread_count})
         except Exception as exc:
             return _json_response({'success': False, 'error': str(exc)}, 500)
 
@@ -2297,11 +2604,12 @@ class LugalEmailController(http.Controller):
                 return _not_found()
             prev_folder = msg.folder
             msg.write({'folder': 'archive'})
+            unread_count = _refresh_account_unread_count(msg.account_id)
             # Move to Archive folder on the IMAP server
             if msg.imap_uid:
                 imap_from = _resolve_imap_folder(msg.account_id, prev_folder)
                 msg.account_id.sudo()._imap_move_async(msg.imap_uid, imap_from, 'archive')
-            return _json_response({'success': True})
+            return _json_response({'success': True, 'unread_count': unread_count})
         except Exception as exc:
             return _json_response({'success': False, 'error': str(exc)}, 500)
 
@@ -2324,10 +2632,11 @@ class LugalEmailController(http.Controller):
                     409,
                 )
             msg.write({'folder': 'inbox'})
+            unread_count = _refresh_account_unread_count(msg.account_id)
             if msg.imap_uid:
                 imap_archive = _resolve_imap_folder(msg.account_id, 'archive')
                 msg.account_id.sudo()._imap_move_async(msg.imap_uid, imap_archive, 'inbox')
-            return _json_response({'success': True})
+            return _json_response({'success': True, 'unread_count': unread_count})
         except Exception as exc:
             return _json_response({'success': False, 'error': str(exc)}, 500)
 
@@ -2359,11 +2668,12 @@ class LugalEmailController(http.Controller):
             imap_uid = msg.imap_uid
             acc      = msg.account_id.sudo()
             msg.sudo().unlink()
+            unread_count = _refresh_account_unread_count(acc)
             # Expunge from IMAP Trash folder so webmail also removes it permanently
             if imap_uid:
                 trash_folder = acc._get_server_folder_name('trash')
                 acc._imap_expunge_async(imap_uid, trash_folder)
-            return _json_response({'success': True, 'deleted_id': message_id})
+            return _json_response({'success': True, 'deleted_id': message_id, 'unread_count': unread_count})
         except Exception as exc:
             _logger.exception('message_permanent_delete error')
             return _json_response({'success': False, 'error': str(exc)}, 500)
@@ -2378,7 +2688,7 @@ class LugalEmailController(http.Controller):
         are silently skipped and reported in 'skipped_ids'.
 
         Request body (JSON):
-          { "message_ids": [1, 2, 3] }   — max 50 IDs per call.
+          { "message_ids": [1, 2, 3] }   — max 1000 IDs per call.
 
         Response:
           {
@@ -2402,9 +2712,9 @@ class LugalEmailController(http.Controller):
                     {'success': False, 'error': 'message_ids must be a non-empty array'},
                     400,
                 )
-            if len(message_ids) > 50:
+            if len(message_ids) > 1000:
                 return _json_response(
-                    {'success': False, 'error': 'message_ids may not exceed 50 per request'},
+                    {'success': False, 'error': 'message_ids may not exceed 1000 per request'},
                     400,
                 )
             if not all(isinstance(i, int) for i in message_ids):
@@ -2425,13 +2735,19 @@ class LugalEmailController(http.Controller):
             )
             deleted_ids  = to_delete.ids
             skipped_ids  = [i for i in message_ids if i not in deleted_ids]
+            affected_accounts = to_delete.mapped('account_id')
             to_delete.unlink()
+            unread_counts = {
+                str(acc.id): _refresh_account_unread_count(acc)
+                for acc in affected_accounts
+            }
 
             return _json_response({
                 'success': True,
                 'data': {
                     'deleted_ids': deleted_ids,
                     'skipped_ids': skipped_ids,
+                    'unread_counts': unread_counts,
                 },
             })
         except json.JSONDecodeError:
@@ -2934,19 +3250,39 @@ class LugalEmailController(http.Controller):
 
                 # ── Count messages ──────────────────────────────────────────────
                 # Standard folders: DB stores logical key ('inbox', 'sent', …)
-                # Custom folders:   DB stores the raw IMAP path ('INBOX.omar.Important')
+                # Custom folders:   DB stores the raw IMAP path ('INBOX.omar.Important').
+                # Namespace parents (e.g. INBOX.syed_naqvi) represent the whole
+                # sender folder, so their counts include child folders.  Important
+                # child folders only count important rows.
                 local_folder_key = role if role in _STANDARD_ROLES else raw_name
+                folder_domain = [('folder', '=', local_folder_key)]
+                if role == 'custom':
+                    child_count = Msg.search_count([
+                        ('account_id', '=', acc.id),
+                        ('is_deleted', '=', False),
+                        '|',
+                        ('folder', 'like', raw_name + delimiter + '%'),
+                        ('folder', 'like', raw_name + ('/' if delimiter != '/' else '.') + '%'),
+                    ])
+                    if child_count:
+                        folder_domain = [
+                            '|', '|',
+                            ('folder', '=', local_folder_key),
+                            ('folder', 'like', raw_name + delimiter + '%'),
+                            ('folder', 'like', raw_name + ('/' if delimiter != '/' else '.') + '%'),
+                        ]
+                    if raw_name.replace('/', '.').split('.')[-1].lower() == 'important':
+                        folder_domain = [('folder', '=', local_folder_key), ('is_important', '=', True)]
+
                 total  = Msg.search_count([
                     ('account_id', '=', acc.id),
-                    ('folder',     '=', local_folder_key),
                     ('is_deleted', '=', False),
-                ])
+                ] + folder_domain)
                 unread = Msg.search_count([
                     ('account_id', '=', acc.id),
-                    ('folder',     '=', local_folder_key),
                     ('is_read',    '=', False),
                     ('is_deleted', '=', False),
-                ])
+                ] + folder_domain)
 
                 # ── Tree metadata ───────────────────────────────────────────────
                 # Split by the detected delimiter to compute depth and parent.
@@ -3121,13 +3457,53 @@ class LugalEmailController(http.Controller):
             if old_path.upper() == 'INBOX':
                 return _json_response({'success': False, 'error': 'Cannot rename INBOX'}, 400)
 
-            import imaplib, time as _time
+            import imaplib, time as _time, re as _re
+            rename_status = 'renamed'
             try:
                 with acc._imap_session() as conn:
-                    typ, data = conn.rename(
-                        _imap_quote_mailbox(old_path),
-                        _imap_quote_mailbox(new_path),
-                    )
+                    def _list_names():
+                        names = {}
+                        typ_l, raw_l = conn.list()
+                        if typ_l != 'OK' or not raw_l:
+                            return names
+                        lr = _re.compile(
+                            r'^\((?P<flags>[^)]*)\)\s+'
+                            r'(?:"(?P<delim>[^"]*)"|NIL)\s+'
+                            r'(?P<name>.+?)\s*$'
+                        )
+                        for item in raw_l:
+                            if not item:
+                                continue
+                            line = item.decode('utf-8', errors='replace') if isinstance(item, bytes) else item
+                            m = lr.match(line.strip())
+                            if not m:
+                                continue
+                            name = m.group('name').strip().strip('"')
+                            if name:
+                                names[name.lower()] = name
+                        return names
+
+                    names_before = _list_names()
+                    old_exists = old_path.lower() in names_before
+                    new_existing = names_before.get(new_path.lower())
+                    if not old_exists and new_existing:
+                        # The user may have renamed the folder directly in
+                        # webmail.  Treat this as success and reconcile DB/rules.
+                        new_path = new_existing
+                        typ, data = 'OK', []
+                        rename_status = 'already_renamed_on_server'
+                    else:
+                        typ, data = conn.rename(
+                            _imap_quote_mailbox(old_path),
+                            _imap_quote_mailbox(new_path),
+                        )
+                        if typ != 'OK':
+                            names_after = _list_names()
+                            new_existing = names_after.get(new_path.lower())
+                            if new_existing:
+                                new_path = new_existing
+                                typ, data = 'OK', []
+                                rename_status = 'server_renamed_despite_non_ok_response'
             except Exception as exc:
                 fe = _format_imap_error(exc)
                 if _is_imap_connection_limit_error(fe):
@@ -3145,9 +3521,16 @@ class LugalEmailController(http.Controller):
                 msg = data[0].decode('utf-8', errors='replace') if data else 'RENAME failed'
                 return _json_response({'success': False, 'error': msg}, 502)
 
+            rewrite = _rewrite_folder_references(request.env, account_id, old_path, new_path)
+            _refresh_account_unread_count(acc)
+            request.env.cr.commit()
+
             return _json_response({'success': True, 'data': {
                 'old_path': old_path,
                 'new_path': new_path,
+                'rename_status': rename_status,
+                'messages_updated': rewrite['messages_updated'],
+                'rules_updated': rewrite['rules_updated'],
             }})
         except Exception as exc:
             return _json_response({'success': False, 'error': _format_imap_error(exc)}, 500)
@@ -3343,6 +3726,7 @@ class LugalEmailController(http.Controller):
                     msgs_restored = len(still_orphaned)
                     to_imap = [(m.imap_uid, m.folder) for m in still_orphaned if m.imap_uid]
                     still_orphaned.write({'folder': 'inbox'})
+                    _refresh_account_unread_count(acc)
 
                     # Async IMAP: physically move messages back to INBOX on server
                     import collections as _col, threading as _thr
@@ -3381,6 +3765,7 @@ class LugalEmailController(http.Controller):
                                     name=f'imap-restore-{_aid}').start()
 
                 try:
+                    _refresh_account_unread_count(acc)
                     request.env.cr.commit()
                 except Exception:
                     pass
@@ -3427,6 +3812,15 @@ class LugalEmailController(http.Controller):
             else:
                 target_logical = 'custom'
                 imap_dest = target_raw
+                if (msg.account_id.password or '').strip():
+                    try:
+                        with msg.account_id.sudo()._imap_session(connect_attempts=6, retry_delay=2.0) as _conn:
+                            msg.account_id.sudo()._imap_ensure_folder(imap_dest, existing_conn=_conn)
+                    except Exception:
+                        _logger.warning(
+                            'message_move: could not ensure destination folder %s',
+                            imap_dest, exc_info=True,
+                        )
 
             prev_folder = msg.folder
             imap_from   = _resolve_imap_folder(msg.account_id, prev_folder)
@@ -3435,7 +3829,16 @@ class LugalEmailController(http.Controller):
             # For logical folders store the logical key; for custom IMAP paths
             # store the raw path so the messages_list query can find them.
             new_folder = target_logical if target_logical != 'custom' else target_raw
-            msg.write({'folder': new_folder})
+            write_vals = {'folder': new_folder}
+            if new_folder.replace('/', '.').split('.')[-1].lower() == 'important':
+                write_vals['is_important'] = True
+            msg.write(write_vals)
+            rule_info = {'rule_id': None, 'applied_existing': 0}
+            if target_logical == 'custom':
+                rule_info = _apply_sender_move_to_existing(msg, new_folder)
+                unread_count = rule_info.get('unread_count', _refresh_account_unread_count(msg.account_id))
+            else:
+                unread_count = _refresh_account_unread_count(msg.account_id)
 
             # Push IMAP move asynchronously
             if msg.imap_uid:
@@ -3469,7 +3872,12 @@ class LugalEmailController(http.Controller):
                 threading.Thread(target=_bg_move, daemon=True, name=f'imap-move-{message_id}').start()
 
             return _json_response({'success': True, 'data': {
-                'id': msg.id, 'folder': target_raw,
+                'id': msg.id,
+                'folder': target_raw,
+                'is_important': msg.is_important,
+                'unread_count': unread_count,
+                'rule_id': rule_info.get('rule_id'),
+                'applied_existing': rule_info.get('applied_existing', 0),
             }})
         except Exception as exc:
             return _json_response({'success': False, 'error': str(exc)}, 500)
@@ -3544,6 +3952,18 @@ class LugalEmailController(http.Controller):
                 target_logical = 'custom'
                 imap_dest      = target_folder
                 db_folder      = target_folder   # raw IMAP path stored in DB
+                # Be forgiving for FE flows that create a rule/folder and then
+                # immediately bulk-move.  Ensure the destination exists before
+                # the DB move so async IMAP MOVE has a valid target.
+                if (acc.password or '').strip():
+                    try:
+                        with acc.sudo()._imap_session(connect_attempts=6, retry_delay=2.0) as _conn:
+                            acc.sudo()._imap_ensure_folder(imap_dest, existing_conn=_conn)
+                    except Exception as _ensure_exc:
+                        _logger.warning(
+                            'bulk_move_by_sender: could not ensure IMAP folder %s: %s',
+                            imap_dest, _ensure_exc,
+                        )
 
             # ── Find messages matching any of the senders ────────────────────
             Msg = request.env['lugal.email.message'].sudo()
@@ -3578,7 +3998,11 @@ class LugalEmailController(http.Controller):
                     imap_tasks.append((m.imap_uid, m.folder))
 
             # ── Update DB atomically ──────────────────────────────────────────
-            msgs.write({'folder': db_folder})
+            write_vals = {'folder': db_folder}
+            if db_folder.replace('/', '.').split('.')[-1].lower() == 'important':
+                write_vals['is_important'] = True
+            msgs.write(write_vals)
+            unread_count = _refresh_account_unread_count(acc)
 
             moved_count = len(msgs)
 
@@ -3633,6 +4057,7 @@ class LugalEmailController(http.Controller):
                 'senders':       senders,
                 'target_folder': target_folder,
                 'db_folder':     db_folder,
+                'unread_count':  unread_count,
             }})
         except Exception as exc:
             _logger.exception('bulk_move_by_sender error')

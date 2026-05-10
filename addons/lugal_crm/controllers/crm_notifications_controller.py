@@ -193,16 +193,24 @@ class CrmNotificationsController(http.Controller):
 
                 acc_ids  = Acc.search([('user_id', '=', uid)]).ids
                 if acc_ids:
+                    # Count unread inbound mail across inbox + custom rule
+                    # folders.  Sender-folder rules move messages out of the
+                    # literal inbox immediately, and inbox-only notification
+                    # domains make those arrivals show as toast-only with no
+                    # bell/tab badge.
+                    notification_folder_domain = [
+                        ('folder', 'not in', ['sent', 'drafts', 'trash', 'spam']),
+                    ]
                     domain = [
                         ('account_id', 'in', acc_ids),
-                        ('folder', '=', 'inbox'),
                         ('is_read', '=', False),
                         ('is_deleted', '=', False),
-                    ]
+                    ] + notification_folder_domain
+                    count_domain = list(domain)
                     if since_dt:
                         domain.append(('date', '>', since_dt))
 
-                    email_unread = EmailMsg.search_count(domain)
+                    email_unread = EmailMsg.search_count(count_domain)
                     recent = EmailMsg.search(domain, order='date desc', limit=limit)
                     for m in recent:
                         email_items.append({
@@ -212,6 +220,7 @@ class CrmNotificationsController(http.Controller):
                             'from_name':    m.from_name or '',
                             'from_address': m.from_address or '',
                             'date':         _to_riyadh_iso(m.date),
+                            'folder':       m.folder or 'inbox',
                         })
 
             checked_at = datetime.now(tz=_RIYADH_TZ).strftime('%Y-%m-%dT%H:%M:%S+03:00')
@@ -331,16 +340,26 @@ class CrmNotificationsController(http.Controller):
                         ('account_id', 'in', acc_ids),
                     ])
                 else:
+                    notification_folder_domain = [
+                        ('folder', 'not in', ['sent', 'drafts', 'trash', 'spam']),
+                    ]
                     msgs = EmailMsg.search([
                         ('account_id', 'in', acc_ids),
-                        ('folder', '=', 'inbox'),
                         ('is_read', '=', False),
                         ('is_deleted', '=', False),
-                    ])
+                    ] + notification_folder_domain)
 
                 if msgs:
                     msgs.write({'is_read': True})
                     email_marked = len(msgs)
+                    for acc in Acc.browse(acc_ids):
+                        unread_count = EmailMsg.search_count([
+                            ('account_id', '=', acc.id),
+                            ('folder', 'not in', ['sent', 'drafts', 'trash', 'spam']),
+                            ('is_read', '=', False),
+                            ('is_deleted', '=', False),
+                        ])
+                        acc.write({'unread_count': unread_count})
 
             return _json_response({
                 'success': True,

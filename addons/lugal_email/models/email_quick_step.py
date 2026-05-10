@@ -47,9 +47,11 @@ class LugalEmailQuickStep(models.Model):
     def apply_to_message(self, msg_record):
         """Apply the quick step's actions to a lugal.email.message record."""
         write_vals = {}
+        imap_moves = []
+        LOGICAL = {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'}
         for step in self._get_steps():
             action = step.get('action', '')
-            value  = step.get('value', '')
+            value  = (step.get('value') or '').strip()
             try:
                 if action == 'mark_read':
                     write_vals['is_read'] = True
@@ -60,14 +62,49 @@ class LugalEmailQuickStep(models.Model):
                 elif action == 'mark_starred':
                     write_vals['is_starred'] = True
                 elif action == 'move_folder':
-                    LOGICAL = {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'}
-                    if value.lower() in LOGICAL:
-                        write_vals['folder'] = value.lower()
+                    if not value:
+                        continue
+                    if value.replace('/', '.').split('.')[-1].lower() == 'important':
+                        write_vals['is_important'] = True
+                    target_folder = value.lower() if value.lower() in LOGICAL else value
+                    write_vals['folder'] = target_folder
+                    if msg_record.imap_uid and msg_record.account_id:
+                        acc = msg_record.account_id
+                        cur = msg_record.folder or 'inbox'
+                        if cur.lower() == 'inbox':
+                            from_imap = 'INBOX'
+                        elif cur.lower() in LOGICAL:
+                            try:
+                                from_imap = acc._get_server_folder_name(cur.lower())
+                            except Exception:
+                                from_imap = cur.lower()
+                        else:
+                            from_imap = cur
+                        imap_moves.append((value.lower() in LOGICAL, msg_record.imap_uid, from_imap, value))
             except Exception as _e:
                 _logger.warning('Quick step action %r failed: %s', action, _e)
 
         if write_vals:
             msg_record.write(write_vals)
+            if msg_record.account_id and (
+                'folder' in write_vals or 'is_read' in write_vals
+            ):
+                unread_count = self.env['lugal.email.message'].sudo().search_count([
+                    ('account_id', '=', msg_record.account_id.id),
+                    ('folder', 'not in', ['sent', 'drafts', 'trash', 'spam']),
+                    ('is_read', '=', False),
+                    ('is_deleted', '=', False),
+                ])
+                msg_record.account_id.sudo().write({'unread_count': unread_count})
+
+        for is_logical, imap_uid, from_imap, dest in imap_moves:
+            try:
+                if is_logical:
+                    msg_record.account_id._imap_move_async(imap_uid, from_imap, dest.lower())
+                else:
+                    msg_record.account_id._imap_move_to_raw_path_async(imap_uid, from_imap, dest)
+            except Exception as _e:
+                _logger.warning('Quick step IMAP move failed: %s', _e)
 
         try:
             self.write({'use_count': self.use_count + 1})

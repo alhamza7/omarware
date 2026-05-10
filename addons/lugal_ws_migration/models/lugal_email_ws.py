@@ -70,6 +70,18 @@ def _build_message_preview(record):
     }
 
 
+def _notification_folder_domain():
+    """Unread mail that should affect email badges/notifications.
+
+    Includes inbox and custom rule folders such as INBOX.syed_naqvi and
+    INBOX.syed_naqvi.Important.  Excludes outbound/system folders that should
+    not increment the "new email" bell count.
+    """
+    return [
+        ('folder', 'not in', ['sent', 'drafts', 'trash', 'spam']),
+    ]
+
+
 class LugalEmailMessageWs(models.Model):
     """
     Wire new inbox email arrivals to the Odoo bus so the FE WebSocket client
@@ -87,8 +99,14 @@ class LugalEmailMessageWs(models.Model):
     def create(self, vals_list):
         records = super().create(vals_list)
         for record in records:
-            # Only push notifications for unread inbox messages
-            if record.folder == 'inbox' and not record.is_read:
+            # Push notifications for unread inbound messages, including custom
+            # rule folders.  Some rules move mail immediately to
+            # INBOX.<sender> / INBOX.<sender>.Important, so inbox-only logic
+            # causes toast-only arrivals with stale bell/tab counts.
+            if (
+                not record.is_read
+                and (record.folder or '') not in ('sent', 'drafts', 'trash', 'spam')
+            ):
                 uid = (
                     record.account_id.user_id.id
                     if record.account_id and record.account_id.user_id
@@ -98,17 +116,16 @@ class LugalEmailMessageWs(models.Model):
                     try:
                         unread_count = self.sudo().search_count([
                             ('account_id', '=', record.account_id.id),
-                            ('folder',     '=', 'inbox'),
                             ('is_read',    '=', False),
                             ('is_deleted', '=', False),
-                        ])
+                        ] + _notification_folder_domain())
                         # Full message dict so the FE can update the inbox list
                         # immediately without calling messages_list again.
                         message_data = _build_message_preview(record)
                         payload = {
                             'message_id':   record.id,
                             'account_id':   record.account_id.id,
-                            'mailbox':      'INBOX',
+                            'mailbox':      record.folder or 'inbox',
                             'subject':      record.subject or '(no subject)',
                             'from_name':    record.from_name or '',
                             'from_address': record.from_address or '',
