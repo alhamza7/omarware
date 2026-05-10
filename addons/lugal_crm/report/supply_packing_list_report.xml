@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="action_report_supply_po_packing_list" model="ir.actions.report">
+        <field name="name">Packing List</field>
+        <field name="model">lugal.crm.supply.po</field>
+        <field name="report_type">qweb-pdf</field>
+        <field name="report_name">lugal_crm.report_supply_po_packing_list</field>
+        <field name="report_file">lugal_crm.report_supply_po_packing_list</field>
+        <field name="print_report_name">'PackingList-%s' % (object.name or object.id)</field>
+    </record>
+
+    <template id="report_supply_po_packing_list">
+        <t t-call="web.html_container">
+            <t t-foreach="docs" t-as="doc">
+                <t t-call="lugal_crm.report_supply_po_packing_list_document"/>
+            </t>
+        </t>
+    </template>
+
+    <template id="report_supply_po_packing_list_document">
+        <t t-set="o" t-value="doc"/>
+        <div class="page" style="padding: 16px; font-family: Helvetica, Arial, sans-serif; font-size: 11px;">
+            <h2 style="margin: 0 0 8px; font-size: 16px;">Packing List</h2>
+            <p style="margin: 0 0 12px;">
+                <strong>PO:</strong> <span t-esc="o.name or ''"/>
+                <t t-if="o.vendor_id">
+                    <span> — </span><span t-esc="o.vendor_id.name or ''"/>
+                </t>
+            </p>
+            <t t-if="o.division">
+                <p style="margin: 0 0 8px;"><strong>Division:</strong> <span t-esc="o.division"/></p>
+            </t>
+            <table style="width: 100%; border-collapse: collapse; margin-top: 8px;">
+                <thead>
+                    <tr style="border-bottom: 1px solid #333;">
+                        <th style="text-align: left; padding: 4px;">#</th>
+                        <th style="text-align: left; padding: 4px;">Product</th>
+                        <th style="text-align: left; padding: 4px;">Code</th>
+                        <th style="text-align: left; padding: 4px;">Size</th>
+                        <th style="text-align: right; padding: 4px;">Qty</th>
+                        <th style="text-align: left; padding: 4px;">UoM</th>
+                        <th style="text-align: right; padding: 4px;">Pcs/Carton</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr t-foreach="o.line_ids" t-as="line" style="border-bottom: 0.5pt solid #ccc;">
+                        <td style="padding: 4px;"><t t-esc="line_index + 1"/></td>
+                        <td style="padding: 4px;"><span t-esc="line.product_name or ''"/></td>
+                        <td style="padding: 4px;"><span t-esc="line.item_code or ''"/></td>
+                        <td style="padding: 4px;"><span t-esc="line.size or ''"/></td>
+                        <td style="text-align: right; padding: 4px;">
+                            <t t-esc="'%.4g' % (line.quantity if line.quantity else (line.quantity_pcs or 0.0))"/>
+                        </td>
+                        <td style="padding: 4px;"><span t-esc="line.uom or ''"/></td>
+                        <td style="text-align: right; padding: 4px;">
+                            <t t-esc="'%.4g' % (line.packing_pcs_per_carton or 0.0)"/>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <p style="margin-top: 16px; font-size: 9px; color: #555;">Packing list only — unit prices and totals are omitted.</p>
+        </div>
+    </template>
+</odoo>

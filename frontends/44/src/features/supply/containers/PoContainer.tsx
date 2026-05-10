@@ -6,6 +6,7 @@ import {
   Plus, Search, RefreshCw, Trash2, Eye, ChevronLeft, ChevronRight,
   CheckCircle2, Truck, Package, XCircle, RotateCcw, Loader2,
   FileText, MessageSquare, Paperclip, X, Send, Upload, Pencil, Check,
+  AlertTriangle, Wallet,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button }         from '../../../components/ui/button';
@@ -15,11 +16,15 @@ import supplyApi          from '../../../services/supplyApi';
 import type {
   Po, PoLine, PoLineInput, PoCreateInput, PoUpdateInput, PoStatus,
   Vendor, Attachment, Comment,
+  PaymentPoDropdownItem, PaymentCreateInput, SupplyPaymentType,
 } from '../../../types/supply';
 
 // ─────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────
+/** Matches `supply_po_comments_*_stub` errors in `supply_chain_api_controller.py`. */
+const PO_COMMENTS_API_DISABLED_MESSAGE = 'PO comments API not enabled';
+
 const STATUS_META: Record<PoStatus, { label: string; color: string }> = {
   draft:     { label: 'Draft',     color: 'bg-gray-100 text-gray-700' },
   confirmed: { label: 'Confirmed', color: 'bg-blue-100 text-blue-700' },
@@ -44,7 +49,7 @@ function fmt(n: number) {
 // ─────────────────────────────────────────────────────────────
 // Login Gate (shared with other supply screens, e.g. Negotiations)
 // ─────────────────────────────────────────────────────────────
-export export function LoginForm({ onLogin }: { onLogin: () => void }) {
+export function LoginForm({ onLogin }: { onLogin: () => void }) {
   const [user, setUser] = useState('');
   const [pass, setPass] = useState('');
   const [err,  setErr]  = useState('');
@@ -383,6 +388,8 @@ function PoDetailSheet({ po: initialPo, onClose, onUpdated }: {
   const [attachments,  setAttachments]  = useState<Attachment[]>([]);
   const [newComment,   setNewComment]   = useState('');
   const [isNote,       setIsNote]       = useState(false);
+  /** Backend stubs return this error for add/delete; list may still succeed with an empty list. */
+  const [poCommentsBackendBlocked, setPoCommentsBackendBlocked] = useState(false);
   const [addingLine,   setAddingLine]   = useState(false);
   const [editingLine,  setEditingLine]  = useState<number | null>(null);
   const [editLineVals, setEditLineVals] = useState<Partial<PoLineInput>>({});
@@ -401,7 +408,10 @@ function PoDetailSheet({ po: initialPo, onClose, onUpdated }: {
     if (tab === 'comments') {
       supplyApi.poCommentList(po.id).then(r => {
         if (r?.success) setComments(r.data?.items ?? []);
-        else if (r?.error) toast.error(r.error);
+        else if (r?.error) {
+          toast.error(r.error);
+          if (r.error === PO_COMMENTS_API_DISABLED_MESSAGE) setPoCommentsBackendBlocked(true);
+        }
       });
     }
     if (tab === 'attachments') supplyApi.poAttachList(po.id).then(r => { if (r?.success) setAttachments(r.data?.attachments ?? []); });
@@ -410,7 +420,14 @@ function PoDetailSheet({ po: initialPo, onClose, onUpdated }: {
   const transition = async (action: string, fn: (id: number) => Promise<{ success: boolean; data: Po; error?: string }>) => {
     setBusy(action);
     const res = await fn(po.id);
-    if (res?.success) { setPo(res.data); onUpdated(res.data); }
+    if (res?.success) {
+      setPo(res.data);
+      onUpdated(res.data);
+    } else if (res?.error) {
+      toast.error(res.error);
+    } else {
+      toast.error('Request failed');
+    }
     setBusy(null);
   };
 
@@ -452,8 +469,10 @@ function PoDetailSheet({ po: initialPo, onClose, onUpdated }: {
       // Append to end: backend returns oldest-first (date asc), new is newest
       setComments(c => [...c, res.data]);
       setNewComment('');
-    } else if (res?.error) {
-      toast.error(res.error);
+    } else {
+      const err = res?.error ?? 'Request failed';
+      toast.error(err);
+      if (err === PO_COMMENTS_API_DISABLED_MESSAGE) setPoCommentsBackendBlocked(true);
     }
     setBusy(null);
   };
@@ -462,7 +481,11 @@ function PoDetailSheet({ po: initialPo, onClose, onUpdated }: {
     setBusy(`comment-del-${msgId}`);
     const res = await supplyApi.poCommentDelete(po.id, msgId);
     if (res?.success) setComments(c => c.filter(x => x.id !== msgId));
-    else if (res?.error) toast.error(res.error);
+    else {
+      const err = res?.error ?? 'Request failed';
+      toast.error(err);
+      if (err === PO_COMMENTS_API_DISABLED_MESSAGE) setPoCommentsBackendBlocked(true);
+    }
     setBusy(null);
   };
 
@@ -524,9 +547,9 @@ function PoDetailSheet({ po: initialPo, onClose, onUpdated }: {
         {/* Status Actions */}
         <div className="flex gap-2 px-6 py-3 border-b bg-white flex-wrap">
           {canConfirm && (
-            <button onClick={() => transition('confirm', supplyApi.poConfirm)} disabled={!!busy}
+            <button onClick={() => transition('submit', supplyApi.poSubmit)} disabled={!!busy}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition">
-              {busy === 'confirm' ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />} Confirm
+              {busy === 'submit' ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />} Submit
             </button>
           )}
           {canShip && (
@@ -564,7 +587,17 @@ function PoDetailSheet({ po: initialPo, onClose, onUpdated }: {
                 tab === t ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
               }`}>
               {t === 'lines'       && <span className="flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" />Lines ({po.line_count})</span>}
-              {t === 'comments'    && <span className="flex items-center gap-1.5"><MessageSquare className="w-3.5 h-3.5" />Comments</span>}
+              {t === 'comments'    && (
+                <span className="flex items-center gap-1.5">
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  Comments
+                  {poCommentsBackendBlocked && (
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">
+                      Backend off
+                    </span>
+                  )}
+                </span>
+              )}
               {t === 'attachments' && <span className="flex items-center gap-1.5"><Paperclip className="w-3.5 h-3.5" />Files ({attachments.length})</span>}
             </button>
           ))}
@@ -662,8 +695,24 @@ function PoDetailSheet({ po: initialPo, onClose, onUpdated }: {
           {/* Comments Tab */}
           {tab === 'comments' && (
             <div className="flex flex-col h-full">
+              {poCommentsBackendBlocked && (
+                <div className="mx-6 mt-4 flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-950">
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600 mt-0.5" aria-hidden />
+                  <div>
+                    <p className="font-medium text-amber-900">Comments blocked by backend</p>
+                    <p className="mt-1 text-amber-900/90">{PO_COMMENTS_API_DISABLED_MESSAGE}</p>
+                    <p className="mt-1.5 text-xs text-amber-800/80">
+                      Add and delete are disabled until the server enables the PO comments API. The list below may be empty while this stub is active.
+                    </p>
+                  </div>
+                </div>
+              )}
               <div className="flex-1 px-6 py-4 space-y-3 overflow-y-auto">
-                {comments.length === 0 && <p className="text-center text-sm text-gray-400 py-8">No comments yet.</p>}
+                {comments.length === 0 && (
+                  <p className="text-center text-sm text-gray-400 py-8">
+                    {poCommentsBackendBlocked ? 'No comments loaded (API disabled on server).' : 'No comments yet.'}
+                  </p>
+                )}
                 {comments.map(c => (
                   <div key={c.id} className={`p-3 rounded-xl text-sm ${c.is_note ? 'bg-amber-50 border border-amber-100' : 'bg-gray-50'}`}>
                     <div className="flex items-center justify-between mb-1">
@@ -675,9 +724,9 @@ function PoDetailSheet({ po: initialPo, onClose, onUpdated }: {
                         <span className="text-xs text-gray-400">{new Date(c.created_at).toLocaleString()}</span>
                         <button
                           onClick={() => deleteComment(c.id)}
-                          disabled={busy === `comment-del-${c.id}`}
+                          disabled={poCommentsBackendBlocked || busy === `comment-del-${c.id}`}
                           className="text-gray-300 hover:text-red-500 disabled:opacity-40 transition"
-                          title="Delete comment"
+                          title={poCommentsBackendBlocked ? PO_COMMENTS_API_DISABLED_MESSAGE : 'Delete comment'}
                         >
                           {busy === `comment-del-${c.id}` ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
                         </button>
@@ -689,20 +738,34 @@ function PoDetailSheet({ po: initialPo, onClose, onUpdated }: {
               </div>
               <div className="px-6 py-3 border-t space-y-2 bg-white">
                 <div className="flex items-center gap-2">
-                  <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
-                    <input type="checkbox" checked={isNote} onChange={e => setIsNote(e.target.checked)} className="rounded" />
+                  <label className={`flex items-center gap-1.5 text-xs text-gray-600 ${poCommentsBackendBlocked ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}>
+                    <input
+                      type="checkbox"
+                      checked={isNote}
+                      onChange={e => setIsNote(e.target.checked)}
+                      disabled={poCommentsBackendBlocked}
+                      className="rounded"
+                    />
                     Internal Note
                   </label>
                 </div>
                 <div className="flex gap-2">
                   <Input
-                    placeholder="Write a comment..."
+                    placeholder={poCommentsBackendBlocked ? PO_COMMENTS_API_DISABLED_MESSAGE : 'Write a comment...'}
                     value={newComment}
                     onChange={e => setNewComment(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && !e.shiftKey && submitComment()}
+                    onKeyDown={e => {
+                      if (poCommentsBackendBlocked) return;
+                      if (e.key === 'Enter' && !e.shiftKey) submitComment();
+                    }}
+                    disabled={poCommentsBackendBlocked}
                     className="flex-1 text-sm"
                   />
-                  <Button size="sm" onClick={submitComment} disabled={!newComment.trim() || busy === 'comment'}>
+                  <Button
+                    size="sm"
+                    onClick={submitComment}
+                    disabled={poCommentsBackendBlocked || !newComment.trim() || busy === 'comment'}
+                  >
                     {busy === 'comment' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
                   </Button>
                 </div>
@@ -757,6 +820,168 @@ function PoDetailSheet({ po: initialPo, onClose, onUpdated }: {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Record payment (PO searchable via `/payments/po/list`)
+// ─────────────────────────────────────────────────────────────
+function RecordPaymentModal({ onClose }: { onClose: () => void }) {
+  const [poQuery,     setPoQuery]     = useState('');
+  const [poItems,     setPoItems]     = useState<PaymentPoDropdownItem[]>([]);
+  const [poLoading,   setPoLoading]   = useState(false);
+  const [selectedPo,   setSelectedPo]  = useState<PaymentPoDropdownItem | null>(null);
+  const [amount,      setAmount]      = useState('');
+  const [paymentType, setPaymentType] = useState<SupplyPaymentType>('installment');
+  const [notes,       setNotes]       = useState('');
+  const [busy,         setBusy]        = useState(false);
+  const [error,        setError]       = useState('');
+
+  const loadPoOptions = useCallback(async (search: string) => {
+    setPoLoading(true);
+    const res = await supplyApi.paymentsPoList({ search, page: 1, per_page: 25 });
+    if (res?.success) setPoItems(res.data?.items ?? []);
+    else setPoItems([]);
+    setPoLoading(false);
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => { void loadPoOptions(poQuery.trim()); }, 300);
+    return () => clearTimeout(t);
+  }, [poQuery, loadPoOptions]);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedPo) return setError('Select a purchase order');
+    const amt = parseFloat(amount);
+    if (!Number.isFinite(amt) || amt <= 0) return setError('Enter a valid amount');
+    setBusy(true); setError('');
+    const input: PaymentCreateInput = {
+      po_id:          selectedPo.id,
+      amount:         amt,
+      payment_type:   paymentType,
+      ...(notes.trim() ? { notes: notes.trim() } : {}),
+    };
+    const res = await supplyApi.paymentsCreate(input);
+    if (res?.success && res.data) {
+      toast.success(`Payment recorded for ${res.data.order_name || selectedPo.name}`);
+      onClose();
+    } else {
+      setError(res?.error ?? 'Failed to record payment');
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b">
+          <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+            <Wallet className="w-5 h-5 text-blue-600" /> Record payment
+          </h2>
+          <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600 transition"><X className="w-5 h-5" /></button>
+        </div>
+
+        <form onSubmit={submit} className="flex flex-col flex-1 overflow-hidden">
+          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+            <div>
+              <label className="text-sm font-medium text-gray-700 block mb-1">Link Purchase Order *</label>
+              {selectedPo ? (
+                <div className="flex items-center gap-2 p-2.5 bg-blue-50 rounded-lg border border-blue-200">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-blue-900 truncate">{selectedPo.name}</p>
+                    <p className="text-xs text-blue-600 truncate">{selectedPo.supplier || '—'}</p>
+                  </div>
+                  <button type="button" onClick={() => setSelectedPo(null)} className="shrink-0 text-blue-400 hover:text-blue-700">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <Input
+                      className="pl-9"
+                      placeholder="Search by PO reference or vendor..."
+                      value={poQuery}
+                      onChange={e => setPoQuery(e.target.value)}
+                      autoComplete="off"
+                    />
+                  </div>
+                  {poLoading ? (
+                    <div className="mt-2 text-center py-4"><Loader2 className="w-4 h-4 animate-spin mx-auto text-gray-400" /></div>
+                  ) : poItems.length > 0 ? (
+                    <div className="mt-1 border rounded-lg divide-y max-h-48 overflow-y-auto">
+                      {poItems.map(row => (
+                        <button
+                          key={row.id}
+                          type="button"
+                          className="w-full text-left px-3 py-2 hover:bg-blue-50 transition"
+                          onClick={() => { setSelectedPo(row); setPoQuery(''); }}
+                        >
+                          <p className="text-sm font-medium text-gray-900">{row.name}</p>
+                          <p className="text-xs text-gray-500">{row.supplier || '—'}</p>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-xs text-gray-500">No matching purchase orders.</p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-1">Amount *</label>
+                <Input
+                  type="number"
+                  step="any"
+                  min="0"
+                  value={amount}
+                  onChange={e => setAmount(e.target.value)}
+                  placeholder="0.00"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-1">Payment type</label>
+                <select
+                  className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm"
+                  value={paymentType}
+                  onChange={e => setPaymentType(e.target.value as SupplyPaymentType)}
+                >
+                  <option value="deposit">Deposit</option>
+                  <option value="installment">Installment</option>
+                  <option value="final">Final</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-gray-700 block mb-1">Notes</label>
+              <textarea
+                className="w-full min-h-[72px] rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={notes}
+                onChange={e => setNotes(e.target.value)}
+                placeholder="Optional"
+              />
+            </div>
+
+            {error && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
+          </div>
+
+          <div className="px-6 py-4 border-t flex justify-end gap-3 bg-gray-50 rounded-b-2xl">
+            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+            <Button type="submit" disabled={busy}>
+              {busy ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+              Save payment
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // Delete Confirm
 // ─────────────────────────────────────────────────────────────
 function DeleteConfirm({ po, onClose, onDeleted }: { po: Po; onClose: () => void; onDeleted: () => void }) {
@@ -796,6 +1021,7 @@ export function PoContainer() {
   const store = useSupplyStore();
   const [showLogin,  setShowLogin]  = useState(!store.token);
   const [showCreate, setShowCreate] = useState(false);
+  const [showPayment, setShowPayment] = useState(false);
   const [detailPo,   setDetailPo]   = useState<Po | null>(null);
   const [deletePo,   setDeletePo]   = useState<Po | null>(null);
   const [searchDraft,setSearchDraft]= useState(store.filter.search ?? '');
@@ -837,6 +1063,9 @@ export function PoContainer() {
           <button onClick={loadPos} className="p-2 text-gray-400 hover:text-gray-700 transition rounded-lg hover:bg-gray-100">
             <RefreshCw className={`w-4 h-4 ${store.loading ? 'animate-spin' : ''}`} />
           </button>
+          <Button variant="outline" onClick={() => setShowPayment(true)} className="gap-2">
+            <Wallet className="w-4 h-4" /> Record payment
+          </Button>
           <Button onClick={() => setShowCreate(true)} className="gap-2">
             <Plus className="w-4 h-4" /> New PO
           </Button>
@@ -984,6 +1213,10 @@ export function PoContainer() {
             setDetailPo(po);
           }}
         />
+      )}
+
+      {showPayment && (
+        <RecordPaymentModal onClose={() => setShowPayment(false)} />
       )}
 
       {detailPo && (

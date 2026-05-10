@@ -55,7 +55,10 @@ export interface POItem {
 }
 
 export interface PurchaseOrder {
+  /** Display / reference id (e.g. PO-2026-001 or Odoo name). */
   id: string;
+  /** When set, packing list Share/PDF call `/api/crm/supply/po/{odooId}/…`. */
+  odooId?: number;
   supplierId: string;
   supplierName: string;
   division: Division;

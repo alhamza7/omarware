@@ -25,10 +25,11 @@ HTTP_PORT="${HTTP_PORT:-8075}"
 HEALTH_URL="http://127.0.0.1:${HTTP_PORT}/web/health"
 
 echo "restart_odoo_ws.sh: stopping odoo-bin (odoo_ws.conf)..."
-pkill -f "odoo-bin -c odoo_ws.conf" 2>/dev/null || true
+# Match both `-c odoo_ws.conf` and `-c /abs/path/odoo_ws.conf`
+pkill -f "odoo-bin.*odoo_ws\.conf" 2>/dev/null || true
 
 for _ in $(seq 1 30); do
-  if ! pgrep -f "odoo-bin -c odoo_ws.conf" >/dev/null 2>&1; then
+  if ! pgrep -f "odoo-bin.*odoo_ws\.conf" >/dev/null 2>&1; then
     break
   fi
   sleep 1

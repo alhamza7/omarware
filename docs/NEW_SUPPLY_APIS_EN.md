@@ -1,7 +1,8 @@
 # New Supply Chain APIs — Reference
 
-**Version:** 1.0 — Added 2026-05-03  
-**Base URL:** `http://localhost:8075`
+**Version:** 1.1 — Updated 2026-05-07 (module upgrade `lugal_supply`, `lugal_crm`)  
+**Base URL:** `http://localhost:8075`  
+**Related (vendors, containers, PO, dashboard, attachments):** `docs/SUPPLY_CHAIN_API_COMPLETE.md`
 
 ---
 
@@ -30,6 +31,10 @@
 { "result": { "success": true,  "data": { ... } } }
 { "result": { "success": false, "error": "Reason" } }
 ```
+
+### `extra_fields` (JSON)
+
+Item requests, negotiations, and supply POs inherit `lugal.supply.dynamic.extra.mixin`: an optional JSON object `extra_fields` for custom keys from the frontend. Send or update it via the same `params` as other writable fields where the controller passes kwargs through to `create` / `write` (see each endpoint in code if not listed below).
 
 ---
 
@@ -735,6 +740,62 @@ Marks all unread notifications for the authenticated user as read.
 
 ---
 
+## 7. Negotiation — confirm, offers, comments, attachments
+
+| Endpoint | Description |
+|---|---|
+| `POST /api/crm/supply/negotiations/<id>/confirm` | Finalize negotiation (`action_finalize`); sets state to finalized. |
+| `POST /api/crm/supply/negotiations/<id>/e_sign_approve` | Same as confirm (approval / e-sign step). |
+| `POST /api/crm/supply/negotiations/<id>/offers/add` | **Params:** `price` (required), `notes`, `currency_id`. Adds a row to `lugal.supply.negotiation.offer`. |
+| `POST /api/crm/supply/negotiations/<id>/offers/list` | Paginated list of offers (`page`, `per_page`). |
+| `POST /api/crm/supply/negotiations/<id>/comments/list` | Chatter comments (`mail.message`), paginated. |
+| `POST /api/crm/supply/negotiations/<id>/comments/add` | **Params:** `body` or `message` (required). |
+| `POST /api/crm/supply/negotiations/<id>/comments/<msg_id>/delete` | Deletes one comment on this negotiation. |
+| `POST /api/crm/supply/negotiations/<id>/attachments/link` | **Params:** `attachment_ids` (list of `ir.attachment` ids) or `ids`. Replaces M2M; empty list clears. |
+
+---
+
+## 8. Item requests — attachments
+
+| Endpoint | Description |
+|---|---|
+| `POST /api/crm/supply/item_requests/<id>/attachments/link` | **Params:** `attachment_ids` or `ids` (list). Links attachments to the request M2M. |
+
+List/get responses for item requests may also include attachment metadata when implemented in the serializer (see controller).
+
+---
+
+## 9. Payments (`lugal.supply.payment`)
+
+All require JWT. `payment_type` is normalized server-side (e.g. deposit / partial / full — see `_normalize_payment_type` in `supply_extra_api_controller.py`).
+
+| Endpoint | Description |
+|---|---|
+| `POST /api/crm/supply/payments/list` | **Params:** `page`, `per_page`, `po_id`, `payment_status`, `payment_type`. |
+| `POST /api/crm/supply/payments/<id>/get` | Single payment. |
+| `POST /api/crm/supply/payments/po/list` | Lightweight PO list for dropdowns (`search`, `status`, `division`, pagination). |
+| `POST /api/crm/supply/payments/create` | **Params:** `po_id` (or `linked_order_id`), `amount` (required); optional `payment_type`, `paid_to`, `payee_partner_id`, `currency_id`, `payment_date`, `payment_method`, `notes`, attachment payloads per shared supply attachment helpers. |
+| `POST /api/crm/supply/payments/<id>/update` | Partial update; supports attachment updates when provided. |
+| `POST /api/crm/supply/payments/<id>/delete` | Deletes the payment record. |
+| `POST /api/crm/supply/payments/<id>/attachments/link` | **Params:** `attachment_ids` or `ids`. |
+
+---
+
+## 10. Shipments (backed by `lugal.supply.container`)
+
+Shipment APIs are aliases over containers: `shipment_id` is the container id.
+
+| Endpoint | Description |
+|---|---|
+| `POST /api/crm/supply/shipments/list` | **Params:** `status` (e.g. `waiting`, `active`, `at_port`, `completed`, or a `shipment_tracking_state` value), `division`, `supplier_id`, `search`, pagination. |
+| `POST /api/crm/supply/shipments/<id>/get` | Single shipment view. |
+| `POST /api/crm/supply/shipments/create` | **Params:** `name` or `container_number` (required); maps `shipping_method`→`transport_mode`, `origin`→`origin_location`, `destination`→`destination_location`, `etd`/`eta`→dates, etc. Supports attachments. |
+| `POST /api/crm/supply/shipments/<id>/update` | Partial update; supports attachments. |
+| `POST /api/crm/supply/shipments/<id>/delete` | Soft-deletes container (`is_deleted`, `active`). |
+| `POST /api/crm/supply/shipments/<id>/link_orders` | **Params:** `order_ids` or `po_ids` (list of PO ids). Requires `purchase_order_ids` on the container model. |
+
+---
+
 ## Quick Reference — All New Endpoints
 
 | # | Endpoint | Description |
@@ -765,6 +826,30 @@ Marks all unread notifications for the authenticated user as read.
 | 24 | `POST /api/crm/supply/notifications/<id>/mark_read` | Mark notification as read |
 | 25 | `POST /api/crm/supply/notifications/mark_all_read` | Mark all notifications as read |
 | 26 | `POST /api/crm/supply/notifications/<id>/delete` | Delete notification |
+| 27 | `POST /api/crm/supply/negotiations/<id>/confirm` | Finalize negotiation |
+| 28 | `POST /api/crm/supply/negotiations/<id>/e_sign_approve` | E-sign / approve (finalize) |
+| 29 | `POST /api/crm/supply/negotiations/<id>/offers/add` | Add price offer row |
+| 30 | `POST /api/crm/supply/negotiations/<id>/offers/list` | List offer rows |
+| 31 | `POST /api/crm/supply/negotiations/<id>/comments/list` | List chatter comments |
+| 32 | `POST /api/crm/supply/negotiations/<id>/comments/add` | Post comment |
+| 33 | `POST /api/crm/supply/negotiations/<id>/comments/<msg_id>/delete` | Delete comment |
+| 34 | `POST /api/crm/supply/negotiations/<id>/attachments/link` | Set linked `ir.attachment` ids |
+| 35 | `POST /api/crm/supply/item_requests/<id>/attachments/link` | Set linked attachments on item request |
+| 36 | `POST /api/crm/supply/payments/list` | List payments |
+| 37 | `POST /api/crm/supply/payments/<id>/get` | Get payment |
+| 38 | `POST /api/crm/supply/payments/po/list` | PO dropdown for payments UI |
+| 39 | `POST /api/crm/supply/payments/create` | Create payment |
+| 40 | `POST /api/crm/supply/payments/<id>/update` | Update payment |
+| 41 | `POST /api/crm/supply/payments/<id>/delete` | Delete payment |
+| 42 | `POST /api/crm/supply/payments/<id>/attachments/link` | Link attachments on payment |
+| 43 | `POST /api/crm/supply/shipments/list` | List shipments (containers) |
+| 44 | `POST /api/crm/supply/shipments/<id>/get` | Get shipment |
+| 45 | `POST /api/crm/supply/shipments/create` | Create shipment / container |
+| 46 | `POST /api/crm/supply/shipments/<id>/update` | Update shipment |
+| 47 | `POST /api/crm/supply/shipments/<id>/delete` | Soft-delete shipment |
+| 48 | `POST /api/crm/supply/shipments/<id>/link_orders` | Link POs to shipment |
+
+**Core supply JSON-RPC** (same auth envelope): vendors, containers CRUD, PO CRUD, lines, dashboard, workflow attachments — see **`docs/SUPPLY_CHAIN_API_COMPLETE.md`**. Chat and stories: **`docs/SUPPLY_CHAT_API.md`** and stories routes under `/api/crm/supply/stories/`.
 
 ---
 

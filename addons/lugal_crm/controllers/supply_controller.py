@@ -7,7 +7,7 @@ import logging
 import mimetypes
 import uuid
 
-from odoo import http
+from odoo import fields, http
 from odoo.http import request, Response
 
 from ._auth import ensure_jwt_user_id
@@ -345,8 +345,10 @@ class CrmSupplyController(http.Controller):
                 return {'success': False, 'error': 'Unauthorized', 'data': None}
             Container = request.env['lugal.supply.container'].sudo()
             c = Container.browse(container_id).exists()
-            if not c:
+            if not c or c.is_deleted:
                 return {'success': False, 'error': 'Container not found', 'data': None}
+            if 'attachment_ids' not in c._fields:
+                return {'success': False, 'error': 'Attachments not available', 'data': None}
             attachments = []
             for att in c.attachment_ids.sorted('id', reverse=True):
                 attachments.append(_serialize_attachment(att))
@@ -355,10 +357,144 @@ class CrmSupplyController(http.Controller):
                 'data': {
                     'container_id': c.id,
                     'attachments': attachments,
+                    'items': attachments,
                 },
             }
         except Exception as e:
             return crm_error(e, 'supply_container_attachments_list')
+
+    @http.route(
+        '/api/crm/supply/containers/<int:container_id>/attachments/upload',
+        type='http',
+        auth='none',
+        methods=['POST', 'OPTIONS'],
+        csrf=False,
+        save_session=False,
+        cors='*',
+        max_content_length=1073741824,
+    )
+    def supply_container_attachments_upload(self, container_id, **kwargs):
+        """Multipart upload for container attachments (same pattern as PO upload)."""
+
+        def _json(payload, status=200):
+            return Response(
+                json.dumps(payload),
+                status=status,
+                headers=[('Content-Type', 'application/json')],
+            )
+
+        try:
+            if request.httprequest.method == 'OPTIONS':
+                return Response(status=204, headers=[
+                    ('Access-Control-Allow-Origin', '*'),
+                    ('Access-Control-Allow-Methods', 'POST, OPTIONS'),
+                    ('Access-Control-Allow-Headers', 'Authorization, Content-Type'),
+                    ('Access-Control-Max-Age', '86400'),
+                ])
+
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return _json({'success': False, 'error': 'Unauthorized'}, 401)
+
+            c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
+            if not c or c.is_deleted:
+                return _json({'success': False, 'error': 'Container not found'}, 404)
+            if 'attachment_ids' not in c._fields:
+                return _json({'success': False, 'error': 'Attachments not available'}, 400)
+
+            files = (
+                request.httprequest.files.getlist('files[]')
+                or request.httprequest.files.getlist('files')
+                or request.httprequest.files.getlist('file')
+            )
+            if not files:
+                return _json(
+                    {'success': False, 'error': 'No files provided (use file, files, or files[])'},
+                    400,
+                )
+
+            model_container = 'lugal.supply.container'
+            out_files = []
+
+            for f in files:
+                data = f.read()
+                mime = f.mimetype or mimetypes.guess_type(f.filename or '')[0] or ''
+                is_video = mime in VIDEO_MIMES
+                limit_mb = MAX_SUPPLY_CHAT_VIDEO_MB if is_video else MAX_SUPPLY_CHAT_UPLOAD_MB
+                limit_bytes = limit_mb * 1024 * 1024
+
+                if not data:
+                    return _json(
+                        {'success': False, 'error': '%s: empty file' % (f.filename or 'file')},
+                        400,
+                    )
+                if len(data) > limit_bytes:
+                    return _json(
+                        {'success': False, 'error': '%s: exceeds %s MB' % (f.filename or 'file', limit_mb)},
+                        400,
+                    )
+                if not _supply_chat_mime_allowed(mime):
+                    return _json(
+                        {'success': False, 'error': '%s: unsupported type (%s)' % (f.filename or 'file', mime)},
+                        400,
+                    )
+
+                filename = f.filename or 'upload'
+                att = _create_attachment(
+                    filename=filename,
+                    mimetype=mime,
+                    data_bytes=data,
+                    res_model=model_container,
+                    res_id=c.id,
+                )
+                c.write({'attachment_ids': [(4, att.id)]})
+                c.invalidate_recordset(['attachment_ids'])
+                out_files.append(_serialize_attachment(att))
+
+            total_att = len(c.attachment_ids)
+            payload = {
+                'container_id': c.id,
+                'uploaded_count': len(out_files),
+                'files': out_files,
+                'attachments': out_files,
+                'total_attachments': total_att,
+            }
+            return _json({'success': True, 'data': payload})
+        except Exception as e:
+            _logger.exception('supply_container_attachments_upload')
+            try:
+                request.env.cr.rollback()
+            except Exception:
+                pass
+            return _json({'success': False, 'error': str(e)}, 500)
+
+    @http.route(
+        '/api/crm/supply/containers/<int:container_id>/attachments/<int:attachment_id>/delete',
+        type='jsonrpc',
+        auth='none',
+        csrf=False,
+        methods=['POST'],
+    )
+    def supply_container_attachments_delete(self, container_id, attachment_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
+            if not c or c.is_deleted:
+                return {'success': False, 'error': 'Container not found', 'data': None}
+            if 'attachment_ids' not in c._fields:
+                return {'success': False, 'error': 'Attachments not available', 'data': None}
+            if attachment_id not in c.attachment_ids.ids:
+                return {'success': False, 'error': 'Attachment not linked to this container', 'data': None}
+            att = request.env['ir.attachment'].sudo().browse(attachment_id).exists()
+            if not att:
+                return {'success': False, 'error': 'Attachment not found', 'data': None}
+            c.write({'attachment_ids': [(3, attachment_id)]})
+            c.invalidate_recordset(['attachment_ids'])
+            att.unlink()
+            return {'success': True, 'data': {'deleted_id': attachment_id, 'container_id': container_id}}
+        except Exception as e:
+            return crm_error(e, 'supply_container_attachments_delete')
 
     @http.route(
         '/api/crm/supply/containers/<int:container_id>/penalties/list',
@@ -391,6 +527,101 @@ class CrmSupplyController(http.Controller):
             }
         except Exception as e:
             return crm_error(e, 'supply_container_penalties_list')
+
+    @http.route(
+        '/api/crm/supply/containers/<int:container_id>/add_penalty',
+        type='jsonrpc',
+        auth='none',
+        csrf=False,
+        methods=['POST'],
+    )
+    def supply_container_add_penalty(self, container_id, **kwargs):
+        """Create a penalty line on a container (SPA: ContainerContainer)."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            Container = request.env['lugal.supply.container'].sudo()
+            c = Container.browse(container_id).exists()
+            if not c or c.is_deleted:
+                return {'success': False, 'error': 'Container not found', 'data': None}
+
+            raw_amount = kwargs.get('amount')
+            if raw_amount is None:
+                return {'success': False, 'error': 'amount is required', 'data': None}
+            try:
+                amount = float(raw_amount)
+            except (TypeError, ValueError):
+                return {'success': False, 'error': 'amount must be a number', 'data': None}
+            if amount <= 0:
+                return {'success': False, 'error': 'amount must be greater than 0', 'data': None}
+
+            reason = (kwargs.get('reason') or kwargs.get('notes') or '').strip()
+            if not reason:
+                reason = 'Penalty charge'
+
+            allowed_types = frozenset(
+                {'storage', 'damage', 'late', 'customs', 'demurrage', 'other'},
+            )
+            ptype = kwargs.get('penalty_type') or 'other'
+            if ptype not in allowed_types:
+                return {'success': False, 'error': 'invalid penalty_type', 'data': None}
+
+            vals = {
+                'container_id': c.id,
+                'penalty_type': ptype,
+                'amount': amount,
+                'reason': reason,
+            }
+            if kwargs.get('currency_id') not in (None, False, ''):
+                try:
+                    vals['currency_id'] = int(kwargs['currency_id'])
+                except (TypeError, ValueError):
+                    return {'success': False, 'error': 'currency_id must be an integer', 'data': None}
+
+            pd = kwargs.get('penalty_date')
+            if pd not in (None, False, ''):
+                try:
+                    vals['penalty_date'] = fields.Date.from_string(str(pd)[:10])
+                except (ValueError, TypeError):
+                    return {'success': False, 'error': 'penalty_date must be YYYY-MM-DD', 'data': None}
+
+            Penalty = request.env['lugal.supply.container.penalty'].sudo()
+            p = Penalty.create(vals)
+            payload = _serialize_penalty(p, c)
+            payload['penalty_id'] = p.id
+            return {'success': True, 'data': payload}
+        except Exception as e:
+            return crm_error(e, 'supply_container_add_penalty')
+
+    @http.route(
+        '/api/crm/supply/containers/<int:container_id>/penalties/<int:penalty_id>/delete',
+        type='jsonrpc',
+        auth='none',
+        csrf=False,
+        methods=['POST'],
+    )
+    def supply_container_penalty_delete(self, container_id, penalty_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            Container = request.env['lugal.supply.container'].sudo()
+            c = Container.browse(container_id).exists()
+            if not c or c.is_deleted:
+                return {'success': False, 'error': 'Container not found', 'data': None}
+            Penalty = request.env['lugal.supply.container.penalty'].sudo()
+            p = Penalty.search(
+                [('id', '=', penalty_id), ('container_id', '=', c.id)],
+                limit=1,
+            )
+            if not p:
+                return {'success': False, 'error': 'Penalty not found', 'data': None}
+            p.unlink()
+            return {
+                'success': True,
+                'data': {'deleted_id': penalty_id, 'container_id': c.id},
+            }
+        except Exception as e:
+            return crm_error(e, 'supply_container_penalty_delete')
 
     @http.route(
         '/api/crm/supply/containers/tracking/view',

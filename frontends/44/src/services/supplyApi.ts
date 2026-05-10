@@ -32,6 +32,9 @@ import type {
   NegotiationListData,
   NegotiationListFilter,
   NegotiationCommentRow,
+  PaymentPoListData,
+  PaymentCreateInput,
+  SupplyPayment,
 } from '../types/supply';
 
 // ── Config ─────────────────────────────────────────────────────────────────
@@ -419,6 +422,7 @@ export const poDelete = (id: number) =>
   rpc<{ id: number; deleted: boolean }>(`/api/crm/supply/po/${id}/delete`, {});
 
 // Status transitions
+export const poSubmit   = (id: number) => rpc<Po>(`/api/crm/supply/po/${id}/submit`,  {});
 export const poConfirm  = (id: number) => rpc<Po>(`/api/crm/supply/po/${id}/confirm`,  {});
 export const poShip     = (id: number) => rpc<Po>(`/api/crm/supply/po/${id}/ship`,     {});
 export const poReceive  = (id: number) => rpc<Po>(`/api/crm/supply/po/${id}/receive`,  {});
@@ -458,6 +462,49 @@ export const poCommentAdd = (poId: number, body: string, is_note = false) =>
 export const poCommentDelete = (poId: number, msgId: number) =>
   rpc<{ id: number }>(`/api/crm/supply/po/${poId}/comments/${msgId}/delete`, {});
 
+/** Packing list — plain text for share / clipboard */
+export const poPackingListShare = (poId: number) =>
+  rpc<{ title: string; text: string; url?: string }>(`/api/crm/supply/po/${poId}/packing-list/share`, {});
+
+/** Packing list — PDF as base64 for client download */
+export const poPackingListPdf = (poId: number) =>
+  rpc<{ filename: string; pdf_base64: string; mimetype: string }>(
+    `/api/crm/supply/po/${poId}/packing-list/pdf`,
+    {},
+  );
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PAYMENTS
+// ═══════════════════════════════════════════════════════════════════════════
+/** Lightweight searchable PO list for payment forms (`po_id` = `item.id`). */
+export const paymentsPoList = (filter: {
+  search?:   string;
+  page?:     number;
+  per_page?: number;
+  status?:   string;
+  division?: '' | 'europe' | 'china';
+} = {}) =>
+  rpc<PaymentPoListData>('/api/crm/supply/payments/po/list', {
+    page:     filter.page     ?? 1,
+    per_page: filter.per_page ?? 25,
+    ...(filter.search   ? { search:   filter.search   } : {}),
+    ...(filter.status   ? { status:   filter.status   } : {}),
+    ...(filter.division ? { division: filter.division } : {}),
+  });
+
+export const paymentsCreate = (input: PaymentCreateInput) =>
+  rpc<SupplyPayment>('/api/crm/supply/payments/create', {
+    po_id:  input.po_id,
+    amount: input.amount,
+    ...(input.payment_type   ? { payment_type:   input.payment_type   } : {}),
+    ...(input.notes          ? { notes:          input.notes          } : {}),
+    ...(input.payment_date   ? { payment_date:   input.payment_date   } : {}),
+    ...(input.currency_id    != null ? { currency_id:    input.currency_id    } : {}),
+    ...(input.payment_method ? { payment_method: input.payment_method } : {}),
+    ...(input.paid_to        ? { paid_to:        input.paid_to        } : {}),
+    ...(input.payee_partner_id != null ? { payee_partner_id: input.payee_partner_id } : {}),
+  });
+
 // ── Named export bundle ────────────────────────────────────────────────────
 const supplyApi = {
   login,
@@ -476,10 +523,12 @@ const supplyApi = {
   containerAddPenalty, containerPenaltiesList, containerPenaltyDelete,
   // purchase orders
   poSuggested, poList, poGet, poCreate, poUpdate, poDelete,
-  poConfirm, poShip, poReceive, poCancel, poReopen,
+  poSubmit, poConfirm, poShip, poReceive, poCancel, poReopen,
   poLineAdd, poLineUpdate, poLineDelete,
   poAttachList, poAttachUpload, poAttachUploadMultiple, poAttachDelete,
   poCommentList, poCommentAdd, poCommentDelete,
+  poPackingListShare, poPackingListPdf,
+  paymentsPoList, paymentsCreate,
 };
 
 export default supplyApi;

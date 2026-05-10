@@ -33,6 +33,7 @@ import { SalesPipeline } from "./components/sales-pipeline/sales-pipeline";
 import { EventLog } from "./components/event-log/event-log";
 import { Forecasting, ForecastingWidget } from "./components/forecasting/forecasting";
 import { SettingsPage } from "./components/settings/settings";
+import { Toaster } from "sonner";
 
 // ── Feature containers (API-connected) ────────────────────────────────────
 import { CustomerListContainer } from "../features/customers/containers/CustomerListContainer";
@@ -866,6 +867,7 @@ function App() {
       </main>
 
       {/* Notifications panel is inline with the Bell button above */}
+      <Toaster richColors position="top-center" />
     </div>
   );
 }

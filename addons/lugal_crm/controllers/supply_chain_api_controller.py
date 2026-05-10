@@ -6,6 +6,7 @@ Covers vendors, containers (CRUD + workflow helpers), and purchase orders + line
 Chat/stories remain in other controllers; attachments lists aligned with `supply_controller`.
 """
 
+import base64
 import json
 import mimetypes
 from datetime import date, datetime
@@ -203,6 +204,68 @@ def _serialize_vendor(v):
     }
 
 
+def _resolve_country_id_for_vendor(env, raw):
+    """Map API ``country`` (id, ISO code, or country name) to ``res.country`` id."""
+    if raw is None or raw is False or isinstance(raw, bool):
+        return None
+    if isinstance(raw, int):
+        c = env['res.country'].sudo().browse(raw).exists()
+        return c.id if c else None
+    s = str(raw).strip()
+    if not s:
+        return None
+    if s.isdigit():
+        cid = int(s)
+        c = env['res.country'].sudo().browse(cid).exists()
+        return c.id if c else None
+    Country = env['res.country'].sudo()
+    c = Country.search(['|', ('code', '=ilike', s), ('name', 'ilike', s)], limit=1)
+    return c.id if c else None
+
+
+def _expand_supplier_style_kwargs(env, kwargs):
+    """Map supplier-style aliases (``contact_person``, ``country``) onto vendor field keys."""
+    kw = dict(kwargs)
+    if 'contact_person' in kw and 'contact_name' not in kw:
+        kw['contact_name'] = kw['contact_person']
+    kw.pop('contact_person', None)
+    if 'country' in kw and 'country_id' not in kw:
+        cid = _resolve_country_id_for_vendor(env, kw.pop('country'))
+        if cid:
+            kw['country_id'] = cid
+    else:
+        kw.pop('country', None)
+    return kw
+
+
+def _build_vendor_write_vals(kwargs):
+    """Partial-update dict for ``lugal.supply.vendor`` from JSON-RPC params."""
+    vals = {}
+    for k in (
+        'name', 'name_ar', 'phone', 'email', 'website', 'whatsapp', 'telegram', 'wechat',
+        'city', 'address', 'payment_terms', 'notes', 'contact_name',
+    ):
+        if k in kwargs:
+            vals[k] = kwargs[k]
+    if 'division' in kwargs:
+        div = kwargs['division']
+        if div in (False, None, ''):
+            vals['division'] = False
+        else:
+            div_norm = _normalize_vendor_division_filter(div)
+            if div_norm:
+                vals['division'] = div_norm
+    if 'lead_time_days' in kwargs:
+        vals['lead_time_days'] = int(kwargs['lead_time_days'] or 0)
+    if 'min_order_value' in kwargs:
+        vals['min_order_value'] = float(kwargs['min_order_value'] or 0.0)
+    if 'currency_id' in kwargs:
+        vals['currency_id'] = kwargs.get('currency_id') or False
+    if 'country_id' in kwargs:
+        vals['country_id'] = kwargs.get('country_id') or False
+    return vals
+
+
 def _serialize_container(c):
     delivered_by = c.clearance_info_delivered_by_id
     supplier = c.supplier_id
@@ -244,6 +307,43 @@ def _serialize_container(c):
         'created_at': c.create_date.isoformat() if c.create_date else '',
         'updated_at': c.write_date.isoformat() if c.write_date else '',
     }
+
+
+def _supply_po_packing_list_plain_text(po):
+    """Plain-text packing list for share / clipboard (no prices)."""
+    lines = [
+        'Packing List (no prices)',
+        'PO: %s' % (po.name or ''),
+    ]
+    if po.vendor_id:
+        lines.append('Vendor: %s' % (po.vendor_id.name or ''))
+    if po.division:
+        lines.append('Division: %s' % po.division)
+    lines.append('')
+    lines.append('#\tProduct\tCode\tSize\tQty\tUoM\tPcs/Carton')
+    for idx, line in enumerate(po.line_ids, start=1):
+        q = float(line.quantity or 0.0)
+        if q == 0.0 and line.quantity_pcs:
+            q = float(line.quantity_pcs)
+
+        def _tab_clean(val):
+            if val in (False, None):
+                return ''
+            return str(val).replace('\t', ' ').replace('\r', ' ').replace('\n', ' ')
+
+        lines.append(
+            '%d\t%s\t%s\t%s\t%s\t%s\t%s'
+            % (
+                idx,
+                _tab_clean(line.product_name),
+                _tab_clean(line.item_code),
+                _tab_clean(line.size),
+                q,
+                _tab_clean(line.uom),
+                float(line.packing_pcs_per_carton or 0.0),
+            )
+        )
+    return '\n'.join(lines)
 
 
 def _vendor_from_partner_id(partner_id):
@@ -346,27 +446,7 @@ class CrmSupplyChainApiController(http.Controller):
             v = request.env['lugal.supply.vendor'].sudo().browse(vendor_id).exists()
             if not v or v.is_deleted:
                 return {'success': False, 'error': 'Vendor not found', 'data': None}
-            vals = {}
-            for k in (
-                'name', 'name_ar', 'phone', 'email', 'website', 'whatsapp', 'telegram', 'wechat',
-                'city', 'address', 'payment_terms', 'notes', 'contact_name',
-            ):
-                if k in kwargs:
-                    vals[k] = kwargs[k]
-            if 'division' in kwargs:
-                div = kwargs['division']
-                if div in (False, None, ''):
-                    vals['division'] = False
-                else:
-                    div_norm = _normalize_vendor_division_filter(div)
-                    if div_norm:
-                        vals['division'] = div_norm
-            if 'lead_time_days' in kwargs:
-                vals['lead_time_days'] = int(kwargs['lead_time_days'] or 0)
-            if 'min_order_value' in kwargs:
-                vals['min_order_value'] = float(kwargs['min_order_value'] or 0.0)
-            if 'currency_id' in kwargs:
-                vals['currency_id'] = kwargs.get('currency_id') or False
+            vals = _build_vendor_write_vals(kwargs)
             if vals:
                 v.write(vals)
             return {'success': True, 'data': _serialize_vendor(v)}
@@ -385,6 +465,44 @@ class CrmSupplyChainApiController(http.Controller):
             return {'success': True, 'data': {'id': vendor_id, 'deleted': True}}
         except Exception as e:
             return crm_error(e, 'supply_vendors_delete')
+
+    @http.route(
+        '/api/crm/supply/suppliers/<int:supplier_id>/update',
+        type='jsonrpc', auth='none', csrf=False, methods=['POST'],
+    )
+    def supply_suppliers_update(self, supplier_id, **kwargs):
+        """Alias for vendor update; accepts ``contact_person`` and string ``country``."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            v = request.env['lugal.supply.vendor'].sudo().browse(supplier_id).exists()
+            if not v or v.is_deleted:
+                return {'success': False, 'error': 'Supplier not found', 'data': None}
+            merged = _expand_supplier_style_kwargs(request.env, kwargs)
+            vals = _build_vendor_write_vals(merged)
+            if vals:
+                v.write(vals)
+            v.invalidate_recordset()
+            return {'success': True, 'data': {'id': v.id, 'name': v.name or ''}}
+        except Exception as e:
+            return crm_error(e, 'supply_suppliers_update')
+
+    @http.route(
+        '/api/crm/supply/suppliers/<int:supplier_id>/delete',
+        type='jsonrpc', auth='none', csrf=False, methods=['POST'],
+    )
+    def supply_suppliers_delete(self, supplier_id, **kwargs):
+        """Soft-delete supplier (same as vendor delete)."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            v = request.env['lugal.supply.vendor'].sudo().browse(supplier_id).exists()
+            if not v or v.is_deleted:
+                return {'success': False, 'error': 'Supplier not found', 'data': None}
+            v.write({'is_deleted': True, 'active': False})
+            return {'success': True, 'data': {'id': supplier_id}}
+        except Exception as e:
+            return crm_error(e, 'supply_suppliers_delete')
 
     # -------------------------------------------------------------------------
     # Containers
@@ -914,6 +1032,11 @@ class CrmSupplyChainApiController(http.Controller):
         except Exception as e:
             return crm_error(e, 'supply_po_confirm')
 
+    @http.route('/api/crm/supply/po/<int:po_id>/submit', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_po_submit(self, po_id, **kwargs):
+        """Alias for confirm: draft PO → confirmed (same validations via model write)."""
+        return self.supply_po_confirm(po_id, **kwargs)
+
     @http.route('/api/crm/supply/dashboard/summary', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def supply_dashboard_summary(self, **kwargs):
         """Aggregate counts for supply dashboard (extends metrics without replacing existing list APIs)."""
@@ -1291,6 +1414,61 @@ class CrmSupplyChainApiController(http.Controller):
             return {'success': True, 'data': _serialize_supply_po(po)}
         except Exception as e:
             return crm_error(e, 'supply_po_attachments_link')
+
+    @http.route(
+        '/api/crm/supply/po/<int:po_id>/packing-list/share',
+        type='jsonrpc', auth='none', csrf=False, methods=['POST'],
+    )
+    def supply_po_packing_list_share(self, po_id, **kwargs):
+        """Return title + plain text for Web Share / clipboard (no prices)."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
+            if not po or po.is_deleted:
+                return {'success': False, 'error': 'PO not found', 'data': None}
+            text = _supply_po_packing_list_plain_text(po)
+            title = 'Packing List — %s' % (po.name or str(po_id))
+            return {
+                'success': True,
+                'data': {
+                    'title': title,
+                    'text': text,
+                    'url': '',
+                },
+            }
+        except Exception as e:
+            return crm_error(e, 'supply_po_packing_list_share')
+
+    @http.route(
+        '/api/crm/supply/po/<int:po_id>/packing-list/pdf',
+        type='jsonrpc', auth='none', csrf=False, methods=['POST'],
+    )
+    def supply_po_packing_list_pdf(self, po_id, **kwargs):
+        """Render QWeb packing list PDF; response includes base64 for SPA download."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
+            if not po or po.is_deleted:
+                return {'success': False, 'error': 'PO not found', 'data': None}
+            report = request.env['ir.actions.report'].sudo()
+            pdf_content, _ = report._render_qweb_pdf(
+                'lugal_crm.report_supply_po_packing_list',
+                [po_id],
+            )
+            safe_name = (po.name or str(po_id)).replace('/', '-').replace('\\', '-')[:120]
+            fname = 'PackingList-%s.pdf' % safe_name
+            return {
+                'success': True,
+                'data': {
+                    'filename': fname,
+                    'pdf_base64': base64.b64encode(pdf_content).decode('ascii'),
+                    'mimetype': 'application/pdf',
+                },
+            }
+        except Exception as e:
+            return crm_error(e, 'supply_po_packing_list_pdf')
 
     # --- Stubs: mail-thread comments not wired in this iteration ---
     @http.route(

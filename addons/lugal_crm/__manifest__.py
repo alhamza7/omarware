@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'Lugal CRM',
-    'version': '1.0.10',
+    'version': '1.0.11',
     'category': 'CRM',
     'summary': 'Custom CRM module for Lugal platform',
     'description': """
@@ -31,6 +31,7 @@ Requirements and specifications are in addons/lugal_crm/requirements/
         'security/ir.model.access.csv',
         'data/crm_sequences.xml',
         'data/crm_cron.xml',
+        'report/supply_packing_list_report.xml',
         'views/res_config_settings_supply_workflow_views.xml',
         'views/supply_chain_menus.xml',
     ],

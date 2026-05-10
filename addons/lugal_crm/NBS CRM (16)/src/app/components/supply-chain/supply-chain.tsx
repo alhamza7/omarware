@@ -32,6 +32,7 @@ import { SCClearance } from "./sc-clearance";
 import { SCNotifications } from "./sc-notifications";
 import { SCMessaging } from "./sc-messaging";
 import { SCMinMax } from "./sc-minmax";
+import type { ApiSupplyPo } from "./sc-purchase-orders";
 
 const sections = [
   { id: "purchase-orders", label: "أوامر الشراء", icon: ClipboardList },
@@ -57,7 +58,12 @@ const sectionDescriptions: Record<string, string> = {
   notifications: "التذكيرات والإشعارات والتنبيهات",
 };
 
-export function SupplyChain() {
+export type SupplyChainProps = {
+  /** Live PO rows from Odoo (`/api/crm/supply/po/list`). Omit to use in-module demo data. */
+  apiPurchaseOrders?: ApiSupplyPo[];
+};
+
+export function SupplyChain({ apiPurchaseOrders }: SupplyChainProps = {}) {
   const [activeSection, setActiveSection] = useState("purchase-orders");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
@@ -67,7 +73,7 @@ export function SupplyChain() {
   const renderContent = () => {
     switch (activeSection) {
       case "purchase-orders":
-        return <SCPurchaseOrders />;
+        return <SCPurchaseOrders apiPos={apiPurchaseOrders} />;
       case "containers":
         return <SCContainers />;
       case "suppliers":
@@ -85,7 +91,7 @@ export function SupplyChain() {
       case "notifications":
         return <SCNotifications />;
       default:
-        return <SCPurchaseOrders />;
+        return <SCPurchaseOrders apiPos={apiPurchaseOrders} />;
     }
   };
 

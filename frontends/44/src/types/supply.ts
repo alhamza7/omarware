@@ -353,3 +353,51 @@ export interface PenaltyInput {
   penalty_date?: string;
   currency_id?:  number;
 }
+
+// ─── Payments (`/api/crm/supply/payments/*`) ─────────────────
+/** Row from `POST /api/crm/supply/payments/po/list` for linking a PO. */
+export interface PaymentPoDropdownItem {
+  id:       number;
+  name:     string;
+  supplier: string;
+}
+
+export interface PaymentPoListData {
+  items:    PaymentPoDropdownItem[];
+  total:    number;
+  page:     number;
+  per_page: number;
+}
+
+export type SupplyPaymentType = 'deposit' | 'installment' | 'final' | 'other';
+
+export interface PaymentCreateInput {
+  po_id:             number;
+  amount:            number;
+  payment_type?:   SupplyPaymentType;
+  notes?:            string;
+  payment_date?:     string;
+  currency_id?:      number;
+  payment_method?: string;
+  paid_to?:          string;
+  payee_partner_id?: number;
+}
+
+/** Serialized `lugal.supply.payment` from create/get/list. */
+export interface SupplyPayment {
+  id:                 number;
+  payment_id:       string;
+  name:               string;
+  po_id:              number | null;
+  linked_order_id:    number | null;
+  order_name:         string;
+  amount:             number;
+  payment_type:       string;
+  payment_type_label: string;
+  payment_status:     string;
+  notes:              string;
+  currency_id:        number | null;
+  currency_name:      string;
+  payment_date:       string | null;
+  payment_method:     string;
+}
