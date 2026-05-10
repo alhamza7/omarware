@@ -3,8 +3,8 @@
 Lugal WebSocket Reverse Proxy
 ==============================
 Listens on PROXY_PORT and routes:
-  • /websocket  →  GEVENT_PORT (8072)  — WebSocket upgrade
-  • everything  →  ODOO_PORT   (8069)  — normal HTTP
+  • /websocket  →  GEVENT_PORT (8076)  — WebSocket upgrade
+  • everything  →  ODOO_PORT   (8075)  — normal HTTP
 
 Run:
     python3 scripts/ws_proxy.py
@@ -36,9 +36,11 @@ import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("ws_proxy")
 
-PROXY_PORT  = 3003
-ODOO_HOST   = "http://127.0.0.1:8069"
-GEVENT_HOST = "http://127.0.0.1:8072"
+# Client-facing ports. 8069 preserves the historical backend URL used by FE;
+# 3003 is kept for older proxy-based clients/tools.
+PROXY_PORTS = (8069, 3003)
+ODOO_HOST   = "http://127.0.0.1:8075"
+GEVENT_HOST = "http://127.0.0.1:8076"
 
 # Send a PING to the browser every N seconds to keep the browser-side
 # connection alive.  Must be shorter than any browser/OS idle timeout
@@ -62,8 +64,12 @@ async def proxy_websocket(request: web.Request) -> web.WebSocketResponse:
     upstream_headers = {k: v for k, v in request.headers.items()
                         if k.lower() not in {"host", "sec-websocket-key",
                                              "sec-websocket-extensions"}}
-    upstream_headers["Host"] = "127.0.0.1:8072"
-    upstream_headers["Origin"] = f"http://127.0.0.1:{PROXY_PORT}"
+    upstream_headers["Host"] = "127.0.0.1:8076"
+    try:
+        origin_port = int((request.host or '').rsplit(':', 1)[-1])
+    except Exception:
+        origin_port = PROXY_PORTS[0]
+    upstream_headers["Origin"] = f"http://127.0.0.1:{origin_port}"
 
     log.info("WS  %s → %s", request.path + qs, target)
 
@@ -174,7 +180,7 @@ async def proxy_http(request: web.Request) -> web.StreamResponse:
     headers = {k: v for k, v in request.headers.items()
                if k.lower() not in SKIP_HEADERS}
     original_host = request.headers.get("Host", "")
-    headers["Host"] = "127.0.0.1:8069"
+    headers["Host"] = "127.0.0.1:8075"
     headers["X-Forwarded-For"] = request.remote
     headers["X-Forwarded-Proto"] = "http"
     headers["X-Forwarded-Host"] = original_host  # original client-facing host:port
@@ -210,11 +216,23 @@ def main():
     app = web.Application(client_max_size=_1GB)
     app.router.add_route("*", "/{path_info:.*}", router)
 
-    log.info("Lugal Proxy starting on :%d (max body: 1 GB)", PROXY_PORT)
+    log.info("Lugal Proxy starting on ports %s (max body: 1 GB)", PROXY_PORTS)
     log.info("  HTTP  → %s", ODOO_HOST)
     log.info("  WS    → %s", GEVENT_HOST.replace("http://", "ws://"))
 
-    web.run_app(app, host="0.0.0.0", port=PROXY_PORT, access_log=None)
+    async def _run():
+        runner = web.AppRunner(app, access_log=None)
+        await runner.setup()
+        sites = []
+        for port in PROXY_PORTS:
+            site = web.TCPSite(runner, host="0.0.0.0", port=port)
+            await site.start()
+            sites.append(site)
+            log.info("  Listening on :%d", port)
+        while True:
+            await asyncio.sleep(3600)
+
+    asyncio.run(_run())
 
 
 if __name__ == "__main__":
