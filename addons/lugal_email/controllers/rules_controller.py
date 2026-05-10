@@ -192,6 +192,75 @@ def _apply_move_rule_to_existing(rule, uid, account_id=None, limit=5000):
     return {'matched': matched, 'applied': applied, 'skipped': skipped}
 
 
+def _apply_account_move_rules_to_existing(rule, uid, account_id=None, limit=10000):
+    """Re-run all active move rules in sequence for existing inbound mail.
+
+    This preserves parent/child rule semantics: specific child rules such as
+    Important/Attachments run first and stop processing, then the parent sender
+    catch-all handles the remaining mail. Applying only the parent or child rule
+    in isolation can leave old inbox rows behind or pull child matches back to
+    the parent folder.
+    """
+    Rule = rule.env['lugal.email.rule'].sudo()
+    Msg = rule.env['lugal.email.message'].sudo()
+    domain = [
+        ('account_id.user_id', '=', uid),
+        ('folder', 'not in', ['sent', 'drafts', 'trash', 'spam']),
+        ('is_deleted', '=', False),
+    ]
+    rule_domain = [('user_id', '=', uid), ('is_active', '=', True)]
+    if account_id:
+        aid = int(account_id)
+        domain.append(('account_id', '=', aid))
+        rule_domain.append(('account_id', '=', aid))
+
+    rules = Rule.search(rule_domain, order='sequence asc, id asc')
+    move_rules = rules.filtered(lambda r: bool(_rule_move_destinations(r)))
+    if not move_rules:
+        return {'matched': 0, 'applied': 0, 'skipped': 0, 'rules_considered': 0}
+
+    matched = applied = skipped = 0
+    affected_accounts = rule.env['lugal.email.account'].sudo().browse()
+    for msg in Msg.search(domain, order='date desc, id desc', limit=limit):
+        msg_vals = _message_rule_vals(msg)
+        for candidate in move_rules:
+            try:
+                if not candidate._matches(msg_vals):
+                    continue
+                matched += 1
+                before_folder = msg.folder
+                affected_accounts |= msg.account_id
+                candidate._apply_actions(msg)
+                msg.invalidate_recordset()
+                if msg.folder != before_folder:
+                    applied += 1
+                if candidate.stop_processing:
+                    break
+            except Exception:
+                skipped += 1
+                _logger.warning(
+                    'apply account move rules failed rule=%s msg=%s',
+                    candidate.id, msg.id,
+                )
+                break
+
+    for acc in affected_accounts:
+        unread = Msg.search_count([
+            ('account_id', '=', acc.id),
+            ('folder', 'not in', ['sent', 'drafts', 'trash', 'spam']),
+            ('is_read', '=', False),
+            ('is_deleted', '=', False),
+        ])
+        acc.sudo().write({'unread_count': unread})
+
+    return {
+        'matched': matched,
+        'applied': applied,
+        'skipped': skipped,
+        'rules_considered': len(move_rules),
+    }
+
+
 def _qs_dict(qs):
     return {
         'id':          qs.id,
@@ -255,7 +324,7 @@ class EmailRulesController(http.Controller):
                 'actions_json':     json.dumps(body.get('actions', [])),
                 'stop_processing':  bool(body.get('stop_processing', False)),
             })
-            auto_applied = _apply_move_rule_to_existing(rule, uid, account_id)
+            auto_applied = _apply_account_move_rules_to_existing(rule, uid, account_id)
             request.env.cr.commit()
             data = _rule_dict(rule)
             data['auto_applied_existing'] = auto_applied
