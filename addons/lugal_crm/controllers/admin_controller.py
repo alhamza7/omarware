@@ -168,11 +168,7 @@ def _build_fe_schema() -> dict:
     return {k: copy.deepcopy(v) for k, v in PERMISSION_TREE.items() if not k.startswith('_')}
 
 def _filter_to_fe_schema(perms: dict) -> dict:
-    """
-    Filter an effective-permissions dict to only FE-visible action keys.
-    Also preserves the '_route_visibility' override map so the route
-    computation picks it up correctly.
-    """
+    """Filter an effective-permissions dict to only FE-visible action keys."""
     def _pick(definition, src):
         if not isinstance(definition, dict):
             return bool(src)
@@ -181,34 +177,26 @@ def _filter_to_fe_schema(perms: dict) -> dict:
                     for sub, sub_def in definition.items()}
         return {action: bool((src or {}).get(action, False)) for action in definition}
 
-    result = {
+    return {
         section: _pick(definition, perms.get(section))
         for section, definition in PERMISSION_TREE.items()
         if not section.startswith('_')
     }
-    # Carry route-level overrides through so _compute_route_visibility can use them
-    if '_route_visibility' in perms:
-        result['_route_visibility'] = copy.deepcopy(perms['_route_visibility'])
-    return result
 
 
-def _compute_route_visibility(perms: dict) -> dict:
+def _compute_route_visibility(perms: dict, route_overrides: dict = None) -> dict:
     """
     Flat map of route paths → bool for FE navigation visibility.
 
     Step 1 — compute from actions: a route is accessible when at least one
              action leaf in its subtree is True.
-    Step 2 — apply explicit overrides from perms['_route_visibility']:
-             an override of False always hides the route (even if actions would
-             make it True), an override of True always shows it (even if all
-             actions are False).
+    Step 2 — apply explicit route_overrides (from the dedicated
+             route_visibility_json column in lugal.crm.user.permission):
+             False always hides the route, True always shows it.
 
     Both section-level ('supply_chain') and subsection-level
     ('supply_chain.containers') keys are included.
     Internal keys (starting with '_') are excluded from the output.
-
-    Admin sets route overrides via the `route_visibility` param of
-    /api/crm/admin/users/<id>/permissions/set.
     """
     def _any_true(node) -> bool:
         if isinstance(node, bool):
@@ -234,8 +222,8 @@ def _compute_route_visibility(perms: dict) -> dict:
         else:
             routes[section] = _any_true(value)
 
-    # Apply explicit route-level overrides (admin-set, highest priority)
-    for path, visible in (perms.get('_route_visibility') or {}).items():
+    # Apply explicit admin-set route overrides (highest priority, separate DB field)
+    for path, visible in (route_overrides or {}).items():
         routes[path] = bool(visible)
 
     return routes
@@ -668,7 +656,9 @@ def _user_to_dict(user, include_permissions: bool = True) -> dict:
     role = _resolve_role(user)
     Override = request.env['lugal.crm.user.permission'].sudo()
     override_rec = Override.search([('user_id', '=', user.id)], limit=1)
-    has_override = bool(override_rec and override_rec.get_overrides())
+    has_override = bool(override_rec and (
+        override_rec.get_overrides() or override_rec.get_route_visibility()
+    ))
 
     d = {
         'id': user.id,
@@ -686,8 +676,13 @@ def _user_to_dict(user, include_permissions: bool = True) -> dict:
     if include_permissions:
         full_perms = _get_effective_permissions(user)
         fe_perms   = _filter_to_fe_schema(full_perms)
-        d['permissions'] = fe_perms
-        d['routes']      = _compute_route_visibility(fe_perms)
+        # Route visibility overrides live in a dedicated DB column — fetch directly
+        Override = request.env['lugal.crm.user.permission'].sudo()
+        override_rec = Override.search([('user_id', '=', user.id)], limit=1)
+        route_overrides = override_rec.get_route_visibility() if override_rec else {}
+        d['permissions']      = fe_perms
+        d['routes']           = _compute_route_visibility(fe_perms, route_overrides)
+        d['route_visibility'] = route_overrides   # echo back the explicit overrides set
     return d
 
 
@@ -1151,17 +1146,15 @@ class CrmAdminController(http.Controller):
             if route_vis_input is not None and not isinstance(route_vis_input, dict):
                 return {'success': False, 'error': '`route_visibility` must be an object'}
 
-            # Merge route_visibility into the overrides under the reserved key
+            # Validate route_visibility paths
+            validated_route_vis = None
             if route_vis_input:
                 valid_paths = set(_all_route_paths())
                 bad = [k for k in route_vis_input if k not in valid_paths]
                 if bad:
                     return {'success': False,
                             'error': f'Unknown route path(s) in route_visibility: {bad}'}
-                new_overrides = dict(new_overrides)   # shallow copy before mutating
-                new_overrides['_route_visibility'] = {
-                    k: bool(v) for k, v in route_vis_input.items()
-                }
+                validated_route_vis = {k: bool(v) for k, v in route_vis_input.items()}
 
             Override = request.env['lugal.crm.user.permission'].sudo()
 
@@ -1197,17 +1190,20 @@ class CrmAdminController(http.Controller):
                 Override.upsert_for_user(
                     user_id=user_id,
                     overrides=new_overrides,
+                    route_visibility=validated_route_vis,
                     job_title_override=job_title_override,
                     admin_notes=notes or None,
                     modifier_id=uid,
                 )
 
+            # Flush ORM cache so _user_to_dict reads the freshly written record
+            request.env['lugal.crm.user.permission'].invalidate_model()
             user.invalidate_recordset()
             return {
                 'success': True,
                 'data': {
                     **_user_to_dict(user),
-                    'applied_to_all_same_job_title': apply_to_all,
+                    'applied_to_all_same_crm_role': apply_to_all,
                 },
             }
         except Exception as e:
