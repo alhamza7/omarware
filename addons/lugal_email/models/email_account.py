@@ -125,8 +125,35 @@ class LugalEmailAccount(models.Model):
 
     # ── Constraints ───────────────────────────────────────────────────────────
 
+    @api.model
+    def _normalize_connection_vals(self, vals):
+        """Normalize common mail-setting mistakes before they reach production."""
+        vals = dict(vals or {})
+        if 'smtp_port' in vals:
+            try:
+                port = int(vals.get('smtp_port') or 0)
+            except (TypeError, ValueError):
+                port = 0
+            if port == 475:
+                # Common typo for implicit TLS SMTP. Port 475 is not reachable
+                # on our mail hosts and leaves outbound mail failed locally.
+                port = 465
+            if port:
+                vals['smtp_port'] = port
+                if port == 465:
+                    vals['smtp_use_tls'] = False
+                elif port == 587:
+                    vals['smtp_use_tls'] = True
+        if 'imap_port' in vals:
+            try:
+                vals['imap_port'] = int(vals.get('imap_port') or 993)
+            except (TypeError, ValueError):
+                vals['imap_port'] = 993
+        return vals
+
     @api.model_create_multi
     def create(self, vals_list):
+        vals_list = [self._normalize_connection_vals(vals) for vals in vals_list]
         records = super().create(vals_list)
         for rec in records:
             if (rec.password or '').strip():
@@ -134,6 +161,9 @@ class LugalEmailAccount(models.Model):
                 # transaction commits, without waiting for the 1-minute cron.
                 rec._schedule_idle_start()
         return records
+
+    def write(self, vals):
+        return super().write(self._normalize_connection_vals(vals))
 
     @api.constrains('is_default', 'user_id')
     def _check_single_default(self):
@@ -155,7 +185,7 @@ class LugalEmailAccount(models.Model):
         self.write({'is_default': True})
 
     def action_test_connection(self):
-        """Test IMAP connection and update sync_status accordingly.
+        """Test both IMAP and SMTP credentials.
 
         On success, the IDLE supervisor is triggered immediately so the new
         account starts receiving live notifications without waiting for the
@@ -168,12 +198,53 @@ class LugalEmailAccount(models.Model):
             conn = conn_cls(self.imap_host, self.imap_port)
             conn.login(self.username or self.email_address, self.password or '')
             conn.logout()
-            self.write({'sync_status': 'ok', 'sync_error_msg': False})
-            self._schedule_idle_start()
-            return {'status': 'ok', 'message': 'Connection successful'}
         except Exception as exc:
             self.write({'sync_status': 'error', 'sync_error_msg': str(exc)})
-            return {'status': 'error', 'message': str(exc)}
+            return {
+                'status': 'error',
+                'imap_status': 'error',
+                'smtp_status': 'not_tested',
+                'message': str(exc),
+            }
+
+        try:
+            import smtplib
+            smtp_port = int(self.smtp_port or 587)
+            if smtp_port == 465:
+                smtp = smtplib.SMTP_SSL(self.smtp_host, smtp_port, timeout=15)
+            else:
+                smtp = smtplib.SMTP(self.smtp_host, smtp_port, timeout=15)
+            try:
+                smtp.ehlo()
+                if smtp_port != 465 and self.smtp_use_tls:
+                    smtp.starttls()
+                    smtp.ehlo()
+                smtp.login(self.username or self.email_address, self.password or '')
+            finally:
+                try:
+                    smtp.quit()
+                except Exception:
+                    pass
+
+            self.write({'sync_status': 'ok', 'sync_error_msg': False})
+            self._schedule_idle_start()
+            return {
+                'status': 'ok',
+                'imap_status': 'ok',
+                'smtp_status': 'ok',
+                'message': 'IMAP and SMTP connection successful',
+            }
+        except Exception as exc:
+            # IMAP is healthy, so keep inbox sync status OK. Surface SMTP failure
+            # to the caller without making notifications/inbox treat the account
+            # as broken.
+            self.write({'sync_status': 'ok', 'sync_error_msg': False})
+            return {
+                'status': 'error',
+                'imap_status': 'ok',
+                'smtp_status': 'error',
+                'message': f'SMTP failed: {exc}',
+            }
 
     def _schedule_idle_start(self):
         """
