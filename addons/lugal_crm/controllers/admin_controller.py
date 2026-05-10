@@ -66,7 +66,7 @@ PERMISSION_TREE = {
     "supply_chain": {
         "containers": {
             "list": False, "view": False, "create": False, "edit": False, "delete": False,
-            "assign_driver": False, "mark_arrived": False, "clearance_delivered": False,
+            "assign_driver": False, "unassign_driver": False, "mark_arrived": False, "clearance_delivered": False,
             "set_reminder": False, "upload_attachment": False, "delete_attachment": False,
             "add_comment": False, "delete_comment": False,
             "add_penalty": False, "delete_penalty": False,
@@ -394,7 +394,7 @@ def _base_for_role(role: str) -> dict:
         'supervisor': {
             "supply_chain": {
                 "containers":    {"list": True, "view": True, "create": True, "edit": True,
-                                  "assign_driver": True, "mark_arrived": True, "clearance_delivered": True,
+                                  "assign_driver": True, "unassign_driver": True, "mark_arrived": True, "clearance_delivered": True,
                                   "set_reminder": True, "upload_attachment": True, "delete_attachment": True,
                                   "add_comment": True, "delete_comment": True},
                 "vendors":       {"list": True, "view": True},
@@ -456,7 +456,7 @@ def _base_for_role(role: str) -> dict:
         'manager': {
             "supply_chain": {
                 "containers":    {"list": True, "view": True, "create": True, "edit": True,
-                                  "assign_driver": True, "mark_arrived": True, "clearance_delivered": True,
+                                  "assign_driver": True, "unassign_driver": True, "mark_arrived": True, "clearance_delivered": True,
                                   "set_reminder": True, "upload_attachment": True, "delete_attachment": True,
                                   "add_comment": True, "delete_comment": True,
                                   "add_penalty": True, "delete_penalty": True},
@@ -536,7 +536,7 @@ def _base_for_role(role: str) -> dict:
         'general_manager': {
             "supply_chain": {
                 "containers":    {"list": True, "view": True, "create": True, "edit": True, "delete": True,
-                                  "assign_driver": True, "mark_arrived": True, "clearance_delivered": True,
+                                  "assign_driver": True, "unassign_driver": True, "mark_arrived": True, "clearance_delivered": True,
                                   "set_reminder": True, "upload_attachment": True, "delete_attachment": True,
                                   "add_comment": True, "delete_comment": True,
                                   "add_penalty": True, "delete_penalty": True},
@@ -1159,7 +1159,7 @@ class CrmAdminController(http.Controller):
             crm_groups = [g for g in crm_group_refs if g]
             user_ids = set()
             for g in crm_groups:
-                user_ids.update(g.sudo().users.ids)
+                user_ids.update(g.sudo().user_ids.ids)
 
             domain = [('id', 'in', list(user_ids)), ('active', '=', bool(active)), ('share', '=', False)]
             if search:
@@ -1998,7 +1998,7 @@ class CrmAdminController(http.Controller):
                     continue
                 try:
                     g = request.env.ref(g_xml, raise_if_not_found=False)
-                    role_counts[role_key] = len(g.users) if g else 0
+                    role_counts[role_key] = len(g.user_ids) if g else 0
                 except Exception:
                     role_counts[role_key] = 0
 
@@ -2190,8 +2190,8 @@ class CrmAdminController(http.Controller):
             for g_xml in _ALL_CRM_GROUPS:
                 try:
                     g = request.env.ref(g_xml, raise_if_not_found=False)
-                    if g and user in g.users:
-                        g.sudo().write({'users': [(3, user.id)]})
+                    if g and user in g.user_ids:
+                        g.sudo().write({'user_ids': [(3, user.id)]})
                 except Exception:
                     pass
 
