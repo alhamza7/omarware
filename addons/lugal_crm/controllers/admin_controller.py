@@ -2,48 +2,43 @@
 """
 CRM User & Permission Management API.
 
-Permission resolution order (later steps win)
----------------------------------------------
-  1. PERMISSION_TREE          — all actions False (empty baseline).
-  2. CRM role baseline        — hardcoded defaults per role (agent/supervisor/…).
-  3. CRM-role template        — admin-customised overrides for the whole role,
-                                stored as job_title='__role__<role>' in the
-                                lugal.crm.permission.template table.
-  4. Job-title template       — overrides tied to user.partner_id.function.
-  5. User-specific overrides  — highest priority, per-user record.
+Architecture
+------------
+Effective permissions for any user are computed as:
+
+  1. Start with the full empty permission tree (all actions = false).
+  2. Apply the JOB-TITLE TEMPLATE that matches user.job_title  →  baseline.
+  3. Deep-merge the USER-SPECIFIC OVERRIDES on top              →  final.
 
 Rules
 -----
 - Only General Manager or Odoo system admin can call /api/crm/admin/* routes.
 - Any authenticated user can call /api/crm/me/permissions.
-- apply_to_all_same_crm_role=true  → upserts the role-level template (step 3)
-  for the user's current CRM role. Does NOT touch individual overrides of other users.
-- Permission responses are filtered to the FE-facing schema only.
-  Internal-only paths (crm.branches, crm.config, supply_chain internal sections)
-  are used by backend route guards but are never returned to the FE.
-- Every permission response includes a `routes` map for navigation visibility.
+- apply_to_all_same_job_title=true  → saves the overrides AS a new job-title
+  template (or updates existing one) so all future users with that title inherit them.
+  It does NOT wipe existing individual overrides for other users.
 
 Endpoints
 ---------
   # Current user
   POST /api/crm/me/permissions
 
-  # Permission schema (FE-facing, for building the permission form)
+  # Permission schema (for FE to build the form)
   POST /api/crm/admin/permissions/schema
 
   # Job-title templates
   POST /api/crm/admin/permissions/job_titles/list
-  POST /api/crm/admin/permissions/job_titles/upsert   { job_title, crm_role, permissions, apply_to_all_users, notes }
-  POST /api/crm/admin/permissions/job_titles/delete   { job_title }
+  POST /api/crm/admin/permissions/job_titles/upsert        { job_title, crm_role, permissions, apply_to_all_users, notes }
+  POST /api/crm/admin/permissions/job_titles/delete        { job_title }
 
   # User management
   POST /api/crm/admin/users/list
   POST /api/crm/admin/users/<id>/get
   POST /api/crm/admin/users/<id>/permissions/get
-  POST /api/crm/admin/users/<id>/permissions/set      { permissions, apply_to_all_same_crm_role, notes }
+  POST /api/crm/admin/users/<id>/permissions/set           { permissions, apply_to_all_same_job_title, notes }
   POST /api/crm/admin/users/<id>/permissions/reset
-  POST /api/crm/admin/users/assign_role               { email, role }
-  POST /api/crm/admin/users/bulk_assign               { assignments: [{email, role}] }
+  POST /api/crm/admin/users/assign_role                    { email, role }
+  POST /api/crm/admin/users/bulk_assign                    { assignments: [{email, role}] }
   POST /api/crm/admin/users/<id>/deactivate
   POST /api/crm/admin/users/<id>/activate
 """
@@ -69,12 +64,10 @@ PERMISSION_TREE = {
 
     # ── Supply Chain ──────────────────────────────────────────────────────────
     "supply_chain": {
-        # FE-facing sections
         "containers": {
             "list": False, "view": False, "create": False, "edit": False, "delete": False,
-            "assign_driver": False, "unassign_driver": False, "mark_arrived": False,
-            "clearance_delivered": False, "set_reminder": False,
-            "upload_attachment": False, "delete_attachment": False,
+            "assign_driver": False, "unassign_driver": False, "mark_arrived": False, "clearance_delivered": False,
+            "set_reminder": False, "upload_attachment": False, "delete_attachment": False,
             "add_comment": False, "delete_comment": False,
             "add_penalty": False, "delete_penalty": False,
         },
@@ -83,11 +76,11 @@ PERMISSION_TREE = {
         },
         "po": {
             "list": False, "view": False, "create": False, "edit": False, "delete": False,
-            "confirm": False, "ship": False, "receive": False,
+            "submit": False, "confirm": False, "ship": False, "receive": False,
             "cancel": False, "reopen": False,
             "add_line": False, "edit_line": False, "delete_line": False,
             "upload_attachment": False, "delete_attachment": False,
-            "add_comment": False, "delete_comment": False,
+            "add_comment": False, "delete_comment": False, "export_pdf": False,
         },
         "negotiations": {
             "list": False, "view": False, "create": False, "edit": False, "delete": False,
@@ -97,22 +90,26 @@ PERMISSION_TREE = {
             "list": False, "view": False, "create": False, "edit": False, "delete": False,
             "approve": False, "reject": False, "fulfill": False,
         },
-        "chat": {"view": False, "send": False, "delete_message": False},
-        # Internal-only (used by backend routes, not rendered by FE)
-        "clearance_companies": {"list": False, "view": False, "create": False, "edit": False, "delete": False},
+        "clearance_companies": {
+            "list": False, "view": False, "create": False, "edit": False, "delete": False,
+        },
         "tracking":     {"view": False, "update": False},
         "minmax":       {"list": False, "edit": False, "delete": False},
         "penalties":    {"list": False, "add": False, "delete": False},
         "notifications":{"list": False, "mark_read": False, "delete": False},
+        "chat":         {"view": False, "send": False, "delete_message": False},
         "stories":      {"list": False, "view": False, "create": False, "delete": False},
     },
 
     # ── CRM ───────────────────────────────────────────────────────────────────
     "crm": {
-        # FE-facing sections
         "customers": {
             "list": False, "view": False, "create": False, "edit": False, "delete": False,
-            "import": False, "export": False, "merge": False,
+            "export": False, "import": False, "merge": False,
+        },
+        "calls": {
+            "list": False, "view": False, "create": False, "edit": False, "delete": False,
+            "listen_recording": False,
         },
         "tickets": {
             "list": False, "view": False, "create": False, "edit": False, "delete": False,
@@ -122,33 +119,197 @@ PERMISSION_TREE = {
             "list": False, "view": False, "create": False, "edit": False, "delete": False,
             "assign": False, "close": False,
         },
-        "calls": {
-            "list": False, "view": False, "create": False, "edit": False, "delete": False,
-            "listen_recording": False,
+        "analytics": {
+            "view": False, "export": False, "view_team_data": False,
         },
-        "omnichannel": {"view": False, "reply": False, "assign": False},
+        "config": {"view": False, "edit": False},
+        "branches": {
+            "list": False, "view": False, "create": False, "edit": False, "delete": False,
+        },
         "knowledge": {
             "list": False, "view": False, "create": False, "edit": False, "delete": False,
         },
-        "analytics": {"view": False, "export": False, "view_team_data": False},
-        "pipeline":   {"view": False},
-        "promotions": {"list": False, "create": False, "edit": False, "delete": False},
-        # Internal-only (used by backend routes, not rendered by FE)
-        "branches": {"list": False, "view": False, "create": False, "edit": False, "delete": False},
-        "config":   {"view": False, "edit": False},
+        "omnichannel": {
+            "view": False, "reply": False, "assign": False,
+        },
+        "shifts": {
+            "view": False, "manage": False,
+        },
+    },
+
+    # ── QA ────────────────────────────────────────────────────────────────────
+    "qa": {
+        "reviews": {
+            "list": False, "view": False, "create": False, "score": False, "delete": False,
+            "export": False,
+        },
+        "management": {
+            "view": False, "manage": False, "assign_reviewer": False,
+        },
+        "reports": {
+            "view": False, "export": False,
+        },
     },
 
     # ── Point of Sale (POS) ───────────────────────────────────────────────────
     "pos": {
-        "products": {
-            "list": False, "view": False, "create": False, "edit": False, "delete": False,
-            "set_price": False, "set_discount": False, "import": False, "export": False,
+        "sessions": {
+            "list": False, "view": False, "open": False, "close": False,
         },
         "orders": {
             "list": False, "view": False, "create": False, "edit": False, "delete": False,
             "refund": False, "export_pdf": False,
         },
-        "config": {"view": False, "edit": False},
+        "products": {
+            "list": False, "view": False, "create": False, "edit": False, "delete": False,
+            "set_price": False, "set_discount": False,
+        },
+        "customers": {
+            "list": False, "view": False, "create": False, "edit": False,
+        },
+        "payments": {
+            "view": False, "process": False, "refund": False,
+        },
+        "reports": {
+            "view": False, "export": False, "z_report": False,
+        },
+        "config": {
+            "view": False, "edit": False,
+        },
+    },
+
+    # ── HR / Human Resources ──────────────────────────────────────────────────
+    "hr": {
+        "employees": {
+            "list": False, "view": False, "create": False, "edit": False, "delete": False,
+            "view_salary": False, "view_private": False, "export": False,
+        },
+        "attendance": {
+            "view_own": False, "view_all": False, "edit": False, "export": False,
+        },
+        "leaves": {
+            "view_own": False, "view_all": False,
+            "request": False, "approve": False, "refuse": False,
+            "manage_allocation": False,
+        },
+        "payroll": {
+            "view_own": False, "view_all": False,
+            "compute": False, "validate": False, "export": False,
+        },
+        "recruitment": {
+            "view": False, "create": False, "manage": False, "delete": False,
+        },
+        "kpi": {
+            "view_own": False, "view_all": False, "set": False, "export": False,
+        },
+        "shifts": {
+            "view_own": False, "view_all": False, "manage": False,
+        },
+        "org_chart": {
+            "view": False,
+        },
+        "config": {
+            "view": False, "edit": False,
+        },
+    },
+
+    # ── Inventory / Stock ─────────────────────────────────────────────────────
+    "inventory": {
+        "products": {
+            "list": False, "view": False, "create": False, "edit": False, "delete": False,
+            "set_price": False, "import": False, "export": False,
+        },
+        "stock": {
+            "view": False, "adjust": False, "transfer": False, "scrap": False,
+            "view_valuation": False,
+        },
+        "transfers": {
+            "list": False, "view": False, "create": False, "validate": False,
+            "cancel": False, "delete": False,
+        },
+        "warehouses": {
+            "view": False, "create": False, "edit": False, "delete": False,
+        },
+        "locations": {
+            "view": False, "create": False, "edit": False, "delete": False,
+        },
+        "lots_serials": {
+            "view": False, "create": False, "edit": False,
+        },
+        "reports": {
+            "view": False, "export": False,
+        },
+        "config": {
+            "view": False, "edit": False,
+        },
+    },
+
+    # ── Finance / Accounting ──────────────────────────────────────────────────
+    "finance": {
+        "invoices": {
+            "list": False, "view": False, "create": False, "edit": False, "delete": False,
+            "confirm": False, "cancel": False, "register_payment": False,
+            "export_pdf": False,
+        },
+        "bills": {
+            "list": False, "view": False, "create": False, "edit": False, "delete": False,
+            "confirm": False, "cancel": False, "register_payment": False,
+        },
+        "payments": {
+            "list": False, "view": False, "create": False, "validate": False, "cancel": False,
+        },
+        "journals": {
+            "view": False, "create": False, "edit": False, "delete": False,
+        },
+        "accounts": {
+            "view": False, "create": False, "edit": False,
+        },
+        "reports": {
+            "profit_loss": False, "balance_sheet": False, "cash_flow": False,
+            "tax_report": False, "export": False,
+        },
+        "bank_statements": {
+            "view": False, "import": False, "reconcile": False,
+        },
+        "config": {
+            "view": False, "edit": False,
+        },
+    },
+
+    # ── Analytics / Dashboards ─────────────────────────────────────────────────
+    "analytics": {
+        "dashboards": {
+            "view": False, "create": False, "edit": False, "delete": False,
+            "share": False,
+        },
+        "reports": {
+            "view": False, "create": False, "export": False,
+        },
+        "kpi": {
+            "view": False, "manage": False,
+        },
+        "spreadsheets": {
+            "view": False, "create": False, "edit": False, "delete": False,
+        },
+    },
+
+    # ── System Settings ───────────────────────────────────────────────────────
+    "settings": {
+        "general": {
+            "view": False, "edit": False,
+        },
+        "users_companies": {
+            "view": False, "manage": False,
+        },
+        "integrations": {
+            "view": False, "manage": False,
+        },
+        "email": {
+            "view": False, "configure": False,
+        },
+        "sap_integration": {
+            "view": False, "sync": False, "configure": False,
+        },
     },
 
     # ── Admin Panel ───────────────────────────────────────────────────────────
@@ -158,309 +319,321 @@ PERMISSION_TREE = {
             "assign_role": False, "deactivate": False, "activate": False,
         },
         "permissions": {
-            "view": False, "set_job_title_defaults": False, "set_user_overrides": False,
+            "view": False,
+            "set_job_title_defaults": False,
+            "set_user_overrides": False,
         },
-        "audit_logs": {"view": False, "export": False},
-    },
-
-    # ── System Settings ───────────────────────────────────────────────────────
-    "settings": {
-        "general":   {"view": False, "edit": False},
-        "templates": {"view": False, "create": False, "edit": False, "delete": False},
-        "rules":     {"view": False, "create": False, "edit": False, "delete": False},
-        "channels":  {"view": False, "edit": False},
-        "sla":       {"view": False, "edit": False},
-        "shifts":    {"view": False, "manage": False},
+        "audit_logs": {
+            "view": False, "export": False, "delete": False,
+        },
+        "modules": {
+            "view": False, "install": False, "upgrade": False,
+        },
     },
 }
-
-# ─── FE-facing permission schema ──────────────────────────────────────────────
-# This is the public subset returned by /api/crm/admin/permissions/schema.
-# It omits internal-only paths (crm.branches, crm.config, supply_chain internal)
-# that are used by backend routes but are not rendered or set by the frontend.
-_FE_SCHEMA_EXCLUDE: dict = {
-    'crm': {'branches', 'config'},
-    'supply_chain': {'clearance_companies', 'tracking', 'minmax', 'penalties', 'notifications', 'stories'},
-}
-
-def _build_fe_schema() -> dict:
-    """Return a copy of PERMISSION_TREE with internal-only sections stripped."""
-    result = {}
-    for module, sections in PERMISSION_TREE.items():
-        excluded = _FE_SCHEMA_EXCLUDE.get(module, set())
-        result[module] = {
-            section: copy.deepcopy(actions)
-            for section, actions in sections.items()
-            if section not in excluded
-        }
-    return result
-
-def _filter_to_fe_schema(perms: dict) -> dict:
-    """Filter a full effective-permissions dict to only FE-facing keys."""
-    result = {}
-    for module, sections in PERMISSION_TREE.items():
-        excluded = _FE_SCHEMA_EXCLUDE.get(module, set())
-        module_result = {}
-        for section, actions in sections.items():
-            if section in excluded:
-                continue
-            src = (perms.get(module) or {}).get(section) or {}
-            module_result[section] = {
-                action: bool(src.get(action, False))
-                for action in actions
-            }
-        result[module] = module_result
-    return result
-
-def _compute_route_visibility(perms: dict) -> dict:
-    """
-    Return a flat map of route paths → bool indicating whether the user has
-    at least one action enabled in that section.
-
-    Keys are:  '<module>'  and  '<module>.<section>'
-    The FE uses this to show/hide navigation items without inspecting every leaf.
-    """
-    routes: dict = {}
-    for module, sections in perms.items():
-        if not isinstance(sections, dict):
-            continue
-        module_accessible = False
-        for section, actions in sections.items():
-            if not isinstance(actions, dict):
-                continue
-            section_accessible = any(bool(v) for v in actions.values())
-            routes[f'{module}.{section}'] = section_accessible
-            if section_accessible:
-                module_accessible = True
-        routes[module] = module_accessible
-    return routes
 
 # ─── Role-level baseline permissions ─────────────────────────────────────────
-# Higher roles are strict supersets of lower ones for the modules in scope.
-# Only modules defined in PERMISSION_TREE are listed here; removed top-level
-# modules (qa, hr, inventory, finance, analytics) are no longer part of the FE
-# permission model.
+# Covers every module section. Higher roles are supersets of lower ones.
 
 def _base_for_role(role: str) -> dict:
     """Return baseline permission overrides for a named CRM role."""
     bases = {
         'none': {},
 
-        # ── Agent: basic CRM + supply view/create ─────────────────────────────
+        # ── Agent: basic CRM + supply view/create only ────────────────────────
         'agent': {
             "supply_chain": {
                 "containers":    {"list": True, "view": True, "upload_attachment": True, "add_comment": True},
                 "vendors":       {"list": True, "view": True},
-                "po":            {"list": True, "view": True, "create": True, "edit": True,
-                                  "add_line": True, "edit_line": True, "upload_attachment": True, "add_comment": True},
+                "po":            {"list": True, "view": True, "create": True, "edit": True, "submit": True,
+                                  "add_line": True, "edit_line": True, "upload_attachment": True, "add_comment": True, "export_pdf": True},
                 "negotiations":  {"list": True, "view": True, "add_comment": True},
                 "item_requests": {"list": True, "view": True, "create": True, "edit": True},
-                "chat":          {"view": True, "send": True},
-                # internal paths
                 "clearance_companies": {"list": True, "view": True},
                 "tracking":      {"view": True},
                 "minmax":        {"list": True},
                 "penalties":     {"list": True},
                 "notifications": {"list": True, "mark_read": True, "delete": True},
+                "chat":          {"view": True, "send": True},
                 "stories":       {"list": True, "view": True, "create": True},
             },
             "crm": {
                 "customers":  {"list": True, "view": True, "create": True, "edit": True},
+                "calls":      {"list": True, "view": True, "create": True, "edit": True},
                 "tickets":    {"list": True, "view": True, "create": True, "edit": True},
                 "tasks":      {"list": True, "view": True, "create": True, "edit": True},
-                "calls":      {"list": True, "view": True, "create": True, "edit": True},
-                "omnichannel":{"view": True, "reply": True},
-                "knowledge":  {"list": True, "view": True, "create": True, "edit": True},
-                # internal paths
                 "branches":   {"list": True, "view": True},
+                "knowledge":  {"list": True, "view": True, "create": True, "edit": True},
+                "omnichannel":{"view": True, "reply": True},
+            },
+            "hr": {
+                "attendance": {"view_own": True},
+                "leaves":     {"view_own": True, "request": True},
+                "payroll":    {"view_own": True},
+                "kpi":        {"view_own": True},
+                "shifts":     {"view_own": True},
             },
             "pos": {
-                "products": {"list": True, "view": True},
-                "orders":   {"list": True, "view": True, "create": True},
+                "sessions":  {"list": True, "view": True, "open": True, "close": True},
+                "orders":    {"list": True, "view": True, "create": True, "export_pdf": True},
+                "products":  {"list": True, "view": True},
+                "customers": {"list": True, "view": True, "create": True},
+                "payments":  {"view": True, "process": True},
             },
-            "settings": {
-                "general": {"view": True},
+            "inventory": {
+                "products":  {"list": True, "view": True},
+                "stock":     {"view": True},
+                "transfers": {"list": True, "view": True},
+            },
+            "analytics": {
+                "dashboards": {"view": True},
             },
         },
 
-        # ── Supervisor: container management, approve POs/requests, team view ─
+        # ── Supervisor: manage containers, approve POs/requests + team view ──
         'supervisor': {
             "supply_chain": {
                 "containers":    {"list": True, "view": True, "create": True, "edit": True,
-                                  "assign_driver": True, "unassign_driver": True, "mark_arrived": True,
-                                  "clearance_delivered": True, "set_reminder": True,
-                                  "upload_attachment": True, "delete_attachment": True,
+                                  "assign_driver": True, "unassign_driver": True, "mark_arrived": True, "clearance_delivered": True,
+                                  "set_reminder": True, "upload_attachment": True, "delete_attachment": True,
                                   "add_comment": True, "delete_comment": True},
                 "vendors":       {"list": True, "view": True},
-                "po":            {"list": True, "view": True, "create": True, "edit": True,
+                "po":            {"list": True, "view": True, "create": True, "edit": True, "submit": True,
                                   "confirm": True, "add_line": True, "edit_line": True, "delete_line": True,
                                   "upload_attachment": True, "delete_attachment": True,
-                                  "add_comment": True, "delete_comment": True},
+                                  "add_comment": True, "delete_comment": True, "export_pdf": True},
                 "negotiations":  {"list": True, "view": True, "create": True, "edit": True,
                                   "add_comment": True, "delete_comment": True},
                 "item_requests": {"list": True, "view": True, "create": True, "edit": True,
                                   "approve": True, "reject": True},
-                "chat":          {"view": True, "send": True, "delete_message": True},
-                # internal paths
                 "clearance_companies": {"list": True, "view": True},
                 "tracking":      {"view": True, "update": True},
                 "minmax":        {"list": True},
                 "penalties":     {"list": True},
                 "notifications": {"list": True, "mark_read": True, "delete": True},
+                "chat":          {"view": True, "send": True, "delete_message": True},
                 "stories":       {"list": True, "view": True, "create": True, "delete": True},
             },
             "crm": {
                 "customers":   {"list": True, "view": True, "create": True, "edit": True},
+                "calls":       {"list": True, "view": True, "create": True, "edit": True},
                 "tickets":     {"list": True, "view": True, "create": True, "edit": True, "assign": True, "escalate": True},
                 "tasks":       {"list": True, "view": True, "create": True, "edit": True, "assign": True},
-                "calls":       {"list": True, "view": True, "create": True, "edit": True},
-                "omnichannel": {"view": True, "reply": True, "assign": True},
-                "knowledge":   {"list": True, "view": True, "create": True, "edit": True},
                 "analytics":   {"view": True, "view_team_data": True},
-                "pipeline":    {"view": True},
-                # internal paths
                 "branches":    {"list": True, "view": True, "edit": True},
+                "knowledge":   {"list": True, "view": True, "create": True, "edit": True},
+                "omnichannel": {"view": True, "reply": True, "assign": True},
+                "shifts":      {"view": True, "manage": True},
+            },
+            "hr": {
+                "attendance": {"view_own": True, "view_all": True},
+                "leaves":     {"view_own": True, "view_all": True, "request": True, "approve": True, "refuse": True},
+                "payroll":    {"view_own": True},
+                "kpi":        {"view_own": True, "view_all": True},
+                "shifts":     {"view_own": True, "view_all": True, "manage": True},
+                "org_chart":  {"view": True},
             },
             "pos": {
-                "products": {"list": True, "view": True},
-                "orders":   {"list": True, "view": True, "create": True, "export_pdf": True},
-                "config":   {"view": True},
+                "sessions":  {"list": True, "view": True, "open": True, "close": True},
+                "orders":    {"list": True, "view": True, "create": True, "export_pdf": True},
+                "products":  {"list": True, "view": True},
+                "customers": {"list": True, "view": True, "create": True, "edit": True},
+                "payments":  {"view": True, "process": True, "refund": True},
+                "reports":   {"view": True},
             },
-            "settings": {
-                "general":  {"view": True},
-                "channels": {"view": True},
-                "sla":      {"view": True},
-                "shifts":   {"view": True},
+            "inventory": {
+                "products":  {"list": True, "view": True},
+                "stock":     {"view": True},
+                "transfers": {"list": True, "view": True, "create": True, "validate": True},
+            },
+            "analytics": {
+                "dashboards": {"view": True},
+                "reports":    {"view": True},
             },
         },
 
-        # ── Manager: full ops except hard-deletes + all FE sections ───────────
+        # ── Manager: full ops except delete core records + finance view ───────
         'manager': {
             "supply_chain": {
                 "containers":    {"list": True, "view": True, "create": True, "edit": True,
-                                  "assign_driver": True, "unassign_driver": True, "mark_arrived": True,
-                                  "clearance_delivered": True, "set_reminder": True,
-                                  "upload_attachment": True, "delete_attachment": True,
+                                  "assign_driver": True, "unassign_driver": True, "mark_arrived": True, "clearance_delivered": True,
+                                  "set_reminder": True, "upload_attachment": True, "delete_attachment": True,
                                   "add_comment": True, "delete_comment": True,
                                   "add_penalty": True, "delete_penalty": True},
                 "vendors":       {"list": True, "view": True, "create": True, "edit": True},
-                "po":            {"list": True, "view": True, "create": True, "edit": True,
+                "po":            {"list": True, "view": True, "create": True, "edit": True, "submit": True,
                                   "confirm": True, "ship": True, "receive": True, "cancel": True, "reopen": True,
                                   "add_line": True, "edit_line": True, "delete_line": True,
                                   "upload_attachment": True, "delete_attachment": True,
-                                  "add_comment": True, "delete_comment": True},
+                                  "add_comment": True, "delete_comment": True, "export_pdf": True},
                 "negotiations":  {"list": True, "view": True, "create": True, "edit": True, "delete": True,
                                   "add_comment": True, "delete_comment": True},
                 "item_requests": {"list": True, "view": True, "create": True, "edit": True, "delete": True,
                                   "approve": True, "reject": True, "fulfill": True},
-                "chat":          {"view": True, "send": True, "delete_message": True},
-                # internal paths
                 "clearance_companies": {"list": True, "view": True, "create": True, "edit": True},
                 "tracking":      {"view": True, "update": True},
                 "minmax":        {"list": True, "edit": True, "delete": True},
                 "penalties":     {"list": True, "add": True, "delete": True},
                 "notifications": {"list": True, "mark_read": True, "delete": True},
+                "chat":          {"view": True, "send": True, "delete_message": True},
                 "stories":       {"list": True, "view": True, "create": True, "delete": True},
             },
             "crm": {
                 "customers":   {"list": True, "view": True, "create": True, "edit": True, "export": True, "import": True},
+                "calls":       {"list": True, "view": True, "create": True, "edit": True, "delete": True, "listen_recording": True},
                 "tickets":     {"list": True, "view": True, "create": True, "edit": True, "assign": True, "escalate": True, "close": True},
                 "tasks":       {"list": True, "view": True, "create": True, "edit": True, "assign": True, "close": True},
-                "calls":       {"list": True, "view": True, "create": True, "edit": True, "delete": True, "listen_recording": True},
-                "omnichannel": {"view": True, "reply": True, "assign": True},
-                "knowledge":   {"list": True, "view": True, "create": True, "edit": True, "delete": True},
                 "analytics":   {"view": True, "export": True, "view_team_data": True},
-                "pipeline":    {"view": True},
-                "promotions":  {"list": True, "create": True, "edit": True},
-                # internal paths
-                "branches":    {"list": True, "view": True, "create": True, "edit": True},
                 "config":      {"view": True},
+                "branches":    {"list": True, "view": True, "create": True, "edit": True},
+                "knowledge":   {"list": True, "view": True, "create": True, "edit": True, "delete": True},
+                "omnichannel": {"view": True, "reply": True, "assign": True},
+                "shifts":      {"view": True, "manage": True},
+            },
+            "hr": {
+                "employees":  {"list": True, "view": True, "create": True, "edit": True, "export": True},
+                "attendance": {"view_own": True, "view_all": True, "edit": True, "export": True},
+                "leaves":     {"view_own": True, "view_all": True, "request": True, "approve": True, "refuse": True, "manage_allocation": True},
+                "payroll":    {"view_own": True, "view_all": True},
+                "recruitment":{"view": True, "create": True, "manage": True},
+                "kpi":        {"view_own": True, "view_all": True, "set": True, "export": True},
+                "shifts":     {"view_own": True, "view_all": True, "manage": True},
+                "org_chart":  {"view": True},
             },
             "pos": {
-                "products": {"list": True, "view": True, "create": True, "edit": True, "set_price": True, "set_discount": True},
-                "orders":   {"list": True, "view": True, "create": True, "edit": True, "export_pdf": True},
-                "config":   {"view": True},
+                "sessions":  {"list": True, "view": True, "open": True, "close": True},
+                "orders":    {"list": True, "view": True, "create": True, "edit": True, "export_pdf": True},
+                "products":  {"list": True, "view": True, "create": True, "edit": True, "set_price": True, "set_discount": True},
+                "customers": {"list": True, "view": True, "create": True, "edit": True},
+                "payments":  {"view": True, "process": True, "refund": True},
+                "reports":   {"view": True, "export": True, "z_report": True},
+                "config":    {"view": True},
             },
-            "admin": {
-                "users":       {"list": True, "view": True},
-                "permissions": {"view": True},
-                "audit_logs":  {"view": True},
+            "inventory": {
+                "products":   {"list": True, "view": True, "create": True, "edit": True, "export": True},
+                "stock":      {"view": True, "adjust": True, "transfer": True},
+                "transfers":  {"list": True, "view": True, "create": True, "validate": True, "cancel": True},
+                "warehouses": {"view": True},
+                "locations":  {"view": True},
+                "lots_serials":{"view": True, "create": True},
+                "reports":    {"view": True, "export": True},
             },
-            "settings": {
-                "general":   {"view": True, "edit": True},
-                "templates": {"view": True, "create": True, "edit": True},
-                "rules":     {"view": True, "create": True, "edit": True},
-                "channels":  {"view": True, "edit": True},
-                "sla":       {"view": True, "edit": True},
-                "shifts":    {"view": True, "manage": True},
+            "finance": {
+                "invoices":    {"list": True, "view": True, "create": True, "confirm": True, "export_pdf": True},
+                "bills":       {"list": True, "view": True},
+                "payments":    {"list": True, "view": True},
+                "reports":     {"profit_loss": True, "export": True},
+            },
+            "analytics": {
+                "dashboards": {"view": True, "create": True, "edit": True},
+                "reports":    {"view": True, "create": True, "export": True},
+                "kpi":        {"view": True},
+                "spreadsheets":{"view": True, "create": True, "edit": True},
             },
         },
 
-        # ── General Manager: FULL access ──────────────────────────────────────
+        # ── General Manager: FULL access to everything ────────────────────────
         'general_manager': {
             "supply_chain": {
                 "containers":    {"list": True, "view": True, "create": True, "edit": True, "delete": True,
-                                  "assign_driver": True, "unassign_driver": True, "mark_arrived": True,
-                                  "clearance_delivered": True, "set_reminder": True,
-                                  "upload_attachment": True, "delete_attachment": True,
+                                  "assign_driver": True, "unassign_driver": True, "mark_arrived": True, "clearance_delivered": True,
+                                  "set_reminder": True, "upload_attachment": True, "delete_attachment": True,
                                   "add_comment": True, "delete_comment": True,
                                   "add_penalty": True, "delete_penalty": True},
                 "vendors":       {"list": True, "view": True, "create": True, "edit": True, "delete": True},
                 "po":            {"list": True, "view": True, "create": True, "edit": True, "delete": True,
-                                  "confirm": True, "ship": True, "receive": True, "cancel": True, "reopen": True,
+                                  "submit": True, "confirm": True, "ship": True, "receive": True,
+                                  "cancel": True, "reopen": True,
                                   "add_line": True, "edit_line": True, "delete_line": True,
                                   "upload_attachment": True, "delete_attachment": True,
-                                  "add_comment": True, "delete_comment": True},
+                                  "add_comment": True, "delete_comment": True, "export_pdf": True},
                 "negotiations":  {"list": True, "view": True, "create": True, "edit": True, "delete": True,
                                   "add_comment": True, "delete_comment": True},
                 "item_requests": {"list": True, "view": True, "create": True, "edit": True, "delete": True,
                                   "approve": True, "reject": True, "fulfill": True},
-                "chat":          {"view": True, "send": True, "delete_message": True},
-                # internal paths
                 "clearance_companies": {"list": True, "view": True, "create": True, "edit": True, "delete": True},
                 "tracking":      {"view": True, "update": True},
                 "minmax":        {"list": True, "edit": True, "delete": True},
                 "penalties":     {"list": True, "add": True, "delete": True},
                 "notifications": {"list": True, "mark_read": True, "delete": True},
+                "chat":          {"view": True, "send": True, "delete_message": True},
                 "stories":       {"list": True, "view": True, "create": True, "delete": True},
             },
             "crm": {
-                "customers":   {"list": True, "view": True, "create": True, "edit": True, "delete": True,
-                                "export": True, "import": True, "merge": True},
-                "tickets":     {"list": True, "view": True, "create": True, "edit": True, "delete": True,
-                                "assign": True, "escalate": True, "close": True},
-                "tasks":       {"list": True, "view": True, "create": True, "edit": True, "delete": True,
-                                "assign": True, "close": True},
-                "calls":       {"list": True, "view": True, "create": True, "edit": True, "delete": True,
-                                "listen_recording": True},
-                "omnichannel": {"view": True, "reply": True, "assign": True},
-                "knowledge":   {"list": True, "view": True, "create": True, "edit": True, "delete": True},
+                "customers":   {"list": True, "view": True, "create": True, "edit": True, "delete": True, "export": True, "import": True, "merge": True},
+                "calls":       {"list": True, "view": True, "create": True, "edit": True, "delete": True, "listen_recording": True},
+                "tickets":     {"list": True, "view": True, "create": True, "edit": True, "delete": True, "assign": True, "escalate": True, "close": True},
+                "tasks":       {"list": True, "view": True, "create": True, "edit": True, "delete": True, "assign": True, "close": True},
                 "analytics":   {"view": True, "export": True, "view_team_data": True},
-                "pipeline":    {"view": True},
-                "promotions":  {"list": True, "create": True, "edit": True, "delete": True},
-                # internal paths
+                "config":      {"view": True, "edit": True},
                 "branches":    {"list": True, "view": True, "create": True, "edit": True, "delete": True},
+                "knowledge":   {"list": True, "view": True, "create": True, "edit": True, "delete": True},
+                "omnichannel": {"view": True, "reply": True, "assign": True},
+                "shifts":      {"view": True, "manage": True},
+            },
+            "qa": {
+                "reviews":    {"list": True, "view": True, "create": True, "score": True, "delete": True, "export": True},
+                "management": {"view": True, "manage": True, "assign_reviewer": True},
+                "reports":    {"view": True, "export": True},
+            },
+            "hr": {
+                "employees":   {"list": True, "view": True, "create": True, "edit": True, "delete": True, "view_salary": True, "view_private": True, "export": True},
+                "attendance":  {"view_own": True, "view_all": True, "edit": True, "export": True},
+                "leaves":      {"view_own": True, "view_all": True, "request": True, "approve": True, "refuse": True, "manage_allocation": True},
+                "payroll":     {"view_own": True, "view_all": True, "compute": True, "validate": True, "export": True},
+                "recruitment": {"view": True, "create": True, "manage": True, "delete": True},
+                "kpi":         {"view_own": True, "view_all": True, "set": True, "export": True},
+                "shifts":      {"view_own": True, "view_all": True, "manage": True},
+                "org_chart":   {"view": True},
                 "config":      {"view": True, "edit": True},
             },
             "pos": {
-                "products": {"list": True, "view": True, "create": True, "edit": True, "delete": True,
-                             "set_price": True, "set_discount": True, "import": True, "export": True},
-                "orders":   {"list": True, "view": True, "create": True, "edit": True, "delete": True,
-                             "refund": True, "export_pdf": True},
-                "config":   {"view": True, "edit": True},
+                "sessions":  {"list": True, "view": True, "open": True, "close": True},
+                "orders":    {"list": True, "view": True, "create": True, "edit": True, "delete": True, "refund": True, "export_pdf": True},
+                "products":  {"list": True, "view": True, "create": True, "edit": True, "delete": True, "set_price": True, "set_discount": True},
+                "customers": {"list": True, "view": True, "create": True, "edit": True},
+                "payments":  {"view": True, "process": True, "refund": True},
+                "reports":   {"view": True, "export": True, "z_report": True},
+                "config":    {"view": True, "edit": True},
+            },
+            "inventory": {
+                "products":    {"list": True, "view": True, "create": True, "edit": True, "delete": True, "set_price": True, "import": True, "export": True},
+                "stock":       {"view": True, "adjust": True, "transfer": True, "scrap": True, "view_valuation": True},
+                "transfers":   {"list": True, "view": True, "create": True, "validate": True, "cancel": True, "delete": True},
+                "warehouses":  {"view": True, "create": True, "edit": True, "delete": True},
+                "locations":   {"view": True, "create": True, "edit": True, "delete": True},
+                "lots_serials":{"view": True, "create": True, "edit": True},
+                "reports":     {"view": True, "export": True},
+                "config":      {"view": True, "edit": True},
+            },
+            "finance": {
+                "invoices":       {"list": True, "view": True, "create": True, "edit": True, "delete": True, "confirm": True, "cancel": True, "register_payment": True, "export_pdf": True},
+                "bills":          {"list": True, "view": True, "create": True, "edit": True, "delete": True, "confirm": True, "cancel": True, "register_payment": True},
+                "payments":       {"list": True, "view": True, "create": True, "validate": True, "cancel": True},
+                "journals":       {"view": True, "create": True, "edit": True, "delete": True},
+                "accounts":       {"view": True, "create": True, "edit": True},
+                "reports":        {"profit_loss": True, "balance_sheet": True, "cash_flow": True, "tax_report": True, "export": True},
+                "bank_statements":{"view": True, "import": True, "reconcile": True},
+                "config":         {"view": True, "edit": True},
+            },
+            "analytics": {
+                "dashboards":  {"view": True, "create": True, "edit": True, "delete": True, "share": True},
+                "reports":     {"view": True, "create": True, "export": True},
+                "kpi":         {"view": True, "manage": True},
+                "spreadsheets":{"view": True, "create": True, "edit": True, "delete": True},
+            },
+            "settings": {
+                "general":        {"view": True, "edit": True},
+                "users_companies":{"view": True, "manage": True},
+                "integrations":   {"view": True, "manage": True},
+                "email":          {"view": True, "configure": True},
+                "sap_integration":{"view": True, "sync": True, "configure": True},
             },
             "admin": {
                 "users":       {"list": True, "view": True, "create": True, "assign_role": True, "deactivate": True, "activate": True},
                 "permissions": {"view": True, "set_job_title_defaults": True, "set_user_overrides": True},
-                "audit_logs":  {"view": True, "export": True},
-            },
-            "settings": {
-                "general":   {"view": True, "edit": True},
-                "templates": {"view": True, "create": True, "edit": True, "delete": True},
-                "rules":     {"view": True, "create": True, "edit": True, "delete": True},
-                "channels":  {"view": True, "edit": True},
-                "sla":       {"view": True, "edit": True},
-                "shifts":    {"view": True, "manage": True},
+                "audit_logs":  {"view": True, "export": True, "delete": True},
+                "modules":     {"view": True, "install": True, "upgrade": True},
             },
         },
 
@@ -469,70 +642,90 @@ def _base_for_role(role: str) -> dict:
             "supply_chain": {
                 "containers":    {"list": True, "view": True},
                 "vendors":       {"list": True, "view": True},
-                "po":            {"list": True, "view": True},
+                "po":            {"list": True, "view": True, "export_pdf": True},
                 "negotiations":  {"list": True, "view": True},
                 "item_requests": {"list": True, "view": True},
-                "chat":          {"view": True},
-                # internal paths
                 "clearance_companies": {"list": True, "view": True},
                 "tracking":      {"view": True},
                 "minmax":        {"list": True},
                 "penalties":     {"list": True},
                 "notifications": {"list": True, "mark_read": True, "delete": True},
+                "chat":          {"view": True},
                 "stories":       {"list": True, "view": True},
             },
             "crm": {
                 "customers": {"list": True, "view": True},
+                "calls":     {"list": True, "view": True, "listen_recording": True},
                 "tickets":   {"list": True, "view": True},
                 "tasks":     {"list": True, "view": True},
-                "calls":     {"list": True, "view": True, "listen_recording": True},
-                "knowledge": {"list": True, "view": True},
                 "analytics": {"view": True},
-                # internal paths
                 "branches":  {"list": True, "view": True},
+                "knowledge": {"list": True, "view": True},
             },
-            "pos": {
-                "products": {"list": True, "view": True},
-                "orders":   {"list": True, "view": True},
+            "qa": {
+                "reviews":    {"list": True, "view": True, "create": True, "score": True},
+                "management": {"view": True},
+                "reports":    {"view": True},
             },
-            "settings": {
-                "general": {"view": True},
+            "hr": {
+                "attendance": {"view_own": True},
+                "leaves":     {"view_own": True},
+                "kpi":        {"view_own": True},
+            },
+            "analytics": {
+                "dashboards": {"view": True},
+                "reports":    {"view": True},
             },
         },
 
-        # ── QA Supervisor: QA auditor + manage team + export ──────────────────
+        # ── QA Supervisor: QA auditor + manage team + export ─────────────────
         'qa_supervisor': {
             "supply_chain": {
                 "containers":    {"list": True, "view": True},
                 "vendors":       {"list": True, "view": True},
-                "po":            {"list": True, "view": True},
+                "po":            {"list": True, "view": True, "export_pdf": True},
                 "negotiations":  {"list": True, "view": True},
                 "item_requests": {"list": True, "view": True},
-                "chat":          {"view": True},
-                # internal paths
                 "clearance_companies": {"list": True, "view": True},
                 "tracking":      {"view": True},
                 "minmax":        {"list": True},
                 "penalties":     {"list": True},
                 "notifications": {"list": True, "mark_read": True, "delete": True},
-                "stories":       {"list": True, "view": True},
+                "chat":       {"view": True},
+                "stories":    {"list": True, "view": True},
             },
             "crm": {
                 "customers": {"list": True, "view": True},
+                "calls":     {"list": True, "view": True},
                 "tickets":   {"list": True, "view": True},
                 "tasks":     {"list": True, "view": True},
-                "calls":     {"list": True, "view": True, "listen_recording": True},
-                "knowledge": {"list": True, "view": True},
-                "analytics": {"view": True, "export": True},
-                # internal paths
+                "analytics": {"view": True},
                 "branches":  {"list": True, "view": True},
+                "knowledge": {"list": True, "view": True},
             },
-            "pos": {
-                "products": {"list": True, "view": True},
-                "orders":   {"list": True, "view": True},
+            "crm": {
+                "customers": {"list": True, "view": True},
+                "calls":     {"list": True, "view": True, "listen_recording": True},
+                "tickets":   {"list": True, "view": True},
+                "tasks":     {"list": True, "view": True},
+                "analytics": {"view": True},
+                "branches":  {"list": True, "view": True},
+                "knowledge": {"list": True, "view": True},
             },
-            "settings": {
-                "general": {"view": True},
+            "qa": {
+                "reviews":    {"list": True, "view": True, "create": True, "score": True, "delete": True, "export": True},
+                "management": {"view": True, "manage": True, "assign_reviewer": True},
+                "reports":    {"view": True, "export": True},
+            },
+            "hr": {
+                "attendance": {"view_own": True, "view_all": True},
+                "leaves":     {"view_own": True, "view_all": True},
+                "kpi":        {"view_own": True, "view_all": True},
+                "org_chart":  {"view": True},
+            },
+            "analytics": {
+                "dashboards": {"view": True},
+                "reports":    {"view": True, "export": True},
             },
         },
     }
@@ -621,50 +814,43 @@ def _get_effective_permissions(user) -> dict:
     """
     Compute the final permission dict for a user.
 
-    Resolution order (later steps win):
-    1. PERMISSION_TREE — all False baseline.
-    2. CRM role baseline (_base_for_role).
-    3. CRM-role template (admin-set overrides for the entire role, stored as
-       job_title='__role__<role_name>' in lugal.crm.permission.template).
-    4. Job-title template (if user has a matching job_title).
-    5. User-specific overrides (highest priority).
+    Steps
+    -----
+    1. Build an empty tree from PERMISSION_TREE.
+    2. Apply the CRM role-level baseline (fast-path when no template).
+    3. Apply the job-title template (if one exists for user.job_title).
+    4. Apply the user-specific overrides on top.
     """
     # Step 1 — empty baseline
     base = copy.deepcopy(PERMISSION_TREE)
 
-    # Step 2 — CRM role baseline
+    # Step 2 — CRM role baseline (lowest priority)
     role = _resolve_role(user)
-    base = _deep_merge(base, _base_for_role(role))
+    role_overrides = _base_for_role(role)
+    base = _deep_merge(base, role_overrides)
 
-    Tmpl = request.env['lugal.crm.permission.template'].sudo()
-
-    # Step 3 — CRM-role template (admin customised defaults for the whole role)
-    role_tmpl_key = f'__role__{role}'
-    role_tmpl = Tmpl.search([('job_title', '=', role_tmpl_key), ('is_active', '=', True)], limit=1)
-    if role_tmpl:
-        role_tmpl_perms = role_tmpl.get_permissions()
-        if role_tmpl_perms:
-            base = _deep_merge(base, role_tmpl_perms)
-
-    # Step 4 — job-title template
+    # Step 3 — job-title template (overrides role baseline)
     job_title = user.sudo().partner_id.function or ''
     if job_title:
+        Tmpl = request.env['lugal.crm.permission.template'].sudo()
         tmpl = Tmpl.search([('job_title', '=ilike', job_title), ('is_active', '=', True)], limit=1)
         if tmpl:
             tmpl_perms = tmpl.get_permissions()
             if tmpl_perms:
                 base = _deep_merge(base, tmpl_perms)
-            # If template is associated with a different role, also apply that role baseline
+            # Also apply the template's crm_role baseline (template role may differ)
             if tmpl.crm_role and tmpl.crm_role != role:
                 base = _deep_merge(base, _base_for_role(tmpl.crm_role))
-                base = _deep_merge(base, tmpl_perms)  # template wins again
+                base = _deep_merge(base, tmpl_perms)   # template perms win again
 
-    # Step 5 — user-specific overrides (highest priority)
+    # Step 4 — user-specific overrides (highest priority)
     Override = request.env['lugal.crm.user.permission'].sudo()
     override_rec = Override.search([('user_id', '=', user.id)], limit=1)
     if override_rec:
+        # If user has a job_title_override, re-apply that template first
         eff_title = override_rec.job_title_override or job_title
         if eff_title and eff_title != job_title:
+            Tmpl = request.env['lugal.crm.permission.template'].sudo()
             tmpl2 = Tmpl.search([('job_title', '=ilike', eff_title), ('is_active', '=', True)], limit=1)
             if tmpl2:
                 base = _deep_merge(base, tmpl2.get_permissions())
@@ -695,13 +881,7 @@ def _user_to_dict(user, include_permissions: bool = True) -> dict:
         'avatar_url': f'/web/image/res.users/{user.id}/avatar_128',
     }
     if include_permissions:
-        full_perms = _get_effective_permissions(user)
-        # Return only FE-facing keys (strips internal-only paths like crm.branches)
-        fe_perms = _filter_to_fe_schema(full_perms)
-        d['permissions'] = fe_perms
-        # Route-visibility map: <module> and <module.section> → bool
-        # The FE uses this to show/hide navigation without inspecting every leaf.
-        d['routes'] = _compute_route_visibility(fe_perms)
+        d['permissions'] = _get_effective_permissions(user)
     return d
 
 
@@ -737,18 +917,17 @@ class CrmAdminController(http.Controller):
     @http.route('/api/crm/admin/permissions/schema', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def admin_permissions_schema(self, **kwargs):
         """
-        Returns the FE-facing permission schema with every section/action.
-        Internal-only paths (crm.branches, crm.config, supply_chain internal)
-        are excluded — the FE does not render or set those.
+        Returns the FULL permission tree with every section/subsection/action.
+        The FE uses this to render checkboxes dynamically.
 
         Response:
           {
             "success": true,
             "data": {
-              "tree": { ...FE schema all-false... },
+              "tree": { ...PERMISSION_TREE with all false... },
               "roles": ["none","agent","supervisor","manager","general_manager","qa_auditor","qa_supervisor"],
               "role_baselines": {
-                "agent":   { ...FE-filtered permissions for agent role... },
+                "agent": { ...permissions when role=agent... },
                 ...
               }
             }
@@ -760,17 +939,16 @@ class CrmAdminController(http.Controller):
                 return {'success': False, 'error': 'Unauthorized'}
             if not _is_admin():
                 return {'success': False, 'error': 'Forbidden — Admin required', 'code': 403}
-            fe_schema = _build_fe_schema()
             roles = list(_ROLE_GROUP.keys())
             role_baselines = {}
             for r in roles:
-                full = _deep_merge(copy.deepcopy(PERMISSION_TREE), _base_for_role(r))
-                role_baselines[r] = _filter_to_fe_schema(full)
+                empty = copy.deepcopy(PERMISSION_TREE)
+                role_baselines[r] = _deep_merge(empty, _base_for_role(r))
             return {
                 'success': True,
                 'data': {
-                    'tree':           fe_schema,
-                    'roles':          roles,
+                    'tree': copy.deepcopy(PERMISSION_TREE),
+                    'roles': roles,
                     'role_baselines': role_baselines,
                 },
             }
@@ -1112,14 +1290,12 @@ class CrmAdminController(http.Controller):
                   "crm": { "analytics": { "export": true } }
                 }
 
-          apply_to_all_same_crm_role (bool, optional, default false)
-              — If TRUE: saves these overrides as the role-level template for
-                this user's CRM role (e.g. "agent", "supervisor"). All users
-                with that role will inherit these permissions as a baseline
-                (above the hardcoded role defaults but below individual overrides).
-                The current user's own individual override is cleared so they
-                inherit the new role template directly.
-                Does NOT touch existing individual overrides for other users.
+          apply_to_all_same_job_title (bool, optional, default false)
+              — If TRUE: saves these overrides as the NEW job-title template
+                for this user's job title (upserts it). Does NOT clear existing
+                individual overrides for other users.
+                The user's own individual override is then cleared (they get
+                the template directly).
 
           job_title_override (str, optional)
               — If set, this user's baseline will be looked up using this
@@ -1128,7 +1304,7 @@ class CrmAdminController(http.Controller):
 
           notes (str, optional) — reason for the override (stored for audit trail)
 
-        Response: user dict with updated effective_permissions + routes map
+        Response: user dict with updated effective_permissions
         """
         try:
             uid = ensure_jwt_user_id()
@@ -1142,7 +1318,7 @@ class CrmAdminController(http.Controller):
                 return {'success': False, 'error': 'User not found'}
 
             new_overrides       = kwargs.get('permissions') or {}
-            apply_to_all        = bool(kwargs.get('apply_to_all_same_crm_role'))
+            apply_to_all        = bool(kwargs.get('apply_to_all_same_job_title'))
             job_title_override  = (kwargs.get('job_title_override') or '').strip() or None
             notes               = (kwargs.get('notes') or '').strip()
 
@@ -1152,39 +1328,31 @@ class CrmAdminController(http.Controller):
             Override = request.env['lugal.crm.user.permission'].sudo()
 
             if apply_to_all:
-                # Upsert a role-level template so all users with this CRM role inherit it
-                crm_role = _resolve_role(user.sudo())
-                if crm_role == 'none':
-                    return {
-                        'success': False,
-                        'error': 'apply_to_all_same_crm_role requires the user to have a CRM role assigned',
-                    }
-                role_tmpl_key = f'__role__{crm_role}'
+                # Save overrides as the job-title template
+                eff_title = job_title_override or user.sudo().partner_id.function or ''
+                if not eff_title:
+                    return {'success': False, 'error': 'apply_to_all_same_job_title requires the user to have a job_title (or pass job_title_override)'}
                 Tmpl = request.env['lugal.crm.permission.template'].sudo()
-                existing_tmpl = Tmpl.search([('job_title', '=', role_tmpl_key)], limit=1)
+                existing_tmpl = Tmpl.search([('job_title', '=ilike', eff_title)], limit=1)
                 if existing_tmpl:
                     current = existing_tmpl.get_permissions()
                     merged  = _deep_merge(current, new_overrides)
-                    existing_tmpl.write({
-                        'permissions_json': json.dumps(merged, ensure_ascii=False),
-                        'crm_role': crm_role,
-                    })
+                    existing_tmpl.write({'permissions_json': json.dumps(merged, ensure_ascii=False)})
                 else:
                     merged = _deep_merge(copy.deepcopy(PERMISSION_TREE), new_overrides)
                     Tmpl.create({
-                        'job_title':        role_tmpl_key,
-                        'label':            f'{crm_role.replace("_", " ").title()} — Role Template',
-                        'crm_role':         crm_role,
+                        'job_title':        eff_title,
+                        'label':            eff_title,
                         'permissions_json': json.dumps(merged, ensure_ascii=False),
                         'is_active':        True,
                     })
-                # Clear this user's individual override (they now inherit the role template)
+                # Clear this user's individual override (they now inherit the template)
                 override_rec = Override.search([('user_id', '=', user_id)], limit=1)
                 if override_rec:
                     override_rec.unlink()
                 _logger.info(
-                    'admin_user_permissions_set: upserted role template "%s" (uid=%d, by=%d)',
-                    crm_role, user_id, uid,
+                    'admin_user_permissions_set: applied overrides as job_title template "%s" (uid=%d, by=%d)',
+                    eff_title, user_id, uid,
                 )
             else:
                 # Store only for this individual user
@@ -1201,7 +1369,7 @@ class CrmAdminController(http.Controller):
                 'success': True,
                 'data': {
                     **_user_to_dict(user),
-                    'applied_to_all_same_crm_role': apply_to_all,
+                    'applied_to_all_same_job_title': apply_to_all,
                 },
             }
         except Exception as e:
