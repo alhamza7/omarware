@@ -557,6 +557,7 @@ class NBSSearchController(http.Controller):
                     'bl_number':             doc.bl_number or None,
                     'invoice_number':        doc.invoice_number or None,
                     'container_number':      doc.container_number or None,
+                    'document_date':         doc.document_date.strftime('%d-%m-%Y') if doc.document_date else None,
                 })
 
             return {

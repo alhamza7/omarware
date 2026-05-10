@@ -128,6 +128,7 @@ class NBSDocumentController(http.Controller):
                     'container_number': doc.container_number,
                     'invoice_number': doc.invoice_number,
                     'envoy_number': doc.envoy_number,
+                    'document_date': doc.document_date.strftime('%d-%m-%Y') if doc.document_date else None,
                     'file_name': doc.current_version_id.file_name if doc.current_version_id else None,
                     'file_size': doc.current_version_id.file_size if doc.current_version_id else 0,
                     'folder_id': doc.folder_id.id if doc.folder_id else (doc.folder_ids[0].id if doc.folder_ids else None),
@@ -292,6 +293,7 @@ class NBSDocumentController(http.Controller):
                     'container_number': document.container_number,
                     'invoice_number': document.invoice_number,
                     'envoy_number': document.envoy_number,
+                    'document_date': document.document_date.strftime('%d-%m-%Y') if document.document_date else None,
                     'folder_id': document.folder_id.id if document.folder_id else (document.folder_ids[0].id if document.folder_ids else None),
                     'folder_name': document.folder_id.name if document.folder_id else (document.folder_ids[0].name if document.folder_ids else None),
                     'parent_folder_id': document.folder_id.id if document.folder_id else (document.folder_ids[0].id if document.folder_ids else None),
@@ -398,6 +400,7 @@ class NBSDocumentController(http.Controller):
             container_number = data.get('container_number')
             invoice_number = data.get('invoice_number')
             envoy_number = data.get('envoy_number')
+            document_date_raw = data.get('document_date')  # expected: dd-mm-yyyy or yyyy-mm-dd
             tags = data.get('tags')
             custom_fields = data.get('custom_fields')
             folder_id = data.get('folder_id')
@@ -444,6 +447,14 @@ class NBSDocumentController(http.Controller):
                 vals['invoice_number'] = invoice_number
             if envoy_number:
                 vals['envoy_number'] = envoy_number
+            if document_date_raw:
+                from datetime import datetime as _dt
+                for _fmt in ('%d-%m-%Y', '%Y-%m-%d', '%d/%m/%Y', '%Y/%m/%d'):
+                    try:
+                        vals['document_date'] = _dt.strptime(str(document_date_raw).strip(), _fmt).strftime('%Y-%m-%d')
+                        break
+                    except ValueError:
+                        continue
             
             # Add tags
             if tags:
@@ -854,6 +865,18 @@ class NBSDocumentController(http.Controller):
                 vals['invoice_number'] = data['invoice_number']
             if 'envoy_number' in data:
                 vals['envoy_number'] = data['envoy_number']
+            if 'document_date' in data:
+                from datetime import datetime as _dt
+                raw = data['document_date']
+                if raw:
+                    for _fmt in ('%d-%m-%Y', '%Y-%m-%d', '%d/%m/%Y', '%Y/%m/%d'):
+                        try:
+                            vals['document_date'] = _dt.strptime(str(raw).strip(), _fmt).strftime('%Y-%m-%d')
+                            break
+                        except ValueError:
+                            continue
+                else:
+                    vals['document_date'] = False
             if 'custom_fields' in data:
                 vals['custom_fields_data'] = json.dumps(data['custom_fields'], ensure_ascii=False)
             
@@ -918,6 +941,7 @@ class NBSDocumentController(http.Controller):
                     'container_number': document.container_number,
                     'invoice_number': document.invoice_number,
                     'envoy_number': document.envoy_number,
+                    'document_date': document.document_date.strftime('%d-%m-%Y') if document.document_date else None,
                     'is_main_document': (document.folder_role == 'main'),
                     'document_role': document.folder_role or 'other',
                     'relation_type': 'attachment' if document.folder_role == 'attachment' or (document.parent_document_id and document.is_attachment) else ('secondary_document' if document.folder_role == 'sub' or document.parent_document_id else ('main' if document.folder_role == 'main' else 'other')),

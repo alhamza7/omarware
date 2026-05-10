@@ -98,6 +98,12 @@ class NBSDocument(models.Model):
         index=True,
         tracking=True
     )
+    document_date = fields.Date(
+        string='Document Date',
+        index=True,
+        tracking=True,
+        help='The official date printed on / associated with this document (dd-mm-yyyy from the frontend).'
+    )
     
     # Status
     state = fields.Selection([
