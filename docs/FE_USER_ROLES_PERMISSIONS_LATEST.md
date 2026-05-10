@@ -51,7 +51,7 @@ All routes currently rendered in the CRM frontend UI.
     "vendors":         { "list": bool, "view": bool, "create": bool, "edit": bool, "delete": bool }
   },
   "conversations": {
-    "chat":      { "view": bool, "send": bool, "delete_message": bool, "create_group": bool, "manage_group": bool, "pin_message": bool, "broadcast": bool, "forward": bool, "search": bool },
+    "chat":      { "view": bool, "send": bool, "delete_message": bool, "create_group": bool, "add_member": bool, "remove_member": bool, "manage_group": bool, "pin_message": bool, "broadcast": bool, "forward": bool, "search": bool },
     "email":     { "view": bool, "send": bool, "reply": bool, "forward": bool, "delete": bool, "manage_rules": bool },
     "stories":   { "view": bool, "create": bool, "delete": bool },
     "localsend": { "view": bool, "send": bool }
@@ -263,6 +263,46 @@ const showSettings = routes['settings'];
 
 // Can the user view the permissions settings page?
 const canViewPermSettings = permissions.settings?.permissions?.view;
+```
+
+---
+
+## Group Chat Member Management
+
+The `conversations.chat` section has **three independent group permission flags**:
+
+| Permission key | What it controls |
+|---------------|-----------------|
+| `create_group` | Can create a new group chat |
+| `add_member` | Can add new participants to an existing group |
+| `remove_member` | Can kick / remove participants from a group |
+| `manage_group` | Can rename group, change avatar, promote/demote admins |
+
+These are separate so the admin can grant, e.g., "can add members but not remove" without giving full management rights.
+
+**FE check example:**
+```javascript
+// Show the "Add Member" button inside the group chat UI
+const canAddMember = permissions.conversations?.chat?.add_member;
+
+// Show the "Remove Member" action on a participant card
+const canRemoveMember = permissions.conversations?.chat?.remove_member;
+```
+
+**Set via the same API** — no structural change needed:
+```json
+{
+  "params": {
+    "permissions": {
+      "conversations": {
+        "chat": {
+          "add_member": true,
+          "remove_member": false
+        }
+      }
+    }
+  }
+}
 ```
 
 ---

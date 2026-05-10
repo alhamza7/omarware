@@ -122,8 +122,9 @@ PERMISSION_TREE = {
     "conversations": {
         "chat": {
             "view": False, "send": False, "delete_message": False,
-            "create_group": False, "manage_group": False, "pin_message": False,
-            "broadcast": False, "forward": False, "search": False,
+            "create_group": False,
+            "add_member": False, "remove_member": False, "manage_group": False,
+            "pin_message": False, "broadcast": False, "forward": False, "search": False,
         },
         "email": {
             "view": False, "send": False, "reply": False, "forward": False,
@@ -283,7 +284,9 @@ def _base_for_role(role: str) -> dict:
                 "vendors":         {"list": True, "view": True},
             },
             "conversations": {
-                "chat":      {"view": True, "send": True, "delete_message": True, "pin_message": True, "search": True},
+                "chat":      {"view": True, "send": True, "delete_message": True,
+                              "add_member": True, "remove_member": True,
+                              "pin_message": True, "search": True},
                 "stories":   {"view": True, "create": True},
                 "localsend": {"view": True, "send": True},
             },
@@ -339,7 +342,7 @@ def _base_for_role(role: str) -> dict:
             },
             "conversations": {
                 "chat":      {"view": True, "send": True, "delete_message": True,
-                              "create_group": True, "manage_group": True, "pin_message": True,
+                              "create_group": True, "add_member": True, "remove_member": True, "manage_group": True, "pin_message": True,
                               "broadcast": True, "forward": True, "search": True},
                 "email":     {"view": True, "send": True, "reply": True, "forward": True, "delete": True},
                 "stories":   {"view": True, "create": True, "delete": True},
@@ -409,7 +412,7 @@ def _base_for_role(role: str) -> dict:
             },
             "conversations": {
                 "chat":      {"view": True, "send": True, "delete_message": True,
-                              "create_group": True, "manage_group": True, "pin_message": True,
+                              "create_group": True, "add_member": True, "remove_member": True, "manage_group": True, "pin_message": True,
                               "broadcast": True, "forward": True, "search": True},
                 "email":     {"view": True, "send": True, "reply": True, "forward": True,
                               "delete": True, "manage_rules": True},
