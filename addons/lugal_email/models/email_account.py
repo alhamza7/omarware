@@ -950,20 +950,41 @@ class LugalEmailAccount(models.Model):
             if _norm_subj:
                 try:
                     # Build candidate subject strings for an exact-match search.
-                    # The stored subject in the DB may or may not carry a Re:/Fwd:
-                    # prefix itself, so we check all common prefix variants plus the
-                    # bare subject.  We use '=ilike' (case-insensitive exact equality)
-                    # deliberately — 'ilike' (contains) would match any message whose
-                    # subject contains _norm_subj as a substring, wrongly merging
-                    # unrelated historical threads.
+                    # We use 'in' (case-sensitive equality in Odoo ORM) rather than
+                    # 'ilike' (LIKE '%value%') which was causing substring matches
+                    # that merged unrelated historical threads.  We include common
+                    # prefix variants to handle both prefixed and bare stored subjects.
                     _subject_candidates = list({
                         _norm_subj,
                         f'Re: {_norm_subj}',
                         f'RE: {_norm_subj}',
+                        f're: {_norm_subj}',
                         f'Fwd: {_norm_subj}',
                         f'FWD: {_norm_subj}',
                         f'Fw: {_norm_subj}',
+                        f'FW: {_norm_subj}',
                     })
+
+                    # Participant filter: only link to a thread that involves the
+                    # sender of the incoming message.  Without this, a reply with a
+                    # generic subject ("test", "hello") would link to any old message
+                    # with the same subject, even from completely different people.
+                    _sender_addr = (from_addr or '').strip().lower()
+                    _participant_domain = []
+                    if _sender_addr:
+                        _participant_domain = [
+                            '|',
+                            ('from_address', '=ilike', _sender_addr),
+                            ('to_addresses', 'ilike', _sender_addr),
+                        ]
+
+                    # Recency filter: only link to messages from the last 90 days.
+                    # A reply with no headers is almost certainly to a recent email.
+                    # Without this, old unrelated threads with identical subjects
+                    # (e.g. recurring "Weekly Update" emails) get merged forever.
+                    from datetime import timedelta as _timedelta
+                    _cutoff = fields.Datetime.now() - _timedelta(days=90)
+                    _recency_domain = [('date', '>=', _cutoff)]
 
                     # Step 1: prefer an existing message that already has a thread_id.
                     _root = Message.search([
@@ -971,24 +992,39 @@ class LugalEmailAccount(models.Model):
                         ('subject',    'in', _subject_candidates),
                         ('is_deleted', '=', False),
                         ('thread_id',  '!=', False),
-                    ], order='id asc', limit=1)
+                    ] + _participant_domain + _recency_domain, order='id asc', limit=1)
+
+                    # Fallback 1a: participant match but any age (older conversation)
+                    if not _root and _participant_domain:
+                        _root = Message.search([
+                            ('account_id', '=', self.id),
+                            ('subject',    'in', _subject_candidates),
+                            ('is_deleted', '=', False),
+                            ('thread_id',  '!=', False),
+                        ] + _participant_domain, order='id asc', limit=1)
 
                     if _root and _root.thread_id != (message_id or ''):
                         thread_id = _root.thread_id
                     else:
                         # Step 2: no message with thread_id yet — find the earliest
-                        # message by exact subject and bootstrap a thread_id from its
-                        # message_id (or generate one from its DB id).
+                        # matching message (by participant + subject) and bootstrap.
                         _any = Message.search([
                             ('account_id', '=', self.id),
                             ('subject',    'in', _subject_candidates),
                             ('is_deleted', '=', False),
-                        ], order='id asc', limit=1)
+                        ] + _participant_domain + _recency_domain, order='id asc', limit=1)
+
+                        # Fallback 2a: any age, same participant
+                        if not _any and _participant_domain:
+                            _any = Message.search([
+                                ('account_id', '=', self.id),
+                                ('subject',    'in', _subject_candidates),
+                                ('is_deleted', '=', False),
+                            ] + _participant_domain, order='id asc', limit=1)
+
                         if _any and _any.id:
-                            # Use existing message_id if available, else synthesize one.
                             _root_tid = (_any.message_id or '').strip() or f'<local.thread.{_any.id}@lugalai>'
                             if _root_tid != (message_id or ''):
-                                # Bootstrap thread_id on the root message if not set.
                                 if not _any.thread_id:
                                     try:
                                         _any.write({'thread_id': _root_tid})
@@ -998,8 +1034,8 @@ class LugalEmailAccount(models.Model):
 
                     if thread_id != (message_id or ''):
                         _logger.debug(
-                            'subject-thread-link: msg_id=%s subject=%r → thread_id=%s',
-                            message_id, _norm_subj, thread_id,
+                            'subject-thread-link: msg_id=%s subject=%r sender=%s → thread_id=%s',
+                            message_id, _norm_subj, _sender_addr, thread_id,
                         )
                 except Exception:
                     pass  # never fail message import due to thread-link search error
