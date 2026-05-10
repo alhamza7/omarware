@@ -1,0 +1,276 @@
+# Frontend Integration: User Roles & Permissions
+**Updated: 2026-05-10** — Schema v2 (current_view_crm_tree)
+
+---
+
+## Changelog
+
+| Date | Version | Summary |
+|------|---------|---------|
+| 2026-05-10 | **v2** | Full schema realignment to FE UI. Introduced `current_view_crm_tree` / `future_edits_crm_tree` split. Renamed `apply_to_all_same_job_title` → `apply_to_all_same_crm_role`. Added `routes` map to every permission response. All path keys updated to match FE route names. |
+| 2026-05-06 | v1 | Initial backend permission system documentation. |
+
+---
+
+## Overview
+
+Every authenticated user has an **effective permissions** object that is a deep-merged result of:
+
+1. Empty tree (all actions = `false`)
+2. CRM role baseline (hardcoded defaults per role)
+3. CRM-role template (admin-customised overrides for the whole role)
+4. Job-title template (per-title overrides)
+5. User-specific overrides (highest priority)
+
+Admins use the Settings → Permissions page to customise steps 3–5.
+
+---
+
+## Permission Schema
+
+### `current_view_crm_tree`
+All routes currently rendered in the CRM frontend UI.
+
+```json
+{
+  "dashboard":      { "view": bool, "view_team_data": bool, "export": bool },
+  "customers":      { "list": bool, "view": bool, "create": bool, "edit": bool, "delete": bool, "import": bool, "export": bool, "merge": bool },
+  "products":       { "list": bool, "view": bool, "create": bool, "edit": bool, "delete": bool, "set_price": bool, "set_discount": bool, "import": bool, "export": bool },
+  "orders":         { "list": bool, "view": bool, "create": bool, "edit": bool, "delete": bool, "create_invoice": bool, "refund": bool, "export_pdf": bool, "view_delivery": bool, "view_branches": bool, "view_samples": bool },
+  "omni_channel":   { "view": bool, "reply": bool, "assign": bool },
+  "tickets":        { "list": bool, "view": bool, "create": bool, "edit": bool, "delete": bool, "assign": bool, "escalate": bool, "close": bool },
+  "tasks":          { "list": bool, "view": bool, "create": bool, "edit": bool, "delete": bool, "assign": bool, "close": bool, "view_projects": bool, "manage_projects": bool },
+  "employees":      { "list": bool, "view": bool, "create": bool, "edit": bool, "deactivate": bool, "assign_role": bool, "add_task": bool, "message": bool },
+  "sales_pipeline": { "view": bool },
+  "forecasting":    { "view": bool, "export": bool },
+  "supply_chain": {
+    "containers":      { "list": bool, "view": bool, "create": bool, "edit": bool, "delete": bool, "assign_driver": bool, "unassign_driver": bool, "mark_arrived": bool, "clearance_delivered": bool, "set_reminder": bool, "upload_attachment": bool, "delete_attachment": bool, "add_comment": bool, "delete_comment": bool, "add_penalty": bool, "delete_penalty": bool },
+    "purchase_orders": { "list": bool, "view": bool, "create": bool, "edit": bool, "delete": bool, "confirm": bool, "ship": bool, "receive": bool, "cancel": bool, "reopen": bool, "add_line": bool, "edit_line": bool, "delete_line": bool, "upload_attachment": bool, "delete_attachment": bool, "add_comment": bool, "delete_comment": bool, "export_pdf": bool },
+    "negotiations":    { "list": bool, "view": bool, "create": bool, "edit": bool, "delete": bool, "add_comment": bool, "delete_comment": bool },
+    "item_requests":   { "list": bool, "view": bool, "create": bool, "edit": bool, "delete": bool, "approve": bool, "reject": bool, "fulfill": bool },
+    "vendors":         { "list": bool, "view": bool, "create": bool, "edit": bool, "delete": bool }
+  },
+  "conversations": {
+    "chat":      { "view": bool, "send": bool, "delete_message": bool, "create_group": bool, "manage_group": bool, "pin_message": bool, "broadcast": bool, "forward": bool, "search": bool },
+    "email":     { "view": bool, "send": bool, "reply": bool, "forward": bool, "delete": bool, "manage_rules": bool },
+    "stories":   { "view": bool, "create": bool, "delete": bool },
+    "localsend": { "view": bool, "send": bool }
+  },
+  "promotions":     { "list": bool, "create": bool, "edit": bool, "delete": bool },
+  "analytics":      { "view": bool, "export": bool, "view_team_data": bool },
+  "knowledge_base": { "list": bool, "view": bool, "create": bool, "edit": bool, "delete": bool },
+  "call_centre":    { "list": bool, "view": bool, "create": bool, "edit": bool, "delete": bool, "listen_recording": bool },
+  "event_log":      { "view": bool, "export": bool, "delete": bool },
+  "admin_dashboard":{ "view": bool, "manage_users": bool, "manage_tasks": bool },
+  "settings": {
+    "general":      { "view": bool, "edit": bool },
+    "permissions":  { "view": bool, "set_user_overrides": bool, "set_job_title_defaults": bool },
+    "templates":    { "view": bool, "create": bool, "edit": bool, "delete": bool },
+    "rules":        { "view": bool, "create": bool, "edit": bool, "delete": bool },
+    "channels":     { "view": bool, "edit": bool },
+    "sla":          { "view": bool, "edit": bool },
+    "shifts":       { "view": bool, "manage": bool },
+    "omni_channels":{ "view": bool, "edit": bool }
+  }
+}
+```
+
+### `future_edits_crm_tree`
+Backend-only internal paths not yet exposed in the FE UI.
+
+```json
+{
+  "branches": { "list": bool, "view": bool, "create": bool, "edit": bool, "delete": bool }
+}
+```
+
+---
+
+## Routes Map
+
+Every permission response includes a `routes` object. Use this for **navigation visibility** — show/hide sidebar items, tabs, and menu entries.
+
+```json
+{
+  "routes": {
+    "dashboard":                   true,
+    "customers":                   true,
+    "products":                    false,
+    "orders":                      false,
+    "omni_channel":                true,
+    "tickets":                     true,
+    "tasks":                       true,
+    "employees":                   false,
+    "sales_pipeline":              false,
+    "forecasting":                 false,
+    "supply_chain":                true,
+    "supply_chain.containers":     true,
+    "supply_chain.purchase_orders":true,
+    "supply_chain.negotiations":   false,
+    "supply_chain.item_requests":  false,
+    "supply_chain.vendors":        false,
+    "conversations":               true,
+    "conversations.chat":          true,
+    "conversations.email":         false,
+    "conversations.stories":       true,
+    "conversations.localsend":     true,
+    "promotions":                  false,
+    "analytics":                   true,
+    "knowledge_base":              true,
+    "call_centre":                 true,
+    "event_log":                   false,
+    "admin_dashboard":             false,
+    "settings":                    true,
+    "settings.general":            true,
+    "settings.permissions":        false,
+    "settings.templates":          false,
+    "settings.rules":              false,
+    "settings.channels":           false,
+    "settings.sla":                false,
+    "settings.shifts":             false,
+    "settings.omni_channels":      false
+  }
+}
+```
+
+**Route visibility rule:** A route key is `true` when at least one action leaf anywhere in that section is `true`. The FE can use this without having to inspect every individual permission.
+
+**Admin UX tip:** When the admin toggles an entire section off (e.g. "hide supply_chain"), set all actions under that section to `false`. The next permissions fetch will return `routes["supply_chain"] = false`.
+
+---
+
+## CRM Roles
+
+| Value | Display Name | Notes |
+|-------|-------------|-------|
+| `none` | No Role | Minimal access |
+| `agent` | Agent | Everyday CRM, basic supply chain |
+| `supervisor` | Supervisor | Team management, approve POs |
+| `manager` | Manager | Full ops, settings access |
+| `general_manager` | General Manager | Full system access |
+| `qa_auditor` | QA Auditor | Read-only + can score reviews |
+| `qa_supervisor` | QA Supervisor | QA team management + exports |
+
+System admins (Odoo uid=1 or `base.group_system`) bypass all permission checks.
+
+---
+
+## API Endpoints
+
+### Get current user's permissions
+```
+POST /api/crm/me/permissions
+Authorization: Bearer <jwt>
+```
+Response:
+```json
+{
+  "success": true,
+  "data": {
+    "id": 5,
+    "role": "agent",
+    "permissions": { ...current_view_crm_tree with actual booleans... },
+    "routes": { ...route visibility map... }
+  }
+}
+```
+
+### Get permission schema (admin only)
+```
+POST /api/crm/admin/permissions/schema
+Authorization: Bearer <jwt>
+```
+Response:
+```json
+{
+  "success": true,
+  "data": {
+    "current_view_crm_tree": { ...all false...  },
+    "future_edits_crm_tree": { ...all false... },
+    "roles":  ["none","agent","supervisor","manager","general_manager","qa_auditor","qa_supervisor"],
+    "role_baselines": {
+      "agent": {
+        "current_view_crm_tree": { ...defaults for agent... },
+        "future_edits_crm_tree": { ...internal defaults... }
+      }
+    }
+  }
+}
+```
+
+### Get a user's permissions (admin only)
+```
+POST /api/crm/admin/users/<id>/permissions/get
+Authorization: Bearer <jwt>
+```
+
+### Set a user's permissions (admin only)
+```
+POST /api/crm/admin/users/<id>/permissions/set
+Authorization: Bearer <jwt>
+Content-Type: application/json
+
+{
+  "jsonrpc": "2.0",
+  "method": "call",
+  "params": {
+    "permissions": {
+      "customers":   { "delete": true, "export": true },
+      "supply_chain":{ "purchase_orders": { "confirm": true, "ship": true } }
+    },
+    "apply_to_all_same_crm_role": false,
+    "notes": "Manager review — expanded access approved by John"
+  }
+}
+```
+
+**`apply_to_all_same_crm_role`** (boolean, default `false`):
+- `false` → Save as this user's individual override only.
+- `true` → Upsert the **role-level template** for the user's CRM role. All users with that role will inherit it (step 3 in the resolution chain). This user's own individual override is cleared.
+
+### Reset user to role defaults
+```
+POST /api/crm/admin/users/<id>/permissions/reset
+Authorization: Bearer <jwt>
+```
+Clears all individual overrides. The user reverts to their role baseline + any role template + job-title template.
+
+### List all users (admin only)
+```
+POST /api/crm/admin/users/list
+Authorization: Bearer <jwt>
+```
+
+---
+
+## Permission Check Examples (Frontend)
+
+```javascript
+// Can this user see the customers list page?
+const canAccessCustomers = routes['customers'];
+
+// Can this user create a purchase order?
+const canCreatePO = permissions.supply_chain?.purchase_orders?.create;
+
+// Should the supply chain nav item be visible?
+const showSupplyChain = routes['supply_chain'];
+
+// Should the "Containers" sub-tab be visible?
+const showContainers = routes['supply_chain.containers'];
+
+// Can the user access settings at all?
+const showSettings = routes['settings'];
+
+// Can the user view the permissions settings page?
+const canViewPermSettings = permissions.settings?.permissions?.view;
+```
+
+---
+
+## Notes for Admin UI
+
+1. **The schema endpoint** (`/api/crm/admin/permissions/schema`) returns `current_view_crm_tree` — use this to render the permissions form checkboxes dynamically.
+2. **Role baselines** in the schema show what each role gets by default before any admin customisation.
+3. **Section-level toggle:** Turning off an entire section (e.g. "supply_chain") means setting all its leaf actions to `false`. The backend computes `routes["supply_chain"] = false` automatically.
+4. **Internal paths** (`future_edits_crm_tree`) are not shown in the permissions UI — they are backend-only guards for routes not yet visible in the FE.
+5. **System admin bypass:** Users with Odoo admin or General Manager role always have full access regardless of the permission tree.

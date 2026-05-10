@@ -4,7 +4,7 @@ import logging
 from odoo import http
 from odoo.http import request
 from ._auth import ensure_jwt_user_id
-from ._permissions import is_manager_or_above, is_supervisor_or_above, forbidden
+from ._permissions import require_permission
 from ._error import crm_error
 
 _logger = logging.getLogger(__name__)
@@ -35,6 +35,9 @@ class BranchController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('_internal.branches.list')
+            if denied:
+                return denied
             domain = [('is_deleted', '=', False), ('active', '=', True)]
             branches = request.env['lugal.crm.branch'].search(domain, order='name asc')
             return {'success': True, 'data': {'items': [_branch_to_dict(b) for b in branches]}}
@@ -47,6 +50,9 @@ class BranchController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('_internal.branches.view')
+            if denied:
+                return denied
             branch = request.env['lugal.crm.branch'].browse(branch_id)
             if not branch.exists() or branch.is_deleted:
                 return {'success': False, 'error': 'Branch not found'}
@@ -60,8 +66,9 @@ class BranchController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_manager_or_above():
-                return forbidden('Branch creation requires Manager role or above')
+            denied = require_permission('_internal.branches.create')
+            if denied:
+                return denied
             vals = {
                 'name': name,
                 'name_ar': name_ar,
@@ -83,8 +90,9 @@ class BranchController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Branch update requires Supervisor role or above')
+            denied = require_permission('_internal.branches.edit')
+            if denied:
+                return denied
             branch = request.env['lugal.crm.branch'].browse(branch_id)
             if not branch.exists() or branch.is_deleted:
                 return {'success': False, 'error': 'Branch not found'}
@@ -102,8 +110,9 @@ class BranchController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_manager_or_above():
-                return forbidden('User assignment requires Manager role or above')
+            denied = require_permission('_internal.branches.edit')
+            if denied:
+                return denied
             branch = request.env['lugal.crm.branch'].browse(branch_id)
             if not branch.exists() or branch.is_deleted:
                 return {'success': False, 'error': 'Branch not found'}
@@ -118,8 +127,9 @@ class BranchController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_manager_or_above():
-                return forbidden('Branch deletion requires Manager role or above')
+            denied = require_permission('_internal.branches.delete')
+            if denied:
+                return denied
             branch = request.env['lugal.crm.branch'].browse(branch_id)
             if not branch.exists():
                 return {'success': False, 'error': 'Branch not found'}

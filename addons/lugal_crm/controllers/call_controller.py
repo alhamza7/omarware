@@ -6,6 +6,7 @@ from odoo.http import request
 from ._auth import ensure_jwt_user_id
 from ._audit import crm_audit
 from ._error import crm_error
+from ._permissions import require_permission
 
 _logger = logging.getLogger(__name__)
 
@@ -53,6 +54,9 @@ class CallController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('call_centre.list')
+            if denied:
+                return denied
             domain = [('is_deleted', '=', False), ('active', '=', True)]
             if customer_id:
                 domain.append(('customer_id', '=', customer_id))
@@ -88,6 +92,9 @@ class CallController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('call_centre.view')
+            if denied:
+                return denied
             call = request.env['lugal.crm.call'].browse(call_id)
             if not call.exists() or call.is_deleted:
                 return {'success': False, 'error': 'Call not found'}
@@ -101,6 +108,9 @@ class CallController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('call_centre.create')
+            if denied:
+                return denied
             from odoo.fields import Datetime
             customer = request.env['lugal.crm.customer'].browse(customer_id)
             if not customer.exists():
@@ -139,6 +149,9 @@ class CallController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('call_centre.edit')
+            if denied:
+                return denied
             from odoo.fields import Datetime
             call = request.env['lugal.crm.call'].browse(call_id)
             if not call.exists() or call.is_deleted:
@@ -170,6 +183,9 @@ class CallController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('call_centre.edit')
+            if denied:
+                return denied
             call = request.env['lugal.crm.call'].browse(call_id)
             if not call.exists() or call.is_deleted:
                 return {'success': False, 'error': 'Call not found'}
@@ -192,6 +208,9 @@ class CallController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('call_centre.delete')
+            if denied:
+                return denied
             call = request.env['lugal.crm.call'].browse(call_id)
             if not call.exists():
                 return {'success': False, 'error': 'Call not found'}
@@ -208,6 +227,9 @@ class CallController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('call_centre.edit')
+            if denied:
+                return denied
             call = request.env['lugal.crm.call'].browse(call_id)
             if not call.exists() or call.is_deleted:
                 return {'success': False, 'error': 'Call not found'}
@@ -227,6 +249,9 @@ class CallController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('call_centre.list')
+            if denied:
+                return denied
             domain = [('is_deleted', '=', False), ('status', '=', status)]
             Queue = request.env['lugal.crm.call.queue']
             items = Queue.search(domain, order='queue_position asc, queued_at asc')
@@ -250,6 +275,9 @@ class CallController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('call_centre.create')
+            if denied:
+                return denied
             q = request.env['lugal.crm.call.queue'].browse(queue_id)
             if not q.exists():
                 return {'success': False, 'error': 'Queue entry not found'}

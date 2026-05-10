@@ -15,12 +15,7 @@ from odoo.http import request, Response
 
 from ._auth import ensure_jwt_user_id
 from ._error import crm_error
-from ._permissions import (
-    is_supervisor_or_above,
-    is_manager_or_above,
-    is_general_manager,
-    forbidden,
-)
+from ._permissions import require_permission
 from .supply_controller import _serialize_penalty
 from .upload_controller import (
     ALLOWED_DOC_MIMES,
@@ -233,6 +228,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('supply_chain.vendors.list')
+            if denied:
+                return denied
             page = max(1, int(kwargs.get('page') or 1))
             per_page = min(200, max(1, int(kwargs.get('per_page') or 50)))
             search = (kwargs.get('search') or '').strip()
@@ -259,6 +257,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('supply_chain.vendors.view')
+            if denied:
+                return denied
             v = request.env['lugal.supply.vendor'].sudo().browse(vendor_id).exists()
             if not v or v.is_deleted:
                 return {'success': False, 'error': 'Vendor not found'}
@@ -271,8 +272,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_manager_or_above():
-                return forbidden('Forbidden — Manager role required to create vendors')
+            denied = require_permission('supply_chain.vendors.create')
+            if denied:
+                return denied
             name = (kwargs.get('name') or '').strip()
             if not name:
                 return {'success': False, 'error': 'name is required'}
@@ -304,8 +306,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_manager_or_above():
-                return forbidden('Forbidden — Manager role required to update vendors')
+            denied = require_permission('supply_chain.vendors.edit')
+            if denied:
+                return denied
             v = request.env['lugal.supply.vendor'].sudo().browse(vendor_id).exists()
             if not v or v.is_deleted:
                 return {'success': False, 'error': 'Vendor not found'}
@@ -326,8 +329,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_general_manager():
-                return forbidden('Forbidden — General Manager role required to delete vendors')
+            denied = require_permission('supply_chain.vendors.delete')
+            if denied:
+                return denied
             v = request.env['lugal.supply.vendor'].sudo().browse(vendor_id).exists()
             if not v or v.is_deleted:
                 return {'success': False, 'error': 'Vendor not found'}
@@ -345,6 +349,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('supply_chain.containers.list')
+            if denied:
+                return denied
             page = max(1, int(kwargs.get('page') or 1))
             per_page = min(200, max(1, int(kwargs.get('per_page') or 20)))
             status = kwargs.get('status')
@@ -383,6 +390,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('supply_chain.containers.view')
+            if denied:
+                return denied
             c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
             if not c or c.is_deleted:
                 return {'success': False, 'error': 'Container not found'}
@@ -395,8 +405,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Forbidden — Supervisor role required to create containers')
+            denied = require_permission('supply_chain.containers.create')
+            if denied:
+                return denied
             name = (kwargs.get('name') or '').strip()
             if not name:
                 return {'success': False, 'error': 'name is required'}
@@ -425,8 +436,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Forbidden — Supervisor role required to update containers')
+            denied = require_permission('supply_chain.containers.edit')
+            if denied:
+                return denied
             c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
             if not c or c.is_deleted:
                 return {'success': False, 'error': 'Container not found'}
@@ -447,8 +459,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_general_manager():
-                return forbidden('Forbidden — General Manager role required to delete containers')
+            denied = require_permission('supply_chain.containers.delete')
+            if denied:
+                return denied
             c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
             if not c or c.is_deleted:
                 return {'success': False, 'error': 'Container not found'}
@@ -462,8 +475,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Forbidden — Supervisor role required to mark containers arrived')
+            denied = require_permission('supply_chain.containers.mark_arrived')
+            if denied:
+                return denied
             c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
             if not c or c.is_deleted:
                 return {'success': False, 'error': 'Container not found'}
@@ -481,8 +495,9 @@ class CrmSupplyChainController(http.Controller):
             uid = ensure_jwt_user_id()
             if not uid:
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Forbidden — Supervisor role required to mark clearance delivered')
+            denied = require_permission('supply_chain.containers.clearance_delivered')
+            if denied:
+                return denied
             c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
             if not c or c.is_deleted:
                 return {'success': False, 'error': 'Container not found'}
@@ -500,8 +515,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Forbidden — Supervisor role required to assign drivers')
+            denied = require_permission('supply_chain.containers.assign_driver')
+            if denied:
+                return denied
             c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
             if not c or c.is_deleted:
                 return {'success': False, 'error': 'Container not found'}
@@ -522,8 +538,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Forbidden — Supervisor role required to unassign drivers')
+            denied = require_permission('supply_chain.containers.unassign_driver')
+            if denied:
+                return denied
             c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
             if not c or c.is_deleted:
                 return {'success': False, 'error': 'Container not found'}
@@ -542,8 +559,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Forbidden — Supervisor role required to set container reminders')
+            denied = require_permission('supply_chain.containers.set_reminder')
+            if denied:
+                return denied
             c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
             if not c or c.is_deleted:
                 return {'success': False, 'error': 'Container not found'}
@@ -583,6 +601,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return _json_http({'success': False, 'error': 'Unauthorized'}, 401)
+            denied = require_permission('supply_chain.containers.upload_attachment')
+            if denied:
+                return _json_http(denied, 403)
             c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
             if not c or c.is_deleted:
                 return _json_http({'success': False, 'error': 'Container not found'}, 404)
@@ -631,8 +652,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Forbidden — Supervisor role required to delete attachments')
+            denied = require_permission('supply_chain.containers.delete_attachment')
+            if denied:
+                return denied
             c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
             if not c or c.is_deleted:
                 return {'success': False, 'error': 'Container not found'}
@@ -658,6 +680,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('supply_chain.containers.list')
+            if denied:
+                return denied
             c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
             if not c or c.is_deleted:
                 return {'success': False, 'error': 'Container not found'}
@@ -690,6 +715,9 @@ class CrmSupplyChainController(http.Controller):
             uid = ensure_jwt_user_id()
             if not uid:
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('supply_chain.containers.add_comment')
+            if denied:
+                return denied
             c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
             if not c or c.is_deleted:
                 return {'success': False, 'error': 'Container not found'}
@@ -716,8 +744,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Forbidden — Supervisor role required to delete comments')
+            denied = require_permission('supply_chain.containers.delete_comment')
+            if denied:
+                return denied
             c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
             if not c or c.is_deleted:
                 return {'success': False, 'error': 'Container not found'}
@@ -742,8 +771,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_manager_or_above():
-                return forbidden('Forbidden — Manager role required to add penalties')
+            denied = require_permission('supply_chain.containers.add_penalty')
+            if denied:
+                return denied
             c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
             if not c or c.is_deleted:
                 return {'success': False, 'error': 'Container not found'}
@@ -771,8 +801,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_manager_or_above():
-                return forbidden('Forbidden — Manager role required to delete penalties')
+            denied = require_permission('supply_chain.containers.delete_penalty')
+            if denied:
+                return denied
             c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
             if not c or c.is_deleted:
                 return {'success': False, 'error': 'Container not found'}
@@ -793,6 +824,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('supply_chain.purchase_orders.list')
+            if denied:
+                return denied
             page = max(1, int(kwargs.get('page') or 1))
             per_page = min(200, max(1, int(kwargs.get('per_page') or 20)))
             domain = [('is_deleted', '=', False)]
@@ -829,6 +863,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('supply_chain.purchase_orders.create')
+            if denied:
+                return denied
             name = (kwargs.get('name') or '').strip()
             vid = kwargs.get('vendor_customer_id')
             if not name:
@@ -876,6 +913,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('supply_chain.purchase_orders.add_line')
+            if denied:
+                return denied
             po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
             if not po or po.is_deleted:
                 return {'success': False, 'error': 'PO not found'}
@@ -905,6 +945,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('supply_chain.purchase_orders.edit_line')
+            if denied:
+                return denied
             po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
             if not po or po.is_deleted:
                 return {'success': False, 'error': 'PO not found'}
@@ -929,8 +972,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Forbidden — Supervisor role required to delete PO lines')
+            denied = require_permission('supply_chain.purchase_orders.delete_line')
+            if denied:
+                return denied
             po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
             if not po or po.is_deleted:
                 return {'success': False, 'error': 'PO not found'}
@@ -949,8 +993,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Forbidden — Supervisor role required to confirm (approve) POs')
+            denied = require_permission('supply_chain.purchase_orders.confirm')
+            if denied:
+                return denied
             po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
             if not po or po.is_deleted:
                 return {'success': False, 'error': 'PO not found'}
@@ -966,8 +1011,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_manager_or_above():
-                return forbidden('Forbidden — Manager role required to ship POs')
+            denied = require_permission('supply_chain.purchase_orders.ship')
+            if denied:
+                return denied
             po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
             if not po or po.is_deleted:
                 return {'success': False, 'error': 'PO not found'}
@@ -983,8 +1029,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_manager_or_above():
-                return forbidden('Forbidden — Manager role required to receive POs')
+            denied = require_permission('supply_chain.purchase_orders.receive')
+            if denied:
+                return denied
             po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
             if not po or po.is_deleted:
                 return {'success': False, 'error': 'PO not found'}
@@ -1000,8 +1047,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_manager_or_above():
-                return forbidden('Forbidden — Manager role required to cancel POs')
+            denied = require_permission('supply_chain.purchase_orders.cancel')
+            if denied:
+                return denied
             po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
             if not po or po.is_deleted:
                 return {'success': False, 'error': 'PO not found'}
@@ -1017,8 +1065,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_manager_or_above():
-                return forbidden('Forbidden — Manager role required to reopen POs')
+            denied = require_permission('supply_chain.purchase_orders.reopen')
+            if denied:
+                return denied
             po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
             if not po or po.is_deleted:
                 return {'success': False, 'error': 'PO not found'}
@@ -1034,6 +1083,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('supply_chain.purchase_orders.view')
+            if denied:
+                return denied
             po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
             if not po or po.is_deleted:
                 return {'success': False, 'error': 'PO not found'}
@@ -1068,6 +1120,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return _json_http({'success': False, 'error': 'Unauthorized'}, 401)
+            denied = require_permission('supply_chain.purchase_orders.upload_attachment')
+            if denied:
+                return _json_http(denied, 403)
             po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
             if not po or po.is_deleted:
                 return _json_http({'success': False, 'error': 'PO not found'}, 404)
@@ -1115,8 +1170,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Forbidden — Supervisor role required to delete PO attachments')
+            denied = require_permission('supply_chain.purchase_orders.delete_attachment')
+            if denied:
+                return denied
             po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
             if not po or po.is_deleted:
                 return {'success': False, 'error': 'PO not found'}
@@ -1133,6 +1189,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('supply_chain.purchase_orders.view')
+            if denied:
+                return denied
             po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
             if not po or po.is_deleted:
                 return {'success': False, 'error': 'PO not found'}
@@ -1159,6 +1218,9 @@ class CrmSupplyChainController(http.Controller):
             uid = ensure_jwt_user_id()
             if not uid:
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('supply_chain.purchase_orders.add_comment')
+            if denied:
+                return denied
             po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
             if not po or po.is_deleted:
                 return {'success': False, 'error': 'PO not found'}
@@ -1179,8 +1241,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Forbidden — Supervisor role required to delete PO comments')
+            denied = require_permission('supply_chain.purchase_orders.delete_comment')
+            if denied:
+                return denied
             po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
             if not po or po.is_deleted:
                 return {'success': False, 'error': 'PO not found'}
@@ -1197,6 +1260,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('supply_chain.purchase_orders.view')
+            if denied:
+                return denied
             po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
             if not po or po.is_deleted:
                 return {'success': False, 'error': 'PO not found'}
@@ -1209,6 +1275,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('supply_chain.purchase_orders.edit')
+            if denied:
+                return denied
             po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
             if not po or po.is_deleted:
                 return {'success': False, 'error': 'PO not found'}
@@ -1225,8 +1294,9 @@ class CrmSupplyChainController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_general_manager():
-                return forbidden('Forbidden — General Manager role required to delete POs')
+            denied = require_permission('supply_chain.purchase_orders.delete')
+            if denied:
+                return denied
             po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
             if not po or po.is_deleted:
                 return {'success': False, 'error': 'PO not found'}

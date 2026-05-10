@@ -6,6 +6,7 @@ from odoo.http import request
 from ._auth import ensure_jwt_user_id
 from ._audit import crm_audit
 from ._error import crm_error
+from ._permissions import require_permission
 
 _logger = logging.getLogger(__name__)
 
@@ -43,6 +44,9 @@ class TaskController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('tasks.list')
+            if denied:
+                return denied
             from datetime import datetime
             domain = [('is_deleted', '=', False), ('active', '=', True)]
             if customer_id:
@@ -82,6 +86,9 @@ class TaskController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('tasks.view')
+            if denied:
+                return denied
             task = request.env['lugal.crm.task'].browse(task_id)
             if not task.exists() or task.is_deleted:
                 return {'success': False, 'error': 'Task not found'}
@@ -96,6 +103,9 @@ class TaskController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('tasks.create')
+            if denied:
+                return denied
             if not title:
                 return {'success': False, 'error': 'title is required'}
             vals = {
@@ -126,6 +136,9 @@ class TaskController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('tasks.edit')
+            if denied:
+                return denied
             task = request.env['lugal.crm.task'].browse(task_id)
             if not task.exists() or task.is_deleted:
                 return {'success': False, 'error': 'Task not found'}
@@ -144,6 +157,9 @@ class TaskController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('tasks.close' if status in ('done', 'closed') else 'tasks.edit')
+            if denied:
+                return denied
             task = request.env['lugal.crm.task'].browse(task_id)
             if not task.exists() or task.is_deleted:
                 return {'success': False, 'error': 'Task not found'}
@@ -162,6 +178,9 @@ class TaskController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('tasks.assign')
+            if denied:
+                return denied
             task = request.env['lugal.crm.task'].browse(task_id)
             if not task.exists() or task.is_deleted:
                 return {'success': False, 'error': 'Task not found'}
@@ -180,6 +199,9 @@ class TaskController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('tasks.delete')
+            if denied:
+                return denied
             task = request.env['lugal.crm.task'].browse(task_id)
             if not task.exists():
                 return {'success': False, 'error': 'Task not found'}
@@ -197,6 +219,9 @@ class TaskController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('tasks.list')
+            if denied:
+                return denied
             domain = [
                 ('is_deleted', '=', False),
                 ('active', '=', True),

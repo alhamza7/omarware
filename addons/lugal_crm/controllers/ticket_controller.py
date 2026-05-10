@@ -6,6 +6,7 @@ from odoo.http import request
 from ._auth import ensure_jwt_user_id
 from ._audit import crm_audit
 from ._error import crm_error
+from ._permissions import require_permission
 
 _logger = logging.getLogger(__name__)
 
@@ -57,6 +58,9 @@ class TicketController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('tickets.list')
+            if denied:
+                return denied
             domain = [('is_deleted', '=', False), ('active', '=', True)]
             if customer_id:
                 domain.append(('customer_id', '=', customer_id))
@@ -90,6 +94,9 @@ class TicketController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('tickets.view')
+            if denied:
+                return denied
             ticket = request.env['lugal.crm.ticket'].browse(ticket_id)
             if not ticket.exists() or ticket.is_deleted:
                 return {'success': False, 'error': 'Ticket not found'}
@@ -103,6 +110,9 @@ class TicketController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('tickets.list')
+            if denied:
+                return denied
             if not query or len(query.strip()) < 2:
                 return {'success': True, 'data': {'items': [], 'total': 0}}
             domain = [
@@ -125,6 +135,9 @@ class TicketController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('tickets.create')
+            if denied:
+                return denied
             customer = request.env['lugal.crm.customer'].browse(customer_id)
             if not customer.exists():
                 return {'success': False, 'error': 'Customer not found'}
@@ -153,6 +166,9 @@ class TicketController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('tickets.edit')
+            if denied:
+                return denied
             ticket = request.env['lugal.crm.ticket'].browse(ticket_id)
             if not ticket.exists() or ticket.is_deleted:
                 return {'success': False, 'error': 'Ticket not found'}
@@ -170,6 +186,9 @@ class TicketController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('tickets.close' if status in ('closed', 'resolved', 'done') else 'tickets.edit')
+            if denied:
+                return denied
             from odoo.fields import Datetime
             ticket = request.env['lugal.crm.ticket'].browse(ticket_id)
             if not ticket.exists() or ticket.is_deleted:
@@ -192,6 +211,9 @@ class TicketController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('tickets.assign')
+            if denied:
+                return denied
             from odoo.fields import Datetime
             ticket = request.env['lugal.crm.ticket'].browse(ticket_id)
             if not ticket.exists() or ticket.is_deleted:
@@ -214,6 +236,9 @@ class TicketController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('tickets.escalate')
+            if denied:
+                return denied
             ticket = request.env['lugal.crm.ticket'].browse(ticket_id)
             if not ticket.exists() or ticket.is_deleted:
                 return {'success': False, 'error': 'Ticket not found'}
@@ -232,6 +257,9 @@ class TicketController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('tickets.delete')
+            if denied:
+                return denied
             ticket = request.env['lugal.crm.ticket'].browse(ticket_id)
             if not ticket.exists():
                 return {'success': False, 'error': 'Ticket not found'}
@@ -249,6 +277,9 @@ class TicketController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('tickets.edit')
+            if denied:
+                return denied
             from odoo.fields import Datetime
             ticket = request.env['lugal.crm.ticket'].browse(ticket_id)
             if not ticket.exists() or ticket.is_deleted:
@@ -277,6 +308,9 @@ class TicketController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('tickets.view')
+            if denied:
+                return denied
             ticket = request.env['lugal.crm.ticket'].browse(ticket_id)
             if not ticket.exists() or ticket.is_deleted:
                 return {'success': False, 'error': 'Ticket not found'}

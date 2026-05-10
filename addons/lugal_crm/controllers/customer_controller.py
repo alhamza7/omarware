@@ -6,6 +6,7 @@ from odoo.http import request
 from ._auth import ensure_jwt_user_id
 from ._audit import crm_audit
 from ._error import crm_error
+from ._permissions import require_permission
 
 _logger = logging.getLogger(__name__)
 
@@ -284,6 +285,9 @@ class CustomerController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('settings.general.edit')
+            if denied:
+                return denied
 
             stage_map = _ensure_default_stages(request.env)
             active_stage = stage_map.get('active')
@@ -314,6 +318,9 @@ class CustomerController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('customers.import')
+            if denied:
+                return denied
             created = _sync_partners_to_crm(request.env)
             total = request.env['lugal.crm.customer'].sudo().search_count(
                 [('is_deleted', '=', False)]
@@ -331,6 +338,9 @@ class CustomerController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('customers.list')
+            if denied:
+                return denied
 
             Customer = request.env['lugal.crm.customer'].sudo()
 
@@ -389,6 +399,9 @@ class CustomerController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('customers.view')
+            if denied:
+                return denied
             customer = _resolve_customer(customer_id)
             if not customer.exists() or customer.is_deleted:
                 return {'success': False, 'error': 'Customer not found'}
@@ -624,6 +637,9 @@ class CustomerController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('customers.create')
+            if denied:
+                return denied
 
             # Separate social handles from model fields
             social_handles = {
@@ -730,6 +746,9 @@ class CustomerController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('customers.edit')
+            if denied:
+                return denied
 
             customer = _resolve_customer(customer_id)
             if not customer.exists() or customer.is_deleted:
@@ -833,6 +852,9 @@ class CustomerController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('customers.delete')
+            if denied:
+                return denied
 
             Customer = request.env['lugal.crm.customer'].sudo().with_context(active_test=False)
             Partner  = request.env['res.partner'].sudo()
@@ -890,6 +912,9 @@ class CustomerController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('customers.edit')
+            if denied:
+                return denied
             customer = _resolve_customer(customer_id)
             if not customer.exists() or customer.is_deleted:
                 return {'success': False, 'error': 'Customer not found'}
@@ -910,6 +935,9 @@ class CustomerController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('customers.list')
+            if denied:
+                return denied
             if not query or len(query.strip()) < 2:
                 return {'success': True, 'data': {'items': [], 'total': 0}}
             domain = [
@@ -933,6 +961,9 @@ class CustomerController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('customers.view')
+            if denied:
+                return denied
             customer = _resolve_customer(customer_id)
             if not customer.exists() or customer.is_deleted:
                 return {'success': False, 'error': 'Customer not found'}
@@ -1010,6 +1041,9 @@ class CustomerController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('call_centre.list')
+            if denied:
+                return denied
             domain = [('customer_id', '=', customer_id), ('is_deleted', '=', False)]
             Call = request.env['lugal.crm.call'].sudo()
             total = Call.search_count(domain)
@@ -1040,6 +1074,9 @@ class CustomerController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('tickets.list')
+            if denied:
+                return denied
             domain = [('customer_id', '=', customer_id), ('is_deleted', '=', False)]
             Ticket = request.env['lugal.crm.ticket'].sudo()
             total = Ticket.search_count(domain)
@@ -1068,6 +1105,9 @@ class CustomerController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('customers.edit')
+            if denied:
+                return denied
             customer = _resolve_customer(customer_id)
             if not customer.exists() or customer.is_deleted:
                 return {'success': False, 'error': 'Customer not found'}
@@ -1093,6 +1133,9 @@ class CustomerController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('customers.edit')
+            if denied:
+                return denied
             customer = _resolve_customer(customer_id)
             if not customer.exists() or customer.is_deleted:
                 return {'success': False, 'error': 'Customer not found'}
@@ -1112,6 +1155,9 @@ class CustomerController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('customers.edit')
+            if denied:
+                return denied
             ci = request.env['lugal.crm.channel.identity'].sudo().browse(ci_id)
             if not ci.exists() or ci.is_deleted or ci.customer_id.id != customer_id:
                 return {'success': False, 'error': 'Channel identity not found'}
@@ -1129,6 +1175,9 @@ class CustomerController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('customers.edit')
+            if denied:
+                return denied
             ci = request.env['lugal.crm.channel.identity'].sudo().browse(ci_id)
             if not ci.exists() or ci.customer_id.id != customer_id:
                 return {'success': False, 'error': 'Channel identity not found'}
@@ -1146,6 +1195,9 @@ class CustomerController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('customers.view')
+            if denied:
+                return denied
             customer = _resolve_customer(customer_id)
             if not customer.exists() or customer.is_deleted:
                 return {'success': False, 'error': 'Customer not found'}
@@ -1189,6 +1241,9 @@ class CustomerController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('customers.edit')
+            if denied:
+                return denied
             if not customer_id or not interaction_type:
                 return {'success': False, 'error': 'customer_id and interaction_type are required'}
             from odoo.fields import Datetime
