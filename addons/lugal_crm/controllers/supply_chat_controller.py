@@ -1553,7 +1553,12 @@ class SupplyChatController(http.Controller):
 
         Channels:
           supply_chat.<conv_id>   — conversation-level events (new msg, typing, reactions)
-          supply_user.<uid>       — user-level events (delivered/read receipts, DM notifications)
+          supply_user.<uid>       — user-level events:
+                                    • delivered/read receipts
+                                    • DM notifications
+                                    • supply.chat.resubscribe  (new conversation created)
+                                    • crm.permissions.updated  (admin changed this user's
+                                        permissions — FE must re-call /api/crm/me/permissions)
         """
         try:
             uid = ensure_jwt_user_id()

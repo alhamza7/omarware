@@ -1,5 +1,5 @@
 # Frontend Integration: User Roles & Permissions
-**Updated: 2026-05-10** — Schema v2 (current_view_crm_tree)
+**Updated: 2026-05-10** — Schema v2.1 (real-time permission push)
 
 ---
 
@@ -7,8 +7,78 @@
 
 | Date | Version | Summary |
 |------|---------|---------|
-| 2026-05-10 | **v2** | Full schema realignment to FE UI. Introduced `current_view_crm_tree` / `future_edits_crm_tree` split. Renamed `apply_to_all_same_job_title` → `apply_to_all_same_crm_role`. Added `routes` map to every permission response. All path keys updated to match FE route names. |
+| 2026-05-10 | **v2.1** | Added real-time `crm.permissions.updated` push event on `supply_user.<uid>` bus channel. Added recommended boot flow and WebSocket handler guidance. `route_visibility` overrides now correctly mask permission leaves. |
+| 2026-05-10 | v2 | Full schema realignment to FE UI. Introduced `current_view_crm_tree` / `future_edits_crm_tree` split. Renamed `apply_to_all_same_job_title` → `apply_to_all_same_crm_role`. Added `routes` map to every permission response. All path keys updated to match FE route names. |
 | 2026-05-06 | v1 | Initial backend permission system documentation. |
+
+---
+
+## Recommended FE Boot Flow
+
+**This is the canonical flow after every login:**
+
+```
+1. POST /lugal/auth/login           → receive access_token (JWT)
+2. POST /api/crm/me/permissions     → receive permissions + routes + route_visibility
+3. Store in global app state (Redux / Pinia / Zustand / etc.)
+4. Gate navigation from routes.*
+5. Gate actions/buttons from permissions.*
+```
+
+**No username is passed to step 2.** The JWT in the `Authorization: Bearer` header identifies the user.
+
+### Re-fetching permissions (without logout)
+
+Call **`POST /api/crm/me/permissions`** again whenever:
+
+- A `crm.permissions.updated` WebSocket event is received (see below — **preferred**).
+- App is focused after idle > 30 min.
+- User visits Settings page.
+
+---
+
+## Real-Time Permission Push (WebSocket)
+
+When an admin changes any user's permissions (via `permissions/set` or `permissions/reset`),
+the backend **automatically pushes** a `crm.permissions.updated` event to the affected
+user's personal bus channel. No polling required.
+
+### Channel
+
+The event arrives on `supply_user.<uid>` — the **same channel** already subscribed to
+for supply chat (returned by `POST /api/crm/supply/chat/bus_channels`).
+No additional subscription is needed.
+
+### Event payload
+
+```json
+{
+  "type": "crm.permissions.updated",
+  "changed_by_uid": 3,
+  "timestamp": "2026-05-10T14:35:22"
+}
+```
+
+### FE handler (recommended)
+
+```javascript
+// In your bus/WebSocket message handler:
+if (message.type === 'crm.permissions.updated') {
+  // Re-fetch and replace the cached permissions store
+  const { data } = await api.post('/api/crm/me/permissions');
+  permissionsStore.set(data);
+  routesStore.set(data.routes);
+}
+```
+
+**Do not** try to apply the push payload directly as the new permissions state —
+it contains no permission data, just a signal. Always re-call `/api/crm/me/permissions`
+to get the authoritative current state.
+
+### When `apply_to_all_same_crm_role: true`
+
+The push goes to **every active user** in that CRM role simultaneously,
+so all affected users refresh without knowing the admin made a change.
 
 ---
 
@@ -142,7 +212,7 @@ Each route key goes through **two steps** in priority order:
 | 1 (low) | Computed from actions | `any(actions) == True` → route visible |
 | 2 (high) | **Explicit `route_visibility` override** | Admin set an explicit `true`/`false` for that path |
 
-An explicit override **always wins** over the computed value. This is how an admin can hide an entire section even though the user still has individual action permissions inside it.
+An explicit override **always wins** over the computed value. When a route is explicitly set to `false`, the backend also masks every action permission under that route to `false` in responses and backend permission checks.
 
 ### Setting route visibility (admin)
 
@@ -164,8 +234,8 @@ Pass `route_visibility` alongside `permissions` in the `/permissions/set` call:
 }
 ```
 
-- `false` → **always hide** this nav route for this user, even if they have action permissions inside it.
-- `true` → **always show** this nav route, even if all action permissions are currently `false`.
+- `false` → **always hide** this nav route for this user and force all permission leaves under that route to `false`.
+- `true` → **always show** this nav route, even if all action permissions are currently `false`. This does not grant action permissions by itself.
 - **Omit a key** → fall back to computed (route shown if any action in it is `true`).
 
 > **Important:** Route visibility overrides are per-user (or per-role when `apply_to_all_same_crm_role: true`). The same API call, same endpoint — just add the `route_visibility` field.

@@ -229,6 +229,44 @@ def _compute_route_visibility(perms: dict, route_overrides: dict = None) -> dict
     return routes
 
 
+def _set_all_leaves(node, value: bool) -> None:
+    """Set every boolean leaf in a nested permission node."""
+    if not isinstance(node, dict):
+        return
+    for key, child in node.items():
+        if isinstance(child, dict):
+            _set_all_leaves(child, value)
+        elif isinstance(child, bool):
+            node[key] = value
+
+
+def _node_for_route(perms: dict, route_path: str):
+    node = perms
+    for part in (route_path or '').split('.'):
+        if not isinstance(node, dict):
+            return None
+        node = node.get(part)
+    return node
+
+
+def _apply_route_visibility_to_permissions(perms: dict, route_overrides: dict = None) -> dict:
+    """
+    Apply explicit route hides to the permission tree itself.
+
+    route_visibility=false is not only a nav/sidebar concern. If an admin hides
+    a route, all permission leaves under that route must be false in API
+    responses and backend permission checks. route_visibility=true only affects
+    nav visibility and does not grant actions.
+    """
+    result = copy.deepcopy(perms)
+    for route_path, visible in (route_overrides or {}).items():
+        if bool(visible):
+            continue
+        node = _node_for_route(result, route_path)
+        _set_all_leaves(node, False)
+    return result
+
+
 def _all_route_paths() -> list:
     """Return every settable route path (section + subsection level)."""
     paths = []
@@ -551,6 +589,38 @@ _ROLE_GROUP = {
 
 # ─── Helper utilities ─────────────────────────────────────────────────────────
 
+def _notify_permissions_updated(user_ids, changed_by_uid: int):
+    """
+    Push a lightweight 'crm.permissions.updated' event to each affected user's
+    personal bus channel (supply_user.<uid>) so their FE can immediately
+    re-fetch /api/crm/me/permissions without waiting for a manual refresh.
+
+    This reuses the same personal channel the supply chat already subscribes to,
+    so no new WS subscription is needed on the FE side.
+
+    Payload fields
+    --------------
+    type            : 'crm.permissions.updated'  (FE switches on this)
+    changed_by_uid  : uid of the admin who made the change
+    timestamp       : ISO-8601 UTC string
+    """
+    payload = {
+        'type': 'crm.permissions.updated',
+        'changed_by_uid': changed_by_uid,
+        'timestamp': fields.Datetime.now().isoformat(),
+    }
+    for uid in (user_ids or []):
+        try:
+            request.env['bus.bus'].sudo()._sendone(
+                f'supply_user.{uid}',
+                'crm.permissions.updated',
+                payload,
+            )
+            _logger.info('permissions push → supply_user.%s (by uid=%s)', uid, changed_by_uid)
+        except Exception as exc:
+            _logger.warning('_notify_permissions_updated bus error uid=%s: %s', uid, exc)
+
+
 def _deep_merge(base: dict, override: dict) -> dict:
     """Recursively merge `override` into a copy of `base`. Override wins."""
     result = copy.deepcopy(base)
@@ -614,6 +684,7 @@ def _get_effective_permissions(user) -> dict:
     base = copy.deepcopy(PERMISSION_TREE)
     role = _resolve_role(user)
     base = _deep_merge(base, _base_for_role(role))
+    route_overrides = {}
 
     Tmpl = request.env['lugal.crm.permission.template'].sudo()
 
@@ -623,6 +694,7 @@ def _get_effective_permissions(user) -> dict:
         rtp = role_tmpl.get_permissions()
         if rtp:
             base = _deep_merge(base, rtp)
+        route_overrides.update(role_tmpl.get_route_visibility())
 
     # Job-title template
     job_title = user.sudo().partner_id.function or ''
@@ -635,6 +707,7 @@ def _get_effective_permissions(user) -> dict:
             if tmpl.crm_role and tmpl.crm_role != role:
                 base = _deep_merge(base, _base_for_role(tmpl.crm_role))
                 base = _deep_merge(base, tmpl_perms)
+            route_overrides.update(tmpl.get_route_visibility())
 
     # User-specific overrides
     Override = request.env['lugal.crm.user.permission'].sudo()
@@ -645,11 +718,45 @@ def _get_effective_permissions(user) -> dict:
             tmpl2 = Tmpl.search([('job_title', '=ilike', eff_title), ('is_active', '=', True)], limit=1)
             if tmpl2:
                 base = _deep_merge(base, tmpl2.get_permissions())
+                route_overrides.update(tmpl2.get_route_visibility())
         user_overrides = override_rec.get_overrides()
         if user_overrides:
             base = _deep_merge(base, user_overrides)
+        route_overrides.update(override_rec.get_route_visibility())
+
+    if route_overrides:
+        base = _apply_route_visibility_to_permissions(base, route_overrides)
 
     return base
+
+
+def _get_effective_route_visibility(user) -> dict:
+    """Return route visibility overrides merged in the same priority order as permissions."""
+    route_overrides = {}
+    role = _resolve_role(user)
+    Tmpl = request.env['lugal.crm.permission.template'].sudo()
+
+    role_tmpl = Tmpl.search([('job_title', '=', f'__role__{role}'), ('is_active', '=', True)], limit=1)
+    if role_tmpl:
+        route_overrides.update(role_tmpl.get_route_visibility())
+
+    job_title = user.sudo().partner_id.function or ''
+    if job_title:
+        tmpl = Tmpl.search([('job_title', '=ilike', job_title), ('is_active', '=', True)], limit=1)
+        if tmpl:
+            route_overrides.update(tmpl.get_route_visibility())
+
+    Override = request.env['lugal.crm.user.permission'].sudo()
+    override_rec = Override.search([('user_id', '=', user.id)], limit=1)
+    if override_rec:
+        eff_title = override_rec.job_title_override or job_title
+        if eff_title and eff_title != job_title:
+            tmpl2 = Tmpl.search([('job_title', '=ilike', eff_title), ('is_active', '=', True)], limit=1)
+            if tmpl2:
+                route_overrides.update(tmpl2.get_route_visibility())
+        route_overrides.update(override_rec.get_route_visibility())
+
+    return route_overrides
 
 
 def _user_to_dict(user, include_permissions: bool = True) -> dict:
@@ -676,10 +783,7 @@ def _user_to_dict(user, include_permissions: bool = True) -> dict:
     if include_permissions:
         full_perms = _get_effective_permissions(user)
         fe_perms   = _filter_to_fe_schema(full_perms)
-        # Route visibility overrides live in a dedicated DB column — fetch directly
-        Override = request.env['lugal.crm.user.permission'].sudo()
-        override_rec = Override.search([('user_id', '=', user.id)], limit=1)
-        route_overrides = override_rec.get_route_visibility() if override_rec else {}
+        route_overrides = _get_effective_route_visibility(user)
         d['permissions']      = fe_perms
         d['routes']           = _compute_route_visibility(fe_perms, route_overrides)
         d['route_visibility'] = route_overrides   # echo back the explicit overrides set
@@ -1148,7 +1252,7 @@ class CrmAdminController(http.Controller):
 
             # Validate route_visibility paths
             validated_route_vis = None
-            if route_vis_input:
+            if route_vis_input is not None:
                 valid_paths = set(_all_route_paths())
                 bad = [k for k in route_vis_input if k not in valid_paths]
                 if bad:
@@ -1167,7 +1271,14 @@ class CrmAdminController(http.Controller):
                 if existing_tmpl:
                     current = existing_tmpl.get_permissions()
                     merged  = _deep_merge(current, new_overrides)
-                    existing_tmpl.write({'permissions_json': json.dumps(merged, ensure_ascii=False)})
+                    vals = {'permissions_json': json.dumps(merged, ensure_ascii=False)}
+                    if validated_route_vis is not None:
+                        current_routes = existing_tmpl.get_route_visibility()
+                        vals['route_visibility_json'] = json.dumps(
+                            {**current_routes, **validated_route_vis},
+                            ensure_ascii=False,
+                        )
+                    existing_tmpl.write(vals)
                 else:
                     merged = _deep_merge(copy.deepcopy(PERMISSION_TREE), new_overrides)
                     Tmpl.create({
@@ -1175,6 +1286,7 @@ class CrmAdminController(http.Controller):
                         'label':            f'Role default: {role}',
                         'crm_role':         role,
                         'permissions_json': json.dumps(merged, ensure_ascii=False),
+                        'route_visibility_json': json.dumps(validated_route_vis or {}, ensure_ascii=False),
                         'is_active':        True,
                     })
                 # Clear this user's individual override so they inherit the role template
@@ -1198,7 +1310,29 @@ class CrmAdminController(http.Controller):
 
             # Flush ORM cache so _user_to_dict reads the freshly written record
             request.env['lugal.crm.user.permission'].invalidate_model()
+            request.env['lugal.crm.permission.template'].invalidate_model()
             user.invalidate_recordset()
+
+            # Push real-time update so affected users' FE can re-fetch immediately
+            if apply_to_all:
+                # Find every active user with the same role and notify them all
+                affected_role = _resolve_role(user.sudo())
+                group_xml = _ROLE_GROUP.get(affected_role)
+                if group_xml:
+                    try:
+                        grp = request.env.ref(group_xml, raise_if_not_found=False)
+                        if grp:
+                            affected_uids = list(grp.sudo().user_ids.ids)
+                        else:
+                            affected_uids = [user_id]
+                    except Exception:
+                        affected_uids = [user_id]
+                else:
+                    affected_uids = [user_id]
+                _notify_permissions_updated(affected_uids, uid)
+            else:
+                _notify_permissions_updated([user_id], uid)
+
             return {
                 'success': True,
                 'data': {
@@ -1228,6 +1362,7 @@ class CrmAdminController(http.Controller):
             rec = Override.search([('user_id', '=', user_id)], limit=1)
             if rec:
                 rec.unlink()
+            _notify_permissions_updated([user_id], uid)
             return {'success': True, 'data': {**_user_to_dict(user), 'reset': True}}
         except Exception as e:
             return crm_error(e, 'admin_user_permissions_reset')
