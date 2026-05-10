@@ -4596,30 +4596,97 @@ def _do_smtp_send(smtp_host, smtp_port, smtp_use_tls, username, password,
     Returns (delivered: bool, error_msg: str|None, refused: dict).
     """
     import smtplib
+    import socket
+    import time
 
     delivered = False
     error_msg = None
     refused   = {}
 
-    try:
+    def _connect_and_send(host, port, use_tls):
         # Port 465 = implicit TLS (SMTP_SSL).
         # smtp_use_tls + other ports = STARTTLS (explicit TLS, common on 587).
         # No TLS + non-465 = plain SMTP (port 25 or custom relay).
-        if smtp_port == 465:
-            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=30)
+        if port == 465:
+            server = smtplib.SMTP_SSL(host, port, timeout=30)
             server.ehlo()
-        elif smtp_use_tls:
-            server = smtplib.SMTP(smtp_host, smtp_port, timeout=30)
+        elif use_tls:
+            server = smtplib.SMTP(host, port, timeout=30)
             server.ehlo()
             server.starttls()
             server.ehlo()
         else:
-            server = smtplib.SMTP(smtp_host, smtp_port, timeout=30)
+            server = smtplib.SMTP(host, port, timeout=30)
             server.ehlo()
 
-        server.login(username, password)
-        partial_refused = server.sendmail(from_address, all_recipients, raw_message)
-        server.quit()
+        try:
+            server.login(username, password)
+            return server.sendmail(from_address, all_recipients, raw_message)
+        finally:
+            try:
+                server.quit()
+            except Exception:
+                try:
+                    server.close()
+                except Exception:
+                    pass
+
+    transient_errors = (
+        ConnectionResetError,
+        ConnectionAbortedError,
+        BrokenPipeError,
+        TimeoutError,
+        socket.timeout,
+        OSError,
+        smtplib.SMTPServerDisconnected,
+    )
+
+    attempts = [(int(smtp_port or 587), bool(smtp_use_tls))]
+    if attempts[0][0] == 465:
+        attempts.append((587, True))
+    elif attempts[0][0] == 587:
+        attempts.append((465, False))
+
+    try:
+        last_exc = None
+        partial_refused = {}
+        sent_ok = False
+        for idx, (attempt_port, attempt_tls) in enumerate(attempts, start=1):
+            for retry in range(1, 3):
+                try:
+                    partial_refused = _connect_and_send(
+                        smtp_host, attempt_port, attempt_tls,
+                    )
+                    if attempt_port != int(smtp_port or 587):
+                        _logger.warning(
+                            'SMTP delivered via fallback route: from=%s to=%s '
+                            'primary=%s:%s fallback=%s:%s',
+                            from_address, all_recipients, smtp_host, smtp_port,
+                            smtp_host, attempt_port,
+                        )
+                    last_exc = None
+                    sent_ok = True
+                    break
+                except smtplib.SMTPRecipientsRefused:
+                    raise
+                except smtplib.SMTPAuthenticationError:
+                    raise
+                except transient_errors as exc:
+                    last_exc = exc
+                    _logger.warning(
+                        'SMTP transient failure attempt=%s.%s from=%s to=%s '
+                        'host=%s:%s tls=%s error=%s',
+                        idx, retry, from_address, all_recipients,
+                        smtp_host, attempt_port, attempt_tls, exc,
+                    )
+                    if retry < 2:
+                        time.sleep(0.75)
+                        continue
+                    break
+            if sent_ok:
+                break
+        if not sent_ok and last_exc:
+            raise last_exc
 
         if partial_refused:
             delivered = True
