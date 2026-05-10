@@ -58,15 +58,15 @@ class LugalCrmUserPermission(models.Model):
     ]
 
     def _auto_init(self):
-        """Ensure route_visibility_json column exists (safe migration without --update)."""
-        super()._auto_init()
+        """Ensure route_visibility_json column exists on module install/update."""
         try:
             self.env.cr.execute("""
                 ALTER TABLE lugal_crm_user_permission
                 ADD COLUMN IF NOT EXISTS route_visibility_json TEXT DEFAULT '{}'
             """)
         except Exception as exc:
-            _logger.warning('_auto_init route_visibility_json: %s', exc)
+            _logger.debug('_auto_init route_visibility_json already exists: %s', exc)
+        super()._auto_init()
 
     def get_overrides(self) -> dict:
         """Return parsed action-level overrides dict (safe fallback to {})."""
