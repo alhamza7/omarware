@@ -2,6 +2,7 @@
 # Component: Lugal Email — lugal.email.account model (email_account.py)
 
 import json
+import hashlib
 import logging
 import re
 import threading
@@ -27,6 +28,14 @@ def _get_upsert_lock(account_id: int) -> threading.Lock:
         if account_id not in _upsert_locks:
             _upsert_locks[account_id] = threading.Lock()
         return _upsert_locks[account_id]
+
+
+def _pg_advisory_lock_key(*parts) -> int:
+    """Stable signed-bigint key for cross-worker PostgreSQL advisory locks."""
+    raw = '|'.join(str(p or '') for p in parts).encode('utf-8', 'ignore')
+    digest = hashlib.blake2b(raw, digest_size=8).digest()
+    # Keep it in signed BIGINT's positive range for pg_advisory_xact_lock(bigint).
+    return int.from_bytes(digest, 'big') & 0x7FFFFFFFFFFFFFFF
 
 
 # Serialize IMAP logins for the same (host, port, login) within this OS process.
@@ -1042,6 +1051,19 @@ class LugalEmailAccount(models.Model):
 
         # Search by imap_uid first; also check message_id as a secondary key so
         # we never store the same RFC-2822 message twice even if the UID changed.
+        lock_identity = message_id or f'{folder_key}:{uid_int}'
+        try:
+            with self.env.cr.savepoint():
+                self.env.cr.execute(
+                    'SELECT pg_advisory_xact_lock(%s)',
+                    [_pg_advisory_lock_key('lugal.email.message.upsert', self.id, lock_identity)],
+                )
+        except Exception:
+            _logger.debug(
+                '_upsert_inbox_message: advisory lock failed account=%s identity=%s',
+                self.id, lock_identity, exc_info=True,
+            )
+
         domain = [('account_id', '=', self.id), ('folder', '=', folder_key), ('imap_uid', '=', uid_int)]
         existing = Message.search(domain, limit=1)
         existing_found_by_uid = bool(existing)

@@ -122,6 +122,14 @@ class LugalEmailMessageWs(models.Model):
     def _lugal_send_new_email_notification(self):
         """Push realtime notification after the message reaches its final folder."""
         for record in self:
+            try:
+                record.invalidate_recordset()
+            except Exception:
+                pass
+            record = record.sudo().exists()
+            if not record or record.is_deleted or not record.active:
+                continue
+
             if (
                 not record.is_read
                 and (record.folder or '') not in ('sent', 'drafts', 'trash', 'spam')

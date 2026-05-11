@@ -1247,6 +1247,13 @@ class LugalEmailController(http.Controller):
             # receiving a crm.email.message.new WS event to guarantee the newly
             # arrived email appears at the top even if its Date header is old.
             since_id    = int(params.get('since_id', 0) or 0)
+            focus_raw   = params.get('message_id') or params.get('focus_message_id')
+            focus_message_id = 0
+            if focus_raw:
+                try:
+                    focus_message_id = int(str(focus_raw).strip())
+                except (TypeError, ValueError):
+                    return _json_response({'success': False, 'error': 'message_id must be an integer'}, 400)
 
             # Optional server-side filter params
             filter_unread         = params.get('unread')
@@ -1465,13 +1472,27 @@ class LugalEmailController(http.Controller):
                 new_msgs = Msg.search(all_accs_domain, order='id desc')
 
             page_msgs = Msg.search(base_domain, limit=limit, offset=offset, order=sort_order)
+            focus_msg = Msg.browse()
+            if focus_message_id:
+                focus_domain = [
+                    ('id',         '=',  focus_message_id),
+                    ('account_id', 'in', [requested_account_id] if requested_account_id else account_ids),
+                    ('is_deleted', '=',  False),
+                ] + _folder_domain
+                focus_msg = Msg.search(focus_domain, limit=1)
 
             include_thread = params.get('include_thread', '0') == '1'
 
-            if new_msgs:
-                new_ids  = set(new_msgs.ids)
-                # New messages pinned at top; de-duplicate from paginated list
-                combined = list(new_msgs) + [m for m in page_msgs if m.id not in new_ids]
+            pinned_msgs = list(new_msgs)
+            if focus_msg and focus_msg.id not in {m.id for m in pinned_msgs}:
+                # Notification/open-from-link safety net: pin the exact requested
+                # message for this mailbox even if optional filters like unread=1
+                # or pagination would otherwise hide it after it is opened/read.
+                pinned_msgs.insert(0, focus_msg)
+
+            if pinned_msgs:
+                pinned_ids = {m.id for m in pinned_msgs}
+                combined = pinned_msgs + [m for m in page_msgs if m.id not in pinned_ids]
                 display_msgs = combined[:limit]
             else:
                 display_msgs = list(page_msgs)
@@ -1533,6 +1554,8 @@ class LugalEmailController(http.Controller):
                     'offset':           offset,
                     'max_id':           max_id,
                     'items':            items,
+                    'focused_message_id': focus_message_id or None,
+                    'focused_message_found': bool(focus_msg),
                     'imap_folder_sync': imap_folder_sync,
                     'includes_descendant_folders': bool(
                         is_custom_mailbox and folder_branch_expand
