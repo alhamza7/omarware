@@ -6,7 +6,10 @@ as their baseline. An admin can edit a template and optionally propagate the
 change to every user that carries that job title (apply_to_all_users flag).
 """
 import json
+import logging
 from odoo import models, fields, api
+
+_logger = logging.getLogger(__name__)
 
 
 class LugalCrmPermissionTemplate(models.Model):
@@ -42,6 +45,11 @@ class LugalCrmPermissionTemplate(models.Model):
         help='Full permission snapshot for this job title. '
              'Stored as a JSON object matching the canonical permission tree.',
     )
+    route_visibility_json = fields.Text(
+        string='Route Visibility Overrides JSON',
+        default='{}',
+        help='Explicit route show/hide map keyed by route path for this template.',
+    )
     notes = fields.Text(string='Admin Notes')
     is_active = fields.Boolean(default=True)
     user_count = fields.Integer(
@@ -54,6 +62,17 @@ class LugalCrmPermissionTemplate(models.Model):
         ('job_title_unique', 'UNIQUE(job_title)',
          'A permission template already exists for this job title.'),
     ]
+
+    def _auto_init(self):
+        """Ensure route_visibility_json column exists on module install/update."""
+        try:
+            self.env.cr.execute("""
+                ALTER TABLE lugal_crm_permission_template
+                ADD COLUMN IF NOT EXISTS route_visibility_json TEXT DEFAULT '{}'
+            """)
+        except Exception as exc:
+            _logger.debug('_auto_init route_visibility_json already exists: %s', exc)
+        super()._auto_init()
 
     @api.depends()
     def _compute_user_count(self):
@@ -69,6 +88,23 @@ class LugalCrmPermissionTemplate(models.Model):
     def get_permissions(self) -> dict:
         """Return parsed permissions dict (safe fallback to {})."""
         try:
-            return json.loads(self.permissions_json or '{}') or {}
+            permissions = json.loads(self.permissions_json or '{}') or {}
+            permissions.pop('_route_visibility', None)
+            return permissions
         except Exception:
             return {}
+
+    def get_route_visibility(self) -> dict:
+        """Return parsed route-visibility overrides dict (safe fallback to {})."""
+        route_visibility = {}
+        try:
+            route_visibility = json.loads(self.route_visibility_json or '{}') or {}
+        except Exception:
+            route_visibility = {}
+        try:
+            legacy = (json.loads(self.permissions_json or '{}') or {}).get('_route_visibility') or {}
+            if isinstance(legacy, dict):
+                route_visibility = {**legacy, **route_visibility}
+        except Exception:
+            pass
+        return route_visibility

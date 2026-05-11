@@ -19,6 +19,7 @@ from odoo.http import request
 
 from ._auth import ensure_jwt_user_id
 from ._error import crm_error
+from ._permissions import require_permission
 
 _logger = logging.getLogger(__name__)
 
@@ -61,6 +62,9 @@ class MarqueeController(http.Controller):
             uid = ensure_jwt_user_id()
             if not uid:
                 return _json_err('Unauthorized', 401)
+            denied = require_permission('settings.general.edit')
+            if denied:
+                return denied
 
             if not message:
                 return _json_err('message is required')
@@ -120,6 +124,9 @@ class MarqueeController(http.Controller):
             uid = ensure_jwt_user_id()
             if not uid:
                 return _json_err('Unauthorized', 401)
+            denied = require_permission('settings.general.view')
+            if denied:
+                return denied
 
             offset = (int(page) - 1) * int(per_page)
             Marquee = request.env['lugal.crm.marquee'].sudo()
@@ -150,6 +157,9 @@ class MarqueeController(http.Controller):
             uid = ensure_jwt_user_id()
             if not uid:
                 return _json_err('Unauthorized', 401)
+            denied = require_permission('settings.general.edit')
+            if denied:
+                return denied
 
             rec = request.env['lugal.crm.marquee'].sudo().browse(marquee_id)
             if not rec.exists():
@@ -184,6 +194,9 @@ class MarqueeController(http.Controller):
             uid = ensure_jwt_user_id()
             if not uid:
                 return _json_err('Unauthorized', 401)
+            denied = require_permission('settings.general.edit')
+            if denied:
+                return denied
 
             rec = request.env['lugal.crm.marquee'].sudo().browse(marquee_id)
             if not rec.exists():
@@ -206,6 +219,9 @@ class MarqueeController(http.Controller):
             uid = ensure_jwt_user_id()
             if not uid:
                 return _json_err('Unauthorized', 401)
+            denied = require_permission('settings.general.edit')
+            if denied:
+                return denied
 
             rec = request.env['lugal.crm.marquee'].sudo().browse(marquee_id)
             if not rec.exists():

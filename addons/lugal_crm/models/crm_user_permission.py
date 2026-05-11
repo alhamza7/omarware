@@ -71,16 +71,28 @@ class LugalCrmUserPermission(models.Model):
     def get_overrides(self) -> dict:
         """Return parsed action-level overrides dict (safe fallback to {})."""
         try:
-            return json.loads(self.permissions_json or '{}') or {}
+            overrides = json.loads(self.permissions_json or '{}') or {}
+            overrides.pop('_route_visibility', None)
+            return overrides
         except Exception:
             return {}
 
     def get_route_visibility(self) -> dict:
         """Return parsed route-visibility overrides dict (safe fallback to {})."""
+        route_visibility = {}
         try:
-            return json.loads(self.route_visibility_json or '{}') or {}
+            route_visibility = json.loads(self.route_visibility_json or '{}') or {}
         except Exception:
-            return {}
+            route_visibility = {}
+        try:
+            # Backward compatibility for the short-lived implementation that
+            # stored this under permissions_json["_route_visibility"].
+            legacy = (json.loads(self.permissions_json or '{}') or {}).get('_route_visibility') or {}
+            if isinstance(legacy, dict):
+                route_visibility = {**legacy, **route_visibility}
+        except Exception:
+            pass
+        return route_visibility
 
     @api.model
     def upsert_for_user(self, user_id: int, overrides: dict,

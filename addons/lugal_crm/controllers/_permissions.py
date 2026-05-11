@@ -81,6 +81,65 @@ def is_qa_supervisor():
     return require_group(QA_SUPERVISOR)
 
 
-def forbidden(message='Insufficient permissions'):
+def _is_system_admin():
+    """Technical admins bypass fine-grained checks."""
+    try:
+        user = request.env.user
+        return bool(
+            user.id == 1
+            or user.has_group('base.group_system')
+        )
+    except Exception:
+        return False
+
+
+def _lookup_permission(permissions, path):
+    current = permissions or {}
+    for part in (path or '').split('.'):
+        if not isinstance(current, dict):
+            return False
+        current = current.get(part)
+    return current is True
+
+
+def has_permission(path):
+    """
+    Return True when the current request user has a resolved permission leaf.
+
+    Must be called after ensure_jwt_user_id(), because that helper binds
+    request.env to the authenticated user. Permission resolution is imported
+    lazily to avoid a controller import cycle.
+    """
+    try:
+        if _is_system_admin():
+            return True
+        from .admin_controller import _get_effective_permissions
+
+        permissions = _get_effective_permissions(request.env.user.sudo())
+        return _lookup_permission(permissions, path)
+    except Exception as exc:
+        _logger.error('_permissions.has_permission(%s) error: %s', path, exc, exc_info=True)
+        return False
+
+
+def has_any_permission(*paths):
+    """Return True when the current user has at least one permission path."""
+    return any(has_permission(path) for path in paths)
+
+
+def require_permission(path, message=None):
+    """Return None when allowed; otherwise return a standard forbidden payload."""
+    if has_permission(path):
+        return None
+    return forbidden(
+        message or f'Forbidden — permission required: {path}',
+        error_code='PERMISSION_DENIED',
+        permission=path,
+    )
+
+
+def forbidden(message='Insufficient permissions', **extra):
     """Shorthand for a standard Forbidden response dict."""
-    return {'success': False, 'error': message, 'code': 403}
+    payload = {'success': False, 'error': message, 'code': 403}
+    payload.update(extra)
+    return payload

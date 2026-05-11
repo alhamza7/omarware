@@ -16,17 +16,19 @@ _logger = logging.getLogger(__name__)
 def _user_to_dict(user, include_branch=True):
     """Serialize a res.users record to a CRM-safe dict."""
     # Resolve CRM role from group membership (Odoo 19: use _has_group for sudo context)
-    role = 'agent'
+    role = 'none'
     try:
-        if user._has_group('lugal_crm.group_lugal_crm_general_manager'):
+        if user.has_group('lugal_crm.group_lugal_crm_general_manager'):
             role = 'general_manager'
-        elif user._has_group('lugal_crm.group_lugal_crm_manager'):
+        elif user.has_group('lugal_crm.group_lugal_crm_manager'):
             role = 'manager'
-        elif user._has_group('lugal_crm.group_lugal_crm_supervisor'):
+        elif user.has_group('lugal_crm.group_lugal_crm_supervisor'):
             role = 'supervisor'
-        elif user._has_group('lugal_crm.group_lugal_crm_qa_supervisor'):
+        elif user.has_group('lugal_crm.group_lugal_crm_agent'):
+            role = 'agent'
+        elif user.has_group('lugal_crm.group_lugal_crm_qa_supervisor'):
             role = 'qa_supervisor'
-        elif user._has_group('lugal_crm.group_lugal_crm_qa'):
+        elif user.has_group('lugal_crm.group_lugal_crm_qa'):
             role = 'qa_auditor'
     except Exception:
         pass
