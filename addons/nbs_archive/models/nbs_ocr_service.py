@@ -557,34 +557,6 @@ class NBSOCRService(models.Model):
             },
         }
 
-    def cron_process_pending_ocr(self):
-        """
-        Scheduled action: process up to 20 pending-OCR documents per run.
-
-        Targets only ``ocr_status = 'pending'`` (newly uploaded, never
-        attempted).  Failed documents are left for the manual backfill
-        endpoint so they are not silently retried in an infinite loop.
-
-        Runs synchronously because cron workers already run in their own
-        thread/process — no need for extra threads here.
-        """
-        import time as _time
-        pending = self.env['nbs.document'].sudo().search([
-            ('ocr_status', '=', 'pending'),
-            ('current_version_id', '!=', False),
-        ], limit=20, order='id asc')
-
-        if not pending:
-            return
-
-        _logger.info('OCR cron: processing %d pending documents', len(pending))
-        for doc in pending:
-            try:
-                self.sudo()._process_document_async(doc.id)
-            except Exception as exc:
-                _logger.warning('OCR cron: doc %s failed: %s', doc.id, exc)
-            _time.sleep(0.3)
-
     def _process_document_async(self, document_id: int):
         """Wrapper called by the OCR controller to trigger OCR on a document."""
         doc = self.env['nbs.document'].sudo().browse(document_id)
