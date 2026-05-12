@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import re
 import logging
 from odoo import http
 from odoo.http import request
@@ -9,25 +10,70 @@ _logger = logging.getLogger(__name__)
 from ._auth import ensure_jwt_user_id
 
 
+def _normalize_ws(text: str) -> str:
+    """Collapse any run of whitespace (including \\n, \\t) into a single space."""
+    return re.sub(r'\s+', ' ', text).strip()
+
+
+def _build_ocr_clause(env, q: str):
+    """
+    Return an Odoo domain leaf that matches ``q`` inside ``ocr_text``.
+
+    For single-word queries the fast ORM ``ilike`` is used unchanged.
+    For multi-word queries a raw-SQL ``regexp_replace`` is used so that
+    newline-separated words in the stored OCR text are treated as
+    space-separated, making "ABCD HXH 455223" findable even when Vision
+    stored them on different lines.
+    """
+    tokens = q.split()
+    if len(tokens) <= 1:
+        return ('ocr_text', 'ilike', q)
+
+    normalized_q = ' '.join(tokens)
+    try:
+        env.cr.execute(
+            """
+            SELECT id
+            FROM   nbs_document
+            WHERE  state = 'active'
+              AND  (is_deleted = false OR is_deleted IS NULL)
+              AND  regexp_replace(ocr_text, '\\s+', ' ', 'g') ILIKE %s
+            """,
+            [f'%{normalized_q}%'],
+        )
+        ocr_ids = [row[0] for row in env.cr.fetchall()]
+    except Exception as exc:
+        _logger.warning('OCR multi-word SQL search failed, falling back to ilike: %s', exc)
+        return ('ocr_text', 'ilike', q)
+
+    return ('id', 'in', ocr_ids) if ocr_ids else ('id', 'in', [-1])
+
+
 def _ocr_snippet(ocr_text: str, query: str, radius: int = 120) -> str:
     """
     Return a short excerpt from ``ocr_text`` centred around the first
-    occurrence of ``query`` (case-insensitive).  Falls back to the first
-    ``radius`` characters if the query is not found.
+    occurrence of ``query`` (case-insensitive).
+
+    Whitespace (including newlines inserted by OCR) is normalised before
+    searching so that a multi-word query like "ABCD HXH 455223" is found
+    even when the words were on separate lines in the original scan.
+    The returned snippet is taken from the normalised text so it is always
+    clean and readable.
     """
     if not ocr_text:
         return ''
-    low_text  = ocr_text.lower()
-    low_query = (query or '').lower()
+    normalized = _normalize_ws(ocr_text)
+    low_text  = normalized.lower()
+    low_query = _normalize_ws((query or '').lower())
     pos = low_text.find(low_query) if low_query else -1
     if pos == -1:
-        return ocr_text[:radius].strip() + ('…' if len(ocr_text) > radius else '')
+        return normalized[:radius] + ('…' if len(normalized) > radius else '')
     start = max(0, pos - radius // 2)
-    end   = min(len(ocr_text), pos + len(query) + radius // 2)
-    snippet = ocr_text[start:end].strip()
+    end   = min(len(normalized), pos + len(low_query) + radius // 2)
+    snippet = normalized[start:end].strip()
     if start > 0:
         snippet = '…' + snippet
-    if end < len(ocr_text):
+    if end < len(normalized):
         snippet = snippet + '…'
     return snippet
 
@@ -62,7 +108,10 @@ class NBSSearchController(http.Controller):
                     'error': 'Search query is required'
                 }
             
-            # Build domain for metadata + OCR content search
+            # Build domain for metadata + OCR content search.
+            # OCR clause uses whitespace-normalised SQL for multi-word queries
+            # so that phrases split across lines by the scanner are still found.
+            ocr_clause = _build_ocr_clause(request.env, query)
             domain = [
                 ('state', '=', 'active'),
                 '|', '|', '|', '|', '|', '|',
@@ -72,7 +121,7 @@ class NBSSearchController(http.Controller):
                 ('bl_number', 'ilike', query),
                 ('container_number', 'ilike', query),
                 ('invoice_number', 'ilike', query),
-                ('ocr_text', 'ilike', query),
+                ocr_clause,
             ]
             
             # Apply filters
@@ -180,7 +229,9 @@ class NBSSearchController(http.Controller):
                     'document_count': getattr(f, 'document_count', None),
                 })
 
-            # Documents — search metadata AND OCR-extracted content
+            # Documents — search metadata AND OCR-extracted content.
+            # OCR clause uses whitespace-normalised SQL for multi-word queries.
+            ocr_clause = _build_ocr_clause(request.env.sudo(), q)
             Document = request.env['nbs.document'].sudo()
             doc_domain = [
                 ('state', '=', 'active'),
@@ -192,7 +243,7 @@ class NBSSearchController(http.Controller):
                 ('bl_number', 'ilike', q),
                 ('container_number', 'ilike', q),
                 ('invoice_number', 'ilike', q),
-                ('ocr_text', 'ilike', q),
+                ocr_clause,
             ]
             documents = Document.search(doc_domain, limit=per_page, order='upload_date desc')
             for doc in documents:
