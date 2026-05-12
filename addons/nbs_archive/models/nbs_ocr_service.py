@@ -25,8 +25,12 @@ import json
 import base64
 import logging
 import mimetypes
+import queue
+import threading
+import zipfile
 import urllib.request
 import urllib.error
+import xml.etree.ElementTree as ET
 
 from odoo import models, fields, api
 
@@ -57,8 +61,14 @@ _TEXT_MIME_TYPES = {
     'text/plain', 'text/csv', 'application/csv',
 }
 
-# Maximum raw file size to attempt Vision API OCR (200 MB)
-MAX_OCR_BYTES = 200 * 1024 * 1024
+# Word documents — text extracted directly from the OOXML zip.
+_DOCX_MIME_TYPES = {
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+}
+
+# Maximum raw file size to attempt OCR.  Large PDFs are processed page-chunk
+# by page-chunk so we can safely support the user's 500 MB upper bound.
+MAX_OCR_BYTES = 500 * 1024 * 1024
 
 # Maximum raw bytes per Vision API chunk (10 MB → ~13.3 MB b64, well under 20 MB limit)
 _VISION_CHUNK_BYTES = 10 * 1024 * 1024
@@ -148,7 +158,35 @@ def _extract_text_text(file_bytes: bytes) -> str:
     return file_bytes.decode('utf-8', errors='replace')
 
 
-def _detect_mime(file_name: str, file_data_b64: str) -> str:
+def _extract_docx_text(file_bytes: bytes) -> str:
+    """Extract text from a .docx file without sending it to Vision API."""
+    parts = []
+    namespaces = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
+    xml_paths = ['word/document.xml']
+    try:
+        with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
+            names = set(zf.namelist())
+            xml_paths.extend(
+                name for name in names
+                if name.startswith(('word/header', 'word/footer')) and name.endswith('.xml')
+            )
+            for path in xml_paths:
+                if path not in names:
+                    continue
+                root = ET.fromstring(zf.read(path))
+                texts = [
+                    node.text
+                    for node in root.findall('.//w:t', namespaces)
+                    if node.text
+                ]
+                if texts:
+                    parts.append(' '.join(texts))
+    except Exception as exc:
+        raise RuntimeError(f'Cannot extract text from DOCX file: {exc}') from exc
+    return '\n\n'.join(parts)
+
+
+def _detect_mime_from_bytes(file_name: str, file_bytes: bytes) -> str:
     """Best-effort MIME detection from filename, then magic bytes."""
     if file_name:
         ext = file_name.rsplit('.', 1)[-1].lower() if '.' in file_name else ''
@@ -165,6 +203,7 @@ def _detect_mime(file_name: str, file_data_b64: str) -> str:
             'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             'xls':  'application/vnd.ms-excel',
             'ods':  'application/vnd.oasis.opendocument.spreadsheet',
+            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             'csv':  'text/csv',
             'txt':  'text/plain',
         }
@@ -175,7 +214,7 @@ def _detect_mime(file_name: str, file_data_b64: str) -> str:
             return mime.lower()
     # Sniff magic bytes
     try:
-        head = base64.b64decode(file_data_b64[:20])
+        head = file_bytes[:16]
         if head.startswith(b'%PDF'):
             return 'application/pdf'
         if head[:4] == b'PK\x03\x04':  # ZIP-based: xlsx, ods, docx …
@@ -183,6 +222,15 @@ def _detect_mime(file_name: str, file_data_b64: str) -> str:
     except Exception:
         pass
     return 'application/pdf'
+
+
+def _detect_mime(file_name: str, file_data_b64: str) -> str:
+    """Compatibility wrapper for older callers that still pass base64 data."""
+    try:
+        head = base64.b64decode(file_data_b64[:64])
+    except Exception:
+        head = b''
+    return _detect_mime_from_bytes(file_name, head)
 
 
 def _extract_pdf_text_direct(file_bytes: bytes) -> str:
@@ -346,9 +394,9 @@ def _call_files_annotate(api_key: str, file_bytes: bytes, mime_type: str) -> str
     return _call_files_annotate_chunk(api_key, content_b64, mime_type)
 
 
-def extract_text_via_vision(env, file_data_b64: str, file_name: str = '') -> str:
+def extract_text_from_bytes(env, file_bytes: bytes, file_name: str = '') -> str:
     """
-    Public entry point: extract text from base64-encoded file bytes.
+    Public entry point: extract text from raw file bytes.
 
     Pipeline:
       1. Excel / ODS / CSV  → direct extraction (no API, no size limit)
@@ -359,20 +407,15 @@ def extract_text_via_vision(env, file_data_b64: str, file_name: str = '') -> str
 
     Returns the full extracted text string (empty string on failure).
     """
-    if not file_data_b64:
+    if not file_bytes:
         return ''
 
-    # Strip any data-URL prefix (data:...;base64,<data>)
-    if 'base64,' in file_data_b64:
-        file_data_b64 = file_data_b64.split('base64,', 1)[1]
-
-    mime_type  = _detect_mime(file_name, file_data_b64)
-    file_bytes = base64.b64decode(file_data_b64)
+    mime_type  = _detect_mime_from_bytes(file_name, file_bytes)
     file_size  = len(file_bytes)
 
     _logger.info('OCR: processing %s (%d MB), mime=%s', file_name, file_size // (1024*1024), mime_type)
 
-    # ── Size guard (200 MB limit) ─────────────────────────────────────────────
+    # ── Size guard (500 MB limit) ─────────────────────────────────────────────
     if file_size > MAX_OCR_BYTES:
         _logger.warning(
             'OCR: file %s (%d MB) exceeds MAX_OCR_BYTES (%d MB) — skipping',
@@ -388,6 +431,10 @@ def extract_text_via_vision(env, file_data_b64: str, file_name: str = '') -> str
     if mime_type in _TEXT_MIME_TYPES:
         return _extract_text_text(file_bytes)
 
+    # ── DOCX — direct XML extraction, no Vision needed ────────────────────────
+    if mime_type in _DOCX_MIME_TYPES:
+        return _extract_docx_text(file_bytes)
+
     # ── PDF: try direct text extraction first (handles any size, no API cost) ─
     if mime_type == 'application/pdf':
         direct_text = _extract_pdf_text_direct(file_bytes)
@@ -396,6 +443,12 @@ def extract_text_via_vision(env, file_data_b64: str, file_name: str = '') -> str
                 'OCR: PDF text extracted directly via pypdf (%d chars)', len(direct_text)
             )
             return direct_text
+        if file_size < 1024:
+            _logger.warning(
+                'OCR: PDF %s is too small to contain valid OCR content (%d bytes)',
+                file_name, file_size,
+            )
+            return ''
         # No embedded text → must be a scanned PDF, fall through to Vision API
 
     # ── Vision API for scanned PDFs / TIFFs / images ──────────────────────────
@@ -414,9 +467,28 @@ def extract_text_via_vision(env, file_data_b64: str, file_name: str = '') -> str
         return _call_images_annotate(api_key, content_b64)
     else:
         _logger.warning(
-            'OCR: unsupported MIME type %s for %s — treating as PDF', mime_type, file_name
+            'OCR: unsupported MIME type %s for %s — caching empty OCR text',
+            mime_type, file_name,
         )
-        return _call_files_annotate(api_key, file_bytes, 'application/pdf')
+        return ''
+
+
+def extract_text_via_vision(env, file_data_b64: str, file_name: str = '') -> str:
+    """
+    Compatibility entry point for base64 callers.
+
+    New backend upload/version processing uses ``extract_text_from_bytes`` to
+    avoid duplicating very large files in memory.
+    """
+    if not file_data_b64:
+        return ''
+
+    if 'base64,' in file_data_b64:
+        file_data_b64 = file_data_b64.split('base64,', 1)[1]
+
+    return extract_text_from_bytes(
+        env, base64.b64decode(file_data_b64), file_name,
+    )
 
 
 # ── Odoo model ────────────────────────────────────────────────────────────────
@@ -424,6 +496,11 @@ def extract_text_via_vision(env, file_data_b64: str, file_name: str = '') -> str
 class NBSOCRService(models.Model):
     _name        = 'nbs.ocr.service'
     _description = 'OCR Processing Service (Google Vision)'
+
+    _ocr_queue = queue.Queue()
+    _ocr_queue_lock = threading.Lock()
+    _ocr_worker_thread = None
+    _ocr_queued_ids = set()
 
     name           = fields.Char(string='OCR Job', required=True)
     document_id    = fields.Many2one('nbs.document', string='Document')
@@ -500,12 +577,7 @@ class NBSOCRService(models.Model):
                 _logger.warning('OCR: version %s has no file data', version.id)
                 return False
 
-            # Convert bytes → base64 string for the extraction pipeline
-            file_data_b64 = base64.b64encode(file_bytes).decode('ascii')
-
-            text = extract_text_via_vision(
-                self.env, file_data_b64, file_name
-            )
+            text = extract_text_from_bytes(self.env, file_bytes, file_name)
 
             version.write({
                 'extracted_text':  text,
@@ -572,16 +644,15 @@ class NBSOCRService(models.Model):
 
     def schedule_ocr_background(self, document_id: int):
         """
-        Spawn a daemon thread to run OCR for ``document_id`` without blocking
-        the current HTTP request.  Uses its own DB cursor so the caller's
-        transaction does not need to be committed first.
+        Queue OCR for ``document_id`` without blocking the current HTTP request.
 
         Safe to call from any HTTP handler.  The document's ocr_status is set
-        to 'processing' immediately (still on the HTTP thread) so the FE can
-        show a spinner right away; the actual Vision API work happens in the
-        background thread.
+        to 'processing' immediately so the FE can show a spinner right away.
+
+        A single daemon worker processes the queue serially. This is deliberate:
+        500 MB PDFs are memory-heavy, so one OCR job at a time is much safer
+        than creating one thread per upload during bulk imports.
         """
-        import threading
         import odoo
 
         db_name = self.env.cr.dbname
@@ -593,23 +664,69 @@ class NBSOCRService(models.Model):
         except Exception:
             pass
 
-        def _worker():
+        self._ensure_ocr_worker(db_name)
+        with self._ocr_queue_lock:
+            if document_id in self._ocr_queued_ids:
+                _logger.info('OCR document %s already queued', document_id)
+                return True
+            self._ocr_queued_ids.add(document_id)
+            self._ocr_queue.put((db_name, document_id))
+        _logger.info('OCR document %s queued for background processing', document_id)
+        return True
+
+    @classmethod
+    def _ocr_worker_loop(cls):
+        import odoo
+        import time as _time
+
+        while True:
+            db_name, document_id = cls._ocr_queue.get()
             try:
                 registry = odoo.modules.registry.Registry(db_name)
-                with registry.cursor() as cr:
-                    env = odoo.api.Environment(cr, odoo.SUPERUSER_ID, {})
-                    svc = env['nbs.ocr.service'].sudo()
-                    svc._process_document_async(document_id)
-                    cr.commit()
+                processed = False
+                # Upload scheduling happens before the HTTP transaction commits.
+                # Use fresh cursors while waiting so the worker can see the new
+                # document as soon as it becomes committed.
+                for attempt in range(30):
+                    with registry.cursor() as cr:
+                        env = odoo.api.Environment(cr, odoo.SUPERUSER_ID, {})
+                        doc = env['nbs.document'].sudo().browse(document_id)
+                        if doc.exists() and doc.current_version_id:
+                            env['nbs.ocr.service'].sudo()._process_document_async(document_id)
+                            cr.commit()
+                            processed = True
+                            break
+                    if attempt == 0:
+                        _logger.info(
+                            'OCR worker waiting for document %s transaction commit',
+                            document_id,
+                        )
+                    _time.sleep(2)
+                if not processed:
+                    _logger.warning(
+                        'OCR worker could not see committed document/version for doc %s',
+                        document_id,
+                    )
             except Exception as exc:
-                _logger.error(
-                    'Background OCR thread failed for doc %s: %s', document_id, exc
-                )
+                _logger.error('Background OCR worker failed for doc %s: %s', document_id, exc)
+            finally:
+                with cls._ocr_queue_lock:
+                    cls._ocr_queued_ids.discard(document_id)
+                cls._ocr_queue.task_done()
 
-        t = threading.Thread(target=_worker, daemon=True,
-                             name=f'ocr-doc-{document_id}')
-        t.start()
-        _logger.info('OCR background thread started for document %s', document_id)
+    @classmethod
+    def _ensure_ocr_worker(cls, db_name):
+        del db_name  # kept for call-site clarity; jobs carry db_name in queue.
+        with cls._ocr_queue_lock:
+            if cls._ocr_worker_thread and cls._ocr_worker_thread.is_alive():
+                return
+            cls._ocr_worker_thread = threading.Thread(
+                target=cls._ocr_worker_loop,
+                daemon=True,
+                name='nbs-ocr-worker',
+            )
+            cls._ocr_worker_thread.start()
+            _logger.info('OCR background queue worker started')
 
 
 # ── Keep existing unrelated models in the same file ──────────────────────────
