@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import logging
+import time
 from odoo import http
 from odoo.http import request
 
@@ -114,6 +115,9 @@ class NBSOCRController(http.Controller):
                         'error':       str(exc),
                     })
                     failed_count += 1
+                # Throttle Vision API calls to avoid rate-limit failures.
+                # At 0.5 s per doc the default batch of 50 takes ~25 s total.
+                time.sleep(0.5)
 
             return {
                 'success':    True,

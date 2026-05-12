@@ -274,16 +274,37 @@ def _call_files_annotate(api_key: str, file_bytes: bytes, mime_type: str) -> str
             _logger.info('Vision OCR: %d-page PDF (%d MB)', total_pages, file_size // (1024*1024))
 
             all_texts = []
-            # Group pages into chunks of 5 (Vision API limit) while keeping
-            # each chunk under _VISION_CHUNK_BYTES.
+            # Group pages into chunks of up to 5 pages each while keeping
+            # every chunk strictly under _VISION_CHUNK_BYTES (10 MB).
+            # If a single page already exceeds the limit the chunk still
+            # contains that page alone (we can't split a page further).
             chunk_start = 0
             while chunk_start < total_pages:
-                writer = pypdf.PdfWriter()
-                chunk_bytes = 0
-                page_idx = chunk_start
-                while page_idx < total_pages and page_idx - chunk_start < 5:
+                writer    = pypdf.PdfWriter()
+                page_idx  = chunk_start
+                max_pages = 5
+
+                # Add pages one by one, stopping when the encoded size
+                # would exceed the Vision API limit or we reach max_pages.
+                for _ in range(max_pages):
+                    if page_idx >= total_pages:
+                        break
+                    test_writer = pypdf.PdfWriter()
+                    for p in writer.pages:
+                        test_writer.add_page(p)
+                    test_writer.add_page(reader.pages[page_idx])
+                    test_buf = io.BytesIO()
+                    test_writer.write(test_buf)
+                    if len(test_buf.getvalue()) > _VISION_CHUNK_BYTES and len(writer.pages) > 0:
+                        # Adding this page would exceed the limit — flush current chunk first
+                        break
                     writer.add_page(reader.pages[page_idx])
                     page_idx += 1
+
+                if not writer.pages:
+                    # Single oversized page — add it anyway (best effort)
+                    writer.add_page(reader.pages[chunk_start])
+                    page_idx = chunk_start + 1
 
                 buf = io.BytesIO()
                 writer.write(buf)
