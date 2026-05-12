@@ -225,6 +225,10 @@ def _serialize_supply_po(po):
         vendor_phone = vendor.phone
     elif partner and partner.phone:
         vendor_phone = partner.phone
+    # List and detail both use this serializer; always expose `extra_fields` (object, may be empty).
+    extra_fields_payload = (
+        po.get_extra_fields_dict() if 'extra_fields' in po._fields else {}
+    )
     out = {
         'id': po.id,
         'name': po.name or '',
@@ -252,6 +256,7 @@ def _serialize_supply_po(po):
         'created_at': po.create_date.isoformat() if po.create_date else '',
         'updated_at': po.write_date.isoformat() if po.write_date else '',
         'lines': [_serialize_supply_po_line(line) for line in po.line_ids],
+        'extra_fields': extra_fields_payload,
     }
     F = po._fields
     if 'item_request_id' in F:
@@ -322,8 +327,6 @@ def _serialize_supply_po(po):
                 'currency_id': pc.id if pc else None,
                 'currency_name': pc.name if pc else '',
             })
-    if 'extra_fields' in F:
-        out['extra_fields'] = po.get_extra_fields_dict()
     if 'attachment_ids' in F:
         out['attachment_ids'] = po.attachment_ids.ids
         out['attachment_count'] = int(po.attachment_count or len(po.attachment_ids))

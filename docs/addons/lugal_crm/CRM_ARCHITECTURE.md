@@ -14,7 +14,7 @@ JWT يعيش في **`lugal_auth`** — موديول مخصص لا يحتوي أ�
 لا يأخذ أي موديول الـ JWT من موديول business آخر مثل `nbs_archive`.
 
 ```
-lugal_auth  ←  the ONLY jwt issuer / verifier
+lugal_auth  ←  the ONLY jwt issuer / verifier 
     ↑
 lugal_crm   ←  depends on lugal_auth for auth (not nbs_archive)
 ```

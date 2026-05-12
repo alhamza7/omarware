@@ -1,7 +1,7 @@
 # Supply PO — Frontend integration (REST)
-
+<!-- 
 Short guide to wire **product search** and **create purchase order** in your SPA.  
-Use the same **base URL** and **JWT** as the rest of the Supply CRM app.
+Use the same **base URL** and **JWT** as the rest of the Supply CRM app. -->
 
 ---
 

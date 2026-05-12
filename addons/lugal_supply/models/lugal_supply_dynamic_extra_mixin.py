@@ -50,6 +50,13 @@ class LugalSupplyDynamicExtraMixin(models.AbstractModel):
             return {}
         if isinstance(raw, dict):
             return dict(raw)
+        # Rare: legacy or import stored JSON as a string in the jsonb column.
+        if isinstance(raw, str) and raw.strip():
+            try:
+                loaded = json.loads(raw)
+            except (TypeError, ValueError):
+                return {}
+            return dict(loaded) if isinstance(loaded, dict) else {}
         return {}
 
     def get_dynamic_field(self, key, default=None):
