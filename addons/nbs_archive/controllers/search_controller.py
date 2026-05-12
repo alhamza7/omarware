@@ -231,7 +231,7 @@ class NBSSearchController(http.Controller):
 
             # Documents — search metadata AND OCR-extracted content.
             # OCR clause uses whitespace-normalised SQL for multi-word queries.
-            ocr_clause = _build_ocr_clause(request.env.sudo(), q)
+            ocr_clause = _build_ocr_clause(request.env, q)
             Document = request.env['nbs.document'].sudo()
             doc_domain = [
                 ('state', '=', 'active'),
