@@ -934,6 +934,27 @@ class LugalEmailAccount(models.Model):
         except Exception:
             has_mime_attachments = False
 
+        # ── written_in_arabic detection ───────────────────────────────────────
+        # Primary: honour the X-Written-In-Arabic header set by Lugal at send
+        # time so the FE can render the body RTL on the receiving side.
+        # Fallback: auto-detect Arabic Unicode characters in the body so emails
+        # sent from any client (not just Lugal) are handled correctly.
+        _x_arabic = (msg.get('X-Written-In-Arabic') or '').strip().lower()
+        if _x_arabic == 'true':
+            written_in_arabic = True
+        else:
+            # Auto-detect: check whether plain-text or HTML body contains at
+            # least one Arabic character (U+0600–U+06FF, extended range
+            # U+0750–U+077F, and supplement U+FB50–U+FDFF, U+FE70–U+FEFF).
+            _arabic_re = re.compile(
+                r'[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]'
+            )
+            _body_for_detect = body_text or ''
+            if not _body_for_detect and body_html:
+                # Strip HTML tags for a lightweight text sample
+                _body_for_detect = re.sub(r'<[^>]+>', '', body_html)
+            written_in_arabic = bool(_arabic_re.search(_body_for_detect))
+
         Message = self.env['lugal.email.message'].sudo()
 
         # ── Subject-based thread linking (fallback) ───────────────────────────
@@ -1108,6 +1129,9 @@ class LugalEmailAccount(models.Model):
             # True when the sender included Disposition-Notification-To.
             # The mark-read endpoints use this to send an MDN back.
             'request_read_receipt': _incoming_request_receipt,
+            # Propagated via X-Written-In-Arabic header (Lugal → Lugal)
+            # or auto-detected from Arabic Unicode characters in the body.
+            'written_in_arabic':    written_in_arabic,
         }
         if headers_only:
             if not existing:
@@ -1520,21 +1544,26 @@ class LugalEmailAccount(models.Model):
                     else:
                         domain += [('subject', '=', subject or '(no subject)'), ('date', '=', dt)]
 
+                    # Detect written_in_arabic from X-Written-In-Arabic header
+                    _x_arabic_sent = (msg.get('X-Written-In-Arabic') or '').strip().lower()
+                    _sent_written_in_arabic = (_x_arabic_sent == 'true')
+
                     if not Msg.search_count(domain):
                         Msg.create({
-                            'account_id':   self.id,
-                            'folder':       'sent',
-                            'imap_uid':     uid_int,
-                            'subject':      subject or '(no subject)',
-                            'from_name':    from_name or '',
-                            'from_address': from_addr or '',
-                            'to_addresses': _json.dumps(to_list),
-                            'cc_addresses': _json.dumps(cc_list),
-                            'message_id':   message_id or False,
-                            'date':         dt,
-                            'is_read':      True,
-                            'smtp_delivered': True,
-                            'body_fetched': False,
+                            'account_id':        self.id,
+                            'folder':            'sent',
+                            'imap_uid':          uid_int,
+                            'subject':           subject or '(no subject)',
+                            'from_name':         from_name or '',
+                            'from_address':      from_addr or '',
+                            'to_addresses':      _json.dumps(to_list),
+                            'cc_addresses':      _json.dumps(cc_list),
+                            'message_id':        message_id or False,
+                            'date':              dt,
+                            'is_read':           True,
+                            'smtp_delivered':    True,
+                            'body_fetched':      False,
+                            'written_in_arabic': _sent_written_in_arabic,
                         })
 
                     if uid_int > max_seen:

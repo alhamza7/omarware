@@ -2160,6 +2160,7 @@ class LugalEmailController(http.Controller):
                 msg_id=msg.id, attachment_ids=attachment_ids,
                 importance=importance_raw,
                 request_read_receipt=request_read_receipt,
+                written_in_arabic=written_in_arabic,
             )
 
             resp_data = _message_to_dict(msg)
@@ -2292,6 +2293,7 @@ class LugalEmailController(http.Controller):
                 msg_id=msg.id, attachment_ids=attachment_ids,
                 importance=importance_raw,
                 request_read_receipt=request_read_receipt,
+                written_in_arabic=written_in_arabic,
             )
             resp_data = _message_to_dict(msg)
             resp_data['smtp_pending'] = True
@@ -2487,6 +2489,7 @@ class LugalEmailController(http.Controller):
                 msg_id=msg.id, attachment_ids=attachment_ids,
                 importance=importance_raw,
                 request_read_receipt=request_read_receipt,
+                written_in_arabic=written_in_arabic,
             )
             resp_data = _message_to_dict(msg)
             resp_data['smtp_pending'] = True
@@ -2561,6 +2564,7 @@ class LugalEmailController(http.Controller):
                 msg_id=msg.id, attachment_ids=fwd_attachment_ids,
                 importance=importance_raw,
                 request_read_receipt=request_read_receipt,
+                written_in_arabic=written_in_arabic,
             )
             resp_data = _message_to_dict(msg)
             resp_data['smtp_pending'] = True
@@ -3232,6 +3236,7 @@ class LugalEmailController(http.Controller):
                 msg_id=draft.id, attachment_ids=all_att_ids,
                 importance=importance_raw,
                 request_read_receipt=request_read_receipt,
+                written_in_arabic=written_in_arabic,
             )
 
             resp_data = _message_to_dict(draft)
@@ -4548,7 +4553,8 @@ def _read_att_parts(attachment_ids, cr, db_name):
 
 def _build_mime_message(from_header, to_list, subject, body_html, body_text,
                         cc, att_parts, from_address, importance='normal',
-                        inline_parts=None, request_read_receipt=False):
+                        inline_parts=None, request_read_receipt=False,
+                        written_in_arabic=False):
     """
     Build a MIME message from pre-loaded data.
 
@@ -4644,6 +4650,12 @@ def _build_mime_message(from_header, to_list, subject, body_html, body_text,
     if request_read_receipt:
         mime_msg['Disposition-Notification-To'] = from_address
         mime_msg['Return-Receipt-To']           = from_address
+
+    # Propagate Arabic-compose flag to the recipient's inbox so the FE can
+    # render the body RTL.  This is a private Lugal extension header; non-Lugal
+    # clients silently ignore it.
+    if written_in_arabic:
+        mime_msg['X-Written-In-Arabic'] = 'true'
 
     return mime_msg.as_string(), generated_msg_id
 
@@ -4935,7 +4947,7 @@ def _send_mdn_async(acc, to_address, original_message_id, original_subject, reci
 
 def _send_via_smtp_async(acc, to_list, subject, body_html, body_text, cc=None, bcc=None,
                          msg_id=None, attachment_ids=None, importance='normal',
-                         request_read_receipt=False):
+                         request_read_receipt=False, written_in_arabic=False):
     """
     Fire-and-forget SMTP send.
 
@@ -4964,12 +4976,13 @@ def _send_via_smtp_async(acc, to_list, subject, body_html, body_text, cc=None, b
     from_address  = acc.email_address
     display_name  = (acc.display_name_field or '').strip()
     from_header   = f'{display_name} <{from_address}>' if display_name else from_address
-    att_ids       = [int(i) for i in (attachment_ids or [])]
-    all_recipients = list(to_list) + list(cc or []) + list(bcc or [])
+    att_ids          = [int(i) for i in (attachment_ids or [])]
+    all_recipients   = list(to_list) + list(cc or []) + list(bcc or [])
+    _written_arabic  = bool(written_in_arabic)   # capture primitive before thread
 
     _logger.info(
-        'SMTP async queued: from=%s to=%s attachments=%s msg_id=%s',
-        from_address, all_recipients, att_ids, msg_id,
+        'SMTP async queued: from=%s to=%s attachments=%s msg_id=%s written_in_arabic=%s',
+        from_address, all_recipients, att_ids, msg_id, _written_arabic,
     )
 
     def _bg():
@@ -4987,6 +5000,7 @@ def _send_via_smtp_async(acc, to_list, subject, body_html, body_text, cc=None, b
                 from_address, importance=importance,
                 inline_parts=inline_parts,
                 request_read_receipt=request_read_receipt,
+                written_in_arabic=_written_arabic,
             )
 
             delivered, error_msg, refused = _do_smtp_send(
