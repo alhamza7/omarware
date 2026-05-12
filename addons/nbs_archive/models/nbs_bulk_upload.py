@@ -457,15 +457,14 @@ class NBSBulkUploadJob(models.Model):
 
         document.write({'current_version_id': version.id})
 
-        # ── Queue async OCR — run in background thread, never block the upload ─
-        if self.auto_ocr:
-            try:
-                self.env['nbs.ocr.service'].sudo().schedule_ocr_background(document.id)
-            except Exception as _ocr_err:
-                _logger.warning(
-                    'Failed to queue async OCR for document %s (%s): %s',
-                    document.id, file_name, _ocr_err,
-                )
+        # ── Queue async OCR — mandatory backend cache, never block the upload ─
+        try:
+            self.env['nbs.ocr.service'].sudo().schedule_ocr_background(document.id)
+        except Exception as _ocr_err:
+            _logger.warning(
+                'Failed to queue async OCR for document %s (%s): %s',
+                document.id, file_name, _ocr_err,
+            )
 
         _logger.info(
             'Bulk upload: document %s (%s) role=%s folder=%s',
