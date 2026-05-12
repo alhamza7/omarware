@@ -8,11 +8,10 @@ from odoo.addons.lugal_auth.controllers._auth import ensure_jwt_user_id
 
 _logger = logging.getLogger(__name__)
 
-# Keep the WebSocket session bridge valid across long inactive workdays.
-# The user asked for background tabs to stay connected for at least 24 hours;
-# one week matches Odoo's default server-side session lifetime and avoids the
-# FE refreshing/rotating the WS cookie after only 1 hour while a tab is idle.
-SESSION_TTL = 60 * 60 * 24 * 7
+# Keep the WebSocket session bridge valid across long inactive browser sessions.
+# Product requirement: do not drop an inactive tab merely because the user works
+# elsewhere; explicit logout/user switch still invalidates the session.
+SESSION_TTL = 60 * 60 * 24 * 365
 
 
 class WsSessionController(http.Controller):

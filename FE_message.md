@@ -4,12 +4,12 @@
 
 ### 1. WebSocket/session lifetime
 
-Backend now keeps the Odoo WebSocket session bridge valid for one week instead of advertising/using a 1-hour session hint.
+Backend now keeps the Odoo WebSocket session bridge valid for one year instead of advertising/using a 1-hour session hint.
 
 What changed:
-- `POST /api/crm/ws/session` now returns `expires_in: 604800` and sets `session_id` cookie `Max-Age=604800`.
-- `lugal_ws_migration` sets `sessions.max_inactivity_seconds=604800`.
-- `odoo_simple.conf` sets `websocket_keep_alive_timeout=604800`.
+- `POST /api/crm/ws/session` now returns `expires_in: 31536000` and sets `session_id` cookie `Max-Age=31536000`.
+- `lugal_ws_migration` sets `sessions.max_inactivity_seconds=31536000`.
+- `odoo_simple.conf` sets `websocket_keep_alive_timeout=31536000`.
 - Logout/user-switch still closes stale sockets through the existing `session.reconnect_required` / `4001` path.
 
 Why the old behavior failed:

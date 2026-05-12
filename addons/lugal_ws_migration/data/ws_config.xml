@@ -10,12 +10,12 @@
             <value eval="'ws.rollout.enabled'"/>
             <value eval="'True'"/>
         </function>
-        <!-- Keep authenticated WS sessions valid for one week (server side).
+        <!-- Keep authenticated WS sessions valid for one year (server side).
              The browser cookie/expires_in in ws_session.py uses the same value.
              Logout still invalidates the session immediately. -->
         <function model="ir.config_parameter" name="set_param">
             <value eval="'sessions.max_inactivity_seconds'"/>
-            <value eval="'604800'"/>
+            <value eval="'31536000'"/>
         </function>
     </data>
 </odoo>
