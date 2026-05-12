@@ -3,7 +3,7 @@
 # Component: Lugal Email — module manifest (lugal_email / __manifest__.py)
 {
     'name': 'Lugal Email',
-    'version': '1.1.2',
+    'version': '1.1.3',
     'category': 'Communication',
     'summary': 'IMAP/SMTP email engine for the Lugal suite — accounts, inbox, send, notifications',
     'description': """

@@ -1,6 +1,6 @@
 {
     'name': 'Lugal WS Migration',
-    'version': '1.0.0',
+    'version': '1.0.1',
     'summary': 'WebSocket migration layer — sandbox/migration branch only',
     'description': """
         Provides:

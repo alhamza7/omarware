@@ -58,6 +58,12 @@ class LugalEmailMessage(models.Model):
     # ── Body ──────────────────────────────────────────────────────────────────
     body_html = fields.Html(string='Body HTML', sanitize=False)
     body_text = fields.Text(string='Body Text')
+    written_in_arabic = fields.Boolean(
+        string='Written in Arabic / RTL',
+        default=False,
+        index=True,
+        help='Frontend compose hint: render this outbound message right-to-left when true.',
+    )
 
     # ── Status ────────────────────────────────────────────────────────────────
     is_read      = fields.Boolean(string='Read',      default=False, index=True)

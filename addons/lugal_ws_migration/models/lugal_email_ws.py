@@ -78,6 +78,7 @@ def _build_message_preview(record):
         'is_starred':     record.is_starred,
         'is_flagged':     record.is_flagged,
         'is_important':   record.is_important,
+        'written_in_arabic': bool(getattr(record, 'written_in_arabic', False)),
         'is_draft':       record.is_draft,
         'smtp_delivered': record.smtp_delivered,
         'smtp_error':     record.smtp_error or None,

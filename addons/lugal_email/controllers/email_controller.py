@@ -99,6 +99,10 @@ _IMAP_THROTTLE_SECONDS = 30        # min gap between syncs when inbox has messag
 _IMAP_THROTTLE_EMPTY_SECONDS = 20  # min gap when inbox is empty
 
 
+def _truthy(v):
+    return str(v or '').lower() in ('1', 'true', 'yes', 'on')
+
+
 def _needs_imap_sync(acc, force=False):
     """
     Return True if this account is overdue for an IMAP sync.
@@ -633,6 +637,7 @@ def _message_to_dict(msg, full=False):
         'is_important':   msg.is_important,
         'is_draft':       msg.is_draft,
         'is_mentioned':   msg.is_mentioned,
+        'written_in_arabic': bool(getattr(msg, 'written_in_arabic', False)),
         'message_size':   msg.message_size or 0,
         'smtp_delivered': msg.smtp_delivered,
         'smtp_error':     msg.smtp_error or None,
@@ -1235,7 +1240,6 @@ class LugalEmailController(http.Controller):
                 or params.get('search')
                 or ''
             ).strip()
-            starred     = params.get('starred')
             linked_model = params.get('linked_model')
             linked_id   = params.get('linked_id')
             limit       = int(params.get('limit', 50))
@@ -1255,13 +1259,23 @@ class LugalEmailController(http.Controller):
                 except (TypeError, ValueError):
                     return _json_response({'success': False, 'error': 'message_id must be an integer'}, 400)
 
-            # Optional server-side filter params
-            filter_unread         = params.get('unread')
-            filter_flagged        = params.get('flagged')
-            filter_important      = params.get('important')
-            filter_has_attachment = params.get('has_attachments')
-            filter_mentioned      = params.get('mentioned')
-            filter_sent_to_me     = params.get('sent_to_me')
+            def _first_param(*names):
+                for name in names:
+                    if name in params:
+                        return params.get(name)
+                return None
+
+            # Optional server-side filter params.  Support both legacy short
+            # names and FE contract names (`filter_*`) used by ConversationsEmail.
+            filter_unread         = _first_param('filter_unread', 'unread')
+            filter_flagged        = _first_param('filter_flagged', 'flagged')
+            filter_starred        = _first_param('filter_starred', 'starred')
+            filter_important      = _first_param('filter_important', 'important')
+            filter_has_attachment = _first_param(
+                'filter_has_attachment', 'filter_has_attachments', 'has_attachments',
+            )
+            filter_mentioned      = _first_param('filter_mentioned', 'mentioned')
+            filter_sent_to_me     = _first_param('filter_sent_to_me', 'sent_to_me')
 
             # scope to this user's accounts
             user_accounts = _get_user_accounts(uid)
@@ -1406,21 +1420,19 @@ class LugalEmailController(http.Controller):
                 base_domain.append(('account_id', '=', requested_account_id))
             if query:
                 base_domain += ['|', ('subject', 'ilike', query), ('body_text', 'ilike', query)]
-            if starred:
-                base_domain.append(('is_starred', '=', True))
             if linked_model and linked_id:
                 base_domain += [('linked_model', '=', linked_model), ('linked_record_id', '=', int(linked_id))]
 
             # Optional server-side filters
-            def _truthy(v):
-                return str(v or '').lower() in ('1', 'true', 'yes')
-
+            filter_domain = []
             if _truthy(filter_unread):
-                base_domain.append(('is_read', '=', False))
+                filter_domain.append(('is_read', '=', False))
             if _truthy(filter_flagged):
-                base_domain.append(('is_starred', '=', True))
+                filter_domain.append(('is_flagged', '=', True))
+            if _truthy(filter_starred):
+                filter_domain.append(('is_starred', '=', True))
             if _truthy(filter_important):
-                base_domain.append(('is_important', '=', True))
+                filter_domain.append(('is_important', '=', True))
             # Folder paths created by the "important from sender" template must
             # not display stale/non-important duplicates.  This keeps
             # INBOX.<sender>.Important semantically consistent even if older
@@ -1428,23 +1440,25 @@ class LugalEmailController(http.Controller):
             if is_custom_mailbox:
                 _folder_tail = (folder_q or '').replace('/', '.').split('.')[-1].lower()
                 if _folder_tail == 'important':
-                    base_domain.append(('is_important', '=', True))
+                    filter_domain.append(('is_important', '=', True))
             if _truthy(filter_mentioned):
-                base_domain.append(('is_mentioned', '=', True))
+                filter_domain.append(('is_mentioned', '=', True))
             if _truthy(filter_has_attachment):
                 att_msg_ids = request.env['ir.attachment'].sudo().search([
                     ('res_model', '=', 'lugal.email.message'),
                 ]).mapped('res_id')
-                base_domain.append(('id', 'in', att_msg_ids))
-            if filter_sent_to_me == '1':
+                filter_domain.append(('id', 'in', att_msg_ids))
+            if _truthy(filter_sent_to_me):
                 user_emails = [a.email_address for a in user_accounts if a.email_address]
                 if user_emails:
                     to_clauses = [('to_addresses', 'ilike', e) for e in user_emails]
                     if len(to_clauses) == 1:
-                        base_domain += to_clauses
+                        filter_domain += to_clauses
                     else:
                         or_clause = ['|'] * (len(to_clauses) - 1) + to_clauses
-                        base_domain += or_clause
+                        filter_domain += or_clause
+
+            base_domain += filter_domain
 
             Msg   = request.env['lugal.email.message'].sudo()
             total = Msg.search_count(base_domain)
@@ -1514,7 +1528,7 @@ class LugalEmailController(http.Controller):
                     ('account_id', 'in', account_ids),
                     ('is_deleted', '=', False),
                     ('thread_id',  'in', thread_ids_on_page),
-                ], order='date asc, id asc')
+                ] + filter_domain, order='date asc, id asc')
 
                 # Group by thread_id in Python — O(n) over thread members
                 from collections import defaultdict as _defaultdict
@@ -2066,6 +2080,7 @@ class LugalEmailController(http.Controller):
             subject    = body.get('subject', '')
             body_html  = body.get('body_html', body.get('body', ''))
             body_text  = body.get('body_text', '')
+            written_in_arabic = _truthy(body.get('written_in_arabic'))
             cc_emails  = _norm_addr_list(body.get('cc', []))
             bcc_emails = _norm_addr_list(body.get('bcc', []))
 
@@ -2100,6 +2115,7 @@ class LugalEmailController(http.Controller):
                 'bcc_addresses':       json.dumps([{'email': e} for e in bcc_emails]),
                 'body_html':           body_html,
                 'body_text':           body_text,
+                'written_in_arabic':   written_in_arabic,
                 'is_read':             True,
                 'body_fetched':        True,
                 'date':                __import__('odoo').fields.Datetime.now(),
@@ -2196,6 +2212,7 @@ class LugalEmailController(http.Controller):
             # the quoted block is assembled here so raw HTML never appears in the editor.
             user_html   = (body.get('body_html', '') or '').strip()
             user_text   = (body.get('body_text', '') or '').strip()
+            written_in_arabic = _truthy(body.get('written_in_arabic'))
 
             # skip_auto_quote=true → FE has already embedded the quoted block
             # inside body_html itself.  In that case, don't append it a second
@@ -2234,6 +2251,7 @@ class LugalEmailController(http.Controller):
                 'bcc_addresses':       json.dumps([{'email': e} for e in _norm_addr_list(body.get('bcc', []))]),
                 'body_html':           final_html,
                 'body_text':           final_text,
+                'written_in_arabic':   written_in_arabic,
                 'is_read':             True,
                 'body_fetched':        True,
                 'is_important':        importance_raw == 'high',
@@ -2395,6 +2413,7 @@ class LugalEmailController(http.Controller):
             # Build complete email body: user's content + quoted original.
             user_html   = (body.get('body_html', '') or '').strip()
             user_text   = (body.get('body_text', '') or '').strip()
+            written_in_arabic = _truthy(body.get('written_in_arabic'))
 
             skip_auto_quote = bool(body.get('skip_auto_quote', False))
             if not skip_auto_quote and user_html:
@@ -2423,6 +2442,7 @@ class LugalEmailController(http.Controller):
                 'bcc_addresses':       json.dumps([{'email': e} for e in bcc_addrs]),
                 'body_html':           final_html,
                 'body_text':           final_text,
+                'written_in_arabic':   written_in_arabic,
                 'is_read':             True,
                 'body_fetched':        True,
                 'is_important':        importance_raw == 'high',
@@ -2481,6 +2501,7 @@ class LugalEmailController(http.Controller):
             bcc_fwd  = _norm_addr_list(body.get('bcc', []))
             subject = f"Fwd: {orig.subject or ''}"
             importance_raw = (body.get('importance') or 'normal').lower()
+            written_in_arabic = _truthy(body.get('written_in_arabic'))
             # Combine the user's intro text (if any) with the properly formatted
             # quoted original message.  Using _build_quoted_html gives a consistent
             # "---------- Forwarded message ----------" style header.
@@ -2501,6 +2522,7 @@ class LugalEmailController(http.Controller):
                 'bcc_addresses':       json.dumps([{'email': e} for e in bcc_fwd]),
                 'body_html':           fwd_body,
                 'body_text':           body.get('body_text', ''),
+                'written_in_arabic':   written_in_arabic,
                 'is_read':             True,
                 'body_fetched':        True,
                 'is_important':        importance_raw == 'high',
@@ -2937,6 +2959,7 @@ class LugalEmailController(http.Controller):
             subject    = body.get('subject', '')
             body_html  = body.get('body_html', body.get('body', ''))
             body_text  = body.get('body_text', '')
+            written_in_arabic = _truthy(body.get('written_in_arabic'))
             att_ids    = body.get('attachment_ids', [])
 
             # Resolve account
@@ -2964,6 +2987,7 @@ class LugalEmailController(http.Controller):
                 'subject':      subject,
                 'body_html':    body_html,
                 'body_text':    body_text,
+                'written_in_arabic': written_in_arabic,
                 'date':         __import__('odoo').fields.Datetime.now(),
             }
 
@@ -3038,6 +3062,8 @@ class LugalEmailController(http.Controller):
             if 'body_html' in body: vals['body_html']  = body.get('body_html', '')
             if 'body_text' in body: vals['body_text']  = body.get('body_text', '')
             if 'body'      in body: vals['body_html']  = body.get('body', '')
+            if 'written_in_arabic' in body:
+                vals['written_in_arabic'] = _truthy(body.get('written_in_arabic'))
 
             if vals:
                 draft.write(vals)
@@ -3134,6 +3160,11 @@ class LugalEmailController(http.Controller):
             subject        = body.get('subject', draft.subject or '')
             body_html      = body.get('body_html', body.get('body', draft.body_html or ''))
             body_text      = body.get('body_text', draft.body_text or '')
+            written_in_arabic = (
+                _truthy(body.get('written_in_arabic'))
+                if 'written_in_arabic' in body
+                else bool(draft.written_in_arabic)
+            )
             importance_raw       = (body.get('importance') or 'normal').lower()
             request_read_receipt = bool(body.get('request_read_receipt', False))
 
@@ -3165,6 +3196,7 @@ class LugalEmailController(http.Controller):
                 'bcc_addresses':         json.dumps([{'email': e} for e in bcc_emails]),
                 'body_html':             body_html,
                 'body_text':             body_text,
+                'written_in_arabic':     written_in_arabic,
                 'is_important':          importance_raw == 'high',
                 'date':                  _odoo.fields.Datetime.now(),
                 'request_read_receipt':  request_read_receipt,

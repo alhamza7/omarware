@@ -8,7 +8,11 @@ from odoo.addons.lugal_auth.controllers._auth import ensure_jwt_user_id
 
 _logger = logging.getLogger(__name__)
 
-SESSION_TTL = 3600  # 1 hour hint — actual Odoo session lives 7 days (SESSION_LIFETIME)
+# Keep the WebSocket session bridge valid across long inactive workdays.
+# The user asked for background tabs to stay connected for at least 24 hours;
+# one week matches Odoo's default server-side session lifetime and avoids the
+# FE refreshing/rotating the WS cookie after only 1 hour while a tab is idle.
+SESSION_TTL = 60 * 60 * 24 * 7
 
 
 class WsSessionController(http.Controller):
@@ -122,7 +126,7 @@ class WsSessionController(http.Controller):
             # opens the WebSocket through the Vite proxy on the same origin.
             # Also set a Max-Age so the session persists across tabs/reopens.
             cookie_header = (
-                f'session_id={session.sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400'
+                f'session_id={session.sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL}'
             )
 
             return _json(
