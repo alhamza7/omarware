@@ -52,6 +52,8 @@ _logger = logging.getLogger(__name__)
 # ── Cross-process ownership ───────────────────────────────────────────────────
 _I_AM_OWNER: bool = False
 _OWNER_PARAM = 'lugal.idle.supervisor.pid'
+_OWNER_HEARTBEAT_PARAM = 'lugal.idle.supervisor.heartbeat'
+_OWNER_STALE_SECS = 90
 
 # ── Thread registry ───────────────────────────────────────────────────────────
 # Key: (imap_host, imap_port, username)
@@ -106,6 +108,27 @@ def _pid_alive(pid: int) -> bool:
         return False
 
 
+def _heartbeat_is_fresh(value) -> bool:
+    """True when the poll owner heartbeat was updated recently."""
+    try:
+        return (time.time() - float(value or 0)) <= _OWNER_STALE_SECS
+    except (TypeError, ValueError):
+        return False
+
+
+def _write_owner_heartbeat(cr):
+    """Persist an owner heartbeat so another worker can recover stale ownership."""
+    now = str(time.time())
+    cr.execute(
+        """
+        INSERT INTO ir_config_parameter (key, value)
+        VALUES (%s, %s)
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+        """,
+        (_OWNER_HEARTBEAT_PARAM, now),
+    )
+
+
 def _sync_account(acc_id: int, db_name: str):
     """
     Open a short-lived DB cursor and run action_sync() for one account.
@@ -158,6 +181,13 @@ def _run_poll_watcher(
             break
 
         current_acc_ids = list(_thread_acc_ids.get(cred_key, set(acc_ids)))
+        try:
+            from odoo.modules.registry import Registry as _Registry
+            with _Registry(db_name).cursor() as cr:
+                _write_owner_heartbeat(cr)
+                cr.commit()
+        except Exception:
+            pass
         for acc_id in current_acc_ids:
             if stop_event.is_set():
                 break
@@ -261,6 +291,7 @@ class LugalEmailIdleWatcher(models.Model):
                     )
                     stop_all()
                     return 0
+                _write_owner_heartbeat(cr)
             except Exception:
                 pass
 
@@ -270,36 +301,44 @@ class LugalEmailIdleWatcher(models.Model):
             try:
                 with cr.savepoint():
                     cr.execute(
-                        "SELECT value FROM ir_config_parameter "
-                        "WHERE key = %s FOR UPDATE NOWAIT",
-                        (_OWNER_PARAM,),
+                        "SELECT key, value FROM ir_config_parameter "
+                        "WHERE key IN %s FOR UPDATE NOWAIT",
+                        ((tuple([_OWNER_PARAM, _OWNER_HEARTBEAT_PARAM])),),
                     )
-                    row = cr.fetchone()
-                    stored = (row[0] if row else '') or ''
+                    rows = dict(cr.fetchall())
+                    row = (_OWNER_PARAM, rows.get(_OWNER_PARAM)) if _OWNER_PARAM in rows else None
+                    stored = (rows.get(_OWNER_PARAM) or '')
+                    heartbeat = rows.get(_OWNER_HEARTBEAT_PARAM)
                     if stored:
                         try:
                             owner_pid = int(stored)
-                            if _pid_alive(owner_pid) and owner_pid != my_pid:
+                            owner_alive = _pid_alive(owner_pid)
+                            heartbeat_fresh = _heartbeat_is_fresh(heartbeat)
+                            if owner_alive and owner_pid != my_pid and heartbeat_fresh:
                                 _logger.debug(
                                     'Poll supervisor: pid=%d owns threads — '
                                     'this worker (pid=%d) skips',
                                     owner_pid, my_pid,
                                 )
                                 return 0
+                            if owner_alive and owner_pid != my_pid and not heartbeat_fresh:
+                                _logger.warning(
+                                    'Poll supervisor: stealing stale owner pid=%d '
+                                    '(heartbeat older than %ss)',
+                                    owner_pid, _OWNER_STALE_SECS,
+                                )
                         except (ValueError, TypeError):
                             pass
                     # Claim ownership while still holding the row lock.
-                    if row:
-                        cr.execute(
-                            "UPDATE ir_config_parameter SET value = %s WHERE key = %s",
-                            (str(my_pid), _OWNER_PARAM),
-                        )
-                    else:
-                        cr.execute(
-                            "INSERT INTO ir_config_parameter (key, value) "
-                            "VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = %s",
-                            (_OWNER_PARAM, str(my_pid), str(my_pid)),
-                        )
+                    cr.execute(
+                        """
+                        INSERT INTO ir_config_parameter (key, value)
+                        VALUES (%s, %s)
+                        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+                        """,
+                        (_OWNER_PARAM, str(my_pid)),
+                    )
+                    _write_owner_heartbeat(cr)
                     claimed = True
             except Exception:
                 _logger.debug(
@@ -463,3 +502,4 @@ class LugalEmailIdleWatcher(models.Model):
                     'interval': _POLL_INTERVAL_SECS,
                 })
         return result
+# TODO: remove - cherry-pick marker

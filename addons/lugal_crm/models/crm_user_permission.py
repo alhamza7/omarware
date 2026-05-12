@@ -118,3 +118,4 @@ class LugalCrmUserPermission(models.Model):
             return existing
         vals['user_id'] = user_id
         return self.create(vals)
+# TODO: remove - cherry-pick marker

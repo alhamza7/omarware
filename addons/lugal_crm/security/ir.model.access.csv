@@ -29,3 +29,4 @@ access_lugal_supply_typing_user,lugal.supply.typing user,model_lugal_supply_typi
 access_lugal_supply_story_user,lugal.supply.story user,model_lugal_supply_story,base.group_user,1,1,1,1
 access_lugal_crm_permission_template_user,lugal.crm.permission.template user,model_lugal_crm_permission_template,base.group_user,1,1,1,1
 access_lugal_crm_user_permission_user,lugal.crm.user.permission user,model_lugal_crm_user_permission,base.group_user,1,1,1,1
+# TODO: remove - cherry-pick marker

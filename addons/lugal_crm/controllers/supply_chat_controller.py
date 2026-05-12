@@ -325,7 +325,7 @@ def _resolve_thread(uid, thread_id, recipient_ids, group_name=None):
     return None, 'Provide thread_id or recipient_ids'
 
 
-def _notify_participants_resubscribe(conv, participant_ids):
+def _notify_participants_resubscribe(conv, participant_ids, action='resubscribe'):
     """
     After a NEW conversation is created, tell every participant's frontend to
     call busClient.resubscribe() so Odoo adds supply_chat.<conv_id> to their
@@ -341,6 +341,7 @@ def _notify_participants_resubscribe(conv, participant_ids):
         'conversation_id': conv.id,
         'conversation_type': conv.type,
         'name': conv.name or '',
+        'action': action,
     }
     for uid in participant_ids:
         try:
@@ -351,6 +352,15 @@ def _notify_participants_resubscribe(conv, participant_ids):
             )
         except Exception as exc:
             _logger.debug('_notify_participants_resubscribe bus error uid=%s: %s', uid, exc)
+
+
+def _notify_membership_changed(conv, user_ids, action):
+    """
+    Tell affected users to refresh their bus channel subscription after group
+    membership changes.  This keeps long-lived tabs aligned with the backend
+    channel list without requiring logout/login.
+    """
+    _notify_participants_resubscribe(conv, user_ids, action=action)
 
 
 def _publish_new_message(msg, uid, conv):
@@ -530,6 +540,7 @@ class SupplyChatController(http.Controller):
                 return {'success': False, 'error': 'Cannot leave team channels'}
             if uid in conv.participant_ids.ids:
                 conv.write({'participant_ids': [(3, uid)]})
+                _notify_membership_changed(conv, [uid], action='removed')
             return {'success': True}
         except Exception as e:
             return crm_error(e, 'conversation_leave')
@@ -798,6 +809,7 @@ class SupplyChatController(http.Controller):
             if target_uid == creator_id and not is_self_remove:
                 return {'success': False, 'error': 'Cannot remove the group creator'}
             conv.write({'participant_ids': [(3, target_uid)]})
+            _notify_membership_changed(conv, [target_uid], action='removed')
             return {'success': True, 'data': _serialize_conversation(conv, uid)}
         except Exception as e:
             return crm_error(e, 'members_remove')
@@ -1593,3 +1605,4 @@ class SupplyChatController(http.Controller):
             }
         except Exception as e:
             return crm_error(e, 'bus_channels')
+# TODO: remove - cherry-pick marker

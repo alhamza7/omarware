@@ -1596,6 +1596,32 @@ class LugalEmailAccount(models.Model):
             self.write({'sync_status': 'error', 'sync_error_msg': 'Missing app password on email account'})
             return {'sync_status': 'error', 'message': 'Missing app password on email account'}
 
+        # Cross-process guard: HTTP reconnects, notifications polling, cron, and
+        # the poll watcher can all request a sync at the same time after a long
+        # idle period or service restart.  Only one worker should talk to IMAP
+        # and update lugal.email.account state for this mailbox at a time.
+        try:
+            self.env.cr.execute(
+                'SELECT pg_try_advisory_xact_lock(%s)',
+                [_pg_advisory_lock_key('lugal.email.account.action_sync', self.id)],
+            )
+            if not bool((self.env.cr.fetchone() or [False])[0]):
+                _logger.info(
+                    'action_sync: account %s skipped because another worker is syncing it',
+                    self.id,
+                )
+                return {
+                    'sync_status': self.sync_status or 'syncing',
+                    'skipped': True,
+                    'reason': 'already_syncing',
+                }
+        except Exception:
+            _logger.debug(
+                'action_sync: advisory lock failed account=%s; continuing without lock',
+                self.id,
+                exc_info=True,
+            )
+
         if not Msg.search_count([
             ('account_id', '=', self.id), ('folder', '=', 'inbox'), ('is_deleted', '=', False),
         ]):
@@ -2103,3 +2129,4 @@ class LugalEmailAccount(models.Model):
         except Exception:
             _logger.exception('fetch_message_body failed for msg=%s account=%s', message_id, self.id)
         return msg
+# TODO: remove - cherry-pick marker

@@ -35,3 +35,4 @@ class LugalSupplyTyping(models.Model):
         ('user_conv_unique', 'UNIQUE(user_id, conversation_id)',
          'Only one typing state per user per conversation.'),
     ]
+# TODO: remove - cherry-pick marker

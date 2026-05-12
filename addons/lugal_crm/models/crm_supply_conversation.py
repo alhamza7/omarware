@@ -72,3 +72,4 @@ class LugalSupplyConversation(models.Model):
 
     # Unread count per user is tracked at message level
     # (computed on-the-fly via supply messages)
+# TODO: remove - cherry-pick marker

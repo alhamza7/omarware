@@ -207,3 +207,4 @@ class LugalEmailMessageWs(models.Model):
         if not self.env.context.get('lugal_email_defer_new_message_ws'):
             records._lugal_send_new_email_notification()
         return records
+# TODO: remove - cherry-pick marker

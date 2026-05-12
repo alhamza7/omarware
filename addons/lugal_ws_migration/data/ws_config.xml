@@ -18,4 +18,5 @@
             <value eval="'31536000'"/>
         </function>
     </data>
+    <!-- TODO: remove - cherry-pick marker -->
 </odoo>

@@ -123,3 +123,4 @@ class LugalSupplyStoryViewReceipt(models.Model):
     _sql_constraints = [
         ('unique_story_user', 'UNIQUE(story_id, user_id)', 'A user can only have one view receipt per story'),
     ]
+# TODO: remove - cherry-pick marker
