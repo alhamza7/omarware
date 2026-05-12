@@ -22,6 +22,8 @@ FE requirement:
 - Treat close code `4001` as session expired/logged out and re-run the session bridge if JWT is still valid.
 - Treat close code `4002` as transient network/keepalive and reconnect with backoff.
 - Do not intentionally stop/recreate the WS just because a tab is inactive; only close on logout or explicit user switch.
+- When the FE receives `supply.chat.resubscribe` on `supply_user.<uid>`, immediately refresh/resubscribe bus channels. This now fires both when a new conversation is created and when a user is added to an existing group.
+- If the FE still uses `/api/crm/supply/chat/bus_channels` for a polling fallback, it now returns `supply_chat.<id>`, `supply_user.<uid>`, `supply_stories`, and `supply_session.<sid>` for parity with WebSocket subscriptions.
 
 ### 2. Email list filters for `GET /api/lugal/email/sync`
 
@@ -36,6 +38,10 @@ FE requirement:
 | Has attachments | `has_attachments=1`, `filter_has_attachment=true`, `filter_has_attachments=true` | Returns only messages with linked `ir.attachment` rows. |
 | Mentioned | `mentioned=1`, `filter_mentioned=true` | Returns only `is_mentioned === true`. |
 | Sent to me | `sent_to_me=1`, `filter_sent_to_me=true` | Matches current user/account email addresses in `to_addresses`. |
+
+Sent/outbox status:
+- Notification polling payloads now include `recently_sent[].smtp_status` (`pending` | `delivered` | `failed`) alongside `smtp_delivered` and `smtp_error`.
+- Use `smtp_status === "pending"` for outbox/sending UI, `delivered` for sent, and `failed` for retry/error display.
 
 Example unread request:
 

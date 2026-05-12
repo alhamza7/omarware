@@ -756,7 +756,15 @@ class SupplyChatController(http.Controller):
             can_add = (uid == creator_id) or (uid in admin_ids) or (uid in supervisor_ids)
             if not can_add:
                 return {'success': False, 'error': 'Only admins and supervisors can add members'}
-            conv.write({'participant_ids': [(4, int(u)) for u in user_ids]})
+            before_ids = set(conv.participant_ids.ids)
+            clean_user_ids = [int(u) for u in user_ids]
+            conv.write({'participant_ids': [(4, u) for u in clean_user_ids]})
+            added_ids = sorted(set(clean_user_ids) - before_ids)
+            if added_ids:
+                # Existing WebSocket subscriptions are built at connection time.
+                # Newly-added members must resubscribe immediately or they can
+                # miss typing/edit/delete/pin events on supply_chat.<conv_id>.
+                _notify_participants_resubscribe(conv, added_ids)
             return {'success': True, 'data': _serialize_conversation(conv, uid)}
         except Exception as e:
             return crm_error(e, 'members_add')
@@ -1571,6 +1579,11 @@ class SupplyChatController(http.Controller):
             ])
             channels = [f'supply_chat.{c.id}' for c in convs]
             channels.append(f'supply_user.{uid}')
+            channels.append('supply_stories')
+            try:
+                channels.append(f'supply_session.{request.session.sid}')
+            except Exception:
+                pass
             return {
                 'success': True,
                 'data': {

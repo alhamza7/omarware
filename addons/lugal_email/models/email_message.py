@@ -156,9 +156,10 @@ class LugalEmailMessage(models.Model):
 
     def write(self, vals):
         # Auto-stamp read_at the first time is_read transitions to True.
-        if vals.get('is_read') and not vals.get('read_at'):
-            for rec in self:
-                if not rec.is_read and not rec.read_at:
-                    vals = dict(vals, read_at=fields.Datetime.now())
-                    break
+        if (
+            vals.get('is_read')
+            and not vals.get('read_at')
+            and any(not rec.is_read and not rec.read_at for rec in self)
+        ):
+            vals = dict(vals, read_at=fields.Datetime.now())
         return super().write(vals)

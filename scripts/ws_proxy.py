@@ -52,7 +52,7 @@ SKIP_HEADERS = {"host", "content-length", "transfer-encoding", "connection",
 
 
 async def proxy_websocket(request: web.Request) -> web.WebSocketResponse:
-    """Upgrade to WebSocket and bridge to gevent worker on 8072."""
+    """Upgrade to WebSocket and bridge to the gevent worker on 8076."""
     # autoping=True: aiohttp automatically replies to any PING the browser
     # sends with a PONG.  We still send our own periodic pings to the browser.
     ws_server = web.WebSocketResponse(autoping=True)

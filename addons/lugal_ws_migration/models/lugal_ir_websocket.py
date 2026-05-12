@@ -154,8 +154,8 @@ class LugalIrWebsocket(models.AbstractModel):
         # Global stories broadcast channel
         result.append('supply_stories')
 
-        _logger.info(
-            '[WS] Channel list built for uid=%s at %.3f: %s',
-            uid, time.time(), result,
+        _logger.debug(
+            '[WS] Channel list built for uid=%s at %.3f (%d channels)',
+            uid, time.time(), len(result),
         )
         return result

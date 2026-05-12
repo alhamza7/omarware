@@ -1348,7 +1348,7 @@ class LugalEmailController(http.Controller):
                     #   INBOX.syed_naqvi.Important    -> only important Syed mail
                     Msg = request.env['lugal.email.message'].sudo()
                     has_child_messages = Msg.search_count([
-                        ('account_id', 'in', account_ids),
+                        ('account_id', '=', acc.id),
                         ('folder',     'like', folder_raw + '.%'),
                         ('is_deleted', '=', False),
                     ]) > 0
@@ -1444,9 +1444,22 @@ class LugalEmailController(http.Controller):
             if _truthy(filter_mentioned):
                 filter_domain.append(('is_mentioned', '=', True))
             if _truthy(filter_has_attachment):
-                att_msg_ids = request.env['ir.attachment'].sudo().search([
-                    ('res_model', '=', 'lugal.email.message'),
-                ]).mapped('res_id')
+                attachment_account_ids = (
+                    [requested_account_id] if requested_account_id else account_ids
+                )
+                request.env.cr.execute(
+                    """
+                    SELECT DISTINCT a.res_id
+                    FROM ir_attachment a
+                    JOIN lugal_email_message m ON m.id = a.res_id
+                    WHERE a.res_model = 'lugal.email.message'
+                      AND COALESCE(a.description, '') NOT LIKE '__inline_cid__:%'
+                      AND m.account_id = ANY(%s)
+                      AND m.is_deleted = FALSE
+                    """,
+                    (attachment_account_ids,),
+                )
+                att_msg_ids = [row[0] for row in request.env.cr.fetchall()]
                 filter_domain.append(('id', 'in', att_msg_ids))
             if _truthy(filter_sent_to_me):
                 user_emails = [a.email_address for a in user_accounts if a.email_address]
@@ -2029,6 +2042,7 @@ class LugalEmailController(http.Controller):
                     'to_addresses':   m.to_addresses or '[]',
                     'smtp_delivered': m.smtp_delivered,
                     'smtp_error':     m.smtp_error or None,
+                    'smtp_status':    m.smtp_status or 'pending',
                 }
                 for m in recent_sent
             ]
