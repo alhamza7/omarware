@@ -98,6 +98,7 @@ def _serialize_negotiation(n, include_offers=True):
     cur = n.currency_id
     final_cur = n.final_currency_id
     fin_by = n.finalized_by_id
+    esign_by = n.e_sign_user_id
     atts = [_serialize_attachment(a) for a in n.attachment_ids]
     data = {
         'id': n.id,
@@ -138,6 +139,9 @@ def _serialize_negotiation(n, include_offers=True):
         'approval_by_id': fin_by.id if fin_by else None,
         'approval_by_name': fin_by.name if fin_by else '',
         'finalized_date': n.finalized_date.isoformat() if n.finalized_date else None,
+        'e_sign_user_id': esign_by.id if esign_by else None,
+        'e_sign_user_name': esign_by.name if esign_by else '',
+        'e_sign_date': n.e_sign_date.isoformat() if n.e_sign_date else None,
         'attachments': atts,
         'created_by_id': n.create_uid.id if n.create_uid else None,
         'created_by_name': n.create_uid.name if n.create_uid else '',
@@ -242,6 +246,8 @@ def _serialize_item_request(r, preloaded_attachments=None):
             'final_agreed_price': float(n.final_agreed_price or 0.0),
             'currency_id': n.currency_id.id if n.currency_id else None,
             'currency_name': n.currency_id.name if n.currency_id else '',
+            'e_sign_user_id': n.e_sign_user_id.id if n.e_sign_user_id else None,
+            'e_sign_date': n.e_sign_date.isoformat() if n.e_sign_date else None,
         })
     data = {
         'id': r.id,
@@ -806,7 +812,7 @@ class CrmSupplyExtraApiController(http.Controller):
 
     @http.route('/api/crm/supply/negotiations/<int:neg_id>/e_sign_approve', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def supply_negotiations_e_sign_approve(self, neg_id, **kwargs):
-        """Same as confirm — negotiation-stage e-sign / approval (Odoo: finalize)."""
+        """Record e-sign on an ongoing negotiation; state stays ongoing until /confirm."""
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized', 'data': None}
@@ -814,7 +820,7 @@ class CrmSupplyExtraApiController(http.Controller):
             if not n or n.is_deleted:
                 return {'success': False, 'error': 'Negotiation not found', 'data': None}
             try:
-                n.action_finalize()
+                n.action_e_sign_approve()
             except UserError as ue:
                 return {'success': False, 'error': str(ue), 'data': None}
             return {'success': True, 'data': _serialize_negotiation(n)}

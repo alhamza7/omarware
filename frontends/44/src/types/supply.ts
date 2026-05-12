@@ -287,6 +287,9 @@ export interface Negotiation {
   status?: string;
   item_request_id?: number | null;
   item_request_name?: string;
+  e_sign_user_id?: number | null;
+  e_sign_user_name?: string;
+  e_sign_date?: string | null;
 }
 
 export interface NegotiationListData {

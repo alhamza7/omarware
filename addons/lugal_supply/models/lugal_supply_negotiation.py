@@ -120,6 +120,17 @@ class LugalSupplyNegotiation(models.Model):
         readonly=True,
         tracking=True,
     )
+    e_sign_user_id = fields.Many2one(
+        'res.users',
+        string='E-sign By',
+        readonly=True,
+        tracking=True,
+    )
+    e_sign_date = fields.Datetime(
+        string='E-sign Date',
+        readonly=True,
+        tracking=True,
+    )
     active = fields.Boolean(default=True)
     is_deleted = fields.Boolean(string='Soft Deleted', default=False, index=True)
 
@@ -139,6 +150,16 @@ class LugalSupplyNegotiation(models.Model):
         records = super().create(vals_list)
         records._lugal_sync_linked_attachments_res()
         return records
+
+    def action_e_sign_approve(self):
+        """Record negotiation e-sign; does not change state (use action_finalize to close)."""
+        for rec in self:
+            if rec.state != 'ongoing':
+                raise UserError(_('E-sign approval is only allowed for ongoing negotiations.'))
+            rec.write({
+                'e_sign_user_id': self.env.user.id,
+                'e_sign_date': fields.Datetime.now(),
+            })
 
     def action_finalize(self):
         for rec in self:

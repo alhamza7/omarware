@@ -286,6 +286,8 @@ def _serialize_supply_po(po):
                 'name': ng.name or '',
                 'state': ng.state or 'ongoing',
                 'final_agreed_price': float(ng.final_agreed_price or 0.0),
+                'e_sign_user_id': ng.e_sign_user_id.id if ng.e_sign_user_id else None,
+                'e_sign_date': ng.e_sign_date.isoformat() if ng.e_sign_date else None,
             }
         )
     if 'agent_id' in F:

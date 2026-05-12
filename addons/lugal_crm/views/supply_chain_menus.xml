@@ -130,6 +130,7 @@
         <field name="arch" type="xml">
             <form string="Negotiation">
                 <header>
+                    <button name="action_e_sign_approve" string="E-sign Approve" type="object" class="btn-secondary" invisible="state != 'ongoing'"/>
                     <button name="action_finalize" string="Finalize" type="object" class="btn-primary" invisible="state != 'ongoing'"/>
                     <button name="action_cancel" string="Cancel" type="object" invisible="state != 'ongoing'"/>
                     <button name="action_set_ongoing" string="Reopen" type="object" invisible="state == 'ongoing'"/>
@@ -154,6 +155,8 @@
                             <field name="final_currency_id"/>
                             <field name="finalized_by_id"/>
                             <field name="finalized_date"/>
+                            <field name="e_sign_user_id"/>
+                            <field name="e_sign_date"/>
                         </group>
                         <group string="Lead time">
                             <field name="expected_lead_time_days"/>
