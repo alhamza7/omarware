@@ -164,6 +164,7 @@ class NBSSearchController(http.Controller):
                     'document_type_name': doc.document_type_id.name,
                     'uploader_name': doc.uploader_id.name,
                     'upload_date': doc.upload_date.isoformat() if doc.upload_date else None,
+                    'document_date': doc.document_date.strftime('%d-%m-%Y') if doc.document_date else None,
                     'barcode': doc.barcode,
                     'file_name': doc.file_name,
                     'highlights': [],  # Will be populated by OpenSearch
@@ -257,6 +258,7 @@ class NBSSearchController(http.Controller):
                     'document_type_name': doc.document_type_id.name if doc.document_type_id else None,
                     'uploader_name': doc.uploader_id.name if doc.uploader_id else None,
                     'upload_date': doc.upload_date.isoformat() if doc.upload_date else None,
+                    'document_date': doc.document_date.strftime('%d-%m-%Y') if doc.document_date else None,
                     'parent_document_id': doc.parent_document_id.id if doc.parent_document_id else None,
                     'relation_type': 'attachment' if doc.parent_document_id and doc.is_attachment else ('secondary_document' if doc.parent_document_id else None),
                     'ocr_status': doc.ocr_status,

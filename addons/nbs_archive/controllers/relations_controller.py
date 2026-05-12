@@ -240,6 +240,7 @@ class NBSRelationsController(http.Controller):
                     'barcode': doc.barcode,
                     'document_type_name': doc.document_type_id.name,
                     'upload_date': doc.upload_date.isoformat() if doc.upload_date else None,
+                    'document_date': doc.document_date.strftime('%d-%m-%Y') if doc.document_date else None,
                     'status': doc.state,
                     'parent_document_id': doc.parent_document_id.id if doc.parent_document_id else None,
                     'parent_title': doc.parent_document_id.name if doc.parent_document_id else None,

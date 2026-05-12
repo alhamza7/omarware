@@ -218,6 +218,7 @@ class NBSDocumentController(http.Controller):
                     'uploader_id':         doc.uploader_id.id if doc.uploader_id else None,
                     'uploader_name':       doc.uploader_id.name if doc.uploader_id else None,
                     'upload_date':         doc.upload_date.isoformat() if doc.upload_date else None,
+                    'document_date':       doc.document_date.strftime('%d-%m-%Y') if doc.document_date else None,
                     'deleted_at':          doc.deleted_at.isoformat() if doc.deleted_at else None,
                     'deleted_by':          doc.deleted_by.name if doc.deleted_by else None,
                     'deletion_reason':     doc.deletion_reason,
