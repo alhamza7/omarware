@@ -19,6 +19,7 @@ from ._permissions import (
     is_manager_or_above,
     is_general_manager,
     forbidden,
+    require_permission,
 )
 from .supply_chain_controller import _serialize_mail_message
 
@@ -187,8 +188,9 @@ class CrmSupplyExtendedController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Forbidden — Supervisor role required to update container tracking')
+            denied = require_permission('supply_chain.containers.edit')
+            if denied:
+                return denied
             container_id = kwargs.get('container_id')
             if not container_id:
                 return {'success': False, 'error': 'container_id is required'}
@@ -354,8 +356,9 @@ class CrmSupplyExtendedController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Forbidden — Supervisor role required to create negotiations')
+            denied = require_permission('supply_chain.negotiations.create')
+            if denied:
+                return denied
             title = (kwargs.get('title') or '').strip()
             if not title:
                 return {'success': False, 'error': 'title is required'}
@@ -398,8 +401,9 @@ class CrmSupplyExtendedController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Forbidden — Supervisor role required to update negotiations')
+            denied = require_permission('supply_chain.negotiations.edit')
+            if denied:
+                return denied
             n = request.env['lugal.supply.negotiation'].sudo().browse(neg_id).exists()
             if not n or n.is_deleted:
                 return {'success': False, 'error': 'Negotiation not found'}
@@ -420,8 +424,9 @@ class CrmSupplyExtendedController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_general_manager():
-                return forbidden('Forbidden — General Manager role required to delete negotiations')
+            denied = require_permission('supply_chain.negotiations.delete')
+            if denied:
+                return denied
             n = request.env['lugal.supply.negotiation'].sudo().browse(neg_id).exists()
             if not n or n.is_deleted:
                 return {'success': False, 'error': 'Negotiation not found'}
@@ -472,8 +477,9 @@ class CrmSupplyExtendedController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Forbidden — Supervisor role required to delete negotiation comments')
+            denied = require_permission('supply_chain.negotiations.delete_comment')
+            if denied:
+                return denied
             n = request.env['lugal.supply.negotiation'].sudo().browse(neg_id).exists()
             if not n or n.is_deleted:
                 return {'success': False, 'error': 'Negotiation not found'}
@@ -580,10 +586,18 @@ class CrmSupplyExtendedController(http.Controller):
                 return {'success': False, 'error': 'Request not found'}
             new_status = (kwargs.get('status') or '').strip()
             valid = {'pending', 'approved', 'rejected', 'fulfilled'}
-            if new_status in ('approved', 'rejected') and not is_supervisor_or_above():
-                return forbidden('Forbidden — Supervisor role required to approve or reject item requests')
-            if new_status == 'fulfilled' and not is_manager_or_above():
-                return forbidden('Forbidden — Manager role required to mark item requests as fulfilled')
+            if new_status == 'approved':
+                denied = require_permission('supply_chain.item_requests.approve')
+                if denied:
+                    return denied
+            elif new_status == 'rejected':
+                denied = require_permission('supply_chain.item_requests.reject')
+                if denied:
+                    return denied
+            elif new_status == 'fulfilled':
+                denied = require_permission('supply_chain.item_requests.fulfill')
+                if denied:
+                    return denied
             if new_status not in valid:
                 return {'success': False, 'error': f'Invalid status. Must be one of: {", ".join(sorted(valid))}'}
             r.write({
@@ -600,8 +614,9 @@ class CrmSupplyExtendedController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_manager_or_above():
-                return forbidden('Forbidden — Manager role required to delete item requests')
+            denied = require_permission('supply_chain.item_requests.delete')
+            if denied:
+                return denied
             r = request.env['lugal.supply.item.request'].sudo().browse(req_id).exists()
             if not r or r.is_deleted:
                 return {'success': False, 'error': 'Request not found'}

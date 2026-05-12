@@ -5,6 +5,7 @@ from odoo import http
 from odoo.http import request
 from ._auth import ensure_jwt_user_id
 from ._error import crm_error
+from ._permissions import require_permission
 
 _logger = logging.getLogger(__name__)
 
@@ -47,11 +48,14 @@ class DeliveryController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('orders.list')
+            if denied:
+                return denied
 
             # Resolve partner_id from CRM customer if needed
             resolved_partner_id = partner_id
             if customer_id and not resolved_partner_id:
-                crm_customer = request.env['lugal.crm.customer'].browse(int(customer_id))
+                crm_customer = request.env['lugal.crm.customer'].sudo().browse(int(customer_id))
                 if crm_customer.exists() and crm_customer.partner_id:
                     resolved_partner_id = crm_customer.partner_id.id
 
@@ -65,7 +69,7 @@ class DeliveryController(http.Controller):
             if state:
                 domain.append(('state', '=', state))
 
-            Order = request.env['pos.perfume.order']
+            Order = request.env['pos.perfume.order'].sudo()
             total = Order.search_count(domain)
             orders = Order.search(domain, limit=per_page, offset=(page - 1) * per_page, order='date_order desc')
 
@@ -87,11 +91,14 @@ class DeliveryController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('orders.view')
+            if denied:
+                return denied
 
             if not request.env.get('pos.perfume.order'):
                 return {'success': False, 'error': 'pos_perfume_custom not installed'}
 
-            order = request.env['pos.perfume.order'].browse(order_id)
+            order = request.env['pos.perfume.order'].sudo().browse(order_id)
             if not order.exists():
                 return {'success': False, 'error': 'Order not found'}
 
@@ -121,6 +128,9 @@ class DeliveryController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('orders.list')
+            if denied:
+                return denied
 
             if not request.env.get('pos.perfume.order'):
                 return {'success': True, 'data': {'items': []}}
@@ -130,7 +140,7 @@ class DeliveryController(http.Controller):
                       ('partner_id.name', 'ilike', query),
                       ('sale_order_name', 'ilike', query) if hasattr(request.env['pos.perfume.order'], 'sale_order_name') else ('name', 'ilike', query),
                       ]
-            orders = request.env['pos.perfume.order'].search(domain, limit=limit, order='date_order desc')
+            orders = request.env['pos.perfume.order'].sudo().search(domain, limit=limit, order='date_order desc')
             return {'success': True, 'data': {'items': [_order_to_dict(o) for o in orders]}}
         except Exception as e:
             return crm_error(e, 'search_orders')

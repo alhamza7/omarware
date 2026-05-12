@@ -5,7 +5,7 @@ from odoo import http
 from odoo.http import request
 from ._auth import ensure_jwt_user_id
 from ._permissions import (
-    is_manager_or_above, is_supervisor_or_above, forbidden,
+    is_manager_or_above, is_supervisor_or_above, forbidden, require_permission,
     AGENT, SUPERVISOR, MANAGER,
 )
 from ._error import crm_error
@@ -327,12 +327,13 @@ class UserController(http.Controller):
 
     @http.route('/api/crm/users/<int:user_id>', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def get_user(self, user_id, **kwargs):
-        """Get a single CRM user by ID. Requires Supervisor or above."""
+        """Get a single CRM user by ID."""
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Requires Supervisor role or above')
+            denied = require_permission('employees.list')
+            if denied:
+                return denied
             user = request.env['res.users'].sudo().browse(user_id)
             if not user.exists():
                 return {'success': False, 'error': 'User not found'}
