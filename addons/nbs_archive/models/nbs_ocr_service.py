@@ -557,6 +557,34 @@ class NBSOCRService(models.Model):
             },
         }
 
+    def cron_process_pending_ocr(self):
+        """
+        Scheduled action: process up to 20 pending-OCR documents per run.
+
+        Targets only ``ocr_status = 'pending'`` (newly uploaded, never
+        attempted).  Failed documents are left for the manual backfill
+        endpoint so they are not silently retried in an infinite loop.
+
+        Runs synchronously because cron workers already run in their own
+        thread/process — no need for extra threads here.
+        """
+        import time as _time
+        pending = self.env['nbs.document'].sudo().search([
+            ('ocr_status', '=', 'pending'),
+            ('current_version_id', '!=', False),
+        ], limit=20, order='id asc')
+
+        if not pending:
+            return
+
+        _logger.info('OCR cron: processing %d pending documents', len(pending))
+        for doc in pending:
+            try:
+                self.sudo()._process_document_async(doc.id)
+            except Exception as exc:
+                _logger.warning('OCR cron: doc %s failed: %s', doc.id, exc)
+            _time.sleep(0.3)
+
     def _process_document_async(self, document_id: int):
         """Wrapper called by the OCR controller to trigger OCR on a document."""
         doc = self.env['nbs.document'].sudo().browse(document_id)
@@ -569,6 +597,47 @@ class NBSOCRService(models.Model):
             _logger.error('Async OCR error for doc %s: %s', document_id, exc)
             doc.write({'ocr_status': 'failed'})
             return False
+
+    def schedule_ocr_background(self, document_id: int):
+        """
+        Spawn a daemon thread to run OCR for ``document_id`` without blocking
+        the current HTTP request.  Uses its own DB cursor so the caller's
+        transaction does not need to be committed first.
+
+        Safe to call from any HTTP handler.  The document's ocr_status is set
+        to 'processing' immediately (still on the HTTP thread) so the FE can
+        show a spinner right away; the actual Vision API work happens in the
+        background thread.
+        """
+        import threading
+        import odoo
+
+        db_name = self.env.cr.dbname
+        # Mark processing immediately so the response reflects the real state
+        try:
+            doc = self.env['nbs.document'].sudo().browse(document_id)
+            if doc.exists():
+                doc.write({'ocr_status': 'processing'})
+        except Exception:
+            pass
+
+        def _worker():
+            try:
+                registry = odoo.modules.registry.Registry(db_name)
+                with registry.cursor() as cr:
+                    env = odoo.api.Environment(cr, odoo.SUPERUSER_ID, {})
+                    svc = env['nbs.ocr.service'].sudo()
+                    svc._process_document_async(document_id)
+                    cr.commit()
+            except Exception as exc:
+                _logger.error(
+                    'Background OCR thread failed for doc %s: %s', document_id, exc
+                )
+
+        t = threading.Thread(target=_worker, daemon=True,
+                             name=f'ocr-doc-{document_id}')
+        t.start()
+        _logger.info('OCR background thread started for document %s', document_id)
 
 
 # ── Keep existing unrelated models in the same file ──────────────────────────

@@ -575,11 +575,13 @@ class NBSDocumentController(http.Controller):
 
             document.sudo().write({'current_version_id': version.id})
 
-            # Auto OCR for supported files (pdf/images)
+            # Auto OCR — run in background thread so the upload response is instant
+            # even for large files (170 MB+ PDFs).
             try:
                 fname = (file_name or '').lower()
-                if any(fname.endswith(ext) for ext in ['.pdf', '.jpg', '.jpeg', '.png', '.tiff']):
-                    request.env['nbs.ocr.service'].sudo()._process_document_async(document.id)
+                ocr_exts = ('.pdf', '.jpg', '.jpeg', '.png', '.tiff', '.tif', '.gif', '.bmp', '.webp')
+                if any(fname.endswith(ext) for ext in ocr_exts):
+                    request.env['nbs.ocr.service'].sudo().schedule_ocr_background(document.id)
             except Exception as e:
                 _logger.warning(f'OCR trigger failed for document {document.id}: {str(e)}')
             

@@ -421,12 +421,13 @@ class NBSDocument(models.Model):
                 'user_agent': self._get_user_agent(),
             })
             
-            # Trigger OCR processing in background (if file is PDF or image)
+            # Trigger OCR in background thread — never block the ORM write
             if doc.current_version_id and doc.current_version_id.file_name:
-                file_name = doc.current_version_id.file_name.lower()
-                if any(file_name.endswith(ext) for ext in ['.pdf', '.jpg', '.jpeg', '.png', '.tiff']):
+                fname = doc.current_version_id.file_name.lower()
+                ocr_exts = ('.pdf', '.jpg', '.jpeg', '.png', '.tiff', '.tif', '.gif', '.bmp', '.webp')
+                if any(fname.endswith(ext) for ext in ocr_exts):
                     try:
-                        self.env['nbs.ocr.service'].sudo()._process_document_async(doc.id)
+                        self.env['nbs.ocr.service'].sudo().schedule_ocr_background(doc.id)
                     except Exception as e:
                         _logger.warning(f'Failed to queue OCR for document {doc.id}: {str(e)}')
             
