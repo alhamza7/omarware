@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
+import { toast } from "sonner";
 import {
   Plus,
   Search,
@@ -14,6 +15,7 @@ import {
   CheckCircle2,
   TriangleAlert,
   PackageOpen,
+  Loader2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
@@ -35,7 +37,7 @@ import {
 } from "../ui/table";
 import { ScrollArea } from "../ui/scroll-area";
 import {
-  purchaseOrders,
+  purchaseOrders as demoPurchaseOrders,
   suggestedPOs,
   suppliers,
   poStatusConfig,
@@ -43,14 +45,114 @@ import {
   type PurchaseOrder,
   type SuggestedPO,
   type Division,
+  type Currency,
 } from "./sc-data";
+import { supplyService } from "../../../features/supply-chain/services/supplyService";
 
 type SubTab = "all" | "open" | "suggested" | "packing";
+
+/** Subset of Odoo `supply_po_list` / `supply_po_get` payload used for grid + packing actions */
+export type ApiSupplyPo = {
+  id: number;
+  name?: string;
+  lines?: Array<{
+    id: number;
+    product_name?: string;
+    size?: string;
+    quantity?: number;
+    quantity_pcs?: number;
+    unit_price?: number;
+  }>;
+  vendor_name?: string;
+  division?: string;
+  currency_name?: string;
+  status?: string;
+  total_amount?: number;
+  created_at?: string;
+  notes?: string;
+  created_by_name?: string;
+  container_name?: string;
+};
 
 const fmt = (n: number) =>
   new Intl.NumberFormat("ar-SA").format(n);
 
-export function SCPurchaseOrders() {
+function mapCurrency(name?: string): Currency {
+  const u = (name || "USD").toUpperCase().slice(0, 3);
+  if (u === "EUR" || u === "CNY" || u === "SAR" || u === "IQD" || u === "USD") return u;
+  return "USD";
+}
+
+function mapApiSupplyPoToPurchaseOrder(api: ApiSupplyPo): PurchaseOrder {
+  const statusMap: Record<string, PurchaseOrder["status"]> = {
+    draft: "draft",
+    confirmed: "confirmed",
+    cancelled: "cancelled",
+    shipped: "shipped",
+    received: "received",
+    sent: "sent",
+  };
+  const st = statusMap[api.status || ""] || "draft";
+  const div: Division =
+    api.division === "europe" || api.division === "china" ? api.division : "china";
+  return {
+    id: api.name || `PO-${api.id}`,
+    odooId: api.id,
+    supplierId: `v-${api.id}`,
+    supplierName: api.vendor_name || "—",
+    division: div,
+    currency: mapCurrency(api.currency_name),
+    status: st,
+    items: (api.lines || []).map((ln) => ({
+      id: `L-${ln.id}`,
+      name: ln.product_name || "—",
+      size: ln.size || "—",
+      qty: Number(ln.quantity ?? ln.quantity_pcs ?? 0),
+      unitPrice: Number(ln.unit_price ?? 0),
+      category: "other",
+    })),
+    totalAmount: Number(api.total_amount ?? 0),
+    createdAt: (api.created_at || "").slice(0, 10) || "—",
+    updatedAt: (api.created_at || "").slice(0, 10) || "—",
+    containerNumber: api.container_name || undefined,
+    notes: api.notes || "",
+    hasPackingList: (api.lines?.length ?? 0) > 0,
+    createdBy: api.created_by_name || "—",
+  };
+}
+
+function resolveOdooPoId(po: PurchaseOrder): number | null {
+  if (po.odooId != null && Number.isFinite(po.odooId)) return po.odooId;
+  if (/^\d+$/.test(String(po.id).trim())) return parseInt(String(po.id), 10);
+  return null;
+}
+
+function buildLocalPackingShareText(po: PurchaseOrder): string {
+  const lines: string[] = [
+    "Packing List (local / preview)",
+    `PO: ${po.id}`,
+  ];
+  if (po.supplierName) lines.push(`Vendor: ${po.supplierName}`);
+  lines.push("", "#\tItem\tSize\tQty\tCBM\tWeight (kg)");
+  po.items.forEach((item, i) => {
+    lines.push(
+      `${i + 1}\t${item.name}\t${item.size}\t${item.qty}\t${item.cbm ?? "—"}\t${item.weight ?? "—"}`,
+    );
+  });
+  return lines.join("\n");
+}
+
+export type SCPurchaseOrdersProps = {
+  /** Live rows from `/api/crm/supply/po/list`. When omitted, demo data is used. */
+  apiPos?: ApiSupplyPo[];
+};
+
+export function SCPurchaseOrders({ apiPos }: SCPurchaseOrdersProps = {}) {
+  const purchaseOrders = useMemo(
+    () => (apiPos !== undefined ? apiPos.map(mapApiSupplyPoToPurchaseOrder) : demoPurchaseOrders),
+    [apiPos],
+  );
+
   const [subTab, setSubTab] = useState<SubTab>("all");
   const [divisionFilter, setDivisionFilter] = useState<"all" | Division>("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -58,13 +160,97 @@ export function SCPurchaseOrders() {
   const [showPackingList, setShowPackingList] = useState(false);
   const [showCreatePO, setShowCreatePO] = useState(false);
   const [expandedSuggested, setExpandedSuggested] = useState<string | null>(null);
+  const [packingBusy, setPackingBusy] = useState<false | "share" | "pdf">(false);
+
+  const runPackingShare = async (poArg?: PurchaseOrder) => {
+    const po = poArg ?? selectedPO;
+    if (!po) return;
+    const oid = resolveOdooPoId(po);
+    setPackingBusy("share");
+    try {
+      let title = `Packing List — ${po.id}`;
+      let text: string;
+      if (oid != null) {
+        const res = await supplyService.getPackingListShare(oid);
+        if (!res.success || !res.data) {
+          toast.error(res.error ?? "تعذر تحميل نص المشاركة");
+          return;
+        }
+        title = res.data.title || title;
+        text = res.data.text || "";
+      } else {
+        text = buildLocalPackingShareText(po);
+        toast.message("معاينة محلية — سجّل الدخول واختر أمراً من الخادم لمشاركة بيانات Odoo");
+      }
+      const url = typeof window !== "undefined" ? window.location.href : "";
+      if (typeof navigator !== "undefined" && navigator.share) {
+        try {
+          await navigator.share({ title, text, url });
+        } catch (err) {
+          if ((err as Error).name === "AbortError") return;
+          try {
+            await navigator.clipboard.writeText(`${title}\n\n${text}`);
+            toast.success("تم نسخ قائمة التعبئة");
+          } catch {
+            toast.error("تعذر المشاركة أو النسخ");
+          }
+        }
+      } else {
+        try {
+          await navigator.clipboard.writeText(`${title}\n\n${text}`);
+          toast.success("تم نسخ قائمة التعبئة");
+        } catch {
+          toast.error("المتصفح لا يدعم الحافظة");
+        }
+      }
+    } finally {
+      setPackingBusy(false);
+    }
+  };
+
+  const runPackingPdf = async (poArg?: PurchaseOrder) => {
+    const po = poArg ?? selectedPO;
+    if (!po) return;
+    const oid = resolveOdooPoId(po);
+    if (oid == null) {
+      toast.error(
+        "تنزيل PDF يتطلب ربط الأمر بسجل Odoo (معرّف رقمي). استخدم أوامر الشراء المحمّلة من الخادم.",
+      );
+      return;
+    }
+    setPackingBusy("pdf");
+    try {
+      const res = await supplyService.getPackingListPdf(oid);
+      if (!res.success || !res.data) {
+        toast.error(res.error ?? "تعذر إنشاء PDF");
+        return;
+      }
+      const { filename, pdf_base64 } = res.data;
+      const bytes = Uint8Array.from(atob(pdf_base64), (c) => c.charCodeAt(0));
+      const blob = new Blob([bytes], { type: "application/pdf" });
+      const a = document.createElement("a");
+      const href = URL.createObjectURL(blob);
+      a.href = href;
+      a.download = filename || `PackingList-${oid}.pdf`;
+      a.click();
+      URL.revokeObjectURL(href);
+      toast.success("تم تنزيل PDF");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "فشل تنزيل PDF");
+    } finally {
+      setPackingBusy(false);
+    }
+  };
 
   const filteredPOs = purchaseOrders.filter((po) => {
     if (divisionFilter !== "all" && po.division !== divisionFilter) return false;
     if (subTab === "open" && !["draft", "sent", "confirmed"].includes(po.status)) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
-      return po.id.toLowerCase().includes(q) || po.supplierName.includes(searchQuery);
+      const idHit =
+        po.id.toLowerCase().includes(q) ||
+        (po.odooId != null && String(po.odooId).includes(searchQuery.trim()));
+      return idHit || po.supplierName.includes(searchQuery);
     }
     return true;
   });
@@ -161,7 +347,11 @@ export function SCPurchaseOrders() {
                     {filteredPOs.map((po) => {
                       const conf = poStatusConfig[po.status];
                       return (
-                        <TableRow key={po.id} className="cursor-pointer hover:bg-muted/30" onClick={() => setSelectedPO(po)}>
+                        <TableRow
+                          key={`${po.odooId ?? "demo"}-${po.id}`}
+                          className="cursor-pointer hover:bg-muted/30"
+                          onClick={() => setSelectedPO(po)}
+                        >
                           <TableCell className="text-start">
                             <span className="text-xs text-foreground" style={{ direction: "ltr", unicodeBidi: "embed" }}>{po.id}</span>
                           </TableCell>
@@ -333,7 +523,7 @@ export function SCPurchaseOrders() {
             className="space-y-3"
           >
             {purchaseOrders.filter((p) => p.hasPackingList).map((po) => (
-              <Card key={po.id} className="border-border/50">
+              <Card key={`${po.odooId ?? "demo"}-${po.id}`} className="border-border/50">
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -346,12 +536,34 @@ export function SCPurchaseOrders() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Button variant="outline" size="sm" className="text-[10px] h-7 gap-1">
-                        <Share2 className="w-3 h-3" />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="text-[10px] h-7 gap-1"
+                        disabled={!!packingBusy}
+                        onClick={() => void runPackingShare(po)}
+                      >
+                        {packingBusy === "share" ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Share2 className="w-3 h-3" />
+                        )}
                         مشاركة
                       </Button>
-                      <Button variant="outline" size="sm" className="text-[10px] h-7 gap-1">
-                        <Download className="w-3 h-3" />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="text-[10px] h-7 gap-1"
+                        disabled={!!packingBusy}
+                        onClick={() => void runPackingPdf(po)}
+                      >
+                        {packingBusy === "pdf" ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Download className="w-3 h-3" />
+                        )}
                         تحميل
                       </Button>
                       <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { setSelectedPO(po); setShowPackingList(true); }}>
@@ -502,7 +714,15 @@ export function SCPurchaseOrders() {
       </Dialog>
 
       {/* ── Packing List Dialog ── */}
-      <Dialog open={showPackingList && !!selectedPO} onOpenChange={(open) => { if (!open) { setShowPackingList(false); setSelectedPO(null); } }}>
+      <Dialog
+        open={showPackingList && !!selectedPO}
+        onOpenChange={(open) => {
+          if (!open) {
+            setShowPackingList(false);
+            setPackingBusy(false);
+          }
+        }}
+      >
         <DialogContent className="!max-w-2xl !p-0 !gap-0">
           <DialogTitle className="sr-only">قائمة التعبئة</DialogTitle>
           <DialogDescription className="sr-only">قائمة التعبئة بدون أسعار</DialogDescription>
@@ -518,12 +738,34 @@ export function SCPurchaseOrders() {
                     </div>
                   </div>
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm" className="text-[10px] h-7 gap-1">
-                      <Share2 className="w-3 h-3" />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="text-[10px] h-7 gap-1"
+                      disabled={!!packingBusy}
+                      onClick={() => void runPackingShare()}
+                    >
+                      {packingBusy === "share" ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Share2 className="w-3 h-3" />
+                      )}
                       مشاركة
                     </Button>
-                    <Button variant="outline" size="sm" className="text-[10px] h-7 gap-1">
-                      <Download className="w-3 h-3" />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="text-[10px] h-7 gap-1"
+                      disabled={!!packingBusy}
+                      onClick={() => void runPackingPdf()}
+                    >
+                      {packingBusy === "pdf" ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Download className="w-3 h-3" />
+                      )}
                       PDF
                     </Button>
                   </div>

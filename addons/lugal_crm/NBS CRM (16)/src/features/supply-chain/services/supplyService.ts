@@ -105,6 +105,28 @@ async function markContainerDelivered(id: number): Promise<ApiResult<Container>>
   return apiPost(`/api/crm/supply/containers/${id}/clearance_delivered`, {});
 }
 
+/** POST /api/crm/supply/po/:id/packing-list/share — plain text for Web Share / clipboard */
+export interface PackingListShareData {
+  title: string;
+  text: string;
+  url?: string;
+}
+
+async function getPackingListShare(poId: number): Promise<ApiResult<PackingListShareData>> {
+  return apiPost(`/api/crm/supply/po/${poId}/packing-list/share`, {});
+}
+
+/** POST /api/crm/supply/po/:id/packing-list/pdf — base64 PDF for client download */
+export interface PackingListPdfData {
+  filename: string;
+  pdf_base64: string;
+  mimetype: string;
+}
+
+async function getPackingListPdf(poId: number): Promise<ApiResult<PackingListPdfData>> {
+  return apiPost(`/api/crm/supply/po/${poId}/packing-list/pdf`, {});
+}
+
 export const supplyService = {
   listPurchaseOrders,
   getPurchaseOrder,
@@ -120,4 +142,6 @@ export const supplyService = {
   listContainers,
   createContainer,
   markContainerDelivered,
+  getPackingListShare,
+  getPackingListPdf,
 };

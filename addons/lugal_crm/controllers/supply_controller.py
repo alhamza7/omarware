@@ -7,7 +7,7 @@ import logging
 import mimetypes
 import uuid
 
-from odoo import http
+from odoo import fields, http
 from odoo.http import request, Response
 
 from ._auth import ensure_jwt_user_id
@@ -15,6 +15,7 @@ from ._error import crm_error
 from .upload_controller import (
     ALLOWED_DOC_MIMES,
     ALLOWED_IMAGE_MIMES,
+    _build_attachment_public_path,
     _build_attachment_url,
     _create_attachment,
     is_allowed_crm_image_mime,
@@ -95,12 +96,13 @@ def _create_supply_chat_attachment(filename, mimetype, data_bytes, res_model=Fal
 
 
 def _serialize_attachment(att):
+    """Single canonical shape for supply-chain attachment lists (no duplicate arrays)."""
     return {
         'id': att.id,
         'name': att.name or '',
         'mimetype': att.mimetype or 'application/octet-stream',
         'size': int(att.file_size or 0),
-        'url': _build_attachment_url(att),
+        'url': _build_attachment_public_path(att),
         'file_url': _build_attachment_url(att),
         'uploaded_by_name': att.create_uid.name if att.create_uid else '',
         'created_at': att.create_date.isoformat() if att.create_date else '',
@@ -145,6 +147,196 @@ def _serialize_penalty(p, container):
     }
 
 
+def _serialize_container_tracking_view(c):
+    """HTTP GET tracking/view — core container fields plus optional tracking_data JSON."""
+    assigned = c.assigned_user_id
+    payload = c.tracking_data
+    if payload in (False, None):
+        tracking_payload = {}
+    elif isinstance(payload, dict):
+        tracking_payload = payload
+    else:
+        tracking_payload = {'_raw': payload}
+    return {
+        'id': c.id,
+        'name': c.name or '',
+        'container_number': c.container_number or '',
+        'bl_number': c.bl_number or '',
+        'tracking_url': c.tracking_url or '',
+        'status': c.status or '',
+        'division': c.division or '',
+        'clearance_company': c.clearance_company or '',
+        'origin_location': c.origin_location or '',
+        'departure_date': c.departure_date.isoformat() if c.departure_date else None,
+        'eta': c.eta.isoformat() if c.eta else None,
+        'arrived_at': c.arrived_at.isoformat() if c.arrived_at else None,
+        'assigned_user_id': assigned.id if assigned else None,
+        'assigned_user_name': assigned.name if assigned else '',
+        'tracking_data': tracking_payload,
+    }
+
+
+_PO_STATUS_LABELS = {
+    'draft': 'Draft',
+    'confirmed': 'Confirmed',
+    'cancelled': 'Cancelled',
+}
+
+
+def _serialize_supply_po_line(line):
+    """Shape aligned with frontends/44 PoLine."""
+    cur = line.currency_id
+    out = {
+        'id': line.id,
+        'sequence': line.sequence or 10,
+        'product_id': line.product_id.id if getattr(line, 'product_id', None) and line.product_id else None,
+        'product_name': line.product_name or '',
+        'item_code': line.item_code or '',
+        'uom': line.uom or '',
+        'quantity_pcs': float(line.quantity_pcs or 0.0),
+        'quantity_carton': float(line.quantity_carton or 0.0),
+        'quantity': float(line.quantity or 0.0),
+        'size': line.size or '',
+        'capacity': line.capacity or '',
+        'packing_pcs_per_carton': float(line.packing_pcs_per_carton or 0.0),
+        'unit_price': float(line.unit_price or 0.0),
+        'total_price': float(line.total_price or 0.0),
+        'currency_id': cur.id if cur else None,
+        'currency_name': cur.name if cur else '',
+        'last_purchase_price': float(line.last_purchase_price or 0.0),
+        'last_purchase_date': line.last_purchase_date.isoformat() if line.last_purchase_date else None,
+        'min_qty': float(line.min_qty or 0.0),
+        'max_qty': float(line.max_qty or 0.0),
+    }
+    return out
+
+
+def _serialize_supply_po(po):
+    """Shape aligned with frontends/44 Po."""
+    vendor = po.vendor_id
+    partner = vendor.partner_id if vendor else None
+    header_currency = po.currency_id
+    branch = po.branch_id
+    container = po.container_id
+    creator = po.create_uid
+    status_key = po.status or 'draft'
+    vendor_phone = ''
+    if vendor and vendor.phone:
+        vendor_phone = vendor.phone
+    elif partner and partner.phone:
+        vendor_phone = partner.phone
+    # List and detail both use this serializer; always expose `extra_fields` (object, may be empty).
+    extra_fields_payload = (
+        po.get_extra_fields_dict() if 'extra_fields' in po._fields else {}
+    )
+    out = {
+        'id': po.id,
+        'name': po.name or '',
+        'order_id': po.name or '',
+        'vendor_customer_id': partner.id if partner else None,
+        'vendor_customer_name': (partner.name if partner else (vendor.name if vendor else '')),
+        'vendor_customer_phone': vendor_phone,
+        'vendor_id': vendor.id if vendor else None,
+        'vendor_name': vendor.name if vendor else '',
+        'division': po.division or '',
+        'currency_id': header_currency.id if header_currency else None,
+        'currency_name': header_currency.name if header_currency else '',
+        'container_id': container.id if container else None,
+        'container_name': container.name if container else '',
+        'branch_id': branch.id if branch else None,
+        'branch_name': branch.name if branch else '',
+        'status': status_key,
+        'order_status': status_key,
+        'status_label': _PO_STATUS_LABELS.get(status_key, status_key.title()),
+        'is_suggested': bool(po.is_suggested),
+        'line_count': len(po.line_ids),
+        'total_amount': float(po.total_amount or 0.0),
+        'created_by_id': creator.id if creator else None,
+        'created_by_name': creator.name if creator else '',
+        'created_at': po.create_date.isoformat() if po.create_date else '',
+        'updated_at': po.write_date.isoformat() if po.write_date else '',
+        'lines': [_serialize_supply_po_line(line) for line in po.line_ids],
+        'extra_fields': extra_fields_payload,
+    }
+    F = po._fields
+    if 'item_request_id' in F:
+        ir = po.item_request_id
+        out['item_request_id'] = ir.id if ir else None
+        out['item_request_name'] = ir.name if ir else ''
+        out['item_request_item_name'] = ir.item_name if ir else ''
+        out['item_request'] = (
+            None
+            if not ir
+            else {
+                'id': ir.id,
+                'name': ir.name or '',
+                'item_name': ir.item_name or '',
+                'state': ir.state or 'draft',
+            }
+        )
+    if 'negotiation_id' in F:
+        ng = po.negotiation_id
+        out['negotiation_id'] = ng.id if ng else None
+        out['negotiation_name'] = ng.name if ng else ''
+        if not ng:
+            out['negotiation'] = None
+        else:
+            es = ng.get_negotiation_e_sign_api_payload()
+            out['negotiation'] = {
+                'id': ng.id,
+                'name': ng.name or '',
+                'state': ng.state or 'ongoing',
+                'final_agreed_price': float(ng.final_agreed_price or 0.0),
+                'e_sign_user_id': es['e_sign_user_id'],
+                'e_sign_user_name': es['e_sign_user_name'],
+                'e_sign_date': es['e_sign_date'],
+            }
+    if 'agent_id' in F:
+        ag = po.agent_id
+        out['agent_id'] = ag.id if ag else None
+        out['agent_name'] = ag.name if ag else ''
+    if 'order_date' in F:
+        out['order_date'] = po.order_date.isoformat() if po.order_date else None
+    if 'production_completion_date' in F:
+        out['production_completion_date'] = (
+            po.production_completion_date.isoformat() if po.production_completion_date else None
+        )
+    if 'payment_term' in F:
+        out['payment_term'] = po.payment_term or ''
+    if 'shipping_method' in F:
+        out['shipping_method'] = po.shipping_method or ''
+    if 'notes' in F:
+        out['notes'] = po.notes or ''
+    if 'exchange_rate' in F:
+        out['exchange_rate'] = float(getattr(po, 'exchange_rate', 0.0) or 0.0)
+    if 'order_confirmed_user_id' in F and po.order_confirmed_user_id:
+        out['order_e_sign_user_id'] = po.order_confirmed_user_id.id
+        out['order_e_sign_date'] = (
+            po.order_confirmed_date.isoformat() if po.order_confirmed_date else None
+        )
+    if 'payment_ids' in F:
+        out['payment_state'] = getattr(po, 'payment_state', None) or 'pending'
+        out['amount_paid_total'] = float(getattr(po, 'amount_paid_total', 0.0) or 0.0)
+        out['balance_remaining'] = float(getattr(po, 'balance_remaining', 0.0) or 0.0)
+        out['linked_payments'] = []
+        for p in po.payment_ids:
+            pc = p.currency_id
+            out['linked_payments'].append({
+                'id': p.id,
+                'name': p.name or '',
+                'amount': float(p.amount or 0.0),
+                'payment_type': p.payment_type or '',
+                'payment_date': p.payment_date.isoformat() if p.payment_date else None,
+                'currency_id': pc.id if pc else None,
+                'currency_name': pc.name if pc else '',
+            })
+    if 'attachment_ids' in F:
+        out['attachment_ids'] = po.attachment_ids.ids
+        out['attachment_count'] = int(po.attachment_count or len(po.attachment_ids))
+        out['attachments'] = [_serialize_attachment(a) for a in po.attachment_ids]
+    return out
+
+
 class CrmSupplyController(http.Controller):
     @http.route(
         '/api/crm/supply/containers/<int:container_id>/attachments/list',
@@ -159,8 +351,10 @@ class CrmSupplyController(http.Controller):
                 return {'success': False, 'error': 'Unauthorized', 'data': None}
             Container = request.env['lugal.supply.container'].sudo()
             c = Container.browse(container_id).exists()
-            if not c:
+            if not c or c.is_deleted:
                 return {'success': False, 'error': 'Container not found', 'data': None}
+            if 'attachment_ids' not in c._fields:
+                return {'success': False, 'error': 'Attachments not available', 'data': None}
             attachments = []
             for att in c.attachment_ids.sorted('id', reverse=True):
                 attachments.append(_serialize_attachment(att))
@@ -169,10 +363,144 @@ class CrmSupplyController(http.Controller):
                 'data': {
                     'container_id': c.id,
                     'attachments': attachments,
+                    'items': attachments,
                 },
             }
         except Exception as e:
             return crm_error(e, 'supply_container_attachments_list')
+
+    @http.route(
+        '/api/crm/supply/containers/<int:container_id>/attachments/upload',
+        type='http',
+        auth='none',
+        methods=['POST', 'OPTIONS'],
+        csrf=False,
+        save_session=False,
+        cors='*',
+        max_content_length=1073741824,
+    )
+    def supply_container_attachments_upload(self, container_id, **kwargs):
+        """Multipart upload for container attachments (same pattern as PO upload)."""
+
+        def _json(payload, status=200):
+            return Response(
+                json.dumps(payload),
+                status=status,
+                headers=[('Content-Type', 'application/json')],
+            )
+
+        try:
+            if request.httprequest.method == 'OPTIONS':
+                return Response(status=204, headers=[
+                    ('Access-Control-Allow-Origin', '*'),
+                    ('Access-Control-Allow-Methods', 'POST, OPTIONS'),
+                    ('Access-Control-Allow-Headers', 'Authorization, Content-Type'),
+                    ('Access-Control-Max-Age', '86400'),
+                ])
+
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return _json({'success': False, 'error': 'Unauthorized'}, 401)
+
+            c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
+            if not c or c.is_deleted:
+                return _json({'success': False, 'error': 'Container not found'}, 404)
+            if 'attachment_ids' not in c._fields:
+                return _json({'success': False, 'error': 'Attachments not available'}, 400)
+
+            files = (
+                request.httprequest.files.getlist('files[]')
+                or request.httprequest.files.getlist('files')
+                or request.httprequest.files.getlist('file')
+            )
+            if not files:
+                return _json(
+                    {'success': False, 'error': 'No files provided (use file, files, or files[])'},
+                    400,
+                )
+
+            model_container = 'lugal.supply.container'
+            out_files = []
+
+            for f in files:
+                data = f.read()
+                mime = f.mimetype or mimetypes.guess_type(f.filename or '')[0] or ''
+                is_video = mime in VIDEO_MIMES
+                limit_mb = MAX_SUPPLY_CHAT_VIDEO_MB if is_video else MAX_SUPPLY_CHAT_UPLOAD_MB
+                limit_bytes = limit_mb * 1024 * 1024
+
+                if not data:
+                    return _json(
+                        {'success': False, 'error': '%s: empty file' % (f.filename or 'file')},
+                        400,
+                    )
+                if len(data) > limit_bytes:
+                    return _json(
+                        {'success': False, 'error': '%s: exceeds %s MB' % (f.filename or 'file', limit_mb)},
+                        400,
+                    )
+                if not _supply_chat_mime_allowed(mime):
+                    return _json(
+                        {'success': False, 'error': '%s: unsupported type (%s)' % (f.filename or 'file', mime)},
+                        400,
+                    )
+
+                filename = f.filename or 'upload'
+                att = _create_attachment(
+                    filename=filename,
+                    mimetype=mime,
+                    data_bytes=data,
+                    res_model=model_container,
+                    res_id=c.id,
+                )
+                c.write({'attachment_ids': [(4, att.id)]})
+                c.invalidate_recordset(['attachment_ids'])
+                out_files.append(_serialize_attachment(att))
+
+            total_att = len(c.attachment_ids)
+            payload = {
+                'container_id': c.id,
+                'uploaded_count': len(out_files),
+                'files': out_files,
+                'attachments': out_files,
+                'total_attachments': total_att,
+            }
+            return _json({'success': True, 'data': payload})
+        except Exception as e:
+            _logger.exception('supply_container_attachments_upload')
+            try:
+                request.env.cr.rollback()
+            except Exception:
+                pass
+            return _json({'success': False, 'error': str(e)}, 500)
+
+    @http.route(
+        '/api/crm/supply/containers/<int:container_id>/attachments/<int:attachment_id>/delete',
+        type='jsonrpc',
+        auth='none',
+        csrf=False,
+        methods=['POST'],
+    )
+    def supply_container_attachments_delete(self, container_id, attachment_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
+            if not c or c.is_deleted:
+                return {'success': False, 'error': 'Container not found', 'data': None}
+            if 'attachment_ids' not in c._fields:
+                return {'success': False, 'error': 'Attachments not available', 'data': None}
+            if attachment_id not in c.attachment_ids.ids:
+                return {'success': False, 'error': 'Attachment not linked to this container', 'data': None}
+            att = request.env['ir.attachment'].sudo().browse(attachment_id).exists()
+            if not att:
+                return {'success': False, 'error': 'Attachment not found', 'data': None}
+            c.write({'attachment_ids': [(3, attachment_id)]})
+            c.invalidate_recordset(['attachment_ids'])
+            att.unlink()
+            return {'success': True, 'data': {'deleted_id': attachment_id, 'container_id': container_id}}
+        except Exception as e:
+            return crm_error(e, 'supply_container_attachments_delete')
 
     @http.route(
         '/api/crm/supply/containers/<int:container_id>/penalties/list',
@@ -205,6 +533,163 @@ class CrmSupplyController(http.Controller):
             }
         except Exception as e:
             return crm_error(e, 'supply_container_penalties_list')
+
+    @http.route(
+        '/api/crm/supply/containers/<int:container_id>/add_penalty',
+        type='jsonrpc',
+        auth='none',
+        csrf=False,
+        methods=['POST'],
+    )
+    def supply_container_add_penalty(self, container_id, **kwargs):
+        """Create a penalty line on a container (SPA: ContainerContainer)."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            Container = request.env['lugal.supply.container'].sudo()
+            c = Container.browse(container_id).exists()
+            if not c or c.is_deleted:
+                return {'success': False, 'error': 'Container not found', 'data': None}
+
+            raw_amount = kwargs.get('amount')
+            if raw_amount is None:
+                return {'success': False, 'error': 'amount is required', 'data': None}
+            try:
+                amount = float(raw_amount)
+            except (TypeError, ValueError):
+                return {'success': False, 'error': 'amount must be a number', 'data': None}
+            if amount <= 0:
+                return {'success': False, 'error': 'amount must be greater than 0', 'data': None}
+
+            reason = (kwargs.get('reason') or kwargs.get('notes') or '').strip()
+            if not reason:
+                reason = 'Penalty charge'
+
+            allowed_types = frozenset(
+                {'storage', 'damage', 'late', 'customs', 'demurrage', 'other'},
+            )
+            ptype = kwargs.get('penalty_type') or 'other'
+            if ptype not in allowed_types:
+                return {'success': False, 'error': 'invalid penalty_type', 'data': None}
+
+            vals = {
+                'container_id': c.id,
+                'penalty_type': ptype,
+                'amount': amount,
+                'reason': reason,
+            }
+            if kwargs.get('currency_id') not in (None, False, ''):
+                try:
+                    vals['currency_id'] = int(kwargs['currency_id'])
+                except (TypeError, ValueError):
+                    return {'success': False, 'error': 'currency_id must be an integer', 'data': None}
+
+            pd = kwargs.get('penalty_date')
+            if pd not in (None, False, ''):
+                try:
+                    vals['penalty_date'] = fields.Date.from_string(str(pd)[:10])
+                except (ValueError, TypeError):
+                    return {'success': False, 'error': 'penalty_date must be YYYY-MM-DD', 'data': None}
+
+            Penalty = request.env['lugal.supply.container.penalty'].sudo()
+            p = Penalty.create(vals)
+            payload = _serialize_penalty(p, c)
+            payload['penalty_id'] = p.id
+            return {'success': True, 'data': payload}
+        except Exception as e:
+            return crm_error(e, 'supply_container_add_penalty')
+
+    @http.route(
+        '/api/crm/supply/containers/<int:container_id>/penalties/<int:penalty_id>/delete',
+        type='jsonrpc',
+        auth='none',
+        csrf=False,
+        methods=['POST'],
+    )
+    def supply_container_penalty_delete(self, container_id, penalty_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            Container = request.env['lugal.supply.container'].sudo()
+            c = Container.browse(container_id).exists()
+            if not c or c.is_deleted:
+                return {'success': False, 'error': 'Container not found', 'data': None}
+            Penalty = request.env['lugal.supply.container.penalty'].sudo()
+            p = Penalty.search(
+                [('id', '=', penalty_id), ('container_id', '=', c.id)],
+                limit=1,
+            )
+            if not p:
+                return {'success': False, 'error': 'Penalty not found', 'data': None}
+            p.unlink()
+            return {
+                'success': True,
+                'data': {'deleted_id': penalty_id, 'container_id': c.id},
+            }
+        except Exception as e:
+            return crm_error(e, 'supply_container_penalty_delete')
+
+    @http.route(
+        '/api/crm/supply/containers/tracking/view',
+        type='http',
+        auth='none',
+        methods=['GET', 'OPTIONS'],
+        csrf=False,
+        save_session=False,
+        cors='*',
+    )
+    def supply_container_tracking_view(self, **kwargs):
+        """
+        GET: return container tracking fields and optional JSON snapshot (`tracking_data`).
+        Query string: container_id (required). JWT: Authorization: Bearer <token>.
+        """
+        try:
+            if request.httprequest.method == 'OPTIONS':
+                return request.make_response(
+                    '',
+                    status=204,
+                    headers=[
+                        ('Access-Control-Allow-Origin', '*'),
+                        ('Access-Control-Allow-Methods', 'GET, OPTIONS'),
+                        ('Access-Control-Allow-Headers', 'Authorization, Content-Type, Accept'),
+                        ('Access-Control-Max-Age', '86400'),
+                    ],
+                )
+            if not ensure_jwt_user_id():
+                return request.make_json_response(
+                    {'success': False, 'error': 'Unauthorized', 'data': None},
+                    status=401,
+                )
+            raw = (
+                kwargs.get('container_id')
+                or request.params.get('container_id')
+                or request.httprequest.args.get('container_id')
+            )
+            if raw is None or str(raw).strip() == '':
+                return request.make_json_response(
+                    {'success': False, 'error': 'container_id is required', 'data': None},
+                    status=400,
+                )
+            try:
+                cid = int(raw)
+            except (TypeError, ValueError):
+                return request.make_json_response(
+                    {'success': False, 'error': 'container_id must be a number', 'data': None},
+                    status=400,
+                )
+            Container = request.env['lugal.supply.container'].sudo()
+            c = Container.search([('id', '=', cid), ('is_deleted', '=', False)], limit=1)
+            if not c:
+                return request.make_json_response(
+                    {'success': False, 'error': 'Container not found', 'data': None},
+                    status=404,
+                )
+            return request.make_json_response({
+                'success': True,
+                'data': _serialize_container_tracking_view(c),
+            })
+        except Exception as e:
+            return request.make_json_response(crm_error(e, 'supply_container_tracking_view'), status=500)
 
     @http.route(
         '/api/crm/supply/messages/<int:message_id>/delete',
@@ -404,7 +889,8 @@ class CrmSupplyController(http.Controller):
                 else:
                     att = _create_supply_chat_attachment(filename, mime, data)
 
-                url = _build_attachment_url(att)
+                pub = _build_attachment_public_path(att)
+                file_url = _build_attachment_url(att)
 
                 # Auto-detect kind if not provided
                 if kind_hint:
@@ -423,13 +909,14 @@ class CrmSupplyController(http.Controller):
                     'name':             att.name or filename,
                     'mimetype':         mime,
                     'size':             len(data),
-                    'url':              url,
+                    'url':              pub,
+                    'file_url':         file_url,
                     'kind':             kind,
                     'duration_seconds': duration_hint if kind in ('audio', 'voice', 'video') else 0,
                 })
 
             # Legacy "attachments" key kept for backwards compat
-            attachments_out = [{'name': r['name'], 'url': r['url']} for r in ir_rows]
+            attachments_out = [{'name': r['name'], 'url': r.get('file_url') or r['url']} for r in ir_rows]
 
             return _json({
                 'success': True,
@@ -447,3 +934,52 @@ class CrmSupplyController(http.Controller):
             except Exception:
                 pass
             return _json({'success': False, 'error': str(e)}, 500)
+
+    @http.route(
+        '/api/crm/supply/po/suggested',
+        type='jsonrpc',
+        auth='none',
+        csrf=False,
+        methods=['POST'],
+    )
+    def supply_po_suggested(self, **kwargs):
+        """
+        List purchase orders flagged as suggested (`is_suggested=True`).
+        Optional JSON params: page (default 1), per_page (default 20), division ('europe'|'china').
+        """
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            try:
+                page = max(1, int(kwargs.get('page') or 1))
+            except (TypeError, ValueError):
+                page = 1
+            try:
+                per_page = min(100, max(1, int(kwargs.get('per_page') or 20)))
+            except (TypeError, ValueError):
+                per_page = 20
+            division = (kwargs.get('division') or '').strip().lower()
+            domain = [
+                ('is_suggested', '=', True),
+                ('is_deleted', '=', False),
+                ('active', '=', True),
+            ]
+            if division in ('europe', 'china'):
+                domain.append(('division', '=', division))
+
+            Po = request.env['lugal.crm.supply.po'].sudo()
+            total = Po.search_count(domain)
+            offset = (page - 1) * per_page
+            rows = Po.search(domain, order='write_date desc, id desc', limit=per_page, offset=offset)
+            items = [_serialize_supply_po(po) for po in rows]
+            return {
+                'success': True,
+                'data': {
+                    'items': items,
+                    'total': total,
+                    'page': page,
+                    'per_page': per_page,
+                },
+            }
+        except Exception as e:
+            return crm_error(e, 'supply_po_suggested')

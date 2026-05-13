@@ -1,0 +1,593 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Item request -->
+    <record id="view_lugal_supply_item_request_tree" model="ir.ui.view">
+        <field name="name">lugal.supply.item.request.list</field>
+        <field name="model">lugal.supply.item.request</field>
+        <field name="arch" type="xml">
+            <list string="Item Requests">
+                <field name="name"/>
+                <field name="item_name"/>
+                <field name="requested_by_id"/>
+                <field name="priority"/>
+                <field name="attachment_count" optional="show"/>
+                <field name="capacity" optional="hide"/>
+                <field name="state"/>
+                <field name="request_date"/>
+            </list>
+        </field>
+    </record>
+    <record id="view_lugal_supply_item_request_form" model="ir.ui.view">
+        <field name="name">lugal.supply.item.request.form</field>
+        <field name="model">lugal.supply.item.request</field>
+        <field name="arch" type="xml">
+            <form string="Item Request">
+                <header>
+                    <button name="action_start_progress" string="Start" type="object" class="btn-primary" invisible="state != 'draft'"/>
+                    <button name="action_mark_completed" string="Mark completed" type="object" invisible="state == 'completed'"/>
+                    <button name="action_requester_confirm" string="Requester confirm (e-sign)" type="object"/>
+                    <button name="action_reset_draft" string="Reset to draft" type="object" invisible="state == 'draft'"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,in_progress,completed"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="name" readonly="1"/>
+                            <field name="item_name"/>
+                            <field name="description"/>
+                            <field name="quantity"/>
+                            <field name="uom"/>
+                            <field name="capacity"/>
+                            <field name="packing_pcs_per_carton"/>
+                            <field name="priority"/>
+                            <field name="request_date"/>
+                        </group>
+                        <group>
+                            <field name="requested_by_id"/>
+                            <field name="requester_confirm_user_id"/>
+                            <field name="requester_confirm_date"/>
+                        </group>
+                        <group string="Workflow milestones">
+                            <field name="workflow_milestone_start" readonly="1"/>
+                            <field name="workflow_milestone_completed" readonly="1"/>
+                        </group>
+                    </group>
+                    <group string="Attachments">
+                        <field name="attachment_ids" widget="many2many_binary" nolabel="1"/>
+                    </group>
+                    <group string="Notes">
+                        <field name="notes" nolabel="1"/>
+                    </group>
+                    <notebook>
+                        <page string="Negotiations" name="negotiations">
+                            <field name="negotiation_ids" context="{'default_item_request_id': id}">
+                                <list>
+                                    <field name="name"/>
+                                    <field name="vendor_id"/>
+                                    <field name="state"/>
+                                    <field name="final_agreed_price"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Orders" name="orders">
+                            <field name="supply_po_ids" readonly="1">
+                                <list>
+                                    <field name="name"/>
+                                    <field name="vendor_id"/>
+                                    <field name="status"/>
+                                    <field name="total_amount"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Custom fields" name="extra_fields">
+                            <group>
+                                <field name="extra_fields" colspan="2" nolabel="1"/>
+                            </group>
+                        </page>
+                        <page string="Approvals" name="item_request_approvals">
+                            <field name="supply_workflow_approval_line_ids" nolabel="1" context="{'default_item_request_id': id}">
+                                <list editable="bottom">
+                                    <field name="level" readonly="1"/>
+                                    <field name="state"/>
+                                    <field name="approver_user_id"/>
+                                    <field name="decided_at" readonly="1"/>
+                                    <field name="notes"/>
+                                </list>
+                            </field>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+    <record id="action_lugal_supply_item_request" model="ir.actions.act_window">
+        <field name="name">Item Requests</field>
+        <field name="res_model">lugal.supply.item.request</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <!-- Negotiation -->
+    <record id="view_lugal_supply_negotiation_tree" model="ir.ui.view">
+        <field name="name">lugal.supply.negotiation.list</field>
+        <field name="model">lugal.supply.negotiation</field>
+        <field name="arch" type="xml">
+            <list string="Negotiations">
+                <field name="name"/>
+                <field name="item_request_id"/>
+                <field name="vendor_id"/>
+                <field name="state"/>
+                <field name="attachment_count" optional="show"/>
+                <field name="offered_price"/>
+                <field name="final_agreed_price"/>
+                <field name="create_date" optional="hide"/>
+            </list>
+        </field>
+    </record>
+    <record id="view_lugal_supply_negotiation_form" model="ir.ui.view">
+        <field name="name">lugal.supply.negotiation.form</field>
+        <field name="model">lugal.supply.negotiation</field>
+        <field name="arch" type="xml">
+            <form string="Negotiation">
+                <header>
+                    <button name="action_e_sign_approve" string="E-sign Approve" type="object" class="btn-secondary" invisible="state != 'ongoing'"/>
+                    <button name="action_finalize" string="Finalize" type="object" class="btn-primary" invisible="state != 'ongoing'"/>
+                    <button name="action_cancel" string="Cancel" type="object" invisible="state != 'ongoing'"/>
+                    <button name="action_set_ongoing" string="Reopen" type="object" invisible="state == 'ongoing'"/>
+                    <field name="state" widget="statusbar" statusbar_visible="ongoing,finalized,cancelled"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="name" readonly="1"/>
+                            <field name="item_request_id"/>
+                            <field name="vendor_id"/>
+                            <field name="agent_id"/>
+                            <field name="item_name"/>
+                            <field name="quantity"/>
+                            <field name="capacity"/>
+                            <field name="packing_pcs_per_carton"/>
+                        </group>
+                        <group>
+                            <field name="offered_price"/>
+                            <field name="currency_id"/>
+                            <field name="final_agreed_price"/>
+                            <field name="final_currency_id"/>
+                            <field name="finalized_by_id"/>
+                            <field name="finalized_date"/>
+                        </group>
+                        <group string="Lead time">
+                            <field name="expected_lead_time_days"/>
+                            <field name="quoted_delivery_date"/>
+                            <field name="order_count" readonly="1"/>
+                        </group>
+                    </group>
+                    <group string="Attachments">
+                        <field name="attachment_ids" widget="many2many_binary" nolabel="1"/>
+                    </group>
+                    <group string="Terms">
+                        <field name="terms" nolabel="1"/>
+                    </group>
+                    <notebook>
+                        <page string="Offer history">
+                            <field name="offer_ids">
+                                <list editable="bottom">
+                                    <field name="sequence" widget="handle"/>
+                                    <field name="price"/>
+                                    <field name="currency_id"/>
+                                    <field name="offer_date"/>
+                                    <field name="user_id"/>
+                                    <field name="notes"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Orders">
+                            <field name="supply_po_ids" readonly="1">
+                                <list>
+                                    <field name="name"/>
+                                    <field name="vendor_id"/>
+                                    <field name="status"/>
+                                    <field name="total_amount"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Custom fields" name="negotiation_extra_fields">
+                            <group>
+                                <field name="extra_fields" colspan="2" nolabel="1"/>
+                            </group>
+                        </page>
+                        <page string="Supplier quotes" name="supplier_quotes">
+                            <field name="supplier_quote_ids" nolabel="1" context="{'default_negotiation_id': id}">
+                                <list editable="bottom">
+                                    <field name="sequence" widget="handle"/>
+                                    <field name="vendor_id"/>
+                                    <field name="offered_price"/>
+                                    <field name="currency_id"/>
+                                    <field name="lead_time_days"/>
+                                    <field name="is_recommended"/>
+                                    <field name="notes"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Approvals" name="negotiation_approvals">
+                            <field name="supply_workflow_approval_line_ids" nolabel="1" context="{'default_negotiation_id': id}">
+                                <list editable="bottom">
+                                    <field name="level" readonly="1"/>
+                                    <field name="state"/>
+                                    <field name="approver_user_id"/>
+                                    <field name="decided_at" readonly="1"/>
+                                    <field name="notes"/>
+                                </list>
+                            </field>
+                        </page>
+                    </notebook>
+                    <group string="Notes">
+                        <field name="notes" nolabel="1"/>
+                    </group>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+    <record id="action_lugal_supply_negotiation" model="ir.actions.act_window">
+        <field name="name">Negotiations</field>
+        <field name="res_model">lugal.supply.negotiation</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <!-- Supply PO -->
+    <record id="view_lugal_crm_supply_po_tree" model="ir.ui.view">
+        <field name="name">lugal.crm.supply.po.list</field>
+        <field name="model">lugal.crm.supply.po</field>
+        <field name="arch" type="xml">
+            <list string="Supply Orders">
+                <field name="name"/>
+                <field name="vendor_id"/>
+                <field name="item_request_id" optional="show"/>
+                <field name="negotiation_id" optional="hide"/>
+                <field name="status"/>
+                <field name="attachment_count" optional="show"/>
+                <field name="total_amount"/>
+                <field name="payment_state" optional="show"/>
+                <field name="order_date" optional="show"/>
+            </list>
+        </field>
+    </record>
+    <record id="view_lugal_crm_supply_po_form" model="ir.ui.view">
+        <field name="name">lugal.crm.supply.po.form</field>
+        <field name="model">lugal.crm.supply.po</field>
+        <field name="arch" type="xml">
+            <form string="Supply Order">
+                <header>
+                    <button name="action_confirm_order_e_sign" string="Confirm order (e-sign)" type="object" class="btn-primary"/>
+                    <field name="status" widget="statusbar" statusbar_visible="draft,confirmed,cancelled"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="name"/>
+                            <field name="vendor_id"/>
+                            <field name="agent_id"/>
+                            <field name="item_request_id"/>
+                            <field name="negotiation_id"/>
+                            <field name="division"/>
+                            <field name="branch_id"/>
+                        </group>
+                        <group>
+                            <field name="currency_id"/>
+                            <field name="order_date"/>
+                            <field name="production_completion_date"/>
+                            <field name="payment_term"/>
+                            <field name="shipping_method"/>
+                            <field name="container_id"/>
+                            <field name="total_amount"/>
+                            <field name="amount_paid_total"/>
+                            <field name="balance_remaining"/>
+                            <field name="payment_state"/>
+                            <field name="order_confirmed_user_id"/>
+                            <field name="order_confirmed_date"/>
+                            <field name="budget_allocation_id"/>
+                            <field name="supplier_commitment_date"/>
+                            <field name="planned_receipt_date"/>
+                            <field name="order_acknowledged_at" readonly="1"/>
+                            <field name="lead_time_delay_days" readonly="1"/>
+                        </group>
+                    </group>
+                    <group string="Notes">
+                        <field name="notes" nolabel="1"/>
+                    </group>
+                    <notebook>
+                        <page string="Lines">
+                            <field name="line_ids">
+                                <list editable="bottom">
+                                    <field name="sequence" widget="handle"/>
+                                    <field name="product_id" optional="show"/>
+                                    <field name="product_name"/>
+                                    <field name="item_code"/>
+                                    <field name="quantity_pcs"/>
+                                    <field name="quantity_carton"/>
+                                    <field name="quantity"/>
+                                    <field name="uom"/>
+                                    <field name="size"/>
+                                    <field name="capacity"/>
+                                    <field name="packing_pcs_per_carton"/>
+                                    <field name="unit_price"/>
+                                    <field name="total_price"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Payments">
+                            <field name="payment_ids">
+                                <list>
+                                    <field name="name"/>
+                                    <field name="payment_type"/>
+                                    <field name="paid_to"/>
+                                    <field name="amount"/>
+                                    <field name="currency_id"/>
+                                    <field name="payment_date"/>
+                                    <field name="remaining_balance"/>
+                                    <field name="payment_status"/>
+                                    <field name="payment_method"/>
+                                </list>
+                                <form>
+                                    <group>
+                                        <field name="name" readonly="1"/>
+                                        <field name="payment_type"/>
+                                        <field name="paid_to"/>
+                                        <field name="payee_partner_id"/>
+                                        <field name="amount"/>
+                                        <field name="currency_id"/>
+                                        <field name="payment_date"/>
+                                        <field name="payment_method"/>
+                                        <field name="remaining_balance"/>
+                                        <field name="payment_status"/>
+                                        <field name="notes"/>
+                                        <field name="attachment_ids" widget="many2many_binary"/>
+                                    </group>
+                                </form>
+                            </field>
+                        </page>
+                        <page string="Attachments">
+                            <field name="attachment_ids" widget="many2many_binary" nolabel="1"/>
+                        </page>
+                        <page string="Custom fields" name="po_extra_fields">
+                            <group>
+                                <field name="extra_fields" colspan="2" nolabel="1"/>
+                            </group>
+                        </page>
+                        <page string="Approvals" name="po_approvals">
+                            <field name="supply_workflow_approval_line_ids" nolabel="1" context="{'default_po_id': id}">
+                                <list editable="bottom">
+                                    <field name="level" readonly="1"/>
+                                    <field name="state"/>
+                                    <field name="approver_user_id"/>
+                                    <field name="decided_at" readonly="1"/>
+                                    <field name="notes"/>
+                                </list>
+                            </field>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+    <record id="action_lugal_crm_supply_po" model="ir.actions.act_window">
+        <field name="name">Supply Orders</field>
+        <field name="res_model">lugal.crm.supply.po</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <!-- Payment -->
+    <record id="view_lugal_supply_payment_tree" model="ir.ui.view">
+        <field name="name">lugal.supply.payment.list</field>
+        <field name="model">lugal.supply.payment</field>
+        <field name="arch" type="xml">
+            <list string="Payments">
+                <field name="name"/>
+                <field name="po_id"/>
+                <field name="payment_type"/>
+                <field name="paid_to"/>
+                <field name="attachment_count" optional="show"/>
+                <field name="amount" sum="Total"/>
+                <field name="currency_id"/>
+                <field name="payment_date"/>
+                <field name="remaining_balance"/>
+                <field name="payment_status"/>
+            </list>
+        </field>
+    </record>
+    <record id="view_lugal_supply_payment_form" model="ir.ui.view">
+        <field name="name">lugal.supply.payment.form</field>
+        <field name="model">lugal.supply.payment</field>
+        <field name="arch" type="xml">
+            <form string="Payment">
+                <sheet>
+                    <group>
+                        <field name="name" readonly="1"/>
+                        <field name="po_id"/>
+                        <field name="payment_type"/>
+                        <field name="paid_to"/>
+                        <field name="payee_partner_id"/>
+                        <field name="amount"/>
+                        <field name="currency_id"/>
+                        <field name="payment_date"/>
+                        <field name="payment_method"/>
+                        <field name="remaining_balance"/>
+                        <field name="payment_status"/>
+                        <field name="funds_cleared_at"/>
+                        <field name="value_date"/>
+                        <field name="notes"/>
+                        <field name="attachment_ids" widget="many2many_binary"/>
+                    </group>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+    <record id="action_lugal_supply_payment" model="ir.actions.act_window">
+        <field name="name">Supply Payments</field>
+        <field name="res_model">lugal.supply.payment</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <!-- Container -->
+    <record id="view_lugal_supply_container_tree" model="ir.ui.view">
+        <field name="name">lugal.supply.container.list</field>
+        <field name="model">lugal.supply.container</field>
+        <field name="arch" type="xml">
+            <list string="Shipments / Containers">
+                <field name="shipment_ref"/>
+                <field name="name"/>
+                <field name="container_number"/>
+                <field name="supplier_id" optional="show"/>
+                <field name="shipment_tracking_state" optional="show"/>
+                <field name="attachment_count" optional="show"/>
+                <field name="status"/>
+                <field name="eta"/>
+                <field name="departure_date"/>
+            </list>
+        </field>
+    </record>
+    <record id="view_lugal_supply_container_form" model="ir.ui.view">
+        <field name="name">lugal.supply.container.form</field>
+        <field name="model">lugal.supply.container</field>
+        <field name="arch" type="xml">
+            <form string="Shipment / Container">
+                <sheet>
+                    <group string="Identification">
+                        <group>
+                            <field name="shipment_ref" readonly="1"/>
+                            <field name="name"/>
+                            <field name="container_number"/>
+                            <field name="bl_number"/>
+                            <field name="division"/>
+                        </group>
+                        <group>
+                            <field name="supplier_id"/>
+                            <field name="agent_id"/>
+                            <field name="transport_mode"/>
+                            <field name="shipping_line"/>
+                            <field name="origin_location"/>
+                            <field name="destination_location"/>
+                        </group>
+                    </group>
+                    <group string="Schedule">
+                        <group>
+                            <field name="departure_date"/>
+                            <field name="eta" string="ETA (Arrival)"/>
+                            <field name="received_date"/>
+                            <field name="arrived_at"/>
+                            <field name="planned_gate_in_date"/>
+                            <field name="actual_gate_in_at"/>
+                        </group>
+                        <group>
+                            <field name="status"/>
+                            <field name="shipment_tracking_state"/>
+                            <field name="assigned_user_id"/>
+                        </group>
+                    </group>
+                    <group string="Linked orders">
+                        <field name="purchase_order_ids" widget="many2many_tags" nolabel="1"/>
+                    </group>
+                    <notebook>
+                        <page string="Tracking">
+                            <group>
+                                <field name="tracking_url"/>
+                                <field name="clearance_company"/>
+                            </group>
+                        </page>
+                        <page string="Attachments">
+                            <field name="attachment_ids" widget="many2many_binary" nolabel="1"/>
+                        </page>
+                    </notebook>
+                    <group string="Notes">
+                        <field name="notes" nolabel="1"/>
+                    </group>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+    <record id="action_lugal_supply_container" model="ir.actions.act_window">
+        <field name="name">Shipments</field>
+        <field name="res_model">lugal.supply.container</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <!-- Budget allocation (structure; enforcement optional via settings) -->
+    <record id="view_lugal_supply_budget_allocation_tree" model="ir.ui.view">
+        <field name="name">lugal.supply.budget.allocation.list</field>
+        <field name="model">lugal.supply.budget.allocation</field>
+        <field name="arch" type="xml">
+            <list string="Budget allocations">
+                <field name="name"/>
+                <field name="company_id" groups="base.group_multi_company"/>
+                <field name="currency_id"/>
+                <field name="amount_limit" sum="Total limit"/>
+                <field name="active"/>
+            </list>
+        </field>
+    </record>
+    <record id="view_lugal_supply_budget_allocation_form" model="ir.ui.view">
+        <field name="name">lugal.supply.budget.allocation.form</field>
+        <field name="model">lugal.supply.budget.allocation</field>
+        <field name="arch" type="xml">
+            <form string="Budget allocation">
+                <sheet>
+                    <group>
+                        <field name="name"/>
+                        <field name="company_id" groups="base.group_multi_company"/>
+                        <field name="currency_id"/>
+                        <field name="amount_limit"/>
+                        <field name="active"/>
+                    </group>
+                    <group string="Notes">
+                        <field name="note" nolabel="1"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="action_lugal_supply_budget_allocation" model="ir.actions.act_window">
+        <field name="name">Budget allocations</field>
+        <field name="res_model">lugal.supply.budget.allocation</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <!-- Menu -->
+    <menuitem id="menu_lugal_supply_chain_root"
+        name="Supply chain"
+        parent="base.menu_custom"
+        sequence="25"/>
+    <menuitem id="menu_lugal_supply_item_request"
+        name="Item requests"
+        parent="menu_lugal_supply_chain_root"
+        action="action_lugal_supply_item_request"
+        sequence="10"/>
+    <menuitem id="menu_lugal_supply_budget_allocation"
+        name="Budget allocations"
+        parent="menu_lugal_supply_chain_root"
+        action="action_lugal_supply_budget_allocation"
+        sequence="15"/>
+    <menuitem id="menu_lugal_supply_negotiation"
+        name="Negotiations"
+        parent="menu_lugal_supply_chain_root"
+        action="action_lugal_supply_negotiation"
+        sequence="20"/>
+    <menuitem id="menu_lugal_crm_supply_po"
+        name="Supply orders"
+        parent="menu_lugal_supply_chain_root"
+        action="action_lugal_crm_supply_po"
+        sequence="30"/>
+    <menuitem id="menu_lugal_supply_payment"
+        name="Payments"
+        parent="menu_lugal_supply_chain_root"
+        action="action_lugal_supply_payment"
+        sequence="40"/>
+    <menuitem id="menu_lugal_supply_container"
+        name="Shipments"
+        parent="menu_lugal_supply_chain_root"
+        action="action_lugal_supply_container"
+        sequence="50"/>
+</odoo>

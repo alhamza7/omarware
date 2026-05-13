@@ -1,0 +1,1517 @@
+# -*- coding: utf-8 -*-
+"""
+REST-like JSON-RPC routes for Supply Chain SPA (`frontends/44`).
+
+Covers vendors, containers (CRUD + workflow helpers), and purchase orders + lines.
+Chat/stories remain in other controllers; attachments lists aligned with `supply_controller`.
+"""
+
+import base64
+import json
+import mimetypes
+from datetime import date, datetime
+
+from odoo import fields, http
+from odoo.http import request, Response
+
+from ._auth import ensure_jwt_user_id
+from ._product_helpers import safe_product_purchase_uom
+from ._error import crm_error
+from .supply_attachment_api import supply_build_attachment_m2m_write, supply_kwargs_has_attachments
+from .supply_controller import (
+    MAX_SUPPLY_CHAT_UPLOAD_MB,
+    MAX_SUPPLY_CHAT_VIDEO_MB,
+    VIDEO_MIMES,
+    _serialize_attachment,
+    _serialize_supply_po,
+    _serialize_supply_po_line,
+    _supply_chat_mime_allowed,
+)
+from .upload_controller import _create_attachment
+
+_logger = __import__('logging').getLogger(__name__)
+
+
+def _resolve_supply_line_product(product_id_raw, Product):
+    """Return browsed ``product.product`` or ``(False, error_message)``."""
+    try:
+        pid = int(product_id_raw)
+    except (TypeError, ValueError):
+        return False, 'product_id must be an integer'
+    prod = Product.browse(pid).exists()
+    if not prod or not prod.active or not prod.purchase_ok:
+        return False, f'Invalid or non-purchasable product_id: {pid}'
+    return prod, None
+
+
+def _apply_product_to_supply_line_vals(prod, lv):
+    """Fill ``product_id``, ``product_name``, ``item_code``, ``uom`` from ``product.product``."""
+    uom = safe_product_purchase_uom(prod)
+    lv['product_id'] = prod.id
+    lv['product_name'] = prod.name or lv.get('product_name') or ''
+    lv['item_code'] = prod.default_code or lv.get('item_code') or ''
+    lv['uom'] = uom.name if uom else (lv.get('uom') or '')
+
+
+# Valid `lugal.supply.vendor` division Selection keys (see lugal_supply_vendor.py)
+_VENDOR_DIVISION_KEYS = frozenset({'europe', 'china', 'other'})
+
+
+def _normalize_vendor_division_filter(raw):
+    """Map API/FE input to stored Selection key: europe | china | other, or None if unset/unknown.
+
+    Accepts case-insensitive labels and common aliases (EU, Europe, China, …).
+    """
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    key = s.lower().replace(' ', '')
+    # Direct keys + short aliases
+    if key in ('china', 'cn', 'prc'):
+        return 'china'
+    if key in ('europe', 'eu'):
+        return 'europe'
+    if key == 'other':
+        return 'other'
+    # Label-style (e.g. "Europe / أوروبا" stored nowhere, but users may type "Europe")
+    if 'china' in key or 'الصين' in s:
+        return 'china'
+    if 'europe' in key or 'euro' in key or 'أوروبا' in s:
+        return 'europe'
+    if key in _VENDOR_DIVISION_KEYS:
+        return key
+    return None
+
+
+def _pagination(kwargs):
+    try:
+        page = max(1, int(kwargs.get('page') or 1))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        per_page = min(200, max(1, int(kwargs.get('per_page') or 20)))
+    except (TypeError, ValueError):
+        per_page = 20
+    return page, per_page, (page - 1) * per_page
+
+
+def _parse_date(val):
+    if not val:
+        return False
+    if isinstance(val, date) and not isinstance(val, datetime):
+        return val
+    s = str(val).strip()
+    if not s:
+        return False
+    try:
+        return datetime.strptime(s[:10], '%Y-%m-%d').date()
+    except ValueError:
+        return False
+
+
+_SUPPLY_REMINDER_CORS = [
+    ('Access-Control-Allow-Origin', '*'),
+    ('Access-Control-Allow-Methods', 'GET, DELETE, OPTIONS'),
+    ('Access-Control-Allow-Headers', 'Authorization, Content-Type'),
+]
+
+
+def _supply_reminder_http_json(payload, status=200):
+    headers = [('Content-Type', 'application/json')] + _SUPPLY_REMINDER_CORS
+    return Response(json.dumps(payload), status=status, headers=headers)
+
+
+def _reminder_datetime_to_api_string(dt_value):
+    if not dt_value:
+        return None
+    if isinstance(dt_value, datetime):
+        return dt_value.strftime('%Y-%m-%d %H:%M:%S')
+    return None
+
+
+def _container_reminder_api_dict(container):
+    """Reminder-only payload for GET /containers/<id>/reminder."""
+    if 'reminder_date' not in container._fields:
+        return {
+            'container_id': container.id,
+            'reminder_date': None,
+            'reminder_note': '',
+        }
+    rd = container.reminder_date
+    return {
+        'container_id': container.id,
+        'reminder_date': _reminder_datetime_to_api_string(rd) if rd else None,
+        'reminder_note': (container.reminder_note or '').strip(),
+    }
+
+
+def _parse_reminder_datetime_in(raw):
+    """Return ``datetime`` when valid, ``False`` when empty, ``None`` when invalid."""
+    if raw is None or raw is False:
+        return False
+    if isinstance(raw, datetime):
+        return raw
+    s = str(raw).strip()
+    if not s:
+        return False
+    try:
+        conv = fields.Datetime.to_datetime(s)
+        if conv:
+            return conv
+    except Exception:
+        pass
+    normalized = s.replace('T', ' ')[:19]
+    for fmt in ('%Y-%m-%d %H:%M:%S',):
+        try:
+            return datetime.strptime(normalized, fmt)
+        except ValueError:
+            pass
+    try:
+        return datetime.strptime(s[:10], '%Y-%m-%d')
+    except ValueError:
+        pass
+    return None
+
+
+def _serialize_vendor(v):
+    country = v.country_id
+    cur = v.currency_id
+    return {
+        'id': v.id,
+        'name': v.name or '',
+        'name_ar': v.name_ar or '',
+        'contact_type': 'vendor',
+        'phone': v.phone or '',
+        'email': v.email or '',
+        'website': v.website or '',
+        'whatsapp': v.whatsapp or '',
+        'telegram': v.telegram or '',
+        'wechat': v.wechat or '',
+        'division': v.division or '',
+        'city': v.city or '',
+        'country_name': country.name if country else '',
+        'address': v.address or '',
+        'payment_terms': v.payment_terms or '',
+        'lead_time_days': int(v.lead_time_days or 0),
+        'min_order_value': float(v.min_order_value or 0.0),
+        'currency_id': cur.id if cur else None,
+        'currency_name': cur.name if cur else '',
+        'contact_name': v.contact_name or '',
+        'notes': v.notes or '',
+        'created_at': v.create_date.isoformat() if v.create_date else '',
+    }
+
+
+def _resolve_country_id_for_vendor(env, raw):
+    """Map API ``country`` (id, ISO code, or country name) to ``res.country`` id."""
+    if raw is None or raw is False or isinstance(raw, bool):
+        return None
+    if isinstance(raw, int):
+        c = env['res.country'].sudo().browse(raw).exists()
+        return c.id if c else None
+    s = str(raw).strip()
+    if not s:
+        return None
+    if s.isdigit():
+        cid = int(s)
+        c = env['res.country'].sudo().browse(cid).exists()
+        return c.id if c else None
+    Country = env['res.country'].sudo()
+    c = Country.search(['|', ('code', '=ilike', s), ('name', 'ilike', s)], limit=1)
+    return c.id if c else None
+
+
+def _expand_supplier_style_kwargs(env, kwargs):
+    """Map supplier-style aliases (``contact_person``, ``country``) onto vendor field keys."""
+    kw = dict(kwargs)
+    if 'contact_person' in kw and 'contact_name' not in kw:
+        kw['contact_name'] = kw['contact_person']
+    kw.pop('contact_person', None)
+    if 'country' in kw and 'country_id' not in kw:
+        cid = _resolve_country_id_for_vendor(env, kw.pop('country'))
+        if cid:
+            kw['country_id'] = cid
+    else:
+        kw.pop('country', None)
+    return kw
+
+
+def _build_vendor_write_vals(kwargs):
+    """Partial-update dict for ``lugal.supply.vendor`` from JSON-RPC params."""
+    vals = {}
+    for k in (
+        'name', 'name_ar', 'phone', 'email', 'website', 'whatsapp', 'telegram', 'wechat',
+        'city', 'address', 'payment_terms', 'notes', 'contact_name',
+    ):
+        if k in kwargs:
+            vals[k] = kwargs[k]
+    if 'division' in kwargs:
+        div = kwargs['division']
+        if div in (False, None, ''):
+            vals['division'] = False
+        else:
+            div_norm = _normalize_vendor_division_filter(div)
+            if div_norm:
+                vals['division'] = div_norm
+    if 'lead_time_days' in kwargs:
+        vals['lead_time_days'] = int(kwargs['lead_time_days'] or 0)
+    if 'min_order_value' in kwargs:
+        vals['min_order_value'] = float(kwargs['min_order_value'] or 0.0)
+    if 'currency_id' in kwargs:
+        vals['currency_id'] = kwargs.get('currency_id') or False
+    if 'country_id' in kwargs:
+        vals['country_id'] = kwargs.get('country_id') or False
+    return vals
+
+
+def _serialize_container(c):
+    delivered_by = c.clearance_info_delivered_by_id
+    supplier = c.supplier_id
+    rem = _container_reminder_api_dict(c)
+    return {
+        'id': c.id,
+        'name': c.name or '',
+        'container_number': c.container_number or '',
+        'bl_number': c.bl_number or '',
+        'clearance_company_id': None,
+        'clearance_company_name': c.clearance_company or '',
+        'origin_location': c.origin_location or '',
+        'destination_port': c.destination_location or '',
+        'departure_date': c.departure_date.isoformat() if c.departure_date else None,
+        'eta': c.eta.isoformat() if c.eta else None,
+        'arrived_at': c.arrived_at.isoformat() if c.arrived_at else None,
+        'status': c.status or 'waiting',
+        'division': c.division or '',
+        'tracking_url': c.tracking_url or '',
+        'total_weight_kg': 0.0,
+        'total_cbm': 0.0,
+        'driver_id': None,
+        'driver_name': '',
+        'driver_phone': '',
+        'driver_assigned_at': None,
+        'driver_assigned_by': '',
+        'clearance_info_delivered': bool(c.clearance_info_delivered),
+        'clearance_info_delivered_at': (
+            c.clearance_info_delivered_at.isoformat() if c.clearance_info_delivered_at else None
+        ),
+        'clearance_info_delivered_by': delivered_by.name if delivered_by else '',
+        'attachment_count': int(getattr(c, 'attachment_count', 0) or len(c.attachment_ids)),
+        'penalty_count': len(c.penalty_ids),
+        'vendor_id': supplier.id if supplier else None,
+        'vendor_name': supplier.name if supplier else '',
+        'reminder_date': rem['reminder_date'],
+        'reminder_note': rem['reminder_note'],
+        'notes': c.notes or '',
+        'created_at': c.create_date.isoformat() if c.create_date else '',
+        'updated_at': c.write_date.isoformat() if c.write_date else '',
+    }
+
+
+def _supply_po_packing_list_plain_text(po):
+    """Plain-text packing list for share / clipboard (no prices)."""
+    lines = [
+        'Packing List (no prices)',
+        'PO: %s' % (po.name or ''),
+    ]
+    if po.vendor_id:
+        lines.append('Vendor: %s' % (po.vendor_id.name or ''))
+    if po.division:
+        lines.append('Division: %s' % po.division)
+    lines.append('')
+    lines.append('#\tProduct\tCode\tSize\tQty\tUoM\tPcs/Carton')
+    for idx, line in enumerate(po.line_ids, start=1):
+        q = float(line.quantity or 0.0)
+        if q == 0.0 and line.quantity_pcs:
+            q = float(line.quantity_pcs)
+
+        def _tab_clean(val):
+            if val in (False, None):
+                return ''
+            return str(val).replace('\t', ' ').replace('\r', ' ').replace('\n', ' ')
+
+        lines.append(
+            '%d\t%s\t%s\t%s\t%s\t%s\t%s'
+            % (
+                idx,
+                _tab_clean(line.product_name),
+                _tab_clean(line.item_code),
+                _tab_clean(line.size),
+                q,
+                _tab_clean(line.uom),
+                float(line.packing_pcs_per_carton or 0.0),
+            )
+        )
+    return '\n'.join(lines)
+
+
+def _vendor_from_partner_id(partner_id):
+    """Resolve `lugal.supply.vendor` from `res.partner` id (frontend vendor_customer_id)."""
+    if not partner_id:
+        return None
+    Vendor = request.env['lugal.supply.vendor'].sudo()
+    return Vendor.search([('partner_id', '=', int(partner_id))], limit=1)
+
+
+class CrmSupplyChainApiController(http.Controller):
+    # -------------------------------------------------------------------------
+    # Vendors
+    # -------------------------------------------------------------------------
+    @http.route('/api/crm/supply/vendors/list', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_vendors_list(self, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            page, per_page, offset = _pagination(kwargs)
+            search = (kwargs.get('search') or '').strip()
+            domain = [('is_deleted', '=', False), ('active', '=', True)]
+            if search:
+                domain += ['|', '|', ('name', 'ilike', search), ('name_ar', 'ilike', search), ('phone', 'ilike', search)]
+            division_raw = kwargs.get('division')
+            division_key = _normalize_vendor_division_filter(division_raw)
+            if division_raw not in (None, '', False):
+                if division_key is not None:
+                    domain.append(('division', '=', division_key))
+                else:
+                    _logger.warning(
+                        'supply_vendors_list: unknown division filter %r — omitting division clause',
+                        division_raw,
+                    )
+            _logger.debug('supply_vendors_list incoming kwargs=%r', kwargs)
+            _logger.debug('supply_vendors_list final domain=%r', domain)
+            Vendor = request.env['lugal.supply.vendor'].sudo()
+            total = Vendor.search_count(domain)
+            rows = Vendor.search(domain, order='name asc, id asc', limit=per_page, offset=offset)
+            return {
+                'success': True,
+                'data': {
+                    'items': [_serialize_vendor(v) for v in rows],
+                    'total': total,
+                    'page': page,
+                    'per_page': per_page,
+                },
+            }
+        except Exception as e:
+            return crm_error(e, 'supply_vendors_list')
+
+    @http.route('/api/crm/supply/vendors/<int:vendor_id>/get', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_vendors_get(self, vendor_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            v = request.env['lugal.supply.vendor'].sudo().browse(vendor_id).exists()
+            if not v or v.is_deleted:
+                return {'success': False, 'error': 'Vendor not found', 'data': None}
+            return {'success': True, 'data': _serialize_vendor(v)}
+        except Exception as e:
+            return crm_error(e, 'supply_vendors_get')
+
+    @http.route('/api/crm/supply/vendors/create', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_vendors_create(self, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            name = (kwargs.get('name') or '').strip()
+            if not name:
+                return {'success': False, 'error': 'name is required', 'data': None}
+            vals = {'name': name}
+            opt = (
+                'name_ar', 'phone', 'email', 'website', 'whatsapp', 'telegram', 'wechat',
+                'city', 'address', 'payment_terms', 'notes', 'contact_name',
+            )
+            for k in opt:
+                if kwargs.get(k) is not None:
+                    vals[k] = kwargs[k]
+            if kwargs.get('division'):
+                div_norm = _normalize_vendor_division_filter(kwargs['division'])
+                if div_norm:
+                    vals['division'] = div_norm
+            if kwargs.get('lead_time_days') is not None:
+                vals['lead_time_days'] = int(kwargs['lead_time_days'] or 0)
+            if kwargs.get('min_order_value') is not None:
+                vals['min_order_value'] = float(kwargs['min_order_value'] or 0.0)
+            if kwargs.get('currency_id'):
+                vals['currency_id'] = int(kwargs['currency_id'])
+            rec = request.env['lugal.supply.vendor'].sudo().create(vals)
+            return {'success': True, 'data': _serialize_vendor(rec)}
+        except Exception as e:
+            return crm_error(e, 'supply_vendors_create')
+
+    @http.route('/api/crm/supply/vendors/<int:vendor_id>/update', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_vendors_update(self, vendor_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            v = request.env['lugal.supply.vendor'].sudo().browse(vendor_id).exists()
+            if not v or v.is_deleted:
+                return {'success': False, 'error': 'Vendor not found', 'data': None}
+            vals = _build_vendor_write_vals(kwargs)
+            if vals:
+                v.write(vals)
+            return {'success': True, 'data': _serialize_vendor(v)}
+        except Exception as e:
+            return crm_error(e, 'supply_vendors_update')
+
+    @http.route('/api/crm/supply/vendors/<int:vendor_id>/delete', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_vendors_delete(self, vendor_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            v = request.env['lugal.supply.vendor'].sudo().browse(vendor_id).exists()
+            if not v:
+                return {'success': False, 'error': 'Vendor not found', 'data': None}
+            v.write({'is_deleted': True, 'active': False})
+            return {'success': True, 'data': {'id': vendor_id, 'deleted': True}}
+        except Exception as e:
+            return crm_error(e, 'supply_vendors_delete')
+
+    @http.route(
+        '/api/crm/supply/suppliers/<int:supplier_id>/update',
+        type='jsonrpc', auth='none', csrf=False, methods=['POST'],
+    )
+    def supply_suppliers_update(self, supplier_id, **kwargs):
+        """Alias for vendor update; accepts ``contact_person`` and string ``country``."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            v = request.env['lugal.supply.vendor'].sudo().browse(supplier_id).exists()
+            if not v or v.is_deleted:
+                return {'success': False, 'error': 'Supplier not found', 'data': None}
+            merged = _expand_supplier_style_kwargs(request.env, kwargs)
+            vals = _build_vendor_write_vals(merged)
+            if vals:
+                v.write(vals)
+            v.invalidate_recordset()
+            return {'success': True, 'data': {'id': v.id, 'name': v.name or ''}}
+        except Exception as e:
+            return crm_error(e, 'supply_suppliers_update')
+
+    @http.route(
+        '/api/crm/supply/suppliers/<int:supplier_id>/delete',
+        type='jsonrpc', auth='none', csrf=False, methods=['POST'],
+    )
+    def supply_suppliers_delete(self, supplier_id, **kwargs):
+        """Soft-delete supplier (same as vendor delete)."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            v = request.env['lugal.supply.vendor'].sudo().browse(supplier_id).exists()
+            if not v or v.is_deleted:
+                return {'success': False, 'error': 'Supplier not found', 'data': None}
+            v.write({'is_deleted': True, 'active': False})
+            return {'success': True, 'data': {'id': supplier_id}}
+        except Exception as e:
+            return crm_error(e, 'supply_suppliers_delete')
+
+    # -------------------------------------------------------------------------
+    # Containers
+    # -------------------------------------------------------------------------
+    @http.route('/api/crm/supply/containers/list', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_containers_list(self, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            page, per_page, offset = _pagination(kwargs)
+            domain = [('is_deleted', '=', False), ('active', '=', True)]
+            if kwargs.get('status'):
+                domain.append(('status', '=', kwargs['status']))
+            if kwargs.get('division'):
+                domain.append(('division', '=', kwargs['division']))
+            search = (kwargs.get('search') or '').strip()
+            if search:
+                domain += [
+                    '|', '|', '|',
+                    ('name', 'ilike', search),
+                    ('container_number', 'ilike', search),
+                    ('bl_number', 'ilike', search),
+                    ('shipment_ref', 'ilike', search),
+                ]
+            C = request.env['lugal.supply.container'].sudo()
+            total = C.search_count(domain)
+            rows = C.search(domain, order='departure_date desc, id desc', limit=per_page, offset=offset)
+            return {
+                'success': True,
+                'data': {
+                    'items': [_serialize_container(c) for c in rows],
+                    'total': total,
+                    'page': page,
+                    'per_page': per_page,
+                },
+            }
+        except Exception as e:
+            return crm_error(e, 'supply_containers_list')
+
+    @http.route('/api/crm/supply/containers/<int:container_id>/get', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_containers_get(self, container_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
+            if not c or c.is_deleted:
+                return {'success': False, 'error': 'Container not found', 'data': None}
+            return {'success': True, 'data': _serialize_container(c)}
+        except Exception as e:
+            return crm_error(e, 'supply_containers_get')
+
+    @http.route('/api/crm/supply/containers/create', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_containers_create(self, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            name = (kwargs.get('name') or '').strip()
+            if not name:
+                return {'success': False, 'error': 'name is required', 'data': None}
+            vals = {'name': name}
+            if kwargs.get('container_number'):
+                vals['container_number'] = kwargs['container_number']
+            if kwargs.get('bl_number'):
+                vals['bl_number'] = kwargs['bl_number']
+            if kwargs.get('clearance_company_id'):
+                pass  # model stores clearance_company as Char
+            if kwargs.get('clearance_company'):
+                vals['clearance_company'] = kwargs['clearance_company']
+            if kwargs.get('origin_location'):
+                vals['origin_location'] = kwargs['origin_location']
+            if kwargs.get('destination_port'):
+                vals['destination_location'] = kwargs['destination_port']
+            dd = _parse_date(kwargs.get('departure_date'))
+            if dd:
+                vals['departure_date'] = dd
+            ed = _parse_date(kwargs.get('eta'))
+            if ed:
+                vals['eta'] = ed
+            if kwargs.get('division'):
+                vals['division'] = kwargs['division']
+            if kwargs.get('tracking_url'):
+                vals['tracking_url'] = kwargs['tracking_url']
+            if kwargs.get('notes'):
+                vals['notes'] = kwargs['notes']
+            c = request.env['lugal.supply.container'].sudo().create(vals)
+            return {'success': True, 'data': _serialize_container(c)}
+        except Exception as e:
+            return crm_error(e, 'supply_containers_create')
+
+    @http.route('/api/crm/supply/containers/<int:container_id>/update', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_containers_update(self, container_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
+            if not c or c.is_deleted:
+                return {'success': False, 'error': 'Container not found', 'data': None}
+            vals = {}
+            string_fields = (
+                'name', 'container_number', 'bl_number', 'clearance_company',
+                'origin_location', 'tracking_url', 'notes', 'shipping_line',
+            )
+            for k in string_fields:
+                if k in kwargs:
+                    vals[k] = kwargs[k]
+            if 'destination_port' in kwargs:
+                vals['destination_location'] = kwargs['destination_port']
+            if 'status' in kwargs and kwargs['status']:
+                vals['status'] = kwargs['status']
+            if 'division' in kwargs:
+                vals['division'] = kwargs['division']
+            dd = _parse_date(kwargs.get('departure_date'))
+            if dd:
+                vals['departure_date'] = dd
+            ed = _parse_date(kwargs.get('eta'))
+            if ed:
+                vals['eta'] = ed
+            if vals:
+                c.write(vals)
+            return {'success': True, 'data': _serialize_container(c)}
+        except Exception as e:
+            return crm_error(e, 'supply_containers_update')
+
+    @http.route('/api/crm/supply/containers/<int:container_id>/delete', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_containers_delete(self, container_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
+            if not c:
+                return {'success': False, 'error': 'Container not found', 'data': None}
+            c.write({'is_deleted': True, 'active': False})
+            return {'success': True, 'data': {'id': container_id, 'deleted': True}}
+        except Exception as e:
+            return crm_error(e, 'supply_containers_delete')
+
+    @http.route('/api/crm/supply/containers/<int:container_id>/mark_arrived', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_containers_mark_arrived(self, container_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
+            if not c or c.is_deleted:
+                return {'success': False, 'error': 'Container not found', 'data': None}
+            c.write({
+                'arrived_at': fields.Datetime.now(),
+                'status': 'completed',
+                'received_date': fields.Date.context_today(request.env['lugal.supply.container']),
+                'shipment_tracking_state': 'arrived',
+            })
+            return {'success': True, 'data': _serialize_container(c)}
+        except Exception as e:
+            return crm_error(e, 'supply_containers_mark_arrived')
+
+    @http.route(
+        '/api/crm/supply/containers/<int:container_id>/clearance_delivered',
+        type='jsonrpc', auth='none', csrf=False, methods=['POST'],
+    )
+    def supply_containers_clearance_delivered(self, container_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
+            if not c or c.is_deleted:
+                return {'success': False, 'error': 'Container not found', 'data': None}
+            c.action_mark_clearance_delivered()
+            c.invalidate_recordset()
+            return {'success': True, 'data': _serialize_container(c)}
+        except Exception as e:
+            return crm_error(e, 'supply_containers_clearance_delivered')
+
+    @http.route('/api/crm/supply/containers/<int:container_id>/assign_driver', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_containers_assign_driver(self, container_id, **kwargs):
+        """No dedicated driver fields on model — acknowledge and return container."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
+            if not c or c.is_deleted:
+                return {'success': False, 'error': 'Container not found', 'data': None}
+            return {'success': True, 'data': _serialize_container(c)}
+        except Exception as e:
+            return crm_error(e, 'supply_containers_assign_driver')
+
+    @http.route('/api/crm/supply/containers/<int:container_id>/unassign_driver', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_containers_unassign_driver(self, container_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
+            if not c or c.is_deleted:
+                return {'success': False, 'error': 'Container not found', 'data': None}
+            return {'success': True, 'data': _serialize_container(c)}
+        except Exception as e:
+            return crm_error(e, 'supply_containers_unassign_driver')
+
+    @http.route('/api/crm/supply/containers/<int:container_id>/set_reminder', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_containers_set_reminder(self, container_id, **kwargs):
+        """Create or update container reminder (``reminder_date``, ``reminder_note``)."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
+            if not c or c.is_deleted:
+                return {'success': False, 'error': 'Container not found', 'data': None}
+            if 'reminder_date' not in c._fields:
+                return {'success': False, 'error': 'Reminder fields not available on container model', 'data': None}
+
+            note_raw = kwargs.get('reminder_note')
+            if note_raw is None:
+                reminder_note = ''
+            else:
+                reminder_note = str(note_raw).strip()
+
+            date_in = kwargs.get('reminder_date')
+            parsed = _parse_reminder_datetime_in(date_in)
+            if parsed is None:
+                return {
+                    'success': False,
+                    'error': 'Invalid reminder_date; use ISO or YYYY-MM-DD HH:MM:SS',
+                    'data': None,
+                }
+            if parsed is False:
+                if c.reminder_date:
+                    c.write({'reminder_note': reminder_note})
+                else:
+                    return {'success': False, 'error': 'reminder_date is required', 'data': None}
+            else:
+                c.write({'reminder_date': parsed, 'reminder_note': reminder_note})
+            c.invalidate_recordset()
+            return {'success': True, 'data': _serialize_container(c)}
+        except Exception as e:
+            return crm_error(e, 'supply_containers_set_reminder')
+
+    @http.route(
+        '/api/crm/supply/containers/<int:container_id>/reminder',
+        type='http',
+        auth='none',
+        methods=['GET', 'DELETE', 'OPTIONS'],
+        csrf=False,
+        cors='*',
+    )
+    def supply_containers_reminder_http(self, container_id, **kwargs):
+        """GET: reminder payload for edit modal. DELETE: clear reminder."""
+        if request.httprequest.method == 'OPTIONS':
+            return Response(status=204, headers=_SUPPLY_REMINDER_CORS)
+        try:
+            if not ensure_jwt_user_id():
+                return _supply_reminder_http_json({'success': False, 'error': 'Unauthorized'}, 401)
+            c = request.env['lugal.supply.container'].sudo().browse(container_id).exists()
+            if not c or c.is_deleted:
+                return _supply_reminder_http_json(
+                    {'success': False, 'error': 'Container not found', 'data': None},
+                    404,
+                )
+            if 'reminder_date' not in c._fields:
+                return _supply_reminder_http_json(
+                    {'success': False, 'error': 'Reminder fields not available on container model', 'data': None},
+                    501,
+                )
+
+            if request.httprequest.method == 'GET':
+                return _supply_reminder_http_json(
+                    {'success': True, 'data': _container_reminder_api_dict(c)},
+                    200,
+                )
+
+            # DELETE
+            c.write({'reminder_date': False, 'reminder_note': ''})
+            c.invalidate_recordset()
+            return _supply_reminder_http_json(
+                {'success': True, 'message': 'Reminder deleted successfully'},
+                200,
+            )
+        except Exception as e:
+            _logger.exception('supply_containers_reminder_http')
+            return _supply_reminder_http_json({'success': False, 'error': str(e)}, 500)
+
+    # -------------------------------------------------------------------------
+    # Purchase orders (register specific paths before generic /<id>/get)
+    # -------------------------------------------------------------------------
+    @http.route('/api/crm/supply/po/list', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_po_list(self, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            page, per_page, offset = _pagination(kwargs)
+            domain = [('is_deleted', '=', False), ('active', '=', True)]
+            if kwargs.get('status'):
+                domain.append(('status', '=', kwargs['status']))
+            if kwargs.get('division'):
+                domain.append(('division', '=', kwargs['division']))
+            if kwargs.get('vendor_customer_id'):
+                v = _vendor_from_partner_id(kwargs['vendor_customer_id'])
+                if v:
+                    domain.append(('vendor_id', '=', v.id))
+            search = (kwargs.get('search') or '').strip()
+            if search:
+                domain.append(('name', 'ilike', search))
+            Po = request.env['lugal.crm.supply.po'].sudo()
+            total = Po.search_count(domain)
+            rows = Po.search(domain, order='write_date desc, id desc', limit=per_page, offset=offset)
+            items = [_serialize_supply_po(po) for po in rows]
+            return {'success': True, 'data': {'items': items, 'total': total, 'page': page, 'per_page': per_page}}
+        except Exception as e:
+            return crm_error(e, 'supply_po_list')
+
+    @http.route('/api/crm/supply/po/create', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_po_create(self, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            partner_id = kwargs.get('vendor_customer_id')
+            vendor = _vendor_from_partner_id(partner_id) if partner_id else None
+            if not vendor:
+                return {'success': False, 'error': 'vendor_customer_id must reference a vendor-linked partner', 'data': None}
+            vals = {'vendor_id': vendor.id}
+            if kwargs.get('name'):
+                vals['name'] = (kwargs.get('name') or '').strip()
+            if kwargs.get('division'):
+                vals['division'] = kwargs['division']
+            if kwargs.get('currency_id'):
+                vals['currency_id'] = int(kwargs['currency_id'])
+            if kwargs.get('container_id'):
+                vals['container_id'] = int(kwargs['container_id'])
+            if kwargs.get('branch_id'):
+                vals['branch_id'] = int(kwargs['branch_id'])
+            Po = request.env['lugal.crm.supply.po'].sudo()
+            if kwargs.get('item_request_id'):
+                vals['item_request_id'] = int(kwargs['item_request_id'])
+            if kwargs.get('negotiation_id'):
+                vals['negotiation_id'] = int(kwargs['negotiation_id'])
+            if kwargs.get('agent_id'):
+                vals['agent_id'] = int(kwargs['agent_id'])
+            if kwargs.get('order_date'):
+                vals['order_date'] = _parse_date(kwargs['order_date'])
+            if kwargs.get('production_completion_date'):
+                vals['production_completion_date'] = _parse_date(kwargs['production_completion_date'])
+            if kwargs.get('payment_term'):
+                vals['payment_term'] = kwargs['payment_term']
+            if kwargs.get('shipping_method'):
+                vals['shipping_method'] = kwargs['shipping_method']
+            if kwargs.get('notes'):
+                vals['notes'] = kwargs['notes']
+            if kwargs.get('exchange_rate') is not None and 'exchange_rate' in Po._fields:
+                try:
+                    vals['exchange_rate'] = float(kwargs['exchange_rate'])
+                except (TypeError, ValueError):
+                    return {'success': False, 'error': 'exchange_rate must be a number', 'data': None}
+            if kwargs.get('extra_fields') is not None:
+                vals['extra_fields'] = Po.sanitize_extra_fields_input(kwargs['extra_fields'])
+            po = Po.create(vals)
+            Line = request.env['lugal.crm.supply.po.line'].sudo()
+            Product = request.env['product.product'].sudo()
+            line_rows = kwargs.get('lines')
+            if line_rows is None and kwargs.get('items') is not None:
+                line_rows = kwargs['items']
+            for line in line_rows or []:
+                lv = {
+                    'po_id': po.id,
+                    'product_name': line.get('product_name') or '',
+                    'item_code': line.get('item_code') or '',
+                    'uom': line.get('uom') or '',
+                    'quantity': float(line.get('quantity') or line.get('qty') or 1.0),
+                    'unit_price': float(line.get('unit_price') or line.get('price') or 0.0),
+                    'min_qty': float(line.get('min_qty') or 0.0),
+                    'max_qty': float(line.get('max_qty') or 0.0),
+                }
+                if line.get('currency_id'):
+                    lv['currency_id'] = int(line['currency_id'])
+                if line.get('product_id'):
+                    try:
+                        pid = int(line['product_id'])
+                    except (TypeError, ValueError):
+                        return {'success': False, 'error': 'line product_id must be an integer', 'data': None}
+                    prod = Product.browse(pid).exists()
+                    if not prod or not prod.active or not prod.purchase_ok:
+                        return {
+                            'success': False,
+                            'error': f'Invalid or non-purchasable product_id: {pid}',
+                            'data': None,
+                        }
+                    uom = safe_product_purchase_uom(prod)
+                    lv['product_id'] = prod.id
+                    lv['product_name'] = prod.name or lv['product_name']
+                    lv['item_code'] = prod.default_code or lv['item_code']
+                    lv['uom'] = uom.name if uom else lv['uom']
+                    try:
+                        qty = float(line.get('qty') if line.get('qty') is not None else line.get('quantity') or 0.0)
+                    except (TypeError, ValueError):
+                        return {'success': False, 'error': 'line quantity/qty must be a number', 'data': None}
+                    if qty <= 0:
+                        return {'success': False, 'error': 'line quantity must be greater than 0', 'data': None}
+                    lv['quantity'] = qty
+                    try:
+                        base_price = float(line.get('unit_price') if line.get('unit_price') is not None else line.get('price') or 0.0)
+                    except (TypeError, ValueError):
+                        return {'success': False, 'error': 'line price/unit_price must be a number', 'data': None}
+                    try:
+                        discount = float(line.get('discount') or 0.0)
+                    except (TypeError, ValueError):
+                        return {'success': False, 'error': 'line discount must be a number', 'data': None}
+                    if discount < 0 or discount > 100:
+                        return {'success': False, 'error': 'line discount must be between 0 and 100', 'data': None}
+                    lv['unit_price'] = base_price * (1.0 - discount / 100.0)
+                Line.create(lv)
+            po.invalidate_recordset()
+            if supply_kwargs_has_attachments(kwargs):
+                try:
+                    aw = supply_build_attachment_m2m_write(
+                        request.env, kwargs, 'lugal.crm.supply.po', po.id
+                    )
+                    if aw:
+                        po.write(aw)
+                except ValueError as ve:
+                    return {'success': False, 'error': str(ve), 'data': None}
+            return {'success': True, 'data': _serialize_supply_po(po)}
+        except Exception as e:
+            return crm_error(e, 'supply_po_create')
+
+    @http.route('/api/crm/supply/po/<int:po_id>/get', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_po_get(self, po_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
+            if not po or po.is_deleted:
+                return {'success': False, 'error': 'PO not found', 'data': None}
+            return {'success': True, 'data': _serialize_supply_po(po)}
+        except Exception as e:
+            return crm_error(e, 'supply_po_get')
+
+    @http.route('/api/crm/supply/po/<int:po_id>/update', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_po_update(self, po_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
+            if not po or po.is_deleted:
+                return {'success': False, 'error': 'PO not found', 'data': None}
+            vals = {}
+            if 'name' in kwargs:
+                vals['name'] = kwargs['name']
+            if 'division' in kwargs:
+                vals['division'] = kwargs['division']
+            if 'currency_id' in kwargs:
+                vals['currency_id'] = kwargs.get('currency_id') or False
+            if 'container_id' in kwargs:
+                vals['container_id'] = kwargs.get('container_id') or False
+            if 'branch_id' in kwargs:
+                vals['branch_id'] = kwargs.get('branch_id') or False
+            if 'status' in kwargs and kwargs['status']:
+                vals['status'] = kwargs['status']
+            if 'is_suggested' in kwargs:
+                vals['is_suggested'] = bool(kwargs['is_suggested'])
+            wf_keys = (
+                'item_request_id', 'negotiation_id', 'agent_id',
+                'payment_term', 'shipping_method', 'notes',
+            )
+            for k in wf_keys:
+                if k in kwargs:
+                    vals[k] = kwargs[k] if kwargs[k] not in (False, None, '') else False
+            if 'order_date' in kwargs:
+                vals['order_date'] = _parse_date(kwargs['order_date'])
+            if 'production_completion_date' in kwargs:
+                vals['production_completion_date'] = _parse_date(kwargs['production_completion_date'])
+            if vals:
+                po.write(vals)
+            if 'extra_fields' in kwargs and kwargs['extra_fields'] is not None:
+                cleaned = request.env['lugal.crm.supply.po'].sudo().sanitize_extra_fields_input(
+                    kwargs['extra_fields']
+                )
+                po.merge_extra_fields(cleaned)
+            if supply_kwargs_has_attachments(kwargs):
+                try:
+                    aw = supply_build_attachment_m2m_write(
+                        request.env, kwargs, 'lugal.crm.supply.po', po.id
+                    )
+                    if aw:
+                        po.write(aw)
+                except ValueError as ve:
+                    return {'success': False, 'error': str(ve), 'data': None}
+            return {'success': True, 'data': _serialize_supply_po(po)}
+        except Exception as e:
+            return crm_error(e, 'supply_po_update')
+
+    @http.route('/api/crm/supply/po/<int:po_id>/order_e_sign', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_po_order_e_sign(self, po_id, **kwargs):
+        """Record order-level confirmation signature on PO (CRM extend model)."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
+            if not po or po.is_deleted:
+                return {'success': False, 'error': 'PO not found', 'data': None}
+            if hasattr(po, 'action_confirm_order_e_sign'):
+                po.action_confirm_order_e_sign()
+            else:
+                return {'success': False, 'error': 'Order e-sign not available', 'data': None}
+            return {'success': True, 'data': _serialize_supply_po(po)}
+        except Exception as e:
+            return crm_error(e, 'supply_po_order_e_sign')
+
+    @http.route('/api/crm/supply/po/<int:po_id>/delete', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_po_delete(self, po_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
+            if not po:
+                return {'success': False, 'error': 'PO not found', 'data': None}
+            po.write({'is_deleted': True, 'active': False})
+            return {'success': True, 'data': {'id': po_id, 'deleted': True}}
+        except Exception as e:
+            return crm_error(e, 'supply_po_delete')
+
+    @http.route('/api/crm/supply/po/<int:po_id>/confirm', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_po_confirm(self, po_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
+            if not po or po.is_deleted:
+                return {'success': False, 'error': 'PO not found', 'data': None}
+            po.write({'status': 'confirmed'})
+            return {'success': True, 'data': _serialize_supply_po(po)}
+        except Exception as e:
+            return crm_error(e, 'supply_po_confirm')
+
+    @http.route('/api/crm/supply/po/<int:po_id>/submit', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_po_submit(self, po_id, **kwargs):
+        """Alias for confirm: draft PO → confirmed (same validations via model write)."""
+        return self.supply_po_confirm(po_id, **kwargs)
+
+    @http.route('/api/crm/supply/dashboard/summary', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_dashboard_summary(self, **kwargs):
+        """Aggregate counts for supply dashboard (extends metrics without replacing existing list APIs)."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            icp = request.env['ir.config_parameter'].sudo()
+            Item = request.env['lugal.supply.item.request'].sudo()
+            Neg = request.env['lugal.supply.negotiation'].sudo()
+            Po = request.env['lugal.crm.supply.po'].sudo()
+            Pay = request.env['lugal.supply.payment'].sudo()
+            Cont = request.env['lugal.supply.container'].sudo()
+            Line = request.env['lugal.supply.workflow.approval.line'].sudo()
+
+            def alive_domain(model):
+                dom = []
+                if 'is_deleted' in model._fields:
+                    dom.append(('is_deleted', '=', False))
+                if 'active' in model._fields:
+                    dom.append(('active', '=', True))
+                return dom
+
+            item_dom = alive_domain(Item)
+            neg_dom = alive_domain(Neg)
+            po_dom = alive_domain(Po)
+            pay_dom = alive_domain(Pay)
+            cont_dom = alive_domain(Cont)
+
+            confirmed_pos = Po.search(po_dom + [('status', '=', 'confirmed')])
+            delayed_receipt = 0
+            if 'lead_time_delay_days' in Po._fields:
+                delayed_receipt = sum(1 for p in confirmed_pos if (p.lead_time_delay_days or 0) > 0)
+
+            data = {
+                'item_requests': {
+                    'draft': Item.search_count(item_dom + [('state', '=', 'draft')]),
+                    'in_progress': Item.search_count(item_dom + [('state', '=', 'in_progress')]),
+                    'completed': Item.search_count(item_dom + [('state', '=', 'completed')]),
+                },
+                'negotiations': {
+                    'ongoing': Neg.search_count(neg_dom + [('state', '=', 'ongoing')]),
+                    'finalized': Neg.search_count(neg_dom + [('state', '=', 'finalized')]),
+                    'cancelled': Neg.search_count(neg_dom + [('state', '=', 'cancelled')]),
+                },
+                'purchase_orders': {
+                    'draft': Po.search_count(po_dom + [('status', '=', 'draft')]),
+                    'confirmed': Po.search_count(po_dom + [('status', '=', 'confirmed')]),
+                    'cancelled': Po.search_count(po_dom + [('status', '=', 'cancelled')]),
+                    'delayed_receipt': delayed_receipt,
+                },
+                'payments': {
+                    'total': Pay.search_count(pay_dom),
+                },
+                'shipments': {
+                    'total': Cont.search_count(cont_dom),
+                },
+                'approvals': {
+                    'pending': Line.search_count([('state', '=', 'pending')]),
+                },
+                'config_flags': {
+                    'workflow_level_count': max(0, int(icp.get_param('lugal_supply.workflow_level_count', '0') or 0)),
+                    'budget_control_enabled': icp.get_param('lugal_supply.budget_control_enabled', 'False') == 'True',
+                    'stock_validate_po': icp.get_param('lugal_supply.stock_validate_po', 'True') == 'True',
+                    'workflow_activity_notify': icp.get_param('lugal_supply.workflow_activity_notify', 'True') == 'True',
+                },
+            }
+            return {'success': True, 'data': data}
+        except Exception as e:
+            return crm_error(e, 'supply_dashboard_summary')
+
+    @http.route('/api/crm/supply/po/<int:po_id>/ship', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_po_ship(self, po_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
+            if not po or po.is_deleted:
+                return {'success': False, 'error': 'PO not found', 'data': None}
+            po.write({'status': 'confirmed'})
+            return {'success': True, 'data': _serialize_supply_po(po)}
+        except Exception as e:
+            return crm_error(e, 'supply_po_ship')
+
+    @http.route('/api/crm/supply/po/<int:po_id>/receive', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_po_receive(self, po_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
+            if not po or po.is_deleted:
+                return {'success': False, 'error': 'PO not found', 'data': None}
+            po.write({'status': 'confirmed'})
+            return {'success': True, 'data': _serialize_supply_po(po)}
+        except Exception as e:
+            return crm_error(e, 'supply_po_receive')
+
+    @http.route('/api/crm/supply/po/<int:po_id>/cancel', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_po_cancel(self, po_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
+            if not po or po.is_deleted:
+                return {'success': False, 'error': 'PO not found', 'data': None}
+            po.write({'status': 'cancelled'})
+            return {'success': True, 'data': _serialize_supply_po(po)}
+        except Exception as e:
+            return crm_error(e, 'supply_po_cancel')
+
+    @http.route('/api/crm/supply/po/<int:po_id>/reopen', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_po_reopen(self, po_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
+            if not po or po.is_deleted:
+                return {'success': False, 'error': 'PO not found', 'data': None}
+            po.write({'status': 'draft'})
+            return {'success': True, 'data': _serialize_supply_po(po)}
+        except Exception as e:
+            return crm_error(e, 'supply_po_reopen')
+
+    @http.route('/api/crm/supply/po/<int:po_id>/lines/add', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_po_lines_add(self, po_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
+            if not po or po.is_deleted:
+                return {'success': False, 'error': 'PO not found', 'data': None}
+            Line = request.env['lugal.crm.supply.po.line'].sudo()
+            Product = request.env['product.product'].sudo()
+            lv = {
+                'po_id': po.id,
+                'product_name': kwargs.get('product_name') or '',
+                'item_code': kwargs.get('item_code') or '',
+                'uom': kwargs.get('uom') or '',
+                'min_qty': float(kwargs.get('min_qty') or 0.0),
+                'max_qty': float(kwargs.get('max_qty') or 0.0),
+            }
+            if kwargs.get('product_id') is not None:
+                prod, err = _resolve_supply_line_product(kwargs['product_id'], Product)
+                if err:
+                    return {'success': False, 'error': err, 'data': None}
+                _apply_product_to_supply_line_vals(prod, lv)
+            try:
+                qty = float(kwargs.get('quantity') if kwargs.get('quantity') is not None else kwargs.get('qty') or 1.0)
+            except (TypeError, ValueError):
+                return {'success': False, 'error': 'quantity/qty must be a number', 'data': None}
+            if qty <= 0:
+                return {'success': False, 'error': 'quantity must be greater than 0', 'data': None}
+            lv['quantity'] = qty
+            try:
+                base_price = float(
+                    kwargs.get('unit_price') if kwargs.get('unit_price') is not None else kwargs.get('price') or 0.0
+                )
+            except (TypeError, ValueError):
+                return {'success': False, 'error': 'unit_price/price must be a number', 'data': None}
+            try:
+                discount = float(kwargs.get('discount') if kwargs.get('discount') is not None else 0.0)
+            except (TypeError, ValueError):
+                return {'success': False, 'error': 'discount must be a number', 'data': None}
+            if discount < 0 or discount > 100:
+                return {'success': False, 'error': 'discount must be between 0 and 100', 'data': None}
+            lv['unit_price'] = base_price * (1.0 - discount / 100.0)
+            if kwargs.get('currency_id'):
+                lv['currency_id'] = int(kwargs['currency_id'])
+            line = Line.create(lv)
+            po.invalidate_recordset()
+            return {'success': True, 'data': _serialize_supply_po_line(line)}
+        except Exception as e:
+            return crm_error(e, 'supply_po_lines_add')
+
+    @http.route('/api/crm/supply/po/<int:po_id>/lines/<int:line_id>/update', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_po_lines_update(self, po_id, line_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            line = request.env['lugal.crm.supply.po.line'].sudo().browse(line_id).exists()
+            if not line or line.po_id.id != po_id:
+                return {'success': False, 'error': 'Line not found', 'data': None}
+            vals = {}
+            Product = request.env['product.product'].sudo()
+            if 'product_id' in kwargs:
+                pid_raw = kwargs['product_id']
+                if pid_raw in (False, None, ''):
+                    vals['product_id'] = False
+                else:
+                    prod, err = _resolve_supply_line_product(pid_raw, Product)
+                    if err:
+                        return {'success': False, 'error': err, 'data': None}
+                    tmp = {'product_name': line.product_name or '', 'item_code': line.item_code or '', 'uom': line.uom or ''}
+                    _apply_product_to_supply_line_vals(prod, tmp)
+                    vals['product_id'] = tmp['product_id']
+                    vals['product_name'] = tmp['product_name']
+                    vals['item_code'] = tmp['item_code']
+                    vals['uom'] = tmp['uom']
+            for k in (
+                'product_name', 'item_code', 'uom', 'min_qty', 'max_qty',
+                'sequence', 'size', 'capacity',
+            ):
+                if k in kwargs:
+                    vals[k] = kwargs[k]
+            if 'quantity' in kwargs:
+                vals['quantity'] = float(kwargs['quantity'] or 0.0)
+            if 'unit_price' in kwargs:
+                vals['unit_price'] = float(kwargs['unit_price'] or 0.0)
+            if 'currency_id' in kwargs:
+                vals['currency_id'] = kwargs.get('currency_id') or False
+            if 'last_purchase_price' in kwargs:
+                vals['last_purchase_price'] = float(kwargs['last_purchase_price'] or 0.0)
+            lp = _parse_date(kwargs.get('last_purchase_date'))
+            if lp:
+                vals['last_purchase_date'] = lp
+            if vals:
+                line.write(vals)
+            return {'success': True, 'data': _serialize_supply_po_line(line)}
+        except Exception as e:
+            return crm_error(e, 'supply_po_lines_update')
+
+    @http.route('/api/crm/supply/po/<int:po_id>/lines/<int:line_id>/delete', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_po_lines_delete(self, po_id, line_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            line = request.env['lugal.crm.supply.po.line'].sudo().browse(line_id).exists()
+            if not line or line.po_id.id != po_id:
+                return {'success': False, 'error': 'Line not found', 'data': None}
+            line.unlink()
+            return {'success': True, 'data': {'id': line_id, 'deleted': True}}
+        except Exception as e:
+            return crm_error(e, 'supply_po_lines_delete')
+
+    @http.route('/api/crm/supply/po/<int:po_id>/attachments/list', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_po_attachments_list(self, po_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
+            if not po or po.is_deleted:
+                return {'success': False, 'error': 'PO not found', 'data': None}
+            attachments = []
+            if 'attachment_ids' in po._fields:
+                for att in po.attachment_ids.sorted('id', reverse=True):
+                    attachments.append(_serialize_attachment(att))
+            return {'success': True, 'data': {'po_id': po.id, 'attachments': attachments}}
+        except Exception as e:
+            return crm_error(e, 'supply_po_attachments_list')
+
+    @http.route(
+        '/api/crm/supply/po/<int:po_id>/attachments/upload',
+        type='http',
+        auth='none',
+        methods=['POST', 'OPTIONS'],
+        csrf=False,
+        save_session=False,
+        cors='*',
+        max_content_length=1073741824,
+    )
+    def supply_po_attachments_upload(self, po_id, **kwargs):
+        """
+        Multipart upload for PO attachments (Supply Chain SPA).
+
+        Form fields:
+          - file | files | files[] — one or more file parts
+
+        Response JSON:
+          { "success": true, "data": { "files": [<attachment shape>], "uploaded_count": n } }
+        """
+
+        def _json(payload, status=200):
+            return Response(
+                json.dumps(payload),
+                status=status,
+                headers=[('Content-Type', 'application/json')],
+            )
+
+        try:
+            if request.httprequest.method == 'OPTIONS':
+                return Response(status=204, headers=[
+                    ('Access-Control-Allow-Origin', '*'),
+                    ('Access-Control-Allow-Methods', 'POST, OPTIONS'),
+                    ('Access-Control-Allow-Headers', 'Authorization, Content-Type'),
+                    ('Access-Control-Max-Age', '86400'),
+                ])
+
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return _json({'success': False, 'error': 'Unauthorized'}, 401)
+
+            po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
+            if not po or po.is_deleted:
+                return _json({'success': False, 'error': 'PO not found'}, 404)
+            if 'attachment_ids' not in po._fields:
+                return _json({'success': False, 'error': 'Attachments not available'}, 400)
+
+            files = (
+                request.httprequest.files.getlist('files[]')
+                or request.httprequest.files.getlist('files')
+                or request.httprequest.files.getlist('file')
+            )
+            if not files:
+                return _json(
+                    {'success': False, 'error': 'No files provided (use file, files, or files[])'},
+                    400,
+                )
+
+            model_po = 'lugal.crm.supply.po'
+            out_files = []
+
+            for f in files:
+                data = f.read()
+                mime = f.mimetype or mimetypes.guess_type(f.filename or '')[0] or ''
+                is_video = mime in VIDEO_MIMES
+                limit_mb = MAX_SUPPLY_CHAT_VIDEO_MB if is_video else MAX_SUPPLY_CHAT_UPLOAD_MB
+                limit_bytes = limit_mb * 1024 * 1024
+
+                if len(data) > limit_bytes:
+                    return _json(
+                        {'success': False, 'error': f'{f.filename or "file"}: exceeds {limit_mb} MB'},
+                        400,
+                    )
+                if not _supply_chat_mime_allowed(mime):
+                    return _json(
+                        {'success': False, 'error': f'{f.filename or "file"}: unsupported type ({mime})'},
+                        400,
+                    )
+
+                filename = f.filename or 'upload'
+                att = _create_attachment(
+                    filename=filename,
+                    mimetype=mime,
+                    data_bytes=data,
+                    res_model=model_po,
+                    res_id=po.id,
+                )
+                po.write({'attachment_ids': [(4, att.id)]})
+                po.invalidate_recordset(['attachment_ids'])
+                out_files.append(_serialize_attachment(att))
+
+            return _json({
+                'success': True,
+                'data': {
+                    'files': out_files,
+                    'uploaded_count': len(out_files),
+                    'po_id': po.id,
+                },
+            })
+        except Exception as e:
+            _logger.exception('supply_po_attachments_upload')
+            try:
+                request.env.cr.rollback()
+            except Exception:
+                pass
+            return _json({'success': False, 'error': str(e)}, 500)
+
+    @http.route(
+        '/api/crm/supply/po/<int:po_id>/attachments/link',
+        type='jsonrpc', auth='none', csrf=False, methods=['POST'],
+    )
+    def supply_po_attachments_link(self, po_id, **kwargs):
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
+            if not po or po.is_deleted:
+                return {'success': False, 'error': 'PO not found', 'data': None}
+            if 'attachment_ids' not in po._fields:
+                return {'success': False, 'error': 'Attachments not available', 'data': None}
+            ids = kwargs.get('attachment_ids') or kwargs.get('ids') or []
+            if not isinstance(ids, (list, tuple)):
+                return {'success': False, 'error': 'attachment_ids must be a list', 'data': None}
+            cmd = [(6, 0, [int(x) for x in ids])] if ids else [(5,)]
+            po.write({'attachment_ids': cmd})
+            return {'success': True, 'data': _serialize_supply_po(po)}
+        except Exception as e:
+            return crm_error(e, 'supply_po_attachments_link')
+
+    @http.route(
+        '/api/crm/supply/po/<int:po_id>/packing-list/share',
+        type='jsonrpc', auth='none', csrf=False, methods=['POST'],
+    )
+    def supply_po_packing_list_share(self, po_id, **kwargs):
+        """Return title + plain text for Web Share / clipboard (no prices)."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
+            if not po or po.is_deleted:
+                return {'success': False, 'error': 'PO not found', 'data': None}
+            text = _supply_po_packing_list_plain_text(po)
+            title = 'Packing List — %s' % (po.name or str(po_id))
+            return {
+                'success': True,
+                'data': {
+                    'title': title,
+                    'text': text,
+                    'url': '',
+                },
+            }
+        except Exception as e:
+            return crm_error(e, 'supply_po_packing_list_share')
+
+    @http.route(
+        '/api/crm/supply/po/<int:po_id>/packing-list/pdf',
+        type='jsonrpc', auth='none', csrf=False, methods=['POST'],
+    )
+    def supply_po_packing_list_pdf(self, po_id, **kwargs):
+        """Render QWeb packing list PDF; response includes base64 for SPA download."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            po = request.env['lugal.crm.supply.po'].sudo().browse(po_id).exists()
+            if not po or po.is_deleted:
+                return {'success': False, 'error': 'PO not found', 'data': None}
+            report = request.env['ir.actions.report'].sudo()
+            pdf_content, _ = report._render_qweb_pdf(
+                'lugal_crm.report_supply_po_packing_list',
+                [po_id],
+            )
+            safe_name = (po.name or str(po_id)).replace('/', '-').replace('\\', '-')[:120]
+            fname = 'PackingList-%s.pdf' % safe_name
+            return {
+                'success': True,
+                'data': {
+                    'filename': fname,
+                    'pdf_base64': base64.b64encode(pdf_content).decode('ascii'),
+                    'mimetype': 'application/pdf',
+                },
+            }
+        except Exception as e:
+            return crm_error(e, 'supply_po_packing_list_pdf')
+
+    # --- Stubs: mail-thread comments not wired in this iteration ---
+    @http.route(
+        '/api/crm/supply/containers/<int:container_id>/comments/list',
+        type='jsonrpc', auth='none', csrf=False, methods=['POST'],
+    )
+    def supply_container_comments_list_stub(self, container_id, **kwargs):
+        if not ensure_jwt_user_id():
+            return {'success': False, 'error': 'Unauthorized', 'data': None}
+        return {'success': True, 'data': {'total': 0, 'items': []}}
+
+    @http.route(
+        '/api/crm/supply/containers/<int:container_id>/comments/add',
+        type='jsonrpc', auth='none', csrf=False, methods=['POST'],
+    )
+    def supply_container_comments_add_stub(self, container_id, **kwargs):
+        if not ensure_jwt_user_id():
+            return {'success': False, 'error': 'Unauthorized', 'data': None}
+        return {'success': False, 'error': 'Container comments API not enabled', 'data': None}
+
+    @http.route(
+        '/api/crm/supply/containers/<int:container_id>/comments/<int:msg_id>/delete',
+        type='jsonrpc', auth='none', csrf=False, methods=['POST'],
+    )
+    def supply_container_comments_delete_stub(self, container_id, msg_id, **kwargs):
+        if not ensure_jwt_user_id():
+            return {'success': False, 'error': 'Unauthorized', 'data': None}
+        return {'success': False, 'error': 'Container comments API not enabled', 'data': None}
+
+    @http.route('/api/crm/supply/po/<int:po_id>/comments/list', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_po_comments_list_stub(self, po_id, **kwargs):
+        if not ensure_jwt_user_id():
+            return {'success': False, 'error': 'Unauthorized', 'data': None}
+        return {'success': True, 'data': {'total': 0, 'items': []}}
+
+    @http.route('/api/crm/supply/po/<int:po_id>/comments/add', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_po_comments_add_stub(self, po_id, **kwargs):
+        if not ensure_jwt_user_id():
+            return {'success': False, 'error': 'Unauthorized', 'data': None}
+        return {'success': False, 'error': 'PO comments API not enabled', 'data': None}
+
+    @http.route('/api/crm/supply/po/<int:po_id>/comments/<int:msg_id>/delete', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def supply_po_comments_delete_stub(self, po_id, msg_id, **kwargs):
+        if not ensure_jwt_user_id():
+            return {'success': False, 'error': 'Unauthorized', 'data': None}
+        return {'success': False, 'error': 'PO comments API not enabled', 'data': None}

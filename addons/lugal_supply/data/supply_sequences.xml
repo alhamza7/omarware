@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+        <record id="seq_lugal_supply_item_request" model="ir.sequence">
+            <field name="name">Supply Item Request</field>
+            <field name="code">lugal.supply.item.request</field>
+            <field name="prefix">IR-</field>
+            <field name="padding">5</field>
+            <field name="number_next">1</field>
+            <field name="number_increment">1</field>
+        </record>
+        <record id="seq_lugal_supply_negotiation" model="ir.sequence">
+            <field name="name">Supply Negotiation</field>
+            <field name="code">lugal.supply.negotiation</field>
+            <field name="prefix">NEG-</field>
+            <field name="padding">5</field>
+            <field name="number_next">1</field>
+            <field name="number_increment">1</field>
+        </record>
+        <record id="seq_lugal_supply_shipment" model="ir.sequence">
+            <field name="name">Supply Shipment</field>
+            <field name="code">lugal.supply.shipment</field>
+            <field name="prefix">SHP-</field>
+            <field name="padding">5</field>
+            <field name="number_next">1</field>
+            <field name="number_increment">1</field>
+        </record>
+    </data>
+</odoo>

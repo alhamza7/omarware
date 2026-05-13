@@ -1605,4 +1605,3 @@ class SupplyChatController(http.Controller):
             }
         except Exception as e:
             return crm_error(e, 'bus_channels')
-# TODO: remove - cherry-pick marker

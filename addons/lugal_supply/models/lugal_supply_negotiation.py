@@ -6,7 +6,7 @@ class LugalSupplyNegotiation(models.Model):
     """Price negotiation with a vendor — linked to supply vendor and optional product."""
     _name = 'lugal.supply.negotiation'
     _description = 'Lugal Supply Negotiation'
-    _inherit = ['mail.thread', 'mail.activity.mixin']
+    _inherit = ['mail.thread', 'mail.activity.mixin', 'lugal.supply.dynamic.extra.mixin']
     _order = 'write_date desc, id desc'
     _rec_name = 'title'
 

@@ -168,6 +168,7 @@ export function VendorContainer() {
   const PER_PAGE = 30;
   const [search,       setSearch]       = useState('');
   const [searchDraft,  setSearchDraft]  = useState('');
+  const [division,     setDivision]     = useState<'' | 'europe' | 'china'>('');
   const [loading,      setLoading]      = useState(false);
   const [error,        setError]        = useState<string | null>(null);
   const [showCreate,   setShowCreate]   = useState(false);
@@ -177,11 +178,11 @@ export function VendorContainer() {
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
-    const res = await supplyApi.vendorList(search, page, PER_PAGE);
+    const res = await supplyApi.vendorList(search, page, PER_PAGE, division || undefined);
     if (res?.success) { setVendors(res.data?.items ?? []); setTotal(res.data?.total ?? 0); }
     else setError(res?.error ?? 'Failed to load vendors');
     setLoading(false);
-  }, [search, page]);
+  }, [search, page, division]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -237,8 +238,8 @@ export function VendorContainer() {
         </div>
       </div>
 
-      {/* Search */}
-      <div className="bg-white border-b px-6 py-3 flex items-center gap-3">
+      {/* Search + division (server-side filter) */}
+      <div className="bg-white border-b px-6 py-3 flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <Input
@@ -248,8 +249,17 @@ export function VendorContainer() {
             onKeyDown={e => { if (e.key === 'Enter') { setSearch(searchDraft); setPage(1); } }}
           />
         </div>
-        {search && (
-          <button onClick={() => { setSearch(''); setSearchDraft(''); setPage(1); }}
+        <select
+          className="h-8 rounded-md border border-input bg-background px-3 py-0 text-sm"
+          value={division}
+          onChange={e => { setDivision(e.target.value as '' | 'europe' | 'china'); setPage(1); }}
+        >
+          <option value="">All divisions</option>
+          <option value="europe">Europe</option>
+          <option value="china">China</option>
+        </select>
+        {(search || division) && (
+          <button onClick={() => { setSearch(''); setSearchDraft(''); setDivision(''); setPage(1); }}
             className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-800 px-2 py-1 rounded-lg hover:bg-gray-100 transition">
             <X className="w-3 h-3" /> Clear
           </button>

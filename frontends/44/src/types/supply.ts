@@ -76,7 +76,12 @@ export interface PoLine {
   product_name:        string;
   item_code:           string;
   uom:                 string;
+  quantity_pcs?:       number;
+  quantity_carton?:    number;
   quantity:            number;
+  size?:               string;
+  capacity?:           string;
+  packing_pcs_per_carton?: number;
   unit_price:          number;
   total_price:         number;
   currency_id:         number | null;
@@ -99,7 +104,7 @@ export interface PoLineInput {
 }
 
 // ─── Purchase Order ──────────────────────────────────────────
-export type PoStatus = 'draft' | 'confirmed' | 'shipped' | 'received' | 'cancelled';
+export type PoStatus = 'draft' | 'confirmed' | 'cancelled';
 
 export interface Po {
   id:                    number;
@@ -121,6 +126,9 @@ export interface Po {
   is_suggested:          boolean;
   line_count:            number;
   total_amount:          number;
+  attachment_ids?:       number[];
+  attachment_count?:     number;
+  attachments?:          SupplyAttachment[];
   created_by_id:         number | null;
   created_by_name:       string;
   created_at:            string;
@@ -164,11 +172,29 @@ export interface PoListFilter {
   division?:           'europe' | 'china' | '';
 }
 
-// ─── Container ───────────────────────────────────────────────
+// ─── Container / Shipment ───────────────────────────────────
 export type ContainerStatus = 'waiting' | 'active' | 'at_port' | 'completed';
+
+/** PO row from `GET /api/crm/supply/shipments/<id>/get` (`linked_orders`). */
+export interface ShipmentLinkedOrder {
+  id:                 number;
+  name:               string;
+  total_amount:       number;
+  status:             string;
+  currency_id:        number | null;
+  currency_name:      string;
+  item_request_id?:   number | null;
+  item_request_name?: string;
+  negotiation_id?:    number | null;
+  negotiation_name?:  string;
+}
 
 export interface Container {
   id:                          number;
+  /** Shipment reference from backend (e.g. SHP-00001). */
+  shipment_id?:                string;
+  shipment_tracking_state?:    string;
+  linked_orders?:              ShipmentLinkedOrder[];
   name:                        string;
   container_number:            string;
   bl_number:                   string;
@@ -234,15 +260,61 @@ export interface ContainerListFilter {
   search?:    string;
 }
 
-// ─── Attachment ──────────────────────────────────────────────
-export interface Attachment {
+// ─── Attachment (supply-chain API §2.5) ───────────────────────
+export interface SupplyAttachment {
   id:               number;
   name:             string;
   mimetype:         string;
   size:             number;
   url:              string;
+  file_url:         string;
   uploaded_by_name: string;
   created_at:       string;
+}
+
+/** @deprecated Use SupplyAttachment; kept for older imports */
+export type Attachment = SupplyAttachment;
+
+// ─── Negotiations (supply_extra_api) ──────────────────────────
+export interface Negotiation {
+  id: number;
+  name: string;
+  negotiation_code?: string;
+  vendor_id?: number | null;
+  vendor_name: string;
+  item_name: string;
+  state: string;
+  status?: string;
+  item_request_id?: number | null;
+  item_request_name?: string;
+  e_sign_user_id?: number | null;
+  e_sign_user_name?: string;
+  e_sign_date?: string | null;
+}
+
+export interface NegotiationListData {
+  items: Negotiation[];
+  total: number;
+  page: number;
+  per_page: number;
+}
+
+export interface NegotiationListFilter {
+  page?: number;
+  per_page?: number;
+  state?: string;
+  vendor_id?: number;
+  item_request_id?: number;
+  search?: string;
+}
+
+/** Row from `POST .../negotiations/<id>/comments/list` (maps to `Comment` in UI). */
+export interface NegotiationCommentRow {
+  id: number;
+  body: string;
+  author_id: number | null;
+  author_name: string;
+  date: string;
 }
 
 // ─── Comment ─────────────────────────────────────────────────
@@ -283,4 +355,80 @@ export interface PenaltyInput {
   reason?:       string;
   penalty_date?: string;
   currency_id?:  number;
+}
+
+// ─── Payments (`/api/crm/supply/payments/*`) ─────────────────
+/** Row from `POST /api/crm/supply/payments/po/list` for linking a PO. */
+export interface PaymentPoDropdownItem {
+  id: number;
+  name: string;
+  /** Vendor display (legacy alias; same as `vendor_name`). */
+  supplier: string;
+  vendor_name?: string;
+  status?: string;
+  division?: string | null;
+  currency_id?: number | null;
+  currency_name?: string;
+  currency_symbol?: string;
+  /** Single-line label for combobox display. */
+  label?: string;
+}
+
+export interface PaymentPoListData {
+  items:    PaymentPoDropdownItem[];
+  total:    number;
+  page:     number;
+  per_page: number;
+}
+
+/** Row from `POST /api/crm/supply/currencies/list`. */
+export interface CurrencyDropdownItem {
+  id: number;
+  name: string;
+  symbol: string;
+  position?: string;
+  decimal_places?: number;
+}
+
+export interface PaymentCurrenciesListData {
+  items:    CurrencyDropdownItem[];
+  total:    number;
+  page:     number;
+  per_page: number;
+}
+
+export type SupplyPaymentType = 'deposit' | 'installment' | 'final' | 'other';
+
+export interface PaymentCreateInput {
+  po_id:             number;
+  amount:            number;
+  payment_type?:   SupplyPaymentType;
+  notes?:            string;
+  payment_date?:     string;
+  currency_id?:      number;
+  payment_method?: string;
+  paid_to?:          string;
+  payee_partner_id?: number;
+}
+
+/** Serialized `lugal.supply.payment` from create/get/list. */
+export interface SupplyPayment {
+  id:                 number;
+  payment_id:       string;
+  name:               string;
+  po_id:              number | null;
+  linked_order_id:    number | null;
+  order_name:         string;
+  amount:             number;
+  payment_type:       string;
+  payment_type_label: string;
+  payment_status:     string;
+  notes:              string;
+  currency_id:        number | null;
+  currency_name:      string;
+  currency_symbol?:   string;
+  po_name?:           string;
+  po_status?:         string;
+  payment_date:       string | null;
+  payment_method:     string;
 }
