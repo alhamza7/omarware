@@ -66,6 +66,20 @@ def _build_attachment_url(attachment):
     return f"/web/content/{attachment.id}?access_token={token}"
 
 
+def _build_attachment_public_path(attachment):
+    """Human-readable public download path: /web/content/<id>/<filename>.
+
+    Preferred for the primary `url` field in API responses — clients can use it
+    directly in <img src> / <a href> without constructing query strings.
+    Falls back to _build_attachment_url when no name is available.
+    """
+    name = attachment.name or ''
+    token = attachment.access_token or ''
+    if name:
+        return f"/web/content/{attachment.id}/{name}?access_token={token}"
+    return f"/web/content/{attachment.id}?access_token={token}"
+
+
 def _create_attachment(filename, mimetype, data_bytes, res_model='lugal.crm.customer', res_id=None):
     """Create an ir.attachment record with a public access token and return it."""
     import base64
