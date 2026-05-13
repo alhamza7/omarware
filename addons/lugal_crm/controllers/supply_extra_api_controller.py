@@ -290,12 +290,32 @@ def _serialize_item_request(r, preloaded_attachments=None):
 
 
 def _serialize_po_for_payment_dropdown(po):
-    """Minimal PO row for payment form / searchable dropdown (`id`, `name`, `supplier`)."""
+    """PO row for payment form searchable dropdown (labels + ids for FE)."""
     vendor = po.vendor_id
+    vendor_name = vendor.name if vendor else ''
+    cur = po.currency_id
+    currency_id = cur.id if cur else None
+    currency_name = cur.name if cur else ''
+    currency_symbol = (cur.symbol or '') if cur else ''
+    status = po.status or ''
+    division = po.division or None
+    name = po.name or ''
+    label = name
+    if vendor_name:
+        label = '%s — %s' % (name, vendor_name) if name else vendor_name
+    if status:
+        label = '%s (%s)' % (label, status) if label else status
     return {
         'id': po.id,
-        'name': po.name or '',
-        'supplier': vendor.name if vendor else '',
+        'name': name,
+        'supplier': vendor_name,
+        'vendor_name': vendor_name,
+        'status': status,
+        'division': division,
+        'currency_id': currency_id,
+        'currency_name': currency_name,
+        'currency_symbol': currency_symbol,
+        'label': label or str(po.id),
     }
 
 
@@ -327,6 +347,7 @@ def _serialize_payment(p):
         pt_label = sel.get(pt, '')
     except Exception:
         pt_label = ''
+    cur_sym = (cur.symbol or '') if cur else ''
     return {
         'id': p.id,
         'payment_id': p.name or '',
@@ -334,6 +355,8 @@ def _serialize_payment(p):
         'po_id': po.id if po else None,
         'linked_order_id': po.id if po else None,
         'order_name': po.name if po else '',
+        'po_name': po.name if po else '',
+        'po_status': po.status if po else '',
         'item_request_id': item_request_id,
         'item_request_name': item_request_name,
         'negotiation_id': negotiation_id,
@@ -348,6 +371,7 @@ def _serialize_payment(p):
         'amount': float(p.amount or 0.0),
         'currency_id': cur.id if cur else None,
         'currency_name': cur.name if cur else '',
+        'currency_symbol': cur_sym,
         'payment_date': p.payment_date.isoformat() if p.payment_date else None,
         'payment_method': p.payment_method or '',
         'remaining_balance': float(p.remaining_balance or 0.0),
@@ -1589,10 +1613,23 @@ class CrmSupplyExtraApiController(http.Controller):
                 domain.append(('status', '=', kwargs['status']))
             if kwargs.get('division'):
                 domain.append(('division', '=', kwargs['division']))
+            Po = request.env['lugal.crm.supply.po'].sudo()
             search = (kwargs.get('search') or '').strip()
             if search:
-                domain += ['|', ('name', 'ilike', search), ('vendor_id.name', 'ilike', search)]
-            Po = request.env['lugal.crm.supply.po'].sudo()
+                or_parts = [
+                    ('name', 'ilike', search),
+                    ('vendor_id.name', 'ilike', search),
+                ]
+                if 'item_request_id' in Po._fields:
+                    or_parts.append(('item_request_id.name', 'ilike', search))
+                if 'negotiation_id' in Po._fields:
+                    or_parts.append(('negotiation_id.name', 'ilike', search))
+                if len(or_parts) == 2:
+                    domain += ['|', or_parts[0], or_parts[1]]
+                elif len(or_parts) == 3:
+                    domain += ['|', '|', or_parts[0], or_parts[1], or_parts[2]]
+                else:
+                    domain += ['|', '|', '|', or_parts[0], or_parts[1], or_parts[2], or_parts[3]]
             total = Po.search_count(domain)
             rows = Po.search(domain, order='name asc, id desc', limit=per_page, offset=offset)
             items = [_serialize_po_for_payment_dropdown(po) for po in rows]
@@ -1607,6 +1644,55 @@ class CrmSupplyExtraApiController(http.Controller):
             }
         except Exception as e:
             return crm_error(e, 'supply_payments_po_dropdown_list')
+
+    @http.route(
+        '/api/crm/supply/currencies/list',
+        type='jsonrpc',
+        auth='none',
+        csrf=False,
+        methods=['POST'],
+    )
+    def supply_currencies_list(self, **kwargs):
+        """List active currencies for payment form currency selector (search + pagination)."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': None}
+            page, per_page, offset = _pagination(kwargs)
+            domain = [('active', '=', True)]
+            search = (kwargs.get('search') or '').strip()
+            if search:
+                domain = [
+                    '&',
+                    ('active', '=', True),
+                    '|',
+                    ('name', 'ilike', search),
+                    ('symbol', 'ilike', search),
+                ]
+            Cur = request.env['res.currency'].sudo()
+            total = Cur.search_count(domain)
+            rows = Cur.search(domain, order='name asc, id asc', limit=per_page, offset=offset)
+            items = []
+            for c in rows:
+                items.append(
+                    {
+                        'id': c.id,
+                        'name': c.name or '',
+                        'symbol': c.symbol or '',
+                        'position': c.position or 'after',
+                        'decimal_places': c.decimal_places,
+                    }
+                )
+            return {
+                'success': True,
+                'data': {
+                    'total': total,
+                    'page': page,
+                    'per_page': per_page,
+                    'items': items,
+                },
+            }
+        except Exception as e:
+            return crm_error(e, 'supply_currencies_list')
 
     @http.route('/api/crm/supply/payments/create', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def supply_payments_create(self, **kwargs):
@@ -1643,6 +1729,8 @@ class CrmSupplyExtraApiController(http.Controller):
                 vals['payee_partner_id'] = int(kwargs['payee_partner_id'])
             if kwargs.get('currency_id'):
                 vals['currency_id'] = int(kwargs['currency_id'])
+            elif po.currency_id:
+                vals['currency_id'] = po.currency_id.id
             if kwargs.get('payment_date'):
                 vals['payment_date'] = _parse_date(kwargs['payment_date'])
             if kwargs.get('payment_method'):

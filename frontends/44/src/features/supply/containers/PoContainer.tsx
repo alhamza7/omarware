@@ -17,6 +17,7 @@ import type {
   Po, PoLine, PoLineInput, PoCreateInput, PoUpdateInput, PoStatus,
   Vendor, Attachment, Comment,
   PaymentPoDropdownItem, PaymentCreateInput, SupplyPaymentType,
+  CurrencyDropdownItem,
 } from '../../../types/supply';
 
 // ─────────────────────────────────────────────────────────────
@@ -827,11 +828,22 @@ function RecordPaymentModal({ onClose }: { onClose: () => void }) {
   const [poItems,     setPoItems]     = useState<PaymentPoDropdownItem[]>([]);
   const [poLoading,   setPoLoading]   = useState(false);
   const [selectedPo,   setSelectedPo]  = useState<PaymentPoDropdownItem | null>(null);
+  const [currencies,  setCurrencies]  = useState<CurrencyDropdownItem[]>([]);
+  const [currencyId,  setCurrencyId]  = useState<number | null>(null);
   const [amount,      setAmount]      = useState('');
   const [paymentType, setPaymentType] = useState<SupplyPaymentType>('installment');
   const [notes,       setNotes]       = useState('');
   const [busy,         setBusy]        = useState(false);
   const [error,        setError]       = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const res = await supplyApi.paymentsCurrenciesList({ per_page: 300 });
+      if (!cancelled && res?.success) setCurrencies(res.data?.items ?? []);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const loadPoOptions = useCallback(async (search: string) => {
     setPoLoading(true);
@@ -857,6 +869,7 @@ function RecordPaymentModal({ onClose }: { onClose: () => void }) {
       amount:         amt,
       payment_type:   paymentType,
       ...(notes.trim() ? { notes: notes.trim() } : {}),
+      ...(currencyId != null ? { currency_id: currencyId } : {}),
     };
     const res = await supplyApi.paymentsCreate(input);
     if (res?.success && res.data) {
@@ -885,10 +898,18 @@ function RecordPaymentModal({ onClose }: { onClose: () => void }) {
               {selectedPo ? (
                 <div className="flex items-center gap-2 p-2.5 bg-blue-50 rounded-lg border border-blue-200">
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-blue-900 truncate">{selectedPo.name}</p>
-                    <p className="text-xs text-blue-600 truncate">{selectedPo.supplier || '—'}</p>
+                    <p className="text-sm font-medium text-blue-900 truncate">
+                      {selectedPo.label || selectedPo.name}
+                    </p>
+                    <p className="text-xs text-blue-600 truncate">
+                      {[selectedPo.supplier || selectedPo.vendor_name, selectedPo.status].filter(Boolean).join(' · ') || '—'}
+                    </p>
                   </div>
-                  <button type="button" onClick={() => setSelectedPo(null)} className="shrink-0 text-blue-400 hover:text-blue-700">
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedPo(null); setCurrencyId(null); }}
+                    className="shrink-0 text-blue-400 hover:text-blue-700"
+                  >
                     <X className="w-4 h-4" />
                   </button>
                 </div>
@@ -913,10 +934,16 @@ function RecordPaymentModal({ onClose }: { onClose: () => void }) {
                           key={row.id}
                           type="button"
                           className="w-full text-left px-3 py-2 hover:bg-blue-50 transition"
-                          onClick={() => { setSelectedPo(row); setPoQuery(''); }}
+                          onClick={() => {
+                            setSelectedPo(row);
+                            setPoQuery('');
+                            setCurrencyId(row.currency_id ?? null);
+                          }}
                         >
-                          <p className="text-sm font-medium text-gray-900">{row.name}</p>
-                          <p className="text-xs text-gray-500">{row.supplier || '—'}</p>
+                          <p className="text-sm font-medium text-gray-900">{row.label || row.name}</p>
+                          <p className="text-xs text-gray-500">
+                            {[row.supplier || row.vendor_name, row.status].filter(Boolean).join(' · ') || '—'}
+                          </p>
                         </button>
                       ))}
                     </div>
@@ -925,6 +952,36 @@ function RecordPaymentModal({ onClose }: { onClose: () => void }) {
                   )}
                 </div>
               )}
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-gray-700 block mb-1">Currency</label>
+              <select
+                className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm"
+                value={currencyId ?? ''}
+                onChange={e => {
+                  const v = e.target.value;
+                  setCurrencyId(v === '' ? null : Number(v));
+                }}
+                disabled={!selectedPo}
+              >
+                <option value="">
+                  {selectedPo
+                    ? 'Automatic (from purchase order or company)'
+                    : 'Select a purchase order first'}
+                </option>
+                {currencies.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}{c.symbol ? ` (${c.symbol})` : ''}
+                  </option>
+                ))}
+              </select>
+              {selectedPo?.currency_name ? (
+                <p className="mt-1 text-xs text-gray-500">
+                  PO currency: {selectedPo.currency_name}
+                  {selectedPo.currency_symbol ? ` (${selectedPo.currency_symbol})` : ''}
+                </p>
+              ) : null}
             </div>
 
             <div className="grid grid-cols-2 gap-4">

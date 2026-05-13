@@ -360,13 +360,38 @@ export interface PenaltyInput {
 // ─── Payments (`/api/crm/supply/payments/*`) ─────────────────
 /** Row from `POST /api/crm/supply/payments/po/list` for linking a PO. */
 export interface PaymentPoDropdownItem {
-  id:       number;
-  name:     string;
+  id: number;
+  name: string;
+  /** Vendor display (legacy alias; same as `vendor_name`). */
   supplier: string;
+  vendor_name?: string;
+  status?: string;
+  division?: string | null;
+  currency_id?: number | null;
+  currency_name?: string;
+  currency_symbol?: string;
+  /** Single-line label for combobox display. */
+  label?: string;
 }
 
 export interface PaymentPoListData {
   items:    PaymentPoDropdownItem[];
+  total:    number;
+  page:     number;
+  per_page: number;
+}
+
+/** Row from `POST /api/crm/supply/currencies/list`. */
+export interface CurrencyDropdownItem {
+  id: number;
+  name: string;
+  symbol: string;
+  position?: string;
+  decimal_places?: number;
+}
+
+export interface PaymentCurrenciesListData {
+  items:    CurrencyDropdownItem[];
   total:    number;
   page:     number;
   per_page: number;
@@ -401,6 +426,9 @@ export interface SupplyPayment {
   notes:              string;
   currency_id:        number | null;
   currency_name:      string;
+  currency_symbol?:   string;
+  po_name?:           string;
+  po_status?:         string;
   payment_date:       string | null;
   payment_method:     string;
 }

@@ -33,6 +33,7 @@ import type {
   NegotiationListFilter,
   NegotiationCommentRow,
   PaymentPoListData,
+  PaymentCurrenciesListData,
   PaymentCreateInput,
   SupplyPayment,
 } from '../types/supply';
@@ -504,6 +505,14 @@ export const paymentsPoList = (filter: {
     ...(filter.division ? { division: filter.division } : {}),
   });
 
+/** Active currencies for payment form dropdown (`item.id` = `currency_id` on create). */
+export const paymentsCurrenciesList = (filter: { search?: string; page?: number; per_page?: number } = {}) =>
+  rpc<PaymentCurrenciesListData>('/api/crm/supply/currencies/list', {
+    page:     filter.page     ?? 1,
+    per_page: filter.per_page ?? 200,
+    ...(filter.search ? { search: filter.search } : {}),
+  });
+
 export const paymentsCreate = (input: PaymentCreateInput) =>
   rpc<SupplyPayment>('/api/crm/supply/payments/create', {
     po_id:  input.po_id,
@@ -541,7 +550,7 @@ const supplyApi = {
   poAttachList, poAttachUpload, poAttachUploadMultiple, poAttachDelete,
   poCommentList, poCommentAdd, poCommentDelete,
   poPackingListShare, poPackingListPdf,
-  paymentsPoList, paymentsCreate,
+  paymentsPoList, paymentsCurrenciesList, paymentsCreate,
 };
 
 export default supplyApi;
