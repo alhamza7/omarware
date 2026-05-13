@@ -98,8 +98,8 @@ def _serialize_negotiation(n, include_offers=True):
     cur = n.currency_id
     final_cur = n.final_currency_id
     fin_by = n.finalized_by_id
-    esign_by = n.e_sign_user_id
     atts = [_serialize_attachment(a) for a in n.attachment_ids]
+    esign = n.get_negotiation_e_sign_api_payload()
     data = {
         'id': n.id,
         'negotiation_code': n.name or '',
@@ -139,9 +139,9 @@ def _serialize_negotiation(n, include_offers=True):
         'approval_by_id': fin_by.id if fin_by else None,
         'approval_by_name': fin_by.name if fin_by else '',
         'finalized_date': n.finalized_date.isoformat() if n.finalized_date else None,
-        'e_sign_user_id': esign_by.id if esign_by else None,
-        'e_sign_user_name': esign_by.name if esign_by else '',
-        'e_sign_date': n.e_sign_date.isoformat() if n.e_sign_date else None,
+        'e_sign_user_id': esign['e_sign_user_id'],
+        'e_sign_user_name': esign['e_sign_user_name'],
+        'e_sign_date': esign['e_sign_date'],
         'attachments': atts,
         'created_by_id': n.create_uid.id if n.create_uid else None,
         'created_by_name': n.create_uid.name if n.create_uid else '',
@@ -237,6 +237,7 @@ def _serialize_item_request(r, preloaded_attachments=None):
     negotiations_payload = []
     for n in negs:
         vn = n.vendor_id
+        esign = n.get_negotiation_e_sign_api_payload()
         negotiations_payload.append({
             'id': n.id,
             'name': n.name or '',
@@ -246,8 +247,9 @@ def _serialize_item_request(r, preloaded_attachments=None):
             'final_agreed_price': float(n.final_agreed_price or 0.0),
             'currency_id': n.currency_id.id if n.currency_id else None,
             'currency_name': n.currency_id.name if n.currency_id else '',
-            'e_sign_user_id': n.e_sign_user_id.id if n.e_sign_user_id else None,
-            'e_sign_date': n.e_sign_date.isoformat() if n.e_sign_date else None,
+            'e_sign_user_id': esign['e_sign_user_id'],
+            'e_sign_user_name': esign['e_sign_user_name'],
+            'e_sign_date': esign['e_sign_date'],
         })
     data = {
         'id': r.id,
@@ -794,8 +796,12 @@ class CrmSupplyExtraApiController(http.Controller):
             return crm_error(e, 'supply_negotiations_delete')
 
     @http.route('/api/crm/supply/negotiations/<int:neg_id>/confirm', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    @http.route('/api/crm/supply/negotiations/<int:neg_id>/finalize', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def supply_negotiations_confirm(self, neg_id, **kwargs):
-        """Finalize negotiation (approval): sets state finalized, records approver."""
+        """Finalize negotiation (approval): sets state finalized, records approver.
+
+        ``/finalize`` is an alias for ``/confirm`` (same handler, for client compatibility).
+        """
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized', 'data': None}

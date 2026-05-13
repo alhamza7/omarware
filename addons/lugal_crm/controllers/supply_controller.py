@@ -278,18 +278,19 @@ def _serialize_supply_po(po):
         ng = po.negotiation_id
         out['negotiation_id'] = ng.id if ng else None
         out['negotiation_name'] = ng.name if ng else ''
-        out['negotiation'] = (
-            None
-            if not ng
-            else {
+        if not ng:
+            out['negotiation'] = None
+        else:
+            es = ng.get_negotiation_e_sign_api_payload()
+            out['negotiation'] = {
                 'id': ng.id,
                 'name': ng.name or '',
                 'state': ng.state or 'ongoing',
                 'final_agreed_price': float(ng.final_agreed_price or 0.0),
-                'e_sign_user_id': ng.e_sign_user_id.id if ng.e_sign_user_id else None,
-                'e_sign_date': ng.e_sign_date.isoformat() if ng.e_sign_date else None,
+                'e_sign_user_id': es['e_sign_user_id'],
+                'e_sign_user_name': es['e_sign_user_name'],
+                'e_sign_date': es['e_sign_date'],
             }
-        )
     if 'agent_id' in F:
         ag = po.agent_id
         out['agent_id'] = ag.id if ag else None

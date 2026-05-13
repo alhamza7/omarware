@@ -365,6 +365,18 @@ export const negotiationList = (filter: NegotiationListFilter = {}) =>
 export const negotiationGet = (negId: number) =>
   rpc<Negotiation>(`/api/crm/supply/negotiations/${negId}/get`, {});
 
+/** Record e-sign only; negotiation stays ``ongoing`` until confirm/finalize. */
+export const negotiationESignApprove = (negId: number) =>
+  rpc<Negotiation>(`/api/crm/supply/negotiations/${negId}/e_sign_approve`, {});
+
+/** Finalize negotiation (sets state to ``finalized``). */
+export const negotiationConfirm = (negId: number) =>
+  rpc<Negotiation>(`/api/crm/supply/negotiations/${negId}/confirm`, {});
+
+/** Same as ``negotiationConfirm`` — backend alias route ``/finalize``. */
+export const negotiationFinalize = (negId: number) =>
+  rpc<Negotiation>(`/api/crm/supply/negotiations/${negId}/finalize`, {});
+
 export const negotiationCommentList = (negId: number, page = 1, per_page = 50) =>
   rpc<{ total: number; page: number; per_page: number; items: NegotiationCommentRow[] }>(
     `/api/crm/supply/negotiations/${negId}/comments/list`,
@@ -510,7 +522,8 @@ const supplyApi = {
   login,
   getToken, saveToken, clearToken,
   // negotiations
-  negotiationList, negotiationGet, negotiationCommentList, negotiationCommentAdd, negotiationCommentDelete,
+  negotiationList, negotiationGet, negotiationESignApprove, negotiationConfirm, negotiationFinalize,
+  negotiationCommentList, negotiationCommentAdd, negotiationCommentDelete,
   // vendors
   vendorList, vendorGet, vendorCreate, vendorUpdate, vendorDelete,
   // containers

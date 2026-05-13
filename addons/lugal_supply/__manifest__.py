@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'Lugal Supply',
-    'version': '1.0.4',
+    'version': '1.0.5',
     'category': 'Inventory/Inventory',
     'summary': 'Vendors and containers — موردين وحاويات',
     'description': """

@@ -31,9 +31,11 @@ function mapNegCommentRow(row: NegotiationCommentRow): Comment {
 function NegotiationDetailSheet({
   negotiation: initial,
   onClose,
+  onNegotiationUpdated,
 }: {
   negotiation: Negotiation;
   onClose: () => void;
+  onNegotiationUpdated: (next: Negotiation) => void;
 }) {
   const [n, setN] = useState<Negotiation>(initial);
   const [comments, setComments] = useState<Comment[]>([]);
@@ -41,6 +43,15 @@ function NegotiationDetailSheet({
   const [busy, setBusy] = useState<string | null>(null);
 
   useEffect(() => { setN(initial); }, [initial]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const r = await supplyApi.negotiationGet(initial.id);
+      if (!cancelled && r?.success && r.data) setN(r.data);
+    })();
+    return () => { cancelled = true; };
+  }, [initial.id]);
 
   const loadComments = useCallback(async () => {
     const r = await supplyApi.negotiationCommentList(n.id, 1, 100);
@@ -55,8 +66,41 @@ function NegotiationDetailSheet({
 
   const refreshNegotiation = async () => {
     const r = await supplyApi.negotiationGet(n.id);
-    if (r?.success) setN(r.data);
+    if (r?.success && r.data) {
+      setN(r.data);
+      onNegotiationUpdated(r.data);
+    }
   };
+
+  const doEsign = async () => {
+    setBusy('esign');
+    const r = await supplyApi.negotiationESignApprove(n.id);
+    if (r?.success && r.data) {
+      setN(r.data);
+      onNegotiationUpdated(r.data);
+      toast.success('E-sign recorded');
+    } else if (r?.error) {
+      toast.error(r.error);
+    }
+    setBusy(null);
+  };
+
+  const doFinalize = async () => {
+    setBusy('finalize');
+    const r = await supplyApi.negotiationConfirm(n.id);
+    if (r?.success && r.data) {
+      setN(r.data);
+      onNegotiationUpdated(r.data);
+      toast.success('Negotiation finalized');
+    } else if (r?.error) {
+      toast.error(r.error);
+    }
+    setBusy(null);
+  };
+
+  const stateNorm = (n.state || n.status || '').toLowerCase();
+  const isOngoing = stateNorm === 'ongoing';
+  const hasEsign = n.e_sign_user_id != null && Number(n.e_sign_user_id) > 0;
 
   const submitComment = async () => {
     if (!newComment.trim()) return;
@@ -88,8 +132,8 @@ function NegotiationDetailSheet({
   return (
     <div className="fixed inset-0 bg-black/40 z-40 flex justify-end">
       <div className="bg-white w-full max-w-2xl h-full flex flex-col shadow-2xl">
-        <div className="flex items-center justify-between px-6 py-4 border-b bg-gray-50">
-          <div>
+        <div className="flex items-start justify-between gap-3 px-6 py-4 border-b bg-gray-50">
+          <div className="min-w-0 flex-1">
             <h2 className="text-lg font-bold text-gray-900">{n.name || n.negotiation_code || `Negotiation #${n.id}`}</h2>
             <div className="flex flex-wrap gap-2 mt-1 text-xs text-gray-600">
               {n.vendor_name && <span>Vendor: <strong className="text-gray-800">{n.vendor_name}</strong></span>}
@@ -97,11 +141,44 @@ function NegotiationDetailSheet({
               {stateLabel && (
                 <span className="ml-1 px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 capitalize">{stateLabel}</span>
               )}
+              {hasEsign && (n.e_sign_user_name || n.e_sign_date) && (
+                <span className="text-emerald-700">
+                  · E-sign: {n.e_sign_user_name || '—'}
+                  {n.e_sign_date ? ` (${new Date(n.e_sign_date).toLocaleString()})` : ''}
+                </span>
+              )}
             </div>
           </div>
-          <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-700 transition">
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex flex-col items-end gap-2 shrink-0">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {isOngoing && !hasEsign && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="border-cyan-600 text-cyan-700 hover:bg-cyan-50"
+                  onClick={doEsign}
+                  disabled={busy !== null}
+                >
+                  {busy === 'esign' ? <Loader2 className="w-4 h-4 animate-spin" /> : 'E-sign approve'}
+                </Button>
+              )}
+              {isOngoing && (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="bg-cyan-600 hover:bg-cyan-700 text-white"
+                  onClick={doFinalize}
+                  disabled={busy !== null}
+                >
+                  {busy === 'finalize' ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirm / Finalize'}
+                </Button>
+              )}
+              <button type="button" onClick={onClose} className="p-1.5 text-gray-400 hover:text-gray-700 transition rounded-lg hover:bg-gray-200" aria-label="Close">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
         </div>
 
         <div className="px-6 py-2 border-b flex items-center gap-2 bg-white">
@@ -177,12 +254,18 @@ export function NegotiationContainer() {
   const [error, setError] = useState<string | null>(null);
   const [searchDraft, setSearchDraft] = useState('');
   const [search, setSearch] = useState('');
+  const [stateFilter, setStateFilter] = useState('');
   const [detail, setDetail] = useState<Negotiation | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const r = await supplyApi.negotiationList({ page, per_page: perPage, search: search || undefined });
+    const r = await supplyApi.negotiationList({
+      page,
+      per_page: perPage,
+      search: search || undefined,
+      ...(stateFilter ? { state: stateFilter } : {}),
+    });
     if (r?.success) {
       setItems(r.data?.items ?? []);
       setTotal(r.data?.total ?? 0);
@@ -191,7 +274,7 @@ export function NegotiationContainer() {
       else setError(r?.error ?? 'Failed to load negotiations');
     }
     setLoading(false);
-  }, [page, search]);
+  }, [page, search, stateFilter]);
 
   useEffect(() => {
     if (!showLogin) load();
@@ -241,6 +324,19 @@ export function NegotiationContainer() {
             Clear
           </button>
         )}
+        <label className="flex items-center gap-2 text-sm text-gray-600 shrink-0">
+          <span className="whitespace-nowrap">State</span>
+          <select
+            className="h-8 text-sm border border-gray-200 rounded-md px-2 bg-white min-w-[140px]"
+            value={stateFilter}
+            onChange={e => { setStateFilter(e.target.value); setPage(1); }}
+          >
+            <option value="">All</option>
+            <option value="ongoing">Ongoing</option>
+            <option value="finalized">Finalized</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </label>
       </div>
 
       <div className="px-6 py-4">
@@ -313,7 +409,16 @@ export function NegotiationContainer() {
       </div>
 
       {detail && (
-        <NegotiationDetailSheet negotiation={detail} onClose={() => setDetail(null)} />
+        <NegotiationDetailSheet
+          negotiation={detail}
+          onClose={() => setDetail(null)}
+          onNegotiationUpdated={(next) => {
+            setDetail(next);
+            const s = (next.state || next.status || '').toLowerCase();
+            if (s === 'finalized') setStateFilter('finalized');
+            void load();
+          }}
+        />
       )}
     </div>
   );

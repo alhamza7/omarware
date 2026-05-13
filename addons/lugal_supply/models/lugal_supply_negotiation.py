@@ -3,6 +3,10 @@
 from odoo import models, fields, api, _
 from odoo.exceptions import UserError
 
+# Reserved keys on ``extra_fields`` (JSON) — no separate DB columns required.
+_NEGOTIATION_ESIGN_USER_EXTRA = 'negotiation_e_sign_user_id'
+_NEGOTIATION_ESIGN_DATE_EXTRA = 'negotiation_e_sign_date'
+
 
 class LugalSupplyNegotiation(models.Model):
     """Supplier/agent price and terms discussion linked to an item request."""
@@ -120,17 +124,6 @@ class LugalSupplyNegotiation(models.Model):
         readonly=True,
         tracking=True,
     )
-    e_sign_user_id = fields.Many2one(
-        'res.users',
-        string='E-sign By',
-        readonly=True,
-        tracking=True,
-    )
-    e_sign_date = fields.Datetime(
-        string='E-sign Date',
-        readonly=True,
-        tracking=True,
-    )
     active = fields.Boolean(default=True)
     is_deleted = fields.Boolean(string='Soft Deleted', default=False, index=True)
 
@@ -151,14 +144,38 @@ class LugalSupplyNegotiation(models.Model):
         records._lugal_sync_linked_attachments_res()
         return records
 
+    def get_negotiation_e_sign_api_payload(self):
+        """E-sign is stored in ``extra_fields`` JSON (works without module DB upgrade)."""
+        self.ensure_one()
+        raw_uid = self.get_dynamic_field(_NEGOTIATION_ESIGN_USER_EXTRA)
+        try:
+            uid = int(raw_uid) if raw_uid not in (None, False, '') else None
+        except (TypeError, ValueError):
+            uid = None
+        user = self.env['res.users'].sudo().browse(uid) if uid else self.env['res.users']
+        if uid and not user.exists():
+            uid = None
+            user = self.env['res.users']
+        date_raw = self.get_dynamic_field(_NEGOTIATION_ESIGN_DATE_EXTRA)
+        date_iso = None
+        if isinstance(date_raw, str) and date_raw.strip():
+            date_iso = date_raw.strip()
+        return {
+            'e_sign_user_id': uid,
+            'e_sign_user_name': user.name if uid else '',
+            'e_sign_date': date_iso,
+        }
+
     def action_e_sign_approve(self):
         """Record negotiation e-sign; does not change state (use action_finalize to close)."""
         for rec in self:
             if rec.state != 'ongoing':
                 raise UserError(_('E-sign approval is only allowed for ongoing negotiations.'))
-            rec.write({
-                'e_sign_user_id': self.env.user.id,
-                'e_sign_date': fields.Datetime.now(),
+            rec.merge_extra_fields({
+                _NEGOTIATION_ESIGN_USER_EXTRA: self.env.user.id,
+                _NEGOTIATION_ESIGN_DATE_EXTRA: fields.Datetime.to_string(
+                    fields.Datetime.now()
+                ),
             })
 
     def action_finalize(self):

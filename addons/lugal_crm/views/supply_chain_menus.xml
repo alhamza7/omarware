@@ -155,8 +155,6 @@
                             <field name="final_currency_id"/>
                             <field name="finalized_by_id"/>
                             <field name="finalized_date"/>
-                            <field name="e_sign_user_id"/>
-                            <field name="e_sign_date"/>
                         </group>
                         <group string="Lead time">
                             <field name="expected_lead_time_days"/>
