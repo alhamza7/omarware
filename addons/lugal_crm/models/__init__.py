@@ -23,6 +23,19 @@ from . import crm_requested_item
 from . import crm_shift
 from . import crm_supply_po
 from . import crm_supply_po_line
+from . import crm_supply_po_line_product
+from . import crm_supply_po_extend
+from . import crm_supply_po_chain_enhance
+from . import crm_supply_container_extend
+from . import crm_supply_item_request_extend
+from . import crm_supply_item_request_workflow
+from . import crm_supply_negotiation_extend
+from . import lugal_supply_payment
+from . import lugal_supply_payment_trace
+from . import supply_budget_allocation
+from . import supply_inventory_minmax
+from . import supply_workflow_approval_line
+from . import supply_workflow_config
 from . import crm_supply_conversation
 from . import crm_supply_message
 from . import crm_supply_story
@@ -31,4 +44,3 @@ from . import crm_marquee
 from . import crm_tag
 from . import crm_task
 from . import crm_ticket
-# TODO: remove - cherry-pick marker

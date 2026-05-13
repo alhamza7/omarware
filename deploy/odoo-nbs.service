@@ -1,0 +1,32 @@
+# Install (once):
+#   sudo cp /home/lugalai/Lugal-ai/deploy/odoo-nbs.service /etc/systemd/system/odoo-nbs.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now odoo-nbs.service
+#   sudo systemctl status odoo-nbs.service
+#
+# Logs: journalctl -u odoo-nbs.service -f
+
+[Unit]
+Description=Odoo 19 (nbs_lugalai)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lugalai
+Group=lugalai
+WorkingDirectory=/home/lugalai/Lugal-ai
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/lugalai/Lugal-ai/venv/bin/python3 /home/lugalai/Lugal-ai/odoo-bin -c /home/lugalai/Lugal-ai/odoo_simple.conf
+Restart=always
+RestartSec=15
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+KillMode=mixed
+TimeoutStopSec=120
+
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

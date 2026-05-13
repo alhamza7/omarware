@@ -52,4 +52,5 @@ class LugalSupplyItemRequest(models.Model):
         tracking=True,
     )
     reviewed_at = fields.Datetime(string='Reviewed At / وقت المراجعة', tracking=True)
+    active = fields.Boolean(string='Active', default=True)
     is_deleted = fields.Boolean(string='Soft Deleted', default=False, index=True)

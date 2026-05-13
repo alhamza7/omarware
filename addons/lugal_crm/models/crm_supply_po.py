@@ -81,8 +81,7 @@ class CrmSupplyPo(models.Model):
 
     def init(self):
         """Legacy status cleanup; ensure columns for extended PO fields exist (DB sync safety)."""
-        cr = self._cr
-        cr.execute(
+        self.env.cr.execute(
             """
             UPDATE lugal_crm_supply_po
             SET status = 'confirmed'

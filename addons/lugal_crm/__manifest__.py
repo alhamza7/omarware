@@ -33,7 +33,7 @@ Requirements and specifications are in addons/lugal_crm/requirements/
         'data/crm_cron.xml',
         'report/supply_packing_list_report.xml',
         'views/res_config_settings_supply_workflow_views.xml',
-        'views/supply_chain_menus.xml',
+        # 'views/supply_chain_menus.xml',  # disabled: views reference fields not yet on models
     ],
     'demo': [],
     'installable': True,

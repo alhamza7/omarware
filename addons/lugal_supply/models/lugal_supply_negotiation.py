@@ -53,4 +53,5 @@ class LugalSupplyNegotiation(models.Model):
         index=True,
         tracking=True,
     )
+    active = fields.Boolean(string='Active', default=True)
     is_deleted = fields.Boolean(string='Soft Deleted', default=False, index=True)

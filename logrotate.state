@@ -1,0 +1,2 @@
+logrotate state -- version 2
+"/home/lugalai/Lugal-ai/odoo.log" 2026-4-11-0:0:1

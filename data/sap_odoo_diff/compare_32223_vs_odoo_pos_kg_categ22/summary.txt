@@ -1,0 +1,9 @@
+SAP file: /home/lugalai/Lugal-ai/32223
+SAP rows (excl. header): 447 distinct: 447
+Odoo POS-equivalent (categ 22 subtree + uom kg + uom_filter_catalog align): 642 variants
+In BOTH: 442
+Only in SAP file (not in Odoo set): 5
+Only in Odoo set (not in SAP file): 200
+Resolved UoM: id=34 'كغم'
+
+CSV written under: /home/lugalai/Lugal-ai/data/sap_odoo_diff/compare_32223_vs_odoo_pos_kg_categ22/

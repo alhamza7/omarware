@@ -31,4 +31,5 @@ class LugalSupplyNotification(models.Model):
     related_type = fields.Char(string='Related Model / النموذج المرتبط', index=True)
     related_id = fields.Integer(string='Related ID / معرّف المرتبط', index=True)
     is_read = fields.Boolean(string='Read / مقروء', default=False, index=True)
+    read_at = fields.Datetime(string='Read At / وقت القراءة')
     is_deleted = fields.Boolean(string='Soft Deleted', default=False, index=True)

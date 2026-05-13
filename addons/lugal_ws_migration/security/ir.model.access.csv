@@ -1,3 +1,2 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_lugal_push_subscription_user,lugal.push.subscription user,model_lugal_push_subscription,base.group_user,1,1,1,1
-# TODO: remove - cherry-pick marker

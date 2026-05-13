@@ -1,0 +1,15 @@
+SAP backend id=2 base=https://192.168.15.50:50000/b1s/v1
+SAP Items rows fetched: 14863 (distinct ItemCode: 14863)
+SAP 'active_for_odoo' (not Frozen, Valid): 11283
+SAP 'sale_ok_equivalent' (active + SalesItem): 8623
+Odoo distinct default_code (any variant row): 14881
+Odoo active variant (default_code set): 11294
+Odoo active + tmpl active + sale_ok: 8634
+
+Symmetric differences (by ItemCode = default_code):
+  SAP_active \ Odoo_active: 5
+  Odoo_active \ SAP_active: 16
+  SAP_sale \ Odoo_sale: 2
+  Odoo_sale \ SAP_sale: 13
+  SAP_any \ Odoo_any_code: 0
+  Odoo_any_code \ SAP_any: 18

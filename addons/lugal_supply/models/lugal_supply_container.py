@@ -25,6 +25,24 @@ class LugalSupplyContainer(models.Model):
         index=True,
         tracking=True,
     )
+    shipment_ref = fields.Char(string='Shipment Reference / رقم الشحنة', index=True, tracking=True, copy=False)
+    supplier_id = fields.Many2one(
+        'lugal.supply.vendor',
+        string='Supplier / المورد',
+        ondelete='set null',
+        index=True,
+        tracking=True,
+    )
+    agent_id = fields.Many2one(
+        'res.partner',
+        string='Agent / الوكيل',
+        ondelete='set null',
+        index=True,
+        tracking=True,
+    )
+    transport_mode = fields.Char(string='Transport Mode / طريقة النقل', tracking=True)
+    destination_location = fields.Char(string='Destination / الوجهة', tracking=True)
+    received_date = fields.Date(string='Received Date / تاريخ الاستلام', tracking=True)
     origin_location = fields.Char(string='Origin / المنشأ', tracking=True)
     departure_date = fields.Date(string='Departure Date / تاريخ المغادرة', index=True, tracking=True)
     eta = fields.Date(string='ETA / الموعد المتوقع', tracking=True)
