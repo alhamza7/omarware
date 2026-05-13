@@ -41,4 +41,3 @@ def crm_error(exc: Exception, handler: str = '') -> dict:
     except Exception:
         pass  # cr may already be closed in edge cases; ignore
     return {'success': False, 'error': str(exc)}
-# TODO: remove - cherry-pick marker
