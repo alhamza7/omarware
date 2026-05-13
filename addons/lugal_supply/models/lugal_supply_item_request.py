@@ -121,7 +121,12 @@ class LugalSupplyItemRequest(models.Model):
     active = fields.Boolean(string='Active', default=True)
     is_deleted = fields.Boolean(string='Soft Deleted', default=False, index=True)
 
-    # ── Computed ─────────────────────────────────────────────────────────────────
+    # ── Negotiations ─────────────────────────────────────────────────────────────
+    negotiation_ids = fields.One2many(
+        'lugal.supply.negotiation',
+        'item_request_id',
+        string='Negotiations / المفاوضات',
+    )
     negotiation_count = fields.Integer(compute='_compute_negotiation_count', store=False)
 
     @api.depends('attachment_ids')
@@ -129,13 +134,10 @@ class LugalSupplyItemRequest(models.Model):
         for rec in self:
             rec.attachment_count = len(rec.attachment_ids)
 
+    @api.depends('negotiation_ids')
     def _compute_negotiation_count(self):
-        Neg = self.env['lugal.supply.negotiation'].sudo()
         for rec in self:
-            rec.negotiation_count = Neg.search_count([
-                ('item_request_id', '=', rec.id),
-                ('is_deleted', '=', False),
-            ]) if 'item_request_id' in Neg._fields else 0
+            rec.negotiation_count = len(rec.negotiation_ids)
 
     # ── Workflow actions (base implementations, extended by lugal_crm workflow) ──
     def action_start_progress(self):
