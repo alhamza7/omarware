@@ -143,4 +143,3 @@ def forbidden(message='Insufficient permissions', **extra):
     payload = {'success': False, 'error': message, 'code': 403}
     payload.update(extra)
     return payload
-# TODO: remove - cherry-pick marker
