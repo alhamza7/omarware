@@ -6,7 +6,7 @@ class LugalSupplyItemRequest(models.Model):
     """Request from a branch/agent to replenish inventory of a specific product."""
     _name = 'lugal.supply.item.request'
     _description = 'Lugal Supply Item Request'
-    _inherit = ['mail.thread', 'mail.activity.mixin']
+    _inherit = ['mail.thread', 'mail.activity.mixin', 'lugal.supply.dynamic.extra.mixin']
     _order = 'write_date desc, id desc'
     _rec_name = 'product_name'
 
@@ -21,6 +21,8 @@ class LugalSupplyItemRequest(models.Model):
     item_code = fields.Char(string='Item Code / رمز الصنف', index=True, tracking=True)
     quantity = fields.Float(string='Quantity / الكمية', digits=(16, 4), default=1.0, tracking=True)
     uom = fields.Char(string='Unit of Measure / وحدة القياس', tracking=True)
+    # Integer instead of Many2one('lugal.crm.branch') to avoid circular dependency:
+    # lugal_crm depends on lugal_supply, so lugal_supply cannot depend on lugal_crm.
     branch_id = fields.Integer(string='Branch ID / معرّف الفرع', index=True, tracking=True)
     requested_by_id = fields.Many2one(
         'res.users',
