@@ -9,6 +9,7 @@ from odoo import http
 from odoo.http import request
 from ._auth import ensure_jwt_user_id
 from ._error import crm_error
+from ._permissions import require_permission
 
 _logger = logging.getLogger(__name__)
 
@@ -113,6 +114,9 @@ class PosBridgeController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('orders.view')
+            if denied:
+                return denied
             data = _get_setup_data()
             partner_id = None
             last_order = None
@@ -195,8 +199,20 @@ class PosBridgeController(http.Controller):
                 else:
                     domain += ['|', ('name', 'ilike', text), ('default_code', 'ilike', text)]
 
-            Product = request.env['product.product']
+            Product = request.env['product.product'].sudo()
             total = Product.search_count(domain)
+
+            # When the user types something that looks like an exact item code
+            # (no spaces), also include any product whose default_code matches
+            # case-insensitively — even if it is archived or has sale_ok=False.
+            # This ensures items like LOC00516 that are deactivated in Odoo but
+            # still exist in SAP are always findable by their exact code.
+            _extra_by_code_ids: set = set()
+            if text and ' ' not in text:
+                extra = Product.with_context(active_test=False).search([
+                    ('default_code', '=ilike', text),
+                ], order='name asc')
+                _extra_by_code_ids = set(extra.ids)
 
             fetch_all_flag = bool(fetch_all) or kwargs.get('fetch_all') is True
 
@@ -237,8 +253,18 @@ class PosBridgeController(http.Controller):
                 offset_out = off
                 limit_out = lim
 
+            # Merge exact-code matches (including inactive) that weren't already
+            # returned by the normal domain search.
+            seen_ids = set(products.ids)
+            extra_records = Product.browse()
+            if _extra_by_code_ids:
+                missing = _extra_by_code_ids - seen_ids
+                if missing:
+                    extra_records = Product.with_context(active_test=False).browse(list(missing))
+                    total += len(extra_records)
+
             items = []
-            for p in products:
+            for p in list(products) + list(extra_records):
                 foreign_name = getattr(p, 'foreign_name', '') or ''
                 sales_uom = _get_sales_uom(p)
                 items.append({
@@ -249,6 +275,7 @@ class PosBridgeController(http.Controller):
                     'uom_id': {'id': sales_uom.id, 'name': sales_uom.name},
                     'list_price': p.list_price,
                     'qty_available': p.qty_available,
+                    'active': p.active,
                 })
             return {
                 'success': True,
@@ -360,22 +387,27 @@ class PosBridgeController(http.Controller):
     def orders_create(self, call_id=None, partner_id=None, pricelist_id=None, invoice_type='1', order_lines=None, exchange_rate=None, **kwargs):
         """Create POS order, confirm it, and link to crm_call."""
         try:
-            if not ensure_jwt_user_id():
+            uid = ensure_jwt_user_id()
+            if not uid:
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('orders.create')
+            if denied:
+                return denied
             if not _pos_available():
                 return {'success': False, 'error': 'POS Perfume module (pos_perfume_custom) is required'}
             if not partner_id:
                 return {'success': False, 'error': 'partner_id is required'}
-            partner = request.env['res.partner'].browse(int(partner_id))
+            # Use sudo() — Lugal permission tree is the authority; ORM-level group checks bypass
+            partner = request.env['res.partner'].sudo().browse(int(partner_id))
             if not partner.exists():
                 return {'success': False, 'error': 'Customer not found'}
-            Order = request.env['pos.perfume.order']
+            Order = request.env['pos.perfume.order'].sudo()
             pl = None
             if pricelist_id:
-                pl = request.env['product.pricelist'].browse(int(pricelist_id))
+                pl = request.env['product.pricelist'].sudo().browse(int(pricelist_id))
             if not pl or not pl.exists():
                 pl_id = Order._get_default_pricelist()
-                pl = request.env['product.pricelist'].browse(pl_id) if pl_id else None
+                pl = request.env['product.pricelist'].sudo().browse(pl_id) if pl_id else None
             if not pl or not pl.exists():
                 return {'success': False, 'error': 'Pricelist not found'}
             order_vals = {
@@ -383,7 +415,7 @@ class PosBridgeController(http.Controller):
                 'pricelist_id': pl.id,
                 'state': 'draft',
                 'invoice_type': str(invoice_type),
-                'user_id': request.env.uid,
+                'user_id': uid,
             }
             if exchange_rate is not None:
                 order_vals['exchange_rate'] = float(exchange_rate)
@@ -399,7 +431,7 @@ class PosBridgeController(http.Controller):
             if line_vals_list:
                 order.action_confirm()
             if call_id:
-                call = request.env['lugal.crm.call'].browse(call_id)
+                call = request.env['lugal.crm.call'].sudo().browse(call_id)
                 if call.exists():
                     call.write({
                         'pos_order_id': order.id,
@@ -429,9 +461,12 @@ class PosBridgeController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('orders.view')
+            if denied:
+                return denied
             if not _pos_available():
                 return {'success': False, 'error': 'POS Perfume module is required'}
-            order = request.env['pos.perfume.order'].browse(order_id)
+            order = request.env['pos.perfume.order'].sudo().browse(order_id)
             if not order.exists():
                 return {'success': False, 'error': 'Order not found'}
             data = {
@@ -455,10 +490,13 @@ class PosBridgeController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
+            denied = require_permission('orders.list')
+            if denied:
+                return denied
             if not _pos_available():
                 return {'success': True, 'data': {'items': []}}
             domain = [('partner_id', '=', int(partner_id))]
-            orders = request.env['pos.perfume.order'].search(domain, limit=limit, order='date desc')
+            orders = request.env['pos.perfume.order'].sudo().search(domain, limit=limit, order='date desc')
             items = [{
                 'id': o.id,
                 'name': o.name,

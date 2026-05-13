@@ -128,10 +128,13 @@ class NBSDocumentController(http.Controller):
                     'container_number': doc.container_number,
                     'invoice_number': doc.invoice_number,
                     'envoy_number': doc.envoy_number,
+                    'document_date': doc.document_date.strftime('%d-%m-%Y') if doc.document_date else None,
                     'file_name': doc.current_version_id.file_name if doc.current_version_id else None,
                     'file_size': doc.current_version_id.file_size if doc.current_version_id else 0,
                     'folder_id': doc.folder_id.id if doc.folder_id else (doc.folder_ids[0].id if doc.folder_ids else None),
                     'folder_name': doc.folder_id.name if doc.folder_id else (doc.folder_ids[0].name if doc.folder_ids else None),
+                    'parent_folder_id': doc.folder_id.id if doc.folder_id else (doc.folder_ids[0].id if doc.folder_ids else None),
+                    'parent_folder_name': doc.folder_id.name if doc.folder_id else (doc.folder_ids[0].name if doc.folder_ids else None),
                     'company_id': doc.company_id.id if doc.company_id else None,
                     'company_name': doc.company_id.name if doc.company_id else None,
                     'parent_document_id': doc.parent_document_id.id if doc.parent_document_id else None,
@@ -171,72 +174,78 @@ class NBSDocumentController(http.Controller):
     @http.route('/api/documents/trash', type='jsonrpc', auth='none', methods=['POST'], csrf=False, cors='*')
     def get_trash_documents(self, department_id=None, document_type_id=None, search=None,
                             from_date=None, to_date=None, page=1, per_page=20, **kwargs):
-        """Get archived (trashed) documents with optional date filters"""
+        """Get trashed documents with optional filters and pagination"""
         try:
             if not ensure_jwt_user_id():
                 return {
                     'success': False,
                     'error': 'Unauthorized',
                     'data': [],
-                    'pagination': {
-                        'total': 0,
-                        'page': page,
-                        'per_page': per_page,
-                        'total_pages': 0,
-                    }
+                    'pagination': {'total': 0, 'page': page, 'per_page': per_page, 'total_pages': 0}
                 }
 
-            domain = [('state', '=', 'archived')]
+            domain = [('state', '=', 'trash'), ('is_deleted', '=', True)]
 
             if department_id:
                 domain.append(('department_id', '=', department_id))
-
             if document_type_id:
                 domain.append(('document_type_id', '=', document_type_id))
-
             if search:
                 domain.append(('name', 'ilike', search))
-
-            # Date range filter on upload_date
             if from_date:
-                domain.append(('upload_date', '>=', from_date))
+                domain.append(('deleted_at', '>=', from_date))
             if to_date:
-                domain.append(('upload_date', '<=', to_date))
+                domain.append(('deleted_at', '<=', to_date))
 
-            Document = request.env['nbs.document']
-            documents = Document.search(domain, limit=per_page, offset=(page - 1) * per_page, order='upload_date desc')
-            total = Document.search_count(domain)
+            Document = request.env['nbs.document'].sudo()
+            per_page = int(per_page)
+            page     = int(page)
+            offset   = (page - 1) * per_page
+            documents = Document.search(domain, limit=per_page, offset=offset, order='deleted_at desc')
+            total     = Document.search_count(domain)
+
+            result = []
+            for doc in documents:
+                result.append({
+                    'id':                  doc.id,
+                    'name':                doc.name,
+                    'title':               doc.name,
+                    'document_number':     getattr(doc, 'document_number', None) or doc.barcode,
+                    'department_id':       doc.department_id.id,
+                    'department_name':     doc.department_id.name,
+                    'document_type_id':    doc.document_type_id.id if doc.document_type_id else None,
+                    'document_type_name':  doc.document_type_id.name if doc.document_type_id else None,
+                    'uploader_id':         doc.uploader_id.id if doc.uploader_id else None,
+                    'uploader_name':       doc.uploader_id.name if doc.uploader_id else None,
+                    'upload_date':         doc.upload_date.isoformat() if doc.upload_date else None,
+                    'document_date':       doc.document_date.strftime('%d-%m-%Y') if doc.document_date else None,
+                    'deleted_at':          doc.deleted_at.isoformat() if doc.deleted_at else None,
+                    'deleted_by':          doc.deleted_by.name if doc.deleted_by else None,
+                    'deletion_reason':     doc.deletion_reason,
+                    'restore_deadline':    doc.restore_deadline.isoformat() if doc.restore_deadline else None,
+                    'state_before_trash':  doc.state_before_trash,
+                    'status':              doc.state,
+                    'confidentiality_level': doc.confidentiality_level,
+                    'barcode':             doc.barcode,
+                    'file_name':           doc.current_version_id.file_name if doc.current_version_id else None,
+                    'file_size':           doc.current_version_id.file_size if doc.current_version_id else 0,
+                    'is_main_document':    (doc.folder_role == 'main'),
+                    'document_role':       doc.folder_role or 'other',
+                })
 
             return {
                 'success': True,
-                'data': [{
-                    'id': doc.id,
-                    'title': doc.name,
-                    'department_id': doc.department_id.id,
-                    'department_name': doc.department_id.name,
-                    'document_type_id': doc.document_type_id.id,
-                    'document_type_name': doc.document_type_id.name,
-                    'uploader_id': doc.uploader_id.id,
-                    'uploader_name': doc.uploader_id.name,
-                    'upload_date': doc.upload_date.isoformat() if doc.upload_date else None,
-                    'status': doc.state,
-                    'confidentiality_level': doc.confidentiality_level,
-                    'barcode': doc.barcode,
-                    'file_name': doc.current_version_id.file_name if doc.current_version_id else None,
-                    'file_size': doc.current_version_id.file_size if doc.current_version_id else 0,
-                } for doc in documents],
+                'data':    result,
+                'count':   len(result),
                 'pagination': {
-                    'total': total,
-                    'page': page,
-                    'per_page': per_page,
-                    'total_pages': (total + per_page - 1) // per_page,
-                }
+                    'total':       total,
+                    'page':        page,
+                    'per_page':    per_page,
+                    'total_pages': (total + per_page - 1) // per_page if per_page else 1,
+                },
             }
-        except AccessError as e:
-            _logger.error(f'Access denied: {str(e)}')
-            return {'success': False, 'error': 'Access denied'}
         except Exception as e:
-            _logger.error(f'Get trash documents error: {str(e)}')
+            _logger.error('get_trash_documents error: %s', e, exc_info=True)
             return {
                 'success': False,
                 'error': str(e),
@@ -285,8 +294,11 @@ class NBSDocumentController(http.Controller):
                     'container_number': document.container_number,
                     'invoice_number': document.invoice_number,
                     'envoy_number': document.envoy_number,
+                    'document_date': document.document_date.strftime('%d-%m-%Y') if document.document_date else None,
                     'folder_id': document.folder_id.id if document.folder_id else (document.folder_ids[0].id if document.folder_ids else None),
                     'folder_name': document.folder_id.name if document.folder_id else (document.folder_ids[0].name if document.folder_ids else None),
+                    'parent_folder_id': document.folder_id.id if document.folder_id else (document.folder_ids[0].id if document.folder_ids else None),
+                    'parent_folder_name': document.folder_id.name if document.folder_id else (document.folder_ids[0].name if document.folder_ids else None),
                     'company_id': document.company_id.id if document.company_id else None,
                     'company_name': document.company_id.name if document.company_id else None,
                     'parent_document_id': document.parent_document_id.id if document.parent_document_id else None,
@@ -335,14 +347,19 @@ class NBSDocumentController(http.Controller):
     def upload_document(self, **kwargs):
         """Upload new document via HTTP POST with JWT authentication"""
         try:
-            # Parse JSON body (must be a dict; if list, take first element)
+            # Parse JSON body — try UTF-8-sig first (strips BOM that some clients
+            # add when the payload contains non-ASCII/Arabic text), then plain UTF-8.
+            raw_body = request.httprequest.data
             try:
-                data = json.loads(request.httprequest.data.decode('utf-8'))
+                data = json.loads(raw_body.decode('utf-8-sig'))
             except Exception:
-                return request.make_json_response({
-                    'success': False,
-                    'error': 'Invalid JSON in request body'
-                })
+                try:
+                    data = json.loads(raw_body.decode('utf-8'))
+                except Exception:
+                    return request.make_json_response({
+                        'success': False,
+                        'error': 'Invalid JSON in request body'
+                    })
             if isinstance(data, list):
                 data = data[0] if data and isinstance(data[0], dict) else {}
             if not isinstance(data, dict):
@@ -384,6 +401,7 @@ class NBSDocumentController(http.Controller):
             container_number = data.get('container_number')
             invoice_number = data.get('invoice_number')
             envoy_number = data.get('envoy_number')
+            document_date_raw = data.get('document_date')  # expected: dd-mm-yyyy or yyyy-mm-dd
             tags = data.get('tags')
             custom_fields = data.get('custom_fields')
             folder_id = data.get('folder_id')
@@ -430,6 +448,14 @@ class NBSDocumentController(http.Controller):
                 vals['invoice_number'] = invoice_number
             if envoy_number:
                 vals['envoy_number'] = envoy_number
+            if document_date_raw:
+                from datetime import datetime as _dt
+                for _fmt in ('%d-%m-%Y', '%Y-%m-%d', '%d/%m/%Y', '%Y/%m/%d'):
+                    try:
+                        vals['document_date'] = _dt.strptime(str(document_date_raw).strip(), _fmt).strftime('%Y-%m-%d')
+                        break
+                    except ValueError:
+                        continue
             
             # Add tags
             if tags:
@@ -449,39 +475,41 @@ class NBSDocumentController(http.Controller):
                 except Exception:
                     folder_ids_to_link = []
 
-            # Enforce folder for sub/attachment
-            if upload_kind in ('sub', 'attachment') and not folder_ids_to_link and not create_folder:
-                return request.make_json_response({
-                    'success': False,
-                    'error': 'folder_id is required for sub/attachment uploads'
-                }, status=400)
+            # Resolve parent_document_id early so we can use it in role logic
+            resolved_parent_id = None
+            if parent_document_id:
+                try:
+                    resolved_parent_id = int(parent_document_id)
+                except Exception:
+                    return request.make_json_response(
+                        {'success': False, 'error': 'Invalid parent_document_id'}, status=400
+                    )
 
             # Apply parent / role flags
             if upload_kind in ('sub', 'attachment'):
-                if parent_document_id:
-                    try:
-                        vals['parent_document_id'] = int(parent_document_id)
-                    except Exception:
-                        return request.make_json_response({'success': False, 'error': 'Invalid parent_document_id'}, status=400)
+                # Accept: folder_id, folder_ids, parent_document_id, create_folder, or no linkage
+                # (orphan sub/attachment is valid — FE may link it later)
+                if resolved_parent_id:
+                    vals['parent_document_id'] = resolved_parent_id
                 vals['folder_role'] = 'attachment' if upload_kind == 'attachment' else 'sub'
-                vals['is_attachment'] = True if upload_kind == 'attachment' else False
+                vals['is_attachment'] = upload_kind == 'attachment'
+                if not folder_ids_to_link and not create_folder and not resolved_parent_id:
+                    _logger.warning(
+                        'upload_document: upload_kind=%s with no folder_id / parent_document_id; '
+                        'document will be created without explicit parent linkage.', upload_kind
+                    )
             elif upload_kind == 'main':
                 vals['folder_role'] = 'main'
                 vals['is_attachment'] = False
             else:
-                # If upload_kind not specified, determine based on folder and parent
+                # upload_kind not specified — auto-detect from context
                 if create_folder:
-                    # Creating new folder = main document
                     vals['folder_role'] = 'main'
                     vals['is_attachment'] = False
-                elif parent_document_id:
-                    # Has parent = secondary document
+                elif resolved_parent_id:
                     vals['folder_role'] = 'sub'
                     vals['is_attachment'] = False
-                    try:
-                        vals['parent_document_id'] = int(parent_document_id)
-                    except Exception:
-                        return request.make_json_response({'success': False, 'error': 'Invalid parent_document_id'}, status=400)
+                    vals['parent_document_id'] = resolved_parent_id
                 elif folder_ids_to_link:
                     # Adding to existing folder - check if folder already has a main document
                     existing_main = Document.search_count([
@@ -547,11 +575,13 @@ class NBSDocumentController(http.Controller):
 
             document.sudo().write({'current_version_id': version.id})
 
-            # Auto OCR for supported files (pdf/images)
+            # Auto OCR — run in background thread so the upload response is instant
+            # even for large files (170 MB+ PDFs).
             try:
                 fname = (file_name or '').lower()
-                if any(fname.endswith(ext) for ext in ['.pdf', '.jpg', '.jpeg', '.png', '.tiff']):
-                    request.env['nbs.ocr.service'].sudo()._process_document_async(document.id)
+                ocr_exts = ('.pdf', '.jpg', '.jpeg', '.png', '.tiff', '.tif', '.gif', '.bmp', '.webp')
+                if any(fname.endswith(ext) for ext in ocr_exts):
+                    request.env['nbs.ocr.service'].sudo().schedule_ocr_background(document.id)
             except Exception as e:
                 _logger.warning(f'OCR trigger failed for document {document.id}: {str(e)}')
             
@@ -593,6 +623,9 @@ class NBSDocumentController(http.Controller):
                     'barcode': document.barcode,
                     'message': 'Document uploaded successfully',
                     'folder_id': folder_info['id'] if folder_info else None,
+                    'folder_name': folder_info['name'] if folder_info else None,
+                    'parent_folder_id': folder_info['id'] if folder_info else None,
+                    'parent_folder_name': folder_info['name'] if folder_info else None,
                     'folder': folder_info,
                     'folders': folder_ids_info
                 }
@@ -612,58 +645,136 @@ class NBSDocumentController(http.Controller):
             })
     
     @http.route('/api/documents/<int:document_id>/download', type='http', auth='none', methods=['GET'], csrf=False)
-    def download_document(self, document_id, version_id=None, **kwargs):
-        """Download document or specific version"""
+    def download_document(self, document_id, version_id=None, preview=None, **kwargs):
+        """
+        Download or preview a document version.
+
+        Query parameters:
+          version_id  int   – specific version (defaults to current)
+          preview     1|0   – if "1", serve inline so the browser can render PDFs
+          token       str   – JWT bearer token (use when Authorization header
+                              cannot be sent, e.g. browser <iframe>/<embed>)
+
+        Large files are streamed directly from the Odoo filestore — no base64
+        copy is ever loaded into Python memory.
+        """
+        import os
+        import mimetypes
+        import werkzeug.wrappers
+
         try:
             if not ensure_jwt_user_id():
-                return request.not_found()
+                return request.make_response(
+                    'Unauthorized', status=401,
+                    headers=[('Content-Type', 'text/plain')],
+                )
 
-            document = request.env['nbs.document'].browse(document_id)
-            
+            env = request.env
+            document = env['nbs.document'].sudo().browse(document_id)
             if not document.exists():
                 return request.not_found()
-            
-            # Log audit
-            request.env['nbs.audit.log'].sudo().create({
-                'user_id': request.env.user.id,
-                'action': 'download',
-                'document_id': document.id,
-                'department_id': document.department_id.id,
-                'ip_address': request.httprequest.remote_addr,
-                'user_agent': request.httprequest.headers.get('User-Agent', ''),
-            })
-            
-            # Get file data
+
+            # ── Audit log ────────────────────────────────────────────────────
+            try:
+                env['nbs.audit.log'].sudo().create({
+                    'user_id':       env.user.id,
+                    'action':        'download',
+                    'document_id':   document.id,
+                    'department_id': document.department_id.id,
+                    'ip_address':    request.httprequest.remote_addr,
+                    'user_agent':    request.httprequest.headers.get('User-Agent', ''),
+                })
+            except Exception:
+                pass  # audit failure must never block the download
+
+            # ── Resolve version ───────────────────────────────────────────────
             if version_id:
-                version = request.env['nbs.document.version'].browse(int(version_id))
-                if version.exists() and version.document_id.id == document_id:
-                    file_data = version.file_data
-                    file_name = version.file_name
-                else:
+                version = env['nbs.document.version'].sudo().browse(int(version_id))
+                if not version.exists() or version.document_id.id != document_id:
                     return request.not_found()
             else:
-                if not document.current_version_id:
+                version = document.current_version_id
+                if not version:
                     return request.not_found()
-                file_data = document.current_version_id.file_data
-                file_name = document.current_version_id.file_name
-            
-            if not file_data:
-                return request.not_found()
-            
-            # Return file with cache-busting headers
-            return request.make_response(
-                base64.b64decode(file_data),
-                headers=[
-                    ('Content-Type', 'application/octet-stream'),
-                    ('Content-Disposition', f'attachment; filename="{file_name}"'),
-                    ('Cache-Control', 'no-cache, no-store, must-revalidate'),
-                    ('Pragma', 'no-cache'),
-                    ('Expires', '0'),
-                ]
+
+            file_name = version.file_name or f'document_{document_id}'
+
+            # ── MIME type ────────────────────────────────────────────────────
+            mime_type = mimetypes.guess_type(file_name)[0] or 'application/octet-stream'
+            is_preview = str(preview or '').lower() in ('1', 'true', 'yes')
+
+            # ── Safe Content-Disposition (RFC 6266 / RFC 5987) ──────────────
+            # HTTP headers must be ASCII.  Non-ASCII filenames (Arabic, CJK…)
+            # MUST use the filename* parameter with UTF-8 percent-encoding.
+            from urllib.parse import quote as _url_quote
+            safe_ascii = file_name.encode('ascii', errors='replace').decode('ascii')
+            encoded_name = _url_quote(file_name, safe='')
+            disp_type = 'inline' if is_preview else 'attachment'
+            disposition = (
+                f"{disp_type}; "
+                f'filename="{safe_ascii}"; '
+                f"filename*=UTF-8''{encoded_name}"
             )
-        
-        except Exception as e:
-            _logger.error(f'Download error: {str(e)}')
+
+            def _stream_file(full_path):
+                """Return a streaming Response for *full_path*."""
+                file_size = os.path.getsize(full_path)
+                resp = werkzeug.wrappers.Response(
+                    response=open(full_path, 'rb'),
+                    status=200,
+                    direct_passthrough=True,
+                )
+                resp.headers['Content-Type']        = mime_type
+                resp.headers['Content-Disposition'] = disposition
+                resp.headers['Content-Length']      = str(file_size)
+                resp.headers['Cache-Control']       = 'private, max-age=3600'
+                resp.headers['Accept-Ranges']       = 'bytes'
+                return resp
+
+            # ── Path 1: version.file_path (fast-upload direct-write path) ───
+            if version.file_path and os.path.isfile(version.file_path):
+                return _stream_file(version.file_path)
+
+            # ── Path 2: ir.attachment in filestore ───────────────────────────
+            IrAttachment = env['ir.attachment'].sudo()
+            attachment = IrAttachment.search([
+                ('res_model', '=', 'nbs.document.version'),
+                ('res_field', '=', 'file_data'),
+                ('res_id',    '=', version.id),
+            ], limit=1)
+
+            if attachment and attachment.store_fname:
+                full_path = IrAttachment._full_path(attachment.store_fname)
+                if os.path.isfile(full_path):
+                    return _stream_file(full_path)
+
+            # ── Path 3: read raw bytes from ORM ──────────────────────────────
+            if attachment and attachment.raw:
+                raw_bytes = attachment.raw
+            elif version.file_data:
+                raw_bytes = base64.b64decode(version.file_data)
+            else:
+                _logger.warning(
+                    'download_document: no file found for doc=%s ver=%s '
+                    '(file_path=%r, attachment=%s)',
+                    document_id, version_id,
+                    getattr(version, 'file_path', None),
+                    attachment.id if attachment else None,
+                )
+                return request.not_found()
+
+            return request.make_response(
+                raw_bytes,
+                headers=[
+                    ('Content-Type',        mime_type),
+                    ('Content-Disposition', disposition),
+                    ('Content-Length',      str(len(raw_bytes))),
+                    ('Cache-Control',       'private, max-age=3600'),
+                ],
+            )
+
+        except Exception as exc:
+            _logger.error('Download error doc=%s ver=%s: %s', document_id, version_id, exc, exc_info=True)
             return request.not_found()
     
     @http.route('/api/documents/<int:document_id>/versions', type='jsonrpc', auth='none', methods=['POST'], csrf=False, cors='*')
@@ -757,6 +868,18 @@ class NBSDocumentController(http.Controller):
                 vals['invoice_number'] = data['invoice_number']
             if 'envoy_number' in data:
                 vals['envoy_number'] = data['envoy_number']
+            if 'document_date' in data:
+                from datetime import datetime as _dt
+                raw = data['document_date']
+                if raw:
+                    for _fmt in ('%d-%m-%Y', '%Y-%m-%d', '%d/%m/%Y', '%Y/%m/%d'):
+                        try:
+                            vals['document_date'] = _dt.strptime(str(raw).strip(), _fmt).strftime('%Y-%m-%d')
+                            break
+                        except ValueError:
+                            continue
+                else:
+                    vals['document_date'] = False
             if 'custom_fields' in data:
                 vals['custom_fields_data'] = json.dumps(data['custom_fields'], ensure_ascii=False)
             
@@ -813,12 +936,15 @@ class NBSDocumentController(http.Controller):
                     'confidentiality_level': document.confidentiality_level,
                     'folder_id': document.folder_id.id if document.folder_id else (document.folder_ids[0].id if document.folder_ids else None),
                     'folder_name': document.folder_id.name if document.folder_id else (document.folder_ids[0].name if document.folder_ids else None),
+                    'parent_folder_id': document.folder_id.id if document.folder_id else (document.folder_ids[0].id if document.folder_ids else None),
+                    'parent_folder_name': document.folder_id.name if document.folder_id else (document.folder_ids[0].name if document.folder_ids else None),
                     'barcode': document.barcode,
                     'po_number': document.po_number,
                     'bl_number': document.bl_number,
                     'container_number': document.container_number,
                     'invoice_number': document.invoice_number,
                     'envoy_number': document.envoy_number,
+                    'document_date': document.document_date.strftime('%d-%m-%Y') if document.document_date else None,
                     'is_main_document': (document.folder_role == 'main'),
                     'document_role': document.folder_role or 'other',
                     'relation_type': 'attachment' if document.folder_role == 'attachment' or (document.parent_document_id and document.is_attachment) else ('secondary_document' if document.folder_role == 'sub' or document.parent_document_id else ('main' if document.folder_role == 'main' else 'other')),
@@ -949,14 +1075,14 @@ class NBSDocumentController(http.Controller):
             ])
             
             # Create notifications
-            Notification = request.env['nbs.notification']
+            Notification = request.env['nbs.notification'].sudo()
             for manager in managers:
                 Notification.create({
                     'user_id': manager.id,
                     'title': f'New document uploaded',
                     'message': f'{document.uploader_id.name} uploaded "{document.name}" in {document.department_id.name}',
                     'notification_type': 'upload',
-                    'related_document_id': document.id,
+                    'document_id': document.id,
                 })
         except Exception as e:
             _logger.error(f'Notification error: {str(e)}')
@@ -1292,41 +1418,17 @@ class NBSDocumentController(http.Controller):
                 **format_error_response(e, include_traceback=True)
             }, status=500)
     
-    @http.route('/api/documents/trash', 
+    @http.route('/api/trash/documents',
                 type='jsonrpc', auth='none', methods=['POST'], csrf=False, cors='*')
-    def list_trash(self, **kwargs):
-        """List documents in trash"""
-        try:
-            if not ensure_jwt_user_id():
-                return {'success': False, 'error': 'Unauthorized'}
-
-            # Get documents in trash
-            documents = request.env['nbs.document'].search([
-                ('is_deleted', '=', True)
-            ], order='deleted_at desc')
-            
-            result = []
-            for doc in documents:
-                result.append({
-                    'id': doc.id,
-                    'name': doc.name,
-                    'document_number': getattr(doc, 'document_number', None) or doc.barcode,
-                    'deleted_at': doc.deleted_at.isoformat() if doc.deleted_at else None,
-                    'deleted_by': doc.deleted_by.name if doc.deleted_by else None,
-                    'deletion_reason': doc.deletion_reason,
-                    'restore_deadline': doc.restore_deadline.isoformat() if doc.restore_deadline else None,
-                    'state_before_trash': doc.state_before_trash,
-                    'parent_document_id': doc.parent_document_id.id if doc.parent_document_id else None,
-                    'is_main_document': (doc.folder_role == 'main'),
-                    'document_role': doc.folder_role or 'other',
-                    'relation_type': 'attachment' if doc.folder_role == 'attachment' or (doc.parent_document_id and doc.is_attachment) else ('secondary_document' if doc.folder_role == 'sub' or doc.parent_document_id else ('main' if doc.folder_role == 'main' else 'other')),
-                })
-            
-            return {
-                'success': True,
-                'data': result,
-                'count': len(result)
-            }
-        except Exception as e:
-            _logger.error(f'List trash error: {str(e)}', exc_info=True)
-            return {'success': False, 'error': str(e)}
+    def list_trash_alias(self, department_id=None, document_type_id=None, search=None,
+                         from_date=None, to_date=None, page=1, per_page=20, **kwargs):
+        """Alias at a different URL — same as /api/documents/trash"""
+        return self.get_trash_documents(
+            department_id=department_id,
+            document_type_id=document_type_id,
+            search=search,
+            from_date=from_date,
+            to_date=to_date,
+            page=page,
+            per_page=per_page,
+        )

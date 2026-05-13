@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# File: addons/lugal_email/controllers/settings_email_controller.py
 """
 Layer 3 — /api/crm/settings/email/*
 User-facing CRUD for email account configuration (JSON-RPC).
@@ -189,3 +190,4 @@ class SettingsEmailController(http.Controller):
             return {'success': True, 'data': _acc_to_dict(acc)}
         except Exception as exc:
             return _crm_error(exc, 'set_default')
+# TODO: remove - cherry-pick marker

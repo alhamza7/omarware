@@ -27,10 +27,7 @@ from odoo.http import request, Response
 
 from ._auth import ensure_jwt_user_id
 from ._error import crm_error
-from .upload_controller import (
-    _build_attachment_public_path,
-    _build_attachment_url,
-)
+from .upload_controller import _build_attachment_url
 
 _RIYADH_TZ = timezone(timedelta(hours=3))
 
@@ -84,7 +81,8 @@ def _serialize_story(story, viewer_uid):
     media_url = None
     att_id = None
     if att and att.exists():
-        media_url = _build_attachment_url(att)
+        token = att.access_token or ''
+        media_url = f'/web/content/{att.id}?access_token={token}'
         att_id = att.id
 
     # Build attachments array — FE expects an array even for single-attachment stories
@@ -103,7 +101,7 @@ def _serialize_story(story, viewer_uid):
         attachments = [{
             'id':        att_id,
             'name':      att.name or 'file',
-            'url':       _build_attachment_public_path(att),
+            'url':       media_url,
             'file_url':  media_url,
             'mimetype':  mime,
             'file_type': file_type,
@@ -590,6 +588,16 @@ class SupplyStoriesController(http.Controller):
             except (ValueError, TypeError):
                 duration = 0.0
 
+            # Enforce 60-second cap for video/audio stories
+            STORY_MAX_DURATION_S = 60.0
+            if kind in ('video', 'audio') and duration > STORY_MAX_DURATION_S:
+                return _json(
+                    {'success': False,
+                     'error': f'Video/audio stories may not exceed {int(STORY_MAX_DURATION_S)} seconds. '
+                              f'Received: {duration:.1f}s'},
+                    400,
+                )
+
             token = uuid.uuid4().hex
             Att = request.env['ir.attachment'].sudo()
             att = Att.create({
@@ -603,12 +611,13 @@ class SupplyStoriesController(http.Controller):
             })
             att.flush_recordset(['access_token'])
 
+            url = _build_attachment_url(att)
+
             return _json({
                 'success': True,
                 'data': {
                     'attachment_id':    att.id,
-                    'url':              _build_attachment_public_path(att),
-                    'file_url':         _build_attachment_url(att),
+                    'url':              url,
                     'kind':             kind,
                     'mimetype':         mime,
                     'size':             len(data),
@@ -622,3 +631,4 @@ class SupplyStoriesController(http.Controller):
             except Exception:
                 pass
             return _json({'success': False, 'error': str(e)}, 500)
+# TODO: remove - cherry-pick marker

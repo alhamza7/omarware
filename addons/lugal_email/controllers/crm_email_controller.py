@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# File: addons/lugal_email/controllers/crm_email_controller.py
 """
 Layer 2 — /api/crm/email/*
 CRM-context wrappers around the email engine (JSON-RPC format).
@@ -25,6 +26,11 @@ def _to_riyadh_iso(dt):
     return dt.astimezone(_RIYADH_TZ).isoformat(timespec='seconds')
 
 
+def _folder_role(folder):
+    value = (folder or 'inbox').strip().lower()
+    return value if value in {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'} else 'custom'
+
+
 def _crm_error(exc, handler=''):
     _logger.exception('%s error', handler)
     try:
@@ -40,13 +46,17 @@ def _msg_to_dict(msg, full=False):
         'id':           msg.id,
         'account_id':   msg.account_id.id,
         'folder':       msg.folder,
+        'folder_role':  _folder_role(msg.folder),
         'subject':      msg.subject or '(no subject)',
         'from_name':    msg.from_name or '',
         'from_address': msg.from_address or '',
         'to_addresses': msg.to_addresses or '[]',
         'date':         _to_riyadh_iso(msg.date),
+        'read_at':      _to_riyadh_iso(msg.read_at) if msg.read_at else None,
         'is_read':      msg.is_read,
         'is_starred':   msg.is_starred,
+        'version':      _to_riyadh_iso(msg.write_date),
+        'write_date':   _to_riyadh_iso(msg.write_date),
         'crm_links': {
             'customer': {'id': msg.linked_customer_id, 'name': msg.linked_customer_name}
                         if msg.linked_customer_id else None,
@@ -80,7 +90,7 @@ class CrmEmailController(http.Controller):
             if folder:
                 domain.append(('folder', '=', folder))
             offset = (int(page) - 1) * int(per_page)
-            msgs  = Msg.search(domain, limit=int(per_page), offset=offset, order='date desc')
+            msgs  = Msg.search(domain, limit=int(per_page), offset=offset, order='create_date desc, id desc')
             # Try to resolve customer name from CRM model if available
             customer_name = ''
             try:
@@ -156,7 +166,7 @@ class CrmEmailController(http.Controller):
             Msg   = request.env['lugal.email.message'].sudo()
             total = Msg.search_count(domain)
             offset = (int(page) - 1) * int(per_page)
-            msgs  = Msg.search(domain, limit=int(per_page), offset=offset, order='date desc')
+            msgs  = Msg.search(domain, limit=int(per_page), offset=offset, order='create_date desc, id desc')
             return {
                 'success': True,
                 'data': {
@@ -175,10 +185,25 @@ class CrmEmailController(http.Controller):
             if not uid:
                 return {'success': False, 'error': 'Unauthorized'}
             msg = request.env['lugal.email.message'].sudo().browse(message_id)
-            if not msg.exists():
+            if not msg.exists() or msg.account_id.user_id.id != uid or msg.is_deleted:
                 return {'success': False, 'error': 'Not found'}
             if not preview and not msg.is_read:
-                msg.write({'is_read': True})
+                from datetime import datetime
+                msg.write({'is_read': True, 'read_at': datetime.utcnow()})
+                try:
+                    from odoo.addons.lugal_email.controllers.email_controller import (
+                        _refresh_account_unread_count,
+                        _resolve_imap_folder,
+                    )
+                    _refresh_account_unread_count(msg.account_id)
+                    if msg.imap_uid:
+                        msg.account_id.sudo()._imap_store_async(
+                            msg.imap_uid,
+                            _resolve_imap_folder(msg.account_id, msg.folder),
+                            add_flags=['\\Seen'],
+                        )
+                except Exception:
+                    _logger.warning('CRM email detail read sync failed msg=%s', msg.id)
             return {'success': True, 'data': _msg_to_dict(msg, full=True)}
         except Exception as exc:
             return _crm_error(exc, 'message_detail')
@@ -293,13 +318,24 @@ class CrmEmailController(http.Controller):
             if not uid:
                 return {'success': False, 'error': 'Unauthorized'}
 
-            # Wake the IDLE supervisor immediately for this user's accounts.
-            # start_all() is idempotent — it only starts threads that are not
-            # already running and skips credential groups in backoff windows.
+            # Wake the IDLE supervisor immediately.
+            # We trigger the dedicated cron job instead of calling start_all()
+            # directly so that the IMAP threads are always owned by the
+            # long-lived cron worker (SNl process) rather than a short-lived
+            # HTTP worker that gets recycled after ~N requests.  The cron
+            # trigger wakes the cron worker within seconds.
             try:
-                request.env['lugal.email.idle.watcher'].sudo().start_all()
+                cron = request.env.ref(
+                    'lugal_email.ir_cron_lugal_email_idle_supervisor',
+                    raise_if_not_found=False,
+                )
+                if cron:
+                    cron.sudo()._trigger()
+                else:
+                    # Fallback if the cron ref is not found
+                    request.env['lugal.email.idle.watcher'].sudo().start_all()
             except Exception as exc:
-                _logger.warning('subscribe: start_all() failed: %s', exc)
+                _logger.warning('subscribe: cron trigger failed: %s', exc)
 
             # Return which accounts are being monitored for this user.
             accounts = request.env['lugal.email.account'].sudo().search([
@@ -313,11 +349,52 @@ class CrmEmailController(http.Controller):
                 if (acc.password or '').strip()
             ]
 
+            # Trigger one background IMAP sync per credential group on connect.
+            # Force=True bypasses the 30-second throttle so the user always gets
+            # fresh emails immediately when they open the app or reconnect.
+            try:
+                db_name = request.env.cr.dbname
+                from odoo.addons.lugal_email.controllers.email_controller import (
+                    _run_imap_sync_bg,
+                )
+                seen_creds: set = set()
+                for acc in accounts:
+                    if not (acc.password or '').strip():
+                        continue
+                    cred = (
+                        (acc.imap_host or '').strip(),
+                        int(acc.imap_port or 993),
+                        (acc.username or acc.email_address or '').strip(),
+                    )
+                    if cred in seen_creds:
+                        continue
+                    seen_creds.add(cred)
+                    # Always force a sync on WS connect — user expects fresh data
+                    _run_imap_sync_bg(acc.id, db_name, force=True)
+            except Exception as exc_sync:
+                _logger.warning('subscribe: immediate email sync failed: %s', exc_sync)
+
+            # Return current unread count so the FE can reconcile immediately on
+            # connect without waiting for the next IMAP sync or push event.
+            # This closes the race where an email arrives between page load and
+            # WebSocket subscription.
+            total_unread = 0
+            try:
+                total_unread = request.env['lugal.email.message'].sudo().search_count([
+                    ('account_id', 'in', accounts.ids),
+                    ('folder', 'not in', ['sent', 'drafts', 'trash', 'spam']),
+                    ('is_read', '=', False),
+                    ('is_deleted', '=', False),
+                ])
+            except Exception:
+                pass
+
             return {
                 'success': True,
                 'subscribed': True,
                 'accounts': monitored,
                 'polling_interval_seconds': 30,
+                'unread_count': total_unread,
             }
         except Exception as exc:
             return _crm_error(exc, 'subscribe')
@@ -332,7 +409,7 @@ class CrmEmailController(http.Controller):
         are skipped (reported in skipped_ids) without raising an error.
 
         Params (JSON-RPC):
-          message_ids: list[int]  — max 50 per call, required.
+          message_ids: list[int]  — max 1000 per call, required.
 
         Response:
           { "success": true, "data": { "deleted_ids": [...], "skipped_ids": [...] } }
@@ -343,8 +420,8 @@ class CrmEmailController(http.Controller):
                 return {'success': False, 'error': 'Unauthorized'}
             if not message_ids or not isinstance(message_ids, list):
                 return {'success': False, 'error': 'message_ids must be a non-empty list'}
-            if len(message_ids) > 50:
-                return {'success': False, 'error': 'message_ids may not exceed 50 per request'}
+            if len(message_ids) > 1000:
+                return {'success': False, 'error': 'message_ids may not exceed 1000 per request'}
 
             user_accounts = request.env['lugal.email.account'].sudo().search([
                 ('user_id', '=', uid),
@@ -403,3 +480,4 @@ class CrmEmailController(http.Controller):
             }
         except Exception as exc:
             return _crm_error(exc, 'stats')
+# TODO: remove - cherry-pick marker

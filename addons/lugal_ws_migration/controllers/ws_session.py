@@ -8,7 +8,10 @@ from odoo.addons.lugal_auth.controllers._auth import ensure_jwt_user_id
 
 _logger = logging.getLogger(__name__)
 
-SESSION_TTL = 3600  # 1 hour hint — actual Odoo session lives 7 days (SESSION_LIFETIME)
+# Keep the WebSocket session bridge valid across long inactive browser sessions.
+# Product requirement: do not drop an inactive tab merely because the user works
+# elsewhere; explicit logout/user switch still invalidates the session.
+SESSION_TTL = 60 * 60 * 24 * 365
 
 
 class WsSessionController(http.Controller):
@@ -60,16 +63,26 @@ class WsSessionController(http.Controller):
 
         try:
             session = request.session
+            old_uid = session.uid  # capture before overwriting
+
             session.uid = uid
             session.db = request.db
             session.login = (
                 request.env['res.users'].sudo().browse(uid).login
             )
-            # Compute and store the session token so Odoo's check_session()
-            # can verify it.  Without this, check_session calls
-            # consteq(str, None) → TypeError → AccessDenied → 403 for every
-            # HTTP-type route (notifications, ws/config, WebSocket).
-            session.session_token = compute_session_token(session, request.env)
+
+            if old_uid and old_uid != uid:
+                # Different user taking over this session — keep old token so
+                # check_session() fails on the next WS dispatch and the stale
+                # connection closes with code 4001.  See auth_controller.py's
+                # _attach_ws_session for the full explanation.
+                pass
+            else:
+                # Compute and store the session token so Odoo's check_session()
+                # can verify it.  Without this, check_session calls
+                # consteq(str, None) → TypeError → AccessDenied → 403 for every
+                # HTTP-type route (notifications, ws/config, WebSocket).
+                session.session_token = compute_session_token(session, request.env)
 
             # Force-save the session.  Odoo normally sets can_save=False when
             # the X-Odoo-Database header is present (stateless mode), which
@@ -80,13 +93,39 @@ class WsSessionController(http.Controller):
             request.session.touch()
             root.session_store.save(session)
 
+            # When a DIFFERENT user is taking over this session, push a bus signal
+            # so any open WS connection for the old user can close immediately.
+            # The _authenticate() override in lugal_ir_websocket.py will also detect
+            # the uid change and raise SessionExpiredException (close 4001) on the
+            # next WS frame, but the bus push provides an immediate fast-path close.
+            if old_uid and old_uid != uid:
+                try:
+                    session_sid = session.sid
+                    bus = request.env['bus.bus'].sudo()
+                    bus._sendone(
+                        f'supply_session.{session_sid}',
+                        'session.reconnect_required',
+                        {'reason': 'user_changed', 'old_uid': old_uid, 'new_uid': uid},
+                    )
+                    bus._sendone(
+                        f'supply_user.{old_uid}',
+                        'session.reconnect_required',
+                        {'reason': 'user_changed', 'session_id': session_sid},
+                    )
+                    _logger.info(
+                        'ws_session: pushed reconnect — session %s uid %s → %s',
+                        session_sid[:8], old_uid, uid,
+                    )
+                except Exception as be:
+                    _logger.debug('ws_session: bus signal failed: %s', be)
+
             # Build the Set-Cookie header manually so it works regardless of
             # which Odoo post_dispatch path is taken.
             # Use SameSite=Lax so the session cookie is sent when the browser
             # opens the WebSocket through the Vite proxy on the same origin.
             # Also set a Max-Age so the session persists across tabs/reopens.
             cookie_header = (
-                f'session_id={session.sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400'
+                f'session_id={session.sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL}'
             )
 
             return _json(
@@ -151,25 +190,14 @@ class WsSessionController(http.Controller):
             from odoo.addons.bus.websocket import WebsocketConnectionHandler
             ws_version = WebsocketConnectionHandler._VERSION
 
-            # Derive the WebSocket URL from the request host + configured gevent_port.
-            # We ALWAYS use gevent_port (8076) because that is the ONLY Odoo listener
-            # that handles WebSocket upgrades — the HTTP workers (8075) do NOT.
-            #
-            # We take the hostname from the incoming request's Host header (the IP
-            # the browser used to reach us) and combine it with the gevent port so
-            # the FE can connect directly — no Vite proxy required.
-            import odoo.tools.config as _odoo_cfg
-            # configmanager IS the config dict — no .config attribute in this version
-            try:
-                gevent_port = int(_odoo_cfg.config.get('gevent_port', 8072))
-            except AttributeError:
-                gevent_port = int(_odoo_cfg.get('gevent_port', 8072))
-
-            # Strip any port from the Host header — we'll add gevent_port ourselves.
-            raw_host = request.httprequest.host or ''
-            hostname = raw_host.split(':')[0]   # "192.168.116.204" (no port)
+            # Build the WebSocket URL using X-Forwarded-Host (set by our proxy)
+            # so the returned URL reflects the client-facing host:port (e.g.
+            # 192.168.116.228:3003) rather than the internal Odoo address.
+            # The proxy already routes /websocket → gevent worker.
+            forwarded_host = request.httprequest.headers.get('X-Forwarded-Host', '')
+            raw_host = forwarded_host or request.httprequest.host or ''
             scheme   = 'wss' if request.httprequest.is_secure else 'ws'
-            ws_url   = f"{scheme}://{hostname}:{gevent_port}/websocket?version={ws_version}"
+            ws_url   = f"{scheme}://{raw_host}/websocket?version={ws_version}"
 
             return _json({
                 'use_websocket': enabled,
@@ -177,5 +205,7 @@ class WsSessionController(http.Controller):
                 'ws_version': ws_version,
                 'ws_url': ws_url,
             })
-        except Exception:
+        except Exception as _exc:
+            _logger.exception('ws_config error: %s', _exc)
             return _json({'use_websocket': False, 'fallback_on_error': True})
+# TODO: remove - cherry-pick marker

@@ -103,16 +103,23 @@ class PosPerfumeController(http.Controller):
             return extended_info.sales_uom_id
         return product.uom_id
 
-    def _get_uoms_from_pricelist(self, product, pricelist):
+    def _get_uoms_from_pricelist(
+        self, product, pricelist,
+        ext_record=None, pricelist_items=None,
+    ):
         """
         Get all UoMs with prices for a product using its SAP UoM Group + pricelist items.
 
         Special handling for items where product_uom_id = Units (id=1):
         SAP sometimes exports prices with UoM = Units regardless of the actual unit.
         These items are treated as generic prices and mapped to the product's actual UoM group.
-        
+
         Fallback strategy: if UoM group filtering produces no results, retry without the filter
         to avoid showing price = 0 when the pricelist item's UoM doesn't match the group.
+
+        ``ext_record``      — optional pre-fetched ``sap.product.extended`` record (avoids N+1).
+        ``pricelist_items`` — optional pre-fetched ``product.pricelist.item`` recordset for this
+                              product's template (avoids N+1 pricelist query).
         """
         effective_base_uom = self._get_effective_base_uom(product)
         if not pricelist:
@@ -120,20 +127,29 @@ class PosPerfumeController(http.Controller):
 
         # Step 1: Get available UoMs from SAP UoM Group
         available_uom_ids = []
-        extended_info = request.env['sap.product.extended'].sudo().search(
-            [('product_id', '=', product.id)], limit=1
-        )
+        if ext_record is not None:
+            extended_info = ext_record
+        else:
+            extended_info = request.env['sap.product.extended'].sudo().search(
+                [('product_id', '=', product.id)], limit=1
+            )
         if extended_info and extended_info.sap_uom_group_id:
             uom_syncs = extended_info.sap_uom_group_id.uom_ids
             available_uom_ids = uom_syncs.mapped('odoo_uom_id').ids
             _logger.info(f"[POS] UoM Group: {extended_info.sap_uom_group_id.name}, UoMs: {available_uom_ids}")
 
         # Step 2: Get pricelist items for this product
-        items = request.env['product.pricelist.item'].sudo().search([
-            ('pricelist_id', '=', pricelist.id),
-            ('product_tmpl_id', '=', product.product_tmpl_id.id),
-            '|', ('product_id', '=', False), ('product_id', '=', product.id),
-        ], order='write_date asc, id asc')
+        if pricelist_items is not None:
+            # Pre-fetched: filter in Python for this specific product variant
+            items = pricelist_items.filtered(
+                lambda i: (not i.product_id or i.product_id.id == product.id)
+            )
+        else:
+            items = request.env['product.pricelist.item'].sudo().search([
+                ('pricelist_id', '=', pricelist.id),
+                ('product_tmpl_id', '=', product.product_tmpl_id.id),
+                '|', ('product_id', '=', False), ('product_id', '=', product.id),
+            ], order='write_date asc, id asc')
         _logger.info(f"[POS] Found {len(items)} pricelist items")
 
         # Step 3: Process items with group filter

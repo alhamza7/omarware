@@ -27,7 +27,6 @@ access_lugal_supply_conversation_user,lugal.supply.conversation user,model_lugal
 access_lugal_supply_message_user,lugal.supply.message user,model_lugal_supply_message,base.group_user,1,1,1,1
 access_lugal_supply_typing_user,lugal.supply.typing user,model_lugal_supply_typing,base.group_user,1,1,1,1
 access_lugal_supply_story_user,lugal.supply.story user,model_lugal_supply_story,base.group_user,1,1,1,1
-access_lugal_supply_payment_user,lugal.supply.payment user,model_lugal_supply_payment,base.group_user,1,1,1,1
-access_lugal_supply_workflow_approval_line_user,lugal.supply.workflow.approval.line user,model_lugal_supply_workflow_approval_line,base.group_user,1,1,1,1
-access_lugal_supply_budget_allocation_user,lugal.supply.budget.allocation user,model_lugal_supply_budget_allocation,base.group_user,1,1,1,1
-access_lugal_supply_inventory_minmax_user,lugal.supply.inventory.minmax user,model_lugal_supply_inventory_minmax,base.group_user,1,1,1,1
+access_lugal_crm_permission_template_user,lugal.crm.permission.template user,model_lugal_crm_permission_template,base.group_user,1,1,1,1
+access_lugal_crm_user_permission_user,lugal.crm.user.permission user,model_lugal_crm_user_permission,base.group_user,1,1,1,1
+# TODO: remove - cherry-pick marker

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'Lugal Supply',
-    'version': '1.0.5',
+    'version': '1.0.0',
     'category': 'Inventory/Inventory',
     'summary': 'Vendors and containers — موردين وحاويات',
     'description': """
@@ -16,11 +16,8 @@ Lugal Supply
     'author': 'NBS IT Team',
     'website': 'https://nbs.com',
     'license': 'LGPL-3',
-    'depends': ['base', 'mail'],
-    'data': [
-        'data/supply_sequences.xml',
-        'security/ir.model.access.csv',
-    ],
+    'depends': ['base', 'mail', 'product'],
+    'data': ['security/ir.model.access.csv'],
     'installable': True,
     'application': False,
     'auto_install': False,

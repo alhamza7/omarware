@@ -1,6 +1,6 @@
 {
     'name': 'Lugal WS Migration',
-    'version': '1.0.0',
+    'version': '1.0.2',
     'summary': 'WebSocket migration layer — sandbox/migration branch only',
     'description': """
         Provides:
@@ -22,3 +22,4 @@
     'application': False,
     'license': 'LGPL-3',
 }
+# TODO: remove - cherry-pick marker

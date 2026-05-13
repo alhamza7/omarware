@@ -10,7 +10,7 @@ import logging
 from odoo import http
 from odoo.http import request
 from ._auth import ensure_jwt_user_id
-from ._permissions import is_supervisor_or_above, forbidden
+from ._permissions import is_supervisor_or_above, forbidden, require_permission
 from ._error import crm_error
 
 _logger = logging.getLogger(__name__)
@@ -80,8 +80,9 @@ class ConfigController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Supervisor role required to create tags')
+            denied = require_permission('settings.general.edit')
+            if denied:
+                return denied
             if not name:
                 return {'success': False, 'error': 'name is required'}
             tag = request.env['lugal.crm.tag'].create({
@@ -101,8 +102,9 @@ class ConfigController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Supervisor role required')
+            denied = require_permission('settings.general.edit')
+            if denied:
+                return denied
             tag = request.env['lugal.crm.tag'].browse(tag_id)
             if not tag.exists() or tag.is_deleted:
                 return {'success': False, 'error': 'Tag not found'}
@@ -120,8 +122,9 @@ class ConfigController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Supervisor role required')
+            denied = require_permission('settings.general.edit')
+            if denied:
+                return denied
             tag = request.env['lugal.crm.tag'].browse(tag_id)
             if not tag.exists():
                 return {'success': False, 'error': 'Tag not found'}
@@ -152,8 +155,9 @@ class ConfigController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Supervisor role required')
+            denied = require_permission('settings.general.edit')
+            if denied:
+                return denied
             if not name:
                 return {'success': False, 'error': 'name is required'}
             stage = request.env['lugal.crm.customer.stage'].create({
@@ -172,8 +176,9 @@ class ConfigController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Supervisor role required')
+            denied = require_permission('settings.general.edit')
+            if denied:
+                return denied
             stage = request.env['lugal.crm.customer.stage'].browse(stage_id)
             if not stage.exists() or stage.is_deleted:
                 return {'success': False, 'error': 'Stage not found'}
@@ -191,8 +196,9 @@ class ConfigController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Supervisor role required')
+            denied = require_permission('settings.general.edit')
+            if denied:
+                return denied
             stage = request.env['lugal.crm.customer.stage'].browse(stage_id)
             if not stage.exists():
                 return {'success': False, 'error': 'Stage not found'}
@@ -241,8 +247,9 @@ class ConfigController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Supervisor role required')
+            denied = require_permission('settings.templates.create')
+            if denied:
+                return denied
             if not title:
                 return {'success': False, 'error': 'title is required'}
             vals = {'title': title, 'category': category, 'sequence': sequence}
@@ -263,8 +270,9 @@ class ConfigController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Supervisor role required')
+            denied = require_permission('settings.templates.edit')
+            if denied:
+                return denied
             script = request.env['lugal.crm.call.script'].browse(script_id)
             if not script.exists() or script.is_deleted:
                 return {'success': False, 'error': 'Script not found'}
@@ -282,8 +290,9 @@ class ConfigController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Supervisor role required')
+            denied = require_permission('settings.templates.delete')
+            if denied:
+                return denied
             script = request.env['lugal.crm.call.script'].browse(script_id)
             if not script.exists():
                 return {'success': False, 'error': 'Script not found'}

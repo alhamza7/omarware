@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from . import admin_controller
 from . import analytics_controller
 from . import branch_controller
 from . import bus_compat_controller
@@ -9,13 +10,13 @@ from . import crm_notifications_controller
 from . import customer_controller
 from . import delivery_controller
 from . import knowledge_controller
+from . import marquee_controller
 from . import pos_bridge_controller
-from . import purchase_products_rest_controller
 from . import price_list_controller
 from . import qa_controller
 from . import supply_controller
-from . import supply_chain_api_controller
-from . import supply_extra_api_controller
+from . import supply_chain_controller
+from . import supply_extended_controller
 from . import supply_chat_controller
 from . import supply_stories_controller
 from . import task_controller
@@ -23,3 +24,4 @@ from . import ticket_controller
 from . import upload_controller
 from . import user_controller
 from . import workforce_controller
+# TODO: remove - cherry-pick marker

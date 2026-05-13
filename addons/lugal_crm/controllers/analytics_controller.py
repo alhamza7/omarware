@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from odoo import http
 from odoo.http import request, Response
 from ._auth import ensure_jwt_user_id
-from ._permissions import is_supervisor_or_above, is_manager_or_above, forbidden
+from ._permissions import is_supervisor_or_above, is_manager_or_above, forbidden, require_permission
 from ._error import crm_error
 
 _logger = logging.getLogger(__name__)
@@ -382,12 +382,13 @@ class AnalyticsController(http.Controller):
 
     @http.route('/api/crm/analytics/all_employees_kpi', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def all_employees_kpi(self, branch_id=None, period_start=None, period_end=None, **kwargs):
-        """Supervisor view: KPI snapshot for every employee. Requires Supervisor or above."""
+        """Supervisor view: KPI snapshot for every employee."""
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Supervisor role required to view all employees KPI')
+            denied = require_permission('analytics.view_team_data')
+            if denied:
+                return denied
 
             domain = [('is_deleted', '=', False)]
             if branch_id:
@@ -423,8 +424,9 @@ class AnalyticsController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Supervisor role required')
+            denied = require_permission('analytics.view_team_data')
+            if denied:
+                return denied
 
             msg_base = [('is_deleted', '=', False)]
             task_base = [('is_deleted', '=', False)]
@@ -574,8 +576,9 @@ class AnalyticsController(http.Controller):
         try:
             if not ensure_jwt_user_id():
                 return Response('Unauthorized', status=401)
-            if not is_manager_or_above():
-                return Response('Forbidden — Manager role required', status=403)
+            from ._permissions import has_permission
+            if not has_permission('analytics.export'):
+                return Response('Forbidden — analytics.export permission required', status=403)
 
             branch_id = kwargs.get('branch_id')
             period_start = kwargs.get('period_start')

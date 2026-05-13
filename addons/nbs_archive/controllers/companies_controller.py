@@ -12,49 +12,71 @@ class CompaniesController(http.Controller):
     """Companies/Brands management controller"""
     
     @http.route('/api/companies', type='jsonrpc', auth='none', methods=['POST'], csrf=False, cors='*')
-    def list_companies(self, search=None, limit=100, **kwargs):
+    def list_companies(self, search=None, limit=500, offset=0, **kwargs):
         """
-        Get list of companies/brands
-        
+        Get list of NBS-Archive companies/brands with pagination.
+
         Args:
-            search: Optional search term for company name
-            limit: Maximum number of results (default: 100)
-        
+            search : Optional search term for company name.
+            limit  : Page size (default 500; pass 0 for all).
+            offset : Page start (default 0).
+
         Returns:
-            List of companies with id and name
+            { success, data: [...], count, total, offset, limit }
         """
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            
-            domain = [
-                ('is_company', '=', True),
-                ('active', '=', True)
-            ]
-            
+
+            # Only partners created through the NBS Archive companies API are
+            # tagged with nbs_archive_company=True.  Fall back to the old
+            # is_company scan when the field doesn't exist yet (pre-migration).
+            Partner = request.env['res.partner']
+            has_nbs_flag = 'nbs_archive_company' in Partner._fields
+
+            if has_nbs_flag:
+                domain = [
+                    ('nbs_archive_company', '=', True),
+                    ('active', '=', True),
+                ]
+            else:
+                domain = [
+                    ('is_company', '=', True),
+                    ('active', '=', True),
+                ]
+
             if search:
                 domain.append(('name', 'ilike', search))
-            
-            companies = request.env['res.partner'].search(
+
+            total = Partner.search_count(domain)
+
+            effective_limit = max(int(limit), 0) if limit else 0
+            effective_offset = max(int(offset), 0) if offset else 0
+
+            companies = Partner.search(
                 domain,
-                limit=limit,
-                order='name'
+                limit=effective_limit or None,
+                offset=effective_offset,
+                order='name',
             )
-            
+
             return {
                 'success': True,
                 'data': [{
-                    'id': company.id,
-                    'name': company.name,
-                    'phone': company.phone,
-                    'email': company.email,
-                    'vat': company.vat,  # Tax ID / رقم ضريبي
-                    'street': company.street,
-                    'city': company.city,
-                    'country_id': company.country_id.id if company.country_id else None,
-                    'country_name': company.country_id.name if company.country_id else None,
-                } for company in companies],
-                'count': len(companies)
+                    'id': c.id,
+                    'name': c.name,
+                    'phone': c.phone,
+                    'email': c.email,
+                    'vat': c.vat,
+                    'street': c.street,
+                    'city': c.city,
+                    'country_id': c.country_id.id if c.country_id else None,
+                    'country_name': c.country_id.name if c.country_id else None,
+                } for c in companies],
+                'count': len(companies),
+                'total': total,
+                'offset': effective_offset,
+                'limit': effective_limit,
             }
         except Exception as e:
             _logger.error(f'List companies error: {str(e)}', exc_info=True)
@@ -164,6 +186,11 @@ class CompaniesController(http.Controller):
                 'is_company': True,
                 'active': True,
             }
+
+            # Tag as NBS Archive company so it appears in the Archive companies
+            # list (isolated from general Odoo contacts / SAP-synced partners).
+            if 'nbs_archive_company' in request.env['res.partner']._fields:
+                vals['nbs_archive_company'] = True
             
             # Optional fields
             if data.get('phone'):
@@ -432,6 +459,166 @@ class CompaniesController(http.Controller):
             _logger.error(f'Get company stats error: {str(e)}', exc_info=True)
             return {'success': False, 'error': str(e)}
     
+    @http.route('/api/companies/batch-delete', type='http', auth='none', methods=['POST'], csrf=False, cors='*')
+    def batch_delete_companies(self, **kwargs):
+        """
+        Delete (archive) multiple companies in one request.
+
+        Body (JSON):
+        {
+          "ids": [7432, 7433, 7434],   // Required: list of company IDs
+          "force": false                // Optional: skip the "has folders" guard
+        }
+
+        Each company is checked individually — companies with linked active
+        folders are skipped unless ``force=true``.
+
+        Returns:
+        {
+          "success": true,
+          "deleted": [7432, 7434],
+          "skipped": [{"id": 7433, "reason": "COMPANY_HAS_FOLDERS", "folder_count": 2}],
+          "errors":  [{"id": 9999, "reason": "NOT_FOUND"}]
+        }
+        """
+        try:
+            if not ensure_jwt_user_id():
+                return request.make_json_response({'success': False, 'error': 'Unauthorized'}, status=401)
+            if not request.env.user.has_group('nbs_archive.group_nbs_manager'):
+                return request.make_json_response({'success': False, 'error': 'Only managers can delete companies'}, status=403)
+
+            import json
+            try:
+                data = json.loads(request.httprequest.get_data(as_text=True) or '{}')
+                if isinstance(data, dict) and 'params' in data:
+                    data = data['params']
+            except Exception:
+                return request.make_json_response({'success': False, 'error': 'Invalid JSON'}, status=400)
+
+            ids = data.get('ids')
+            if not ids or not isinstance(ids, list):
+                return request.make_json_response({'success': False, 'error': '"ids" must be a non-empty list'}, status=400)
+
+            force = bool(data.get('force', False))
+
+            deleted = []
+            skipped = []
+            errors = []
+
+            for cid in ids:
+                try:
+                    cid = int(cid)
+                except (TypeError, ValueError):
+                    errors.append({'id': cid, 'reason': 'INVALID_ID'})
+                    continue
+
+                company = request.env['res.partner'].browse(cid)
+                if not company.exists() or not company.is_company:
+                    errors.append({'id': cid, 'reason': 'NOT_FOUND'})
+                    continue
+
+                if not force:
+                    folder_count = request.env['nbs.document.folder'].search_count([
+                        ('company_id', '=', cid),
+                        ('active', '=', True),
+                    ])
+                    if folder_count > 0:
+                        skipped.append({'id': cid, 'name': company.name, 'reason': 'COMPANY_HAS_FOLDERS', 'folder_count': folder_count})
+                        continue
+
+                company_name = company.name
+                company.write({'active': False})
+                request.env['nbs.audit.log'].sudo().create({
+                    'user_id': request.env.user.id,
+                    'action': 'company_deleted',
+                    'metadata': f'Batch-deleted company: {company_name} (ID: {cid})',
+                })
+                deleted.append(cid)
+
+            return request.make_json_response({
+                'success': True,
+                'deleted': deleted,
+                'deleted_count': len(deleted),
+                'skipped': skipped,
+                'errors': errors,
+            })
+
+        except Exception as e:
+            _logger.error(f'Batch delete companies error: {str(e)}', exc_info=True)
+            return request.make_json_response({'success': False, 'error': str(e)}, status=500)
+
+    @http.route('/api/companies/delete-all', type='http', auth='none', methods=['POST'], csrf=False, cors='*')
+    def delete_all_companies(self, **kwargs):
+        """
+        Archive ALL NBS Archive companies that have no active folders.
+
+        Body (JSON) — all optional:
+        {
+          "force": false   // If true, also deletes companies that still have folders
+        }
+
+        Returns the same shape as batch-delete.
+        """
+        try:
+            if not ensure_jwt_user_id():
+                return request.make_json_response({'success': False, 'error': 'Unauthorized'}, status=401)
+            if not request.env.user.has_group('nbs_archive.group_nbs_manager'):
+                return request.make_json_response({'success': False, 'error': 'Only managers can delete companies'}, status=403)
+
+            import json
+            try:
+                data = json.loads(request.httprequest.get_data(as_text=True) or '{}')
+                if isinstance(data, dict) and 'params' in data:
+                    data = data['params']
+            except Exception:
+                data = {}
+
+            force = bool(data.get('force', False))
+
+            Partner = request.env['res.partner']
+            has_nbs_flag = 'nbs_archive_company' in Partner._fields
+
+            if has_nbs_flag:
+                domain = [('nbs_archive_company', '=', True), ('active', '=', True)]
+            else:
+                domain = [('is_company', '=', True), ('active', '=', True)]
+
+            all_companies = Partner.search(domain)
+
+            deleted = []
+            skipped = []
+
+            for company in all_companies:
+                if not force:
+                    folder_count = request.env['nbs.document.folder'].search_count([
+                        ('company_id', '=', company.id),
+                        ('active', '=', True),
+                    ])
+                    if folder_count > 0:
+                        skipped.append({'id': company.id, 'name': company.name, 'reason': 'COMPANY_HAS_FOLDERS', 'folder_count': folder_count})
+                        continue
+
+                company_name = company.name
+                company.write({'active': False})
+                request.env['nbs.audit.log'].sudo().create({
+                    'user_id': request.env.user.id,
+                    'action': 'company_deleted',
+                    'metadata': f'Delete-all: archived company: {company_name} (ID: {company.id})',
+                })
+                deleted.append(company.id)
+
+            return request.make_json_response({
+                'success': True,
+                'deleted': deleted,
+                'deleted_count': len(deleted),
+                'skipped': skipped,
+                'skipped_count': len(skipped),
+            })
+
+        except Exception as e:
+            _logger.error(f'Delete all companies error: {str(e)}', exc_info=True)
+            return request.make_json_response({'success': False, 'error': str(e)}, status=500)
+
     @http.route('/api/countries', type='jsonrpc', auth='none', methods=['POST'], csrf=False, cors='*')
     def list_countries(self, search=None, limit=100, **kwargs):
         """

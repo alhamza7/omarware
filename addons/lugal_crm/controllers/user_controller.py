@@ -5,7 +5,7 @@ from odoo import http
 from odoo.http import request
 from ._auth import ensure_jwt_user_id
 from ._permissions import (
-    is_manager_or_above, is_supervisor_or_above, forbidden,
+    is_manager_or_above, is_supervisor_or_above, forbidden, require_permission,
     AGENT, SUPERVISOR, MANAGER,
 )
 from ._error import crm_error
@@ -16,17 +16,19 @@ _logger = logging.getLogger(__name__)
 def _user_to_dict(user, include_branch=True):
     """Serialize a res.users record to a CRM-safe dict."""
     # Resolve CRM role from group membership (Odoo 19: use _has_group for sudo context)
-    role = 'agent'
+    role = 'none'
     try:
-        if user._has_group('lugal_crm.group_lugal_crm_general_manager'):
+        if user.has_group('lugal_crm.group_lugal_crm_general_manager'):
             role = 'general_manager'
-        elif user._has_group('lugal_crm.group_lugal_crm_manager'):
+        elif user.has_group('lugal_crm.group_lugal_crm_manager'):
             role = 'manager'
-        elif user._has_group('lugal_crm.group_lugal_crm_supervisor'):
+        elif user.has_group('lugal_crm.group_lugal_crm_supervisor'):
             role = 'supervisor'
-        elif user._has_group('lugal_crm.group_lugal_crm_qa_supervisor'):
+        elif user.has_group('lugal_crm.group_lugal_crm_agent'):
+            role = 'agent'
+        elif user.has_group('lugal_crm.group_lugal_crm_qa_supervisor'):
             role = 'qa_supervisor'
-        elif user._has_group('lugal_crm.group_lugal_crm_qa'):
+        elif user.has_group('lugal_crm.group_lugal_crm_qa'):
             role = 'qa_auditor'
     except Exception:
         pass
@@ -259,16 +261,79 @@ class UserController(http.Controller):
         except Exception as e:
             return crm_error(e, 'update_me')
 
+    # ─── Change password ──────────────────────────────────────────────────────
+
+    @http.route('/api/crm/users/me/change_password', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def change_password(self, old_password=None, current_password=None, new_password=None, confirm_password=None, **kwargs):
+        """
+        Change the current user's password.
+
+        Params:
+          old_password     (str, required) — current password for verification
+          new_password     (str, required) — desired new password (min 6 chars)
+          confirm_password (str, optional) — must match new_password if supplied
+        """
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+            # Accept both 'current_password' and 'old_password' field names
+            old_password = old_password or current_password
+            if not old_password:
+                return {'success': False, 'error': 'current_password is required'}
+            if not new_password:
+                return {'success': False, 'error': 'new_password is required'}
+            if len(new_password) < 6:
+                return {'success': False, 'error': 'Password must be at least 6 characters'}
+            if confirm_password is not None and new_password != confirm_password:
+                return {'success': False, 'error': 'Passwords do not match'}
+
+            user = request.env['res.users'].sudo().browse(uid)
+            if not user.exists():
+                return {'success': False, 'error': 'User not found'}
+
+            # Verify old password against the stored hash directly.
+            # passlib is always available in Odoo and this works across all versions.
+            try:
+                from passlib.context import CryptContext
+                _pwd_ctx = CryptContext(schemes=['pbkdf2_sha512'], deprecated=[])
+                cr = request.env.cr
+                cr.execute(
+                    "SELECT password FROM res_users WHERE id = %s AND active = true",
+                    (uid,),
+                )
+                row = cr.fetchone()
+                stored_hash = row[0] if row else None
+                if not stored_hash or not _pwd_ctx.verify(old_password, stored_hash):
+                    return {'success': False, 'error': 'Current password is incorrect'}
+            except Exception:
+                return {'success': False, 'error': 'Current password is incorrect'}
+
+            user.write({'password': new_password})
+
+            # Invalidate all existing JWT tokens so old sessions must re-login
+            try:
+                request.env['lugal.jwt.blacklist'].sudo().search(
+                    [('user_id', '=', uid), ('revoked', '=', False)]
+                ).write({'revoked': True, 'reason': 'password_changed'})
+            except Exception:
+                pass
+
+            return {'success': True, 'data': {'message': 'Password changed successfully'}}
+        except Exception as e:
+            return crm_error(e, 'change_password')
+
     # ─── Single user detail ───────────────────────────────────────────────────
 
     @http.route('/api/crm/users/<int:user_id>', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def get_user(self, user_id, **kwargs):
-        """Get a single CRM user by ID. Requires Supervisor or above."""
+        """Get a single CRM user by ID."""
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
-            if not is_supervisor_or_above():
-                return forbidden('Requires Supervisor role or above')
+            denied = require_permission('employees.list')
+            if denied:
+                return denied
             user = request.env['res.users'].sudo().browse(user_id)
             if not user.exists():
                 return {'success': False, 'error': 'User not found'}

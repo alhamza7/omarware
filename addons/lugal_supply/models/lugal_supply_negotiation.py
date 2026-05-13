@@ -1,232 +1,56 @@
 # -*- coding: utf-8 -*-
-
-from odoo import models, fields, api, _
-from odoo.exceptions import UserError
-
-# Reserved keys on ``extra_fields`` (JSON) — no separate DB columns required.
-_NEGOTIATION_ESIGN_USER_EXTRA = 'negotiation_e_sign_user_id'
-_NEGOTIATION_ESIGN_DATE_EXTRA = 'negotiation_e_sign_date'
+from odoo import models, fields
 
 
 class LugalSupplyNegotiation(models.Model):
-    """Supplier/agent price and terms discussion linked to an item request."""
+    """Price negotiation with a vendor — linked to supply vendor and optional product."""
     _name = 'lugal.supply.negotiation'
-    _description = 'Supply Negotiation'
-    _inherit = [
-        'mail.thread',
-        'mail.activity.mixin',
-        'lugal.supply.dynamic.extra.mixin',
-        'lugal.supply.attachment.sync.mixin',
-    ]
-    _order = 'create_date desc, id desc'
+    _description = 'Lugal Supply Negotiation'
+    _inherit = ['mail.thread', 'mail.activity.mixin']
+    _order = 'write_date desc, id desc'
+    _rec_name = 'title'
 
-    name = fields.Char(
-        string='Negotiation ID',
-        required=True,
-        copy=False,
-        readonly=True,
-        default=lambda self: _('New'),
-        index=True,
-    )
-    item_request_id = fields.Many2one(
-        'lugal.supply.item.request',
-        string='Linked Item Request',
-        required=True,
-        ondelete='cascade',
-        index=True,
-        tracking=True,
-    )
-    vendor_id = fields.Many2one(
+    title = fields.Char(string='Title / العنوان', required=True, index=True, tracking=True)
+    supply_vendor_id = fields.Many2one(
         'lugal.supply.vendor',
-        string='Supplier',
-        required=True,
+        string='Supply Vendor / المورد',
         ondelete='restrict',
         index=True,
         tracking=True,
     )
-    agent_id = fields.Many2one(
+    vendor_id = fields.Many2one(
         'res.partner',
-        string='Agent',
+        string='Odoo Partner / شريك أودو',
         ondelete='set null',
         index=True,
         tracking=True,
-        domain=[('is_company', '=', True)],
     )
-    item_name = fields.Char(string='Item Name', tracking=True)
-    quantity = fields.Float(string='Quantity', digits=(16, 4), tracking=True)
-    capacity = fields.Char(
-        string='Capacity',
-        help='Bottle or pack capacity (e.g. 50ml, 100ml).',
-        tracking=True,
-    )
-    packing_pcs_per_carton = fields.Float(
-        string='Packing (pcs per carton)',
-        digits=(16, 4),
-        tracking=True,
-    )
-    attachment_ids = fields.Many2many(
-        'ir.attachment',
-        'lugal_supply_negotiation_attachment_rel',
-        'negotiation_id',
-        'attachment_id',
-        string='Images / Files',
-    )
-    offered_price = fields.Float(
-        string='Current Offered Price',
-        digits=(16, 4),
-        compute='_compute_offer_prices',
-        store=True,
-        help='Latest price from offer history.',
-    )
-    currency_id = fields.Many2one(
-        'res.currency',
-        string='Currency',
-        tracking=True,
-    )
-    terms = fields.Text(
-        string='Terms',
-        help='MOQ, packaging, lead time, etc.',
-        tracking=True,
-    )
-    offer_ids = fields.One2many(
-        'lugal.supply.negotiation.offer',
-        'negotiation_id',
-        string='Offer History',
-    )
-    final_agreed_price = fields.Float(string='Final Agreed Price', digits=(16, 4), tracking=True)
-    final_currency_id = fields.Many2one(
-        'res.currency',
-        string='Final Currency',
+    product_id = fields.Many2one(
+        'product.product',
+        string='Product / المنتج',
         ondelete='set null',
-        tracking=True,
-    )
-    notes = fields.Text(string='Notes / Discussion', tracking=True)
-    state = fields.Selection(
-        [
-            ('ongoing', 'Ongoing'),
-            ('finalized', 'Finalized'),
-            ('cancelled', 'Cancelled'),
-        ],
-        string='Status',
-        default='ongoing',
-        required=True,
-        tracking=True,
         index=True,
+        tracking=True,
     )
-    finalized_by_id = fields.Many2one(
+    product_name = fields.Char(string='Product Name (free) / اسم المنتج', tracking=True)
+    description = fields.Text(string='Description / الوصف', tracking=True)
+    quantity = fields.Float(string='Quantity / الكمية', digits=(16, 4), tracking=True)
+    uom = fields.Char(string='Unit of Measure / وحدة القياس', tracking=True)
+    currency_id = fields.Many2one('res.currency', string='Currency / العملة', ondelete='set null', tracking=True)
+    expected_price = fields.Float(string='Expected Price / السعر المتوقع', digits=(16, 4), tracking=True)
+    agreed_price = fields.Float(string='Agreed Price / السعر المتفق عليه', digits=(16, 4), tracking=True)
+    status = fields.Selection([
+        ('open', 'Open / مفتوح'),
+        ('pending', 'Pending / معلق'),
+        ('closed', 'Closed / مغلق'),
+    ], string='Status / الحالة', default='open', required=True, index=True, tracking=True)
+    due_date = fields.Date(string='Due Date / تاريخ الاستحقاق', tracking=True)
+    notes = fields.Text(string='Notes / ملاحظات', tracking=True)
+    assigned_user_id = fields.Many2one(
         'res.users',
-        string='Approval By',
-        readonly=True,
+        string='Assigned To / مُعيَّن لـ',
+        ondelete='set null',
+        index=True,
         tracking=True,
     )
-    finalized_date = fields.Datetime(
-        string='Approval Date',
-        readonly=True,
-        tracking=True,
-    )
-    active = fields.Boolean(default=True)
     is_deleted = fields.Boolean(string='Soft Deleted', default=False, index=True)
-
-    @api.depends('offer_ids.price', 'offer_ids.offer_date')
-    def _compute_offer_prices(self):
-        for neg in self:
-            last = neg.offer_ids.sorted(lambda o: (o.offer_date, o.id), reverse=True)[:1]
-            neg.offered_price = last.price if last else 0.0
-
-    @api.model_create_multi
-    def create(self, vals_list):
-        for vals in vals_list:
-            if vals.get('name', _('New')) == _('New'):
-                vals['name'] = self.env['ir.sequence'].next_by_code(
-                    'lugal.supply.negotiation'
-                ) or _('New')
-        records = super().create(vals_list)
-        records._lugal_sync_linked_attachments_res()
-        return records
-
-    def get_negotiation_e_sign_api_payload(self):
-        """E-sign is stored in ``extra_fields`` JSON (works without module DB upgrade)."""
-        self.ensure_one()
-        raw_uid = self.get_dynamic_field(_NEGOTIATION_ESIGN_USER_EXTRA)
-        try:
-            uid = int(raw_uid) if raw_uid not in (None, False, '') else None
-        except (TypeError, ValueError):
-            uid = None
-        user = self.env['res.users'].sudo().browse(uid) if uid else self.env['res.users']
-        if uid and not user.exists():
-            uid = None
-            user = self.env['res.users']
-        date_raw = self.get_dynamic_field(_NEGOTIATION_ESIGN_DATE_EXTRA)
-        date_iso = None
-        if isinstance(date_raw, str) and date_raw.strip():
-            date_iso = date_raw.strip()
-        return {
-            'e_sign_user_id': uid,
-            'e_sign_user_name': user.name if uid else '',
-            'e_sign_date': date_iso,
-        }
-
-    def action_e_sign_approve(self):
-        """Record negotiation e-sign; does not change state (use action_finalize to close)."""
-        for rec in self:
-            if rec.state != 'ongoing':
-                raise UserError(_('E-sign approval is only allowed for ongoing negotiations.'))
-            rec.merge_extra_fields({
-                _NEGOTIATION_ESIGN_USER_EXTRA: self.env.user.id,
-                _NEGOTIATION_ESIGN_DATE_EXTRA: fields.Datetime.to_string(
-                    fields.Datetime.now()
-                ),
-            })
-
-    def action_finalize(self):
-        for rec in self:
-            if rec.state != 'ongoing':
-                raise UserError(_('Only ongoing negotiations can be finalized.'))
-            rec.write({
-                'state': 'finalized',
-                'finalized_by_id': self.env.user.id,
-                'finalized_date': fields.Datetime.now(),
-            })
-
-    def action_cancel(self):
-        self.write({'state': 'cancelled'})
-
-    def action_set_ongoing(self):
-        self.write({
-            'state': 'ongoing',
-            'finalized_by_id': False,
-            'finalized_date': False,
-        })
-
-
-class LugalSupplyNegotiationOffer(models.Model):
-    """Single offer line in negotiation history."""
-    _name = 'lugal.supply.negotiation.offer'
-    _description = 'Supply Negotiation Offer'
-    _order = 'offer_date desc, id desc'
-
-    negotiation_id = fields.Many2one(
-        'lugal.supply.negotiation',
-        string='Negotiation',
-        required=True,
-        ondelete='cascade',
-        index=True,
-    )
-    sequence = fields.Integer(default=10)
-    price = fields.Float(string='Offered Price', required=True, digits=(16, 4))
-    currency_id = fields.Many2one(
-        'res.currency',
-        string='Currency',
-        ondelete='set null',
-    )
-    notes = fields.Text(string='Notes')
-    user_id = fields.Many2one(
-        'res.users',
-        string='Recorded By',
-        default=lambda self: self.env.user,
-    )
-    offer_date = fields.Datetime(
-        string='Offer Date',
-        default=fields.Datetime.now,
-        required=True,
-    )

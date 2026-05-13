@@ -20,17 +20,16 @@ import os
 import sys
 import psycopg2
 
-DB_HOST = None
-DB_PORT = 5432
-DB_USER = None
+DB_HOST     = "localhost"
+DB_PORT     = 5432
+DB_USER     = "odoo_user"
+DB_PASSWORD = "root"
 
 C = "\033[96m"; G = "\033[92m"; Y = "\033[93m"; R = "\033[91m"; X = "\033[0m"
 
 
 def connect(dbname):
-    kw = dict(dbname=dbname)
-    if DB_HOST: kw.update(host=DB_HOST, port=DB_PORT)
-    if DB_USER: kw["user"] = DB_USER
+    kw = dict(dbname=dbname, host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASSWORD)
     return psycopg2.connect(**kw)
 
 

@@ -301,17 +301,223 @@ class NBSBulkUploadJob(models.Model):
     def get_progress_info(self):
         """Get current progress information"""
         self.ensure_one()
-        
         return {
-            'job_id': self.job_id,
-            'status': self.status,
-            'total_files': self.total_files,
-            'processed_files': self.processed_files,
-            'successful_files': self.successful_files,
-            'failed_files': self.failed_files,
+            'job_id':              self.job_id,
+            'status':              self.status,
+            'total_files':         self.total_files,
+            'processed_files':     self.processed_files,
+            'successful_files':    self.successful_files,
+            'failed_files':        self.failed_files,
             'progress_percentage': self.progress_percentage,
-            'created_documents': len(self.created_document_ids),
-            'error_log': self.error_log,
-            'started_at': self.started_at.isoformat() if self.started_at else None,
-            'completed_at': self.completed_at.isoformat() if self.completed_at else None
+            'created_documents':   len(self.created_document_ids),
+            'error_log':           self.error_log,
+            'started_at':          self.started_at.isoformat() if self.started_at else None,
+            'completed_at':        self.completed_at.isoformat() if self.completed_at else None,
         }
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Per-file upload path (used by upload_single_fast controller)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _create_document_for_file(self, file_info):
+        """
+        Core logic: create folder (optional) + document + version for one file.
+
+        file_info keys:
+          file_name   str   required
+          name        str   optional  display name
+          description str   optional
+          upload_kind str   optional  main|sub|other  (overrides auto-detection)
+
+          — EITHER —
+          file_data   str   base64-encoded binary  (legacy path)
+          — OR —
+          store_fname str   already-written filestore path  (no base64 needed)
+          file_size   int
+          checksum    str
+          mimetype    str
+
+        Returns dict with document_id, folder_id, folder_name.
+        """
+        self.ensure_one()
+
+        doc_name  = (
+            file_info.get('name')
+            or (file_info.get('file_name') or '').rsplit('.', 1)[0]
+            or 'Unnamed'
+        )
+        file_name = file_info.get('file_name') or doc_name
+
+        # ── Folder selection ──────────────────────────────────────────────────
+        # If job already has a folder, always use it (never create a new one).
+        if self.folder_id:
+            create_individual_folder = False
+        else:
+            create_individual_folder = file_info.get('create_folder', self.create_folder_per_file)
+
+        target_folder_id = None
+
+        if create_individual_folder:
+            dept_abbr   = self.department_id.code or self.department_id.name[:2].upper()
+            type_abbr   = self.document_type_id.code or self.document_type_id.name[:3].upper()
+            folder_code = f"{dept_abbr}-{type_abbr}-{doc_name}"[:64]
+            folder_vals = {
+                'name':          doc_name,
+                'code':          folder_code,
+                'department_id': self.department_id.id,
+                'description':   f'Auto-created for {doc_name}',
+                'owner_id':      self.uploader_id.id,
+                'active':        True,
+            }
+            if self.company_id:
+                folder_vals['company_id'] = self.company_id.id
+            folder = self.env['nbs.document.folder'].create(folder_vals)
+            target_folder_id = folder.id
+        elif self.folder_id:
+            target_folder_id = self.folder_id.id
+
+        # ── folder_role ───────────────────────────────────────────────────────
+        upload_kind = file_info.get('upload_kind') or None
+        if upload_kind in ('main', 'sub', 'other', 'attachment'):
+            folder_role = upload_kind
+        elif create_individual_folder:
+            folder_role = 'main'
+        elif target_folder_id:
+            existing_main = self.env['nbs.document'].search_count([
+                '|',
+                ('folder_id',  '=',  target_folder_id),
+                ('folder_ids', 'in', [target_folder_id]),
+                ('folder_role', '=', 'main'),
+                ('is_deleted', '=', False),
+            ])
+            folder_role = 'sub' if existing_main > 0 else 'main'
+        else:
+            folder_role = 'other'
+
+        # ── Create document record ────────────────────────────────────────────
+        doc_vals = {
+            'name':                  doc_name,
+            'department_id':         self.department_id.id,
+            'document_type_id':      self.document_type_id.id,
+            'folder_id':             target_folder_id or False,
+            'folder_role':           folder_role,
+            'confidentiality_level': self.confidentiality_level,
+            'state':                 'active',
+            'uploader_id':           self.uploader_id.id,
+            'is_locked':             False,
+        }
+        if target_folder_id:
+            doc_vals['folder_ids'] = [(6, 0, [target_folder_id])]
+
+        document = self.env['nbs.document'].create(doc_vals)
+
+        # ── Create version ────────────────────────────────────────────────────
+        store_fname = file_info.get('store_fname')  # pre-written to filestore
+        version_vals = {
+            'document_id':  document.id,
+            'version_number': 1,
+            'file_name':    file_name,
+            'uploader_id':  self.uploader_id.id,
+            'notes':        file_info.get('description') or 'Uploaded',
+        }
+        if not store_fname:
+            # Legacy base64 path
+            version_vals['file_data'] = file_info.get('file_data')
+
+        version = self.env['nbs.document.version'].with_context(
+            skip_auto_ocr=True
+        ).create(version_vals)
+
+        # ── If file was pre-written to filestore, link the attachment directly ─
+        #
+        # IMPORTANT: Odoo's ir.attachment.create() and write() BOTH strip
+        # 'store_fname', 'checksum', and 'file_size' from the values dict
+        # (they are treated as computed-only by the ORM).  We must bypass the
+        # ORM and write them via raw SQL after the record is created.
+        if store_fname:
+            att = self.env['ir.attachment'].sudo().create({
+                'name':      file_name,
+                'res_model': 'nbs.document.version',
+                'res_field': 'file_data',
+                'res_id':    version.id,
+                'type':      'binary',
+                'mimetype':  file_info.get('mimetype', 'application/octet-stream'),
+            })
+            # Bypass ORM to set the fields that ir.attachment.create() strips
+            self.env.cr.execute(
+                "UPDATE ir_attachment "
+                "SET store_fname=%s, file_size=%s, checksum=%s "
+                "WHERE id=%s",
+                (store_fname,
+                 file_info.get('file_size', 0),
+                 file_info.get('checksum', ''),
+                 att.id),
+            )
+            att.invalidate_recordset(['store_fname', 'file_size', 'checksum', 'raw', 'datas'])
+
+        document.write({'current_version_id': version.id})
+
+        # ── Queue async OCR — mandatory backend cache, never block the upload ─
+        try:
+            self.env['nbs.ocr.service'].sudo().schedule_ocr_background(document.id)
+        except Exception as _ocr_err:
+            _logger.warning(
+                'Failed to queue async OCR for document %s (%s): %s',
+                document.id, file_name, _ocr_err,
+            )
+
+        _logger.info(
+            'Bulk upload: document %s (%s) role=%s folder=%s',
+            document.id, doc_name, folder_role, target_folder_id,
+        )
+        folder_name = None
+        if target_folder_id:
+            folder_rec = self.env['nbs.document.folder'].browse(target_folder_id)
+            folder_name = folder_rec.name if folder_rec.exists() else None
+        return {
+            'document_id': document.id,
+            'folder_id':   target_folder_id,
+            'folder_name': folder_name,
+        }
+
+    def process_single_file(self, file_info):
+        """
+        Process exactly ONE file.  Called once per HTTP request from
+        upload_single_fast.  Updates job counters and returns a result dict.
+        """
+        self.ensure_one()
+
+        if self.status == 'completed':
+            return {'success': False, 'error': 'Job already completed'}
+
+        if self.status == 'pending':
+            self.write({'status': 'processing', 'started_at': fields.Datetime.now()})
+
+        try:
+            result = self._create_document_for_file(file_info)
+            self.write({
+                'processed_files':      self.processed_files + 1,
+                'successful_files':     self.successful_files + 1,
+                'created_document_ids': [(4, result['document_id'])],
+            })
+            return {'success': True, **result}
+        except Exception as exc:
+            _logger.error('process_single_file error: %s', exc, exc_info=True)
+            self.write({
+                'processed_files': self.processed_files + 1,
+                'failed_files':    self.failed_files + 1,
+                'error_log': (self.error_log or '') + f'\n{file_info.get("file_name")}: {exc}',
+            })
+            return {'success': False, 'error': str(exc)}
+
+    def finalize_job(self):
+        """Mark job as completed/partial/failed and return final status string."""
+        self.ensure_one()
+        if self.successful_files == self.total_files:
+            status = 'completed'
+        elif self.successful_files > 0:
+            status = 'partial'
+        else:
+            status = 'failed'
+        self.write({'status': status, 'completed_at': fields.Datetime.now()})
+        return status

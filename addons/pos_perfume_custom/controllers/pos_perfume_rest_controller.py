@@ -17,15 +17,6 @@ _PREFIX = "/api/pos_perfume/v1"
 _READ = ("GET", "POST")
 
 
-def _is_missing_uom_po_id_attribute_error(exc):
-    """True when core/pricelist code touches ``product.product.uom_po_id`` but the field is gone (e.g. Odoo 19+)."""
-    if not isinstance(exc, AttributeError):
-        return False
-    if getattr(exc, "name", None) == "uom_po_id":
-        return True
-    return "uom_po_id" in str(exc)
-
-
 def _json(data, status=200):
     body = json.dumps(data, ensure_ascii=False, default=str)
     return Response(
@@ -117,6 +108,23 @@ class PosPerfumeRestController(http.Controller):
         """Pricelist used by REST catalog when ``pricelist_id`` is omitted — matches POS UI."""
         return self._rest_pos_ui_default_pricelist()
 
+    def _rest_uom_sales_touch_count(self, uom_rec):
+        """How strongly a UoM is used for saleable catalog (templates + SAP sales UoM)."""
+        env = request.env
+        Pt = env["product.template"].sudo()
+        n = Pt.search_count(
+            [
+                ("uom_id", "=", uom_rec.id),
+                ("sale_ok", "=", True),
+                ("active", "=", True),
+            ]
+        )
+        if "sap.product.extended" in env:
+            n += env["sap.product.extended"].sudo().search_count(
+                [("sales_uom_id", "=", uom_rec.id)]
+            )
+        return n
+
     def _rest_pick_base_mass_uom(self, Uom, low: str):
         """
         Map ``uom=kg`` / kilo synonyms to a **base** kilogram UoM.
@@ -129,6 +137,7 @@ class PosPerfumeRestController(http.Controller):
             return Uom.browse()
         cand = Uom.search(
             [
+                ("active", "=", True),
                 "|",
                 "|",
                 ("name", "ilike", "كغم"),
@@ -168,7 +177,10 @@ class PosPerfumeRestController(http.Controller):
 
         if not cand:
             return Uom.browse()
-        ranked = sorted(cand, key=_sort_key)
+        ranked = sorted(
+            cand,
+            key=lambda r: (_sort_key(r), -self._rest_uom_sales_touch_count(r), r.id),
+        )
         return Uom.browse(ranked[0].id)
 
     def _rest_price_uom(self, product, get_arg):
@@ -177,7 +189,7 @@ class PosPerfumeRestController(http.Controller):
         if uid:
             try:
                 u = request.env["uom.uom"].sudo().browse(int(uid))
-                if u.exists():
+                if u.exists() and u.active:
                     return u
             except (TypeError, ValueError):
                 pass
@@ -190,10 +202,18 @@ class PosPerfumeRestController(http.Controller):
         if u:
             return u
         if low in ("g", "gram", "grams"):
-            u = Uom.search(["|", ("name", "ilike", "غرام"), ("name", "ilike", "gram")], limit=1)
+            u = Uom.search(
+                [
+                    ("active", "=", True),
+                    "|",
+                    ("name", "ilike", "غرام"),
+                    ("name", "ilike", "gram"),
+                ],
+                limit=1,
+            )
             if u:
                 return u
-        u = Uom.search([("name", "ilike", raw)], limit=1)
+        u = Uom.search([("active", "=", True), ("name", "ilike", raw)], limit=1)
         if u:
             return u
         return product.uom_id
@@ -204,7 +224,7 @@ class PosPerfumeRestController(http.Controller):
         if uid not in (None, ""):
             try:
                 u = request.env["uom.uom"].sudo().browse(int(uid))
-                if u.exists():
+                if u.exists() and u.active:
                     return u
             except (TypeError, ValueError):
                 pass
@@ -217,10 +237,18 @@ class PosPerfumeRestController(http.Controller):
         if u:
             return u
         if low in ("g", "gram", "grams"):
-            u = Uom.search(["|", ("name", "ilike", "غرام"), ("name", "ilike", "gram")], limit=1)
+            u = Uom.search(
+                [
+                    ("active", "=", True),
+                    "|",
+                    ("name", "ilike", "غرام"),
+                    ("name", "ilike", "gram"),
+                ],
+                limit=1,
+            )
             if u:
                 return u
-        u = Uom.search([("name", "ilike", raw)], limit=1)
+        u = Uom.search([("active", "=", True), ("name", "ilike", raw)], limit=1)
         if u:
             return u
         return request.env["uom.uom"].browse()
@@ -256,13 +284,7 @@ class PosPerfumeRestController(http.Controller):
                 qty_in_product_uom = quantity
         else:
             qty_in_product_uom = quantity
-        try:
-            rules = pl_rec._get_applicable_rules(product, date)
-        except AttributeError as err:
-            if _is_missing_uom_po_id_attribute_error(err):
-                _logger.debug("REST _get_applicable_rules skipped (uom_po_id): %s", err)
-                return 0.0
-            raise
+        rules = pl_rec._get_applicable_rules(product, date)
         for rule in rules:
             if not rule._is_applicable_for(product, qty_in_product_uom):
                 continue
@@ -270,20 +292,47 @@ class PosPerfumeRestController(http.Controller):
                 return float(
                     rule._compute_price(product, quantity, pu, date=date, currency=cur)
                 )
-            except AttributeError as err:
-                if _is_missing_uom_po_id_attribute_error(err):
-                    _logger.debug("REST rule._compute_price skipped (uom_po_id): %s", err)
-                    continue
-                raise
             except Exception:
                 continue
         return 0.0
 
-    def _rest_product_unit_price_impl(self, product, pl_rec, price_uom):
-        """Inner price resolution (see ``_rest_product_unit_price`` wrapper)."""
+    def _rest_product_unit_price(self, product, pl_rec, price_uom,
+                                  ext_record=None, pl_items=None):
+        """
+        Match ``product.product.search_products_for_pos`` (right panel): use Odoo
+        ``pricelist._get_product_price`` first on sudo records so API users without
+        ``product.pricelist.item`` read rights still get the same numbers as the UI.
+
+        Then fall back to POS UoM-group / packaging mapping (``get_product_data`` path)
+        and rule chain when the standard engine returns 0.
+
+        ``ext_record`` — optional pre-fetched ``sap.product.extended`` (avoids N+1).
+        ``pl_items``   — optional pre-fetched pricelist items recordset (avoids N+1).
+                         When provided, skips the expensive per-product
+                         ``pl._get_product_price`` call (uom_in_pricelist) and resolves
+                         price directly from pre-computed UoM data.
+        """
         prod = product.sudo()
         pu = price_uom or prod.uom_id
         pl = pl_rec.sudo() if pl_rec else False
+        ctrl = PosPerfumeController()
+
+        # ── Fast bulk path (pre-fetched data available) ──────────────────────
+        # Skip the expensive per-product pl._get_product_price / uom_in_pricelist
+        # path entirely; use pre-fetched pricelist items through _get_uoms_from_pricelist.
+        if pl_items is not None:
+            uoms = ctrl._get_uoms_from_pricelist(
+                prod, pl,
+                ext_record=ext_record,
+                pricelist_items=pl_items,
+            )
+            target_id = pu.id if pu else None
+            price = ctrl._get_default_price_from_uoms(uoms, target_id)
+            if price and price > 0:
+                return float(price)
+            return float(prod.list_price or 0.0)
+
+        # ── Slow single-product path (no pre-fetched data) ───────────────────
         company_partner = request.env.company.sudo().partner_id
 
         if pl:
@@ -302,8 +351,9 @@ class PosPerfumeRestController(http.Controller):
             except Exception as ex:
                 _logger.debug("REST _get_product_price (partner): %s", ex)
 
-        ctrl = PosPerfumeController()
-        uoms = ctrl._get_uoms_from_pricelist(prod, pl)
+        uoms = ctrl._get_uoms_from_pricelist(
+            prod, pl, ext_record=ext_record,
+        )
         target_id = pu.id if pu else None
         price = ctrl._get_default_price_from_uoms(uoms, target_id)
         if price and price > 0:
@@ -335,32 +385,12 @@ class PosPerfumeRestController(http.Controller):
 
         return float(prod.list_price or 0.0)
 
-    def _rest_product_unit_price(self, product, pl_rec, price_uom):
-        """
-        Match ``product.product.search_products_for_pos`` (right panel): use Odoo
-        ``pricelist._get_product_price`` first on sudo records so API users without
-        ``product.pricelist.item`` read rights still get the same numbers as the UI.
-
-        Then fall back to POS UoM-group / packaging mapping (``get_product_data`` path)
-        and rule chain when the standard engine returns 0.
-        """
-        try:
-            return self._rest_product_unit_price_impl(product, pl_rec, price_uom)
-        except AttributeError as err:
-            if not _is_missing_uom_po_id_attribute_error(err):
-                raise
-            _logger.warning(
-                "pos_perfume REST: price resolution fallback (missing uom_po_id): %s",
-                err,
-            )
-            prod = product.sudo()
-            return float(prod.list_price or 0.0)
-
     def _strict_pricelist_flag(self, get_arg):
         v = (get_arg("strict_pricelist") or "").strip().lower()
         return v in ("1", "true", "yes", "on")
 
-    def _rest_catalog_unit_price(self, product, pl_rec, price_uom, strict=False):
+    def _rest_catalog_unit_price(self, product, pl_rec, price_uom, strict=False,
+                                  ext_record=None, pl_items=None):
         """
         Catalog price: use ``pl_rec``; if price is 0 and not ``strict``, retry once with
         the POS UI default pricelist when it is a different record (mirrors omitting
@@ -368,15 +398,19 @@ class PosPerfumeRestController(http.Controller):
         Returns ``(price, pricelist_id_used)``; ``pricelist_id_used`` is None if ``pl_rec`` is empty.
         """
         if not pl_rec:
-            p = self._rest_product_unit_price(product, pl_rec, price_uom)
+            p = self._rest_product_unit_price(product, pl_rec, price_uom,
+                                              ext_record=ext_record, pl_items=pl_items)
             return float(p or 0.0), None
-        p = float(self._rest_product_unit_price(product, pl_rec, price_uom) or 0.0)
+        p = float(self._rest_product_unit_price(product, pl_rec, price_uom,
+                                                 ext_record=ext_record, pl_items=pl_items) or 0.0)
         used_id = pl_rec.id
         if strict or p > 0:
             return p, used_id
         alt = self._rest_default_pricelist()
         if alt and alt.id != pl_rec.id:
-            p2 = float(self._rest_product_unit_price(product, alt, price_uom) or 0.0)
+            # For the alternative pricelist we don't have pre-fetched items; accept the overhead
+            p2 = float(self._rest_product_unit_price(product, alt, price_uom,
+                                                      ext_record=ext_record) or 0.0)
             if p2 > 0:
                 return p2, alt.id
         return p, used_id
@@ -386,18 +420,6 @@ class PosPerfumeRestController(http.Controller):
         if not fn and prod.product_tmpl_id:
             fn = getattr(prod.product_tmpl_id, "foreign_name", None) or ""
         return fn or ""
-
-    def _rest_safe_qty_available(self, prod):
-        """``qty_available`` can trigger code paths that reference removed ``uom_po_id``."""
-        try:
-            return float(prod.qty_available)
-        except AttributeError as err:
-            if _is_missing_uom_po_id_attribute_error(err):
-                _logger.debug("REST qty_available fallback (uom_po_id): %s", err)
-                return 0.0
-            raise
-        except Exception:
-            return 0.0
 
     def _rest_category_type_payload(self, prod, ext):
         """Shape used by the development mobile catalog (fragrances + properties)."""
@@ -445,16 +467,37 @@ class PosPerfumeRestController(http.Controller):
             },
         }
 
-    def _rest_product_catalog_row(self, prod, pl_rec, price_uom, strict_pl, pl_used_id):
+    def _rest_product_catalog_row(
+        self, prod, pl_rec, price_uom, strict_pl, pl_used_id,
+        ext_map=None, wh_map=None, pl_items_map=None,
+    ):
         """
         One product record matching the legacy **development** catalog JSON shape
         (rich UoMs, warehouses, brand, category_type, has_price, etc.).
 
-        ``list_price`` prefers the **pricelist-resolved** unit price (same as the slim
-        API clients already use); if that is zero, falls back to Odoo ``lst_price``.
+        ``ext_map``      — ``{product_id: sap.product.extended record}`` pre-fetched in bulk.
+        ``wh_map``       — ``{product_id: [warehouse_dict, …]}`` pre-fetched in bulk.
+        ``pl_items_map`` — ``{product_tmpl_id: pricelist.item recordset}`` pre-fetched in bulk.
+
+        When these maps are provided the method skips all per-product ORM/SAP queries that
+        would otherwise cause an N+1 problem on large ``fetch_all`` requests.
         """
+        # SAP extended: use pre-fetched map (avoids N+1 ORM calls)
+        ext_rec = ext_map.get(prod.id, False) if ext_map is not None else None
+
+        # Pricelist items: use pre-fetched map (avoids N+1 ORM calls)
+        # Use empty recordset (not None) so fast path stays active even for no-item products
+        if pl_items_map is not None:
+            tmpl_id = prod.product_tmpl_id.id if prod.product_tmpl_id else None
+            _empty_items = request.env["product.pricelist.item"].sudo().browse([])
+            pl_items_for_prod = pl_items_map.get(tmpl_id, _empty_items)
+        else:
+            pl_items_for_prod = None
+
         catalog_price, priced_pl_id = self._rest_catalog_unit_price(
-            prod, pl_rec, price_uom, strict=strict_pl
+            prod, pl_rec, price_uom, strict=strict_pl,
+            ext_record=ext_rec,
+            pl_items=pl_items_for_prod,
         )
         Pl = request.env["product.pricelist"].sudo()
         pl_uom = pl_rec
@@ -464,16 +507,11 @@ class PosPerfumeRestController(http.Controller):
                 pl_uom = cand
 
         ctrl = PosPerfumeController()
-        try:
-            raw_uoms = ctrl._get_uoms_from_pricelist(prod, pl_uom)
-        except AttributeError as err:
-            if not _is_missing_uom_po_id_attribute_error(err):
-                raise
-            _logger.warning(
-                "pos_perfume REST: _get_uoms_from_pricelist fallback (missing uom_po_id): %s",
-                err,
-            )
-            raw_uoms = []
+        raw_uoms = ctrl._get_uoms_from_pricelist(
+            prod, pl_uom,
+            ext_record=ext_rec,
+            pricelist_items=pl_items_for_prod,
+        )
         available_uoms = [
             {"id": u["id"], "name": u["name"], "price": float(u.get("price") or 0.0)}
             for u in raw_uoms
@@ -486,7 +524,12 @@ class PosPerfumeRestController(http.Controller):
             (u.get("price") or 0) > 0 for u in available_uoms
         )
 
-        warehouses = ctrl._get_warehouses_simple(prod.id)
+        # Warehouses: use pre-fetched map when available (avoids N+1 SAP/ORM calls)
+        if wh_map is not None:
+            warehouses = wh_map.get(prod.id, [])
+        else:
+            warehouses = ctrl._get_warehouses_simple(prod.id)
+
         foreign_name = self._rest_foreign_name(prod)
         _, color_class, badge_text = prod._get_product_priority_and_color(prod.default_code)
         categ_name = prod.categ_id.name if prod.categ_id else ""
@@ -496,8 +539,9 @@ class PosPerfumeRestController(http.Controller):
             "code": badge_text or "",
         }
 
-        ext = False
-        if "sap.product.extended" in request.env:
+        # SAP extended: resolve from the pre-fetched ext_rec (already set above)
+        ext = ext_rec if ext_rec is not None else False
+        if ext is False and ext_map is None and "sap.product.extended" in request.env:
             ext = request.env["sap.product.extended"].sudo().search(
                 [("product_id", "=", prod.id)], limit=1
             )
@@ -527,7 +571,7 @@ class PosPerfumeRestController(http.Controller):
             "uom_id": uom_payload,
             "uom_name": (pu.name or "") if pu else "",
             "list_price": list_price,
-            "qty_available": self._rest_safe_qty_available(prod),
+            "qty_available": float(prod.qty_available),
             "color_class": color_class or "",
             "badge_text": badge_text or "",
             "active": bool(prod.active),
@@ -905,22 +949,12 @@ class PosPerfumeRestController(http.Controller):
 
     # --- products ----------------------------------------------------------
 
-    def _rest_products_catalog(self, pget):
-        """Build the same payload as ``GET /api/pos_perfume/v1/products`` (for reuse by CRM purchase search).
-
-        ``pget(key, default=None)`` behaves like ``_rest_products_query_params()`` output.
-
-        Extra keys (optional, for internal callers):
-
-        - ``purchase_po_only`` (bool): restrict to ``purchase_ok`` variants.
-        - ``hide_zero_stock`` (bool): drop rows with ``qty_available`` ≤ 0 (paginate after filter;
-          when no brand/category/has_price filters, scan is capped at 5000 rows for safety).
-        - ``supplier_partner_id`` (int): restrict to templates that list this ``res.partner`` in
-          ``seller_ids`` (requires Purchase / ``seller_ids`` on ``product.template``).
-
-        On error returns ``{"_error": True, "message": str, "code": int}`` instead of items.
-        """
+    @http.route(f"{_PREFIX}/products", type="http", auth="none", methods=list(_READ), csrf=False, cors="*")
+    def products(self, **kwargs):
+        if not self._pos_rest_auth():
+            return self._fail("Unauthorized", 401)
         Product = request.env["product.product"].sudo()
+        pget = self._rest_products_query_params()
         q = (pget("query") or "").strip()
 
         lim_raw = self._rest_int_param(pget, "limit", None)
@@ -939,26 +973,6 @@ class PosPerfumeRestController(http.Controller):
             domain.append(("active", "=", True))
         if not self._rest_query_bool(pget, "include_non_sale", False):
             domain.append(("sale_ok", "=", True))
-        if self._rest_query_bool(pget, "purchase_po_only", False):
-            domain.append(("purchase_ok", "=", True))
-
-        sp_raw = pget("supplier_partner_id")
-        if sp_raw not in (None, "", False):
-            try:
-                spid = int(sp_raw)
-            except (TypeError, ValueError):
-                return {"_error": True, "message": "supplier_partner_id must be an integer", "code": 400}
-            Template = request.env["product.template"].sudo()
-            if "seller_ids" not in Template._fields:
-                return {
-                    "_error": True,
-                    "message": (
-                        "supplier_partner_id filter is not available: product templates have no vendor links "
-                        "(install the Purchase app or configure seller_ids)."
-                    ),
-                    "code": 501,
-                }
-            domain = ["&"] + domain + [("product_tmpl_id.seller_ids.partner_id", "=", spid)]
 
         if q:
             or_terms = [
@@ -980,11 +994,10 @@ class PosPerfumeRestController(http.Controller):
                 Cat = request.env["product.category"].sudo().with_context(active_test=False)
                 root = Cat.browse(cid)
                 if not root.exists():
-                    return {
-                        "_error": True,
-                        "message": "Unknown product category for categ_id / category_id.",
-                        "code": 404,
-                    }
+                    return self._fail(
+                        "Unknown product category for categ_id / category_id.",
+                        404,
+                    )
                 subtree = Cat.search([("id", "child_of", root.ids)])
                 domain = ["&"] + domain + [("categ_id", "in", subtree.ids)]
 
@@ -995,27 +1008,111 @@ class PosPerfumeRestController(http.Controller):
                 pref = pref + "%"
             domain = ["&"] + domain + [("default_code", "ilike", pref)]
 
+        uom_rec = request.env["uom.uom"].browse()
+        _uom_is_subunit = False  # shared flag for sap_uom_group_entry block below
+        _sub_uom_ids = None       # set when sub-unit UoM requested; used in phase-2 below
+        _sub_base_sap_pids = set()  # product IDs from base-UoM + SAP (no pl_rec needed)
         if self._rest_query_bool(pget, "uom_filter_catalog", False):
             uom_rec = self._rest_resolve_catalog_uom(pget)
             if not uom_rec or not uom_rec.exists():
-                return {
-                    "_error": True,
-                    "message": "uom_filter_catalog=1 requires a resolvable uom or uom_id (e.g. uom=kg).",
-                    "code": 400,
-                }
-            align = self._rest_query_bool(pget, "uom_align_sap_sales_unit", True)
-            narrowed = self._rest_product_ids_for_uom_filter(
-                request.env, uom_rec.id, align_sap_sales_unit=align
-            )
-            domain = ["&"] + domain + [("id", "in", narrowed)]
+                return self._fail(
+                    "uom_filter_catalog=1 requires a resolvable uom or uom_id (e.g. uom=kg).",
+                    400,
+                )
+            # Detect whether the requested UoM is the base kg or a sub-unit.
+            _base_kg = self._rest_pick_base_mass_uom(request.env["uom.uom"].sudo(), "kg")
+            if _base_kg and uom_rec.id != _base_kg.id:
+                _uom_is_subunit = True
+
+            if not _uom_is_subunit:
+                # Base kg: standard SAP sales-UoM catalog filter
+                align = self._rest_query_bool(pget, "uom_align_sap_sales_unit", True)
+                narrowed = self._rest_product_ids_for_uom_filter(
+                    request.env, uom_rec.id, align_sap_sales_unit=align
+                )
+                domain = ["&"] + domain + [("id", "in", narrowed)]
+            else:
+                # Sub-unit (0.25 كغم, 0.5 كيلو, …): Phase 1 — build the list of
+                # same-weight UoM IDs and pre-compute sets that don't need pl_rec.
+                # Phase 2 (pricelist items) is deferred to after pl_rec is resolved.
+                #
+                # This Odoo instance uses a custom tree UoM model where:
+                #   - UoMs like "0.25 كغم بلاستك" have factor=0.25 (sub-unit of kg)
+                #   - UoMs like "0.25 كغم"           have factor=1.0 (standalone unit)
+                # So factor-based matching misses related UoMs. Instead we extract
+                # the leading weight number from the name (e.g. "0.25") and find
+                # all UoMs whose name starts with that number (name LIKE "0.25%").
+                import re as _re
+                _Uom = request.env["uom.uom"].sudo()
+                _weight_match = _re.match(r'^([\d.]+)', (uom_rec.name or "").strip())
+                if _weight_match:
+                    _weight_prefix = _weight_match.group(1)
+                    _same_weight_uoms = _Uom.search([
+                        ("active", "=", True),
+                        ("name", "like", _weight_prefix + "%"),
+                    ])
+                    _sub_uom_ids = _same_weight_uoms.ids or [uom_rec.id]
+                else:
+                    _sub_uom_ids = [uom_rec.id]
+
+                # Products whose base product UoM (product.uom_id) is this weight
+                _base_pids = set(Product.search([("uom_id", "in", _sub_uom_ids)]).ids)
+
+                # Products whose SAP sales UoM is this weight
+                _sap_pids = set()
+                if "sap.product.extended" in request.env:
+                    _sap_pids = set(
+                        request.env["sap.product.extended"].sudo()
+                        .search([("sales_uom_id", "in", _sub_uom_ids)])
+                        .mapped("product_id").ids
+                    )
+                _sub_base_sap_pids = _base_pids | _sap_pids
+
+        sge_raw = pget("sap_uom_group_entry")
+        if sge_raw not in (None, ""):
+            # sap_uom_group_entry is an independent AND-filter that restricts products by their
+            # SAP UoM group entry (AbsEntry). It is always applied when provided, regardless of
+            # whether uom_filter_catalog targets a sub-unit UoM — the two filters are orthogonal.
+            if "sap.product.extended" not in request.env:
+                return self._fail(
+                    "sap_uom_group_entry requires sap_integration (sap.product.extended).",
+                    400,
+                )
+            parts = []
+            if isinstance(sge_raw, (list, tuple)):
+                for x in sge_raw:
+                    parts.extend(str(x).replace(";", ",").split(","))
+            else:
+                parts = str(sge_raw).replace(";", ",").split(",")
+            entries = []
+            for p in parts:
+                p = str(p).strip()
+                if not p:
+                    continue
+                try:
+                    entries.append(int(p))
+                except (TypeError, ValueError):
+                    return self._fail(
+                        "sap_uom_group_entry must be one or more integers (SAP UoMGroupEntry / AbsEntry), "
+                        "e.g. 2 or 2,9 for «لك» and «فل بلاستك».",
+                        400,
+                    )
+            if not entries:
+                return self._fail(
+                    "sap_uom_group_entry was empty after parsing; use e.g. 2 or 2,9.",
+                    400,
+                )
+            entries = list(dict.fromkeys(entries))
+            Ext = request.env["sap.product.extended"].sudo()
+            pids = Ext.search([("sap_uom_group_entry", "in", entries)]).mapped("product_id").ids
+            domain = ["&"] + domain + [("id", "in", pids or [-1])]
 
         brand_raw = (pget("brand") or "").strip()
         cat_type_raw = (pget("category_type") or "").strip()
         has_price_only = self._rest_query_bool(pget, "has_price_only", False) or str(
             pget("has_price_only") or ""
         ).strip() == "1"
-        hide_zero_stock = self._rest_query_bool(pget, "hide_zero_stock", False)
-        use_python_filters = bool(brand_raw or cat_type_raw or has_price_only or hide_zero_stock)
+        use_python_filters = bool(brand_raw or cat_type_raw or has_price_only)
 
         pl_rec = False
         if pl_id:
@@ -1028,22 +1125,134 @@ class PosPerfumeRestController(http.Controller):
         pl_used_id = pl_rec.id if pl_rec else None
         strict_pl = self._strict_pricelist_flag(pget)
 
+        # Phase 2: apply sub-unit UoM product filter now that pl_rec is known.
+        # _sub_uom_ids is set only when uom_filter_catalog=1 with a sub-unit UoM.
+        if _sub_uom_ids is not None:
+            _pl_pids = set()
+            if pl_rec:
+                _pl_items = request.env["product.pricelist.item"].sudo().search([
+                    ("pricelist_id", "=", int(pl_rec.id)),
+                    ("product_uom_id", "in", _sub_uom_ids),
+                ])
+                if _pl_items:
+                    _tmpl_ids = _pl_items.mapped("product_tmpl_id").ids
+                    _pl_pids = set(Product.search(
+                        [("product_tmpl_id", "in", _tmpl_ids)]
+                    ).ids)
+            _sub_narrowed = list(_sub_base_sap_pids | _pl_pids)
+            domain = ["&"] + domain + [("id", "in", _sub_narrowed or [-1])]
+
+        def _build_ext_map(prod_ids):
+            """Pre-fetch sap.product.extended for all product_ids in one query."""
+            if not prod_ids or "sap.product.extended" not in request.env:
+                return {}
+            all_exts = request.env["sap.product.extended"].sudo().search(
+                [("product_id", "in", prod_ids)]
+            )
+            return {e.product_id.id: e for e in all_exts}
+
+        def _build_wh_map(prod_ids):
+            """Pre-fetch sap.product.warehouse.info for all product_ids in one query."""
+            result = {}
+            if not prod_ids:
+                return result
+            if "sap.product.warehouse.info" in request.env:
+                all_whs = request.env["sap.product.warehouse.info"].sudo().search(
+                    [("product_id", "in", prod_ids)]
+                )
+                for wh_info in all_whs:
+                    pid = wh_info.product_id.id
+                    qty = wh_info.current_qty_available or wh_info.last_available or 0
+                    if qty > 0 and wh_info.warehouse_id:
+                        result.setdefault(pid, []).append({
+                            "id": wh_info.warehouse_id.id,
+                            "name": wh_info.warehouse_id.name,
+                            "code": wh_info.sap_warehouse_code or wh_info.warehouse_id.code,
+                            "quantity": float(qty),
+                        })
+                return result
+            # Fallback: bulk SQL query across all products in one shot
+            placeholders = ",".join(["%s"] * len(prod_ids))
+            query = f"""
+                SELECT sq.product_id,
+                       sw.id   AS wh_id,
+                       sw.name AS wh_name,
+                       sw.code AS wh_code,
+                       COALESCE(SUM(sq.quantity - sq.reserved_quantity), 0) AS available_qty
+                FROM stock_warehouse sw
+                JOIN stock_location sl ON sl.warehouse_id = sw.id AND sl.usage = 'internal'
+                JOIN stock_quant sq ON sq.location_id = sl.id
+                             AND sq.product_id IN ({placeholders})
+                WHERE sw.active = true
+                GROUP BY sq.product_id, sw.id, sw.name, sw.code
+                HAVING COALESCE(SUM(sq.quantity - sq.reserved_quantity), 0) > 0
+                ORDER BY sw.name
+            """
+            request.env.cr.execute(query, tuple(prod_ids))
+            for row in request.env.cr.dictfetchall():
+                result.setdefault(row["product_id"], []).append({
+                    "id": row["wh_id"],
+                    "name": row["wh_name"],
+                    "code": row["wh_code"] or row["wh_name"][:5],
+                    "quantity": float(row["available_qty"]),
+                })
+            return result
+
+        def _build_pl_items_map(tmpl_ids):
+            """Pre-fetch pricelist items for all template_ids in one query.
+            Returns a dict keyed by tmpl_id where every input tmpl_id is present
+            (missing = empty recordset) so the fast path is always used.
+            """
+            Item = request.env["product.pricelist.item"].sudo()
+            if not tmpl_ids or not pl_rec:
+                # Populate with empty recordsets so fast path is still taken
+                return {tid: Item.browse([]) for tid in tmpl_ids}
+            all_items = Item.search(
+                [
+                    ("pricelist_id", "=", pl_rec.id),
+                    ("product_tmpl_id", "in", list(tmpl_ids)),
+                ],
+                order="write_date asc, id asc",
+            )
+            # Start with empty recordsets for every template
+            result = {tid: Item.browse([]) for tid in tmpl_ids}
+            # Group found items by template
+            by_tmpl = {}
+            for item in all_items:
+                by_tmpl.setdefault(item.product_tmpl_id.id, []).append(item.id)
+            for tid, ids in by_tmpl.items():
+                result[tid] = Item.browse(ids)
+            return result
+
         def _rows_for_products(prod_recs):
+            prod_ids = prod_recs.ids
+            tmpl_ids = set(prod_recs.mapped("product_tmpl_id").ids)
+            ext_map = _build_ext_map(prod_ids)
+            wh_map = _build_wh_map(prod_ids)
+            pl_items_map = _build_pl_items_map(tmpl_ids)
+
+            # Pre-resolve price UoM once per request batch.
+            # When uom / uom_id are fixed params they produce the same UoM for every
+            # product — resolving per-product triggers _rest_uom_sales_touch_count
+            # (2 DB queries per candidate) multiplied by N products.
+            _fixed_price_uom = None
+            if (pget("uom_id") or pget("uom")) and prod_ids:
+                _fixed_price_uom = self._rest_price_uom(prod_recs[0], pget)
+
             out = []
             for prod in prod_recs:
-                price_uom = self._rest_price_uom(prod, pget)
+                # Use the pre-resolved UoM when available; fall back to product's own UoM
+                price_uom = _fixed_price_uom if _fixed_price_uom else prod.uom_id
                 row = self._rest_product_catalog_row(
-                    prod, pl_rec, price_uom, strict_pl, pl_used_id
+                    prod, pl_rec, price_uom, strict_pl, pl_used_id,
+                    ext_map=ext_map, wh_map=wh_map, pl_items_map=pl_items_map,
                 )
                 out.append(row)
             return out
 
         if use_python_filters:
-            if hide_zero_stock and not (brand_raw or cat_type_raw or has_price_only):
-                all_recs = Product.search(domain, order="name", limit=5000)
-            else:
-                all_recs = Product.search(domain, order="name")
-            seq_prods = []
+            all_recs = Product.search(domain, order="name")
+            seq_ids = []
             for prod in all_recs:
                 if brand_raw and not self._rest_product_matches_brand_param(prod, brand_raw):
                     continue
@@ -1051,12 +1260,13 @@ class PosPerfumeRestController(http.Controller):
                     prod, cat_type_raw
                 ):
                     continue
-                seq_prods.append(prod)
-            rows = _rows_for_products(seq_prods)
+                seq_ids.append(prod.id)
+            # Rebuild a proper Odoo recordset so _rows_for_products can use
+            # bulk-fetch helpers (.ids / .mapped / bulk searches).
+            seq_recs = Product.browse(seq_ids)
+            rows = _rows_for_products(seq_recs)
             if has_price_only:
                 rows = [r for r in rows if r.get("has_price")]
-            if hide_zero_stock:
-                rows = [r for r in rows if float(r.get("qty_available") or 0) > 0.0001]
             total = len(rows)
             if limit is None:
                 items = rows
@@ -1079,7 +1289,7 @@ class PosPerfumeRestController(http.Controller):
                 offset_out = offset
                 limit_out = limit
 
-        return {
+        payload = {
             "items": items,
             "total": total,
             "offset": offset_out,
@@ -1088,16 +1298,10 @@ class PosPerfumeRestController(http.Controller):
             "fetch_all": bool(limit is None),
             "pricelist_id": pl_used_id,
         }
-
-    @http.route(f"{_PREFIX}/products", type="http", auth="none", methods=list(_READ), csrf=False, cors="*")
-    def products(self, **kwargs):
-        if not self._pos_rest_auth():
-            return self._fail("Unauthorized", 401)
-        pget = self._rest_products_query_params()
-        result = self._rest_products_catalog(pget)
-        if result.get("_error"):
-            return self._fail(result["message"], result.get("code", 400))
-        return self._ok(result)
+        if uom_rec and uom_rec.exists():
+            payload["resolved_catalog_uom_id"] = uom_rec.id
+            payload["resolved_catalog_uom_name"] = uom_rec.display_name
+        return self._ok(payload)
 
     @http.route(
         f"{_PREFIX}/products/<int:product_id>",
@@ -1130,6 +1334,273 @@ class PosPerfumeRestController(http.Controller):
             prod, pl_rec, price_uom, strict_pl, pl_used_id
         )
         return self._ok(payload)
+
+    @http.route(
+        f"{_PREFIX}/products/by_primary_sales_uom",
+        type="http",
+        auth="none",
+        methods=list(_READ),
+        csrf=False,
+        cors="*",
+    )
+    def products_by_primary_sales_uom(self, **kwargs):
+        """
+        Return products whose **SAP primary sales UoM** name starts with ``weight_prefix``
+        (default ``"0.25"``).
+
+        This is a strict filter on ``sap.product.extended.sales_uom_id`` — the unit SAP
+        has designated as this product's main sales unit.  It intentionally excludes
+        products that merely have a 0.25 kg pricelist item entry but whose primary unit
+        is something else (e.g. «لك»).
+
+        Query params
+        ────────────
+        weight_prefix  str   Name prefix to match UoMs (default "0.25").  Pass "0.5" for
+                             half-kg items, "1" for full-kg, etc.
+        pricelist_id   int   Pricelist for pricing (omit → POS default).
+        categ_id /
+        category_id    int   Restrict to a category subtree (child_of).
+        query          str   Free-text search (name / default_code / barcode / foreign_name).
+        fetch_all      bool  Return all rows (ignores limit/offset).
+        limit          int   Page size (default 80).
+        offset         int   Page start (default 0).
+        """
+        if not self._pos_rest_auth():
+            return self._fail("Unauthorized", 401)
+
+        if "sap.product.extended" not in request.env:
+            return self._fail(
+                "by_primary_sales_uom requires the sap_integration addon "
+                "(sap.product.extended model not found).",
+                400,
+            )
+
+        pget = self._rest_products_query_params()
+
+        # ── weight_prefix ──────────────────────────────────────────────────────
+        weight_prefix = (pget("weight_prefix") or "0.25").strip()
+        if not weight_prefix:
+            return self._fail("weight_prefix must not be empty.", 400)
+
+        # Collect all active UoMs whose name starts with the requested prefix.
+        Uom = request.env["uom.uom"].sudo()
+        matching_uoms = Uom.search([
+            ("active", "=", True),
+            ("name", "like", weight_prefix + "%"),
+        ])
+        if not matching_uoms:
+            return self._ok({
+                "items": [],
+                "total": 0,
+                "offset": 0,
+                "limit": 0,
+                "returned": 0,
+                "fetch_all": False,
+                "pricelist_id": None,
+                "weight_prefix": weight_prefix,
+                "matched_uom_ids": [],
+            })
+
+        # Products whose SAP-designated primary sales UoM is one of these UoMs.
+        Ext = request.env["sap.product.extended"].sudo()
+        ext_recs = Ext.search([("sales_uom_id", "in", matching_uoms.ids)])
+        primary_pids = set(ext_recs.mapped("product_id").ids)
+
+        if not primary_pids:
+            return self._ok({
+                "items": [],
+                "total": 0,
+                "offset": 0,
+                "limit": 0,
+                "returned": 0,
+                "fetch_all": False,
+                "pricelist_id": None,
+                "weight_prefix": weight_prefix,
+                "matched_uom_ids": matching_uoms.ids,
+            })
+
+        # ── base domain ───────────────────────────────────────────────────────
+        Product = request.env["product.product"].sudo()
+        domain = [
+            ("active", "=", True),
+            ("sale_ok", "=", True),
+            ("id", "in", list(primary_pids)),
+        ]
+
+        # ── optional free-text search ─────────────────────────────────────────
+        q = (pget("query") or "").strip()
+        if q:
+            or_terms = [
+                ("name", "ilike", q),
+                ("default_code", "ilike", q),
+                ("barcode", "ilike", q),
+            ]
+            if "foreign_name" in Product._fields:
+                or_terms.append(("foreign_name", "ilike", q))
+            domain = ["&"] + domain + (["|"] * (len(or_terms) - 1)) + or_terms
+
+        # ── optional category filter ──────────────────────────────────────────
+        categ_raw = pget("categ_id") or pget("category_id")
+        if categ_raw:
+            try:
+                cid = int(categ_raw)
+            except (TypeError, ValueError):
+                cid = None
+            if cid is not None:
+                Cat = request.env["product.category"].sudo().with_context(active_test=False)
+                root = Cat.browse(cid)
+                if not root.exists():
+                    return self._fail(
+                        "Unknown product category for categ_id / category_id.",
+                        404,
+                    )
+                subtree = Cat.search([("id", "child_of", root.ids)])
+                domain = ["&"] + domain + [("categ_id", "in", subtree.ids)]
+
+        # ── pagination ────────────────────────────────────────────────────────
+        lim_raw = self._rest_int_param(pget, "limit", None)
+        if lim_raw is None:
+            lim_raw = 80
+        fetch_all = self._rest_query_bool(pget, "fetch_all", False) or lim_raw == 0
+        if fetch_all:
+            limit = None
+        else:
+            limit = max(int(lim_raw), 1)
+        offset = max(self._rest_int_param(pget, "offset", 0) or 0, 0)
+
+        # ── pricelist ─────────────────────────────────────────────────────────
+        pl_id = pget("pricelist_id")
+        pl_rec = False
+        if pl_id:
+            try:
+                pl_rec = request.env["product.pricelist"].sudo().browse(int(pl_id)).exists()
+            except (TypeError, ValueError):
+                pl_rec = False
+        if not pl_rec:
+            pl_rec = self._rest_default_pricelist()
+        pl_used_id = pl_rec.id if pl_rec else None
+        strict_pl = self._strict_pricelist_flag(pget)
+
+        # ── fetch & serialize ─────────────────────────────────────────────────
+        # Use the first matching UoM as the display/pricing UoM for all products.
+        # The catalog row helper will still use each product's own sales UoM for
+        # available_uoms, but the price column will use this UoM for consistency.
+        price_uom = matching_uoms[0]
+
+        def _build_ext_map(prod_ids):
+            if not prod_ids:
+                return {}
+            all_exts = Ext.search([("product_id", "in", prod_ids)])
+            return {e.product_id.id: e for e in all_exts}
+
+        def _build_wh_map(prod_ids):
+            result = {}
+            if not prod_ids:
+                return result
+            if "sap.product.warehouse.info" in request.env:
+                for wh_info in request.env["sap.product.warehouse.info"].sudo().search(
+                    [("product_id", "in", prod_ids)]
+                ):
+                    pid = wh_info.product_id.id
+                    qty = wh_info.current_qty_available or wh_info.last_available or 0
+                    if qty > 0 and wh_info.warehouse_id:
+                        result.setdefault(pid, []).append({
+                            "id": wh_info.warehouse_id.id,
+                            "name": wh_info.warehouse_id.name,
+                            "code": wh_info.sap_warehouse_code or wh_info.warehouse_id.code,
+                            "quantity": float(qty),
+                        })
+                return result
+            placeholders = ",".join(["%s"] * len(prod_ids))
+            request.env.cr.execute(
+                f"""
+                SELECT sq.product_id,
+                       sw.id   AS wh_id,
+                       sw.name AS wh_name,
+                       sw.code AS wh_code,
+                       COALESCE(SUM(sq.quantity - sq.reserved_quantity), 0) AS available_qty
+                FROM stock_warehouse sw
+                JOIN stock_location sl ON sl.warehouse_id = sw.id AND sl.usage = 'internal'
+                JOIN stock_quant sq ON sq.location_id = sl.id
+                             AND sq.product_id IN ({placeholders})
+                WHERE sw.active = true
+                GROUP BY sq.product_id, sw.id, sw.name, sw.code
+                HAVING COALESCE(SUM(sq.quantity - sq.reserved_quantity), 0) > 0
+                ORDER BY sw.name
+                """,
+                tuple(prod_ids),
+            )
+            for row in request.env.cr.dictfetchall():
+                result.setdefault(row["product_id"], []).append({
+                    "id": row["wh_id"],
+                    "name": row["wh_name"],
+                    "code": row["wh_code"] or row["wh_name"][:5],
+                    "quantity": float(row["available_qty"]),
+                })
+            return result
+
+        def _build_pl_items_map(tmpl_ids):
+            Item = request.env["product.pricelist.item"].sudo()
+            if not tmpl_ids or not pl_rec:
+                return {tid: Item.browse([]) for tid in tmpl_ids}
+            all_items = Item.search(
+                [
+                    ("pricelist_id", "=", pl_rec.id),
+                    ("product_tmpl_id", "in", list(tmpl_ids)),
+                ],
+                order="write_date asc, id asc",
+            )
+            result = {tid: Item.browse([]) for tid in tmpl_ids}
+            by_tmpl = {}
+            for item in all_items:
+                by_tmpl.setdefault(item.product_tmpl_id.id, []).append(item.id)
+            for tid, ids in by_tmpl.items():
+                result[tid] = Item.browse(ids)
+            return result
+
+        def _rows_for_products(prod_recs):
+            prod_ids = prod_recs.ids
+            tmpl_ids = set(prod_recs.mapped("product_tmpl_id").ids)
+            ext_map = _build_ext_map(prod_ids)
+            wh_map = _build_wh_map(prod_ids)
+            pl_items_map = _build_pl_items_map(tmpl_ids)
+            out = []
+            for prod in prod_recs:
+                # Use the ext_map to pick the exact primary sales UoM for this product
+                ext_r = ext_map.get(prod.id)
+                pu = (ext_r.sales_uom_id if ext_r and ext_r.sales_uom_id else price_uom)
+                row = self._rest_product_catalog_row(
+                    prod, pl_rec, pu, strict_pl, pl_used_id,
+                    ext_map=ext_map, wh_map=wh_map, pl_items_map=pl_items_map,
+                )
+                # Expose which primary sales UoM was used for transparency
+                row["primary_sales_uom"] = {"id": pu.id, "name": pu.name or ""}
+                out.append(row)
+            return out
+
+        total = Product.search_count(domain)
+        if limit is None:
+            recs = Product.search(domain, order="name")
+            items = _rows_for_products(recs)
+            offset_out = 0
+            limit_out = 0
+        else:
+            recs = Product.search(domain, limit=limit, offset=offset, order="name")
+            items = _rows_for_products(recs)
+            offset_out = offset
+            limit_out = limit
+
+        return self._ok({
+            "items": items,
+            "total": total,
+            "offset": offset_out,
+            "limit": limit_out,
+            "returned": len(items),
+            "fetch_all": bool(limit is None),
+            "pricelist_id": pl_used_id,
+            "weight_prefix": weight_prefix,
+            "matched_uom_ids": matching_uoms.ids,
+        })
 
     @http.route(f"{_PREFIX}/products/data", type="http", auth="none", methods=["POST"], csrf=False, cors="*")
     def product_data(self, **kwargs):
@@ -1174,150 +1645,6 @@ class PosPerfumeRestController(http.Controller):
                 price = row.get("price") or price
                 break
         return self._ok({"price_unit": float(price)})
-
-    @http.route(
-        f"{_PREFIX}/products/by_primary_sales_uom",
-        type="http",
-        auth="none",
-        methods=list(_READ),
-        csrf=False,
-        cors="*",
-    )
-    def products_by_primary_sales_uom(self, **kwargs):
-        """
-        Return products grouped by their primary sales UoM.
-
-        Query params (all optional):
-          pricelist_id    — pricelist to use for pricing (default: POS UI default)
-          categ_id        — filter by product.category id (includes subcategories)
-          fetch_all       — 1 / true → return all products (no limit)
-          limit           — page size (default 80)
-          offset          — pagination offset
-          query           — search term (name / SKU / barcode)
-          include_inactive — 1 to include archived products
-          include_non_sale — 1 to include products with sale_ok=False
-
-        Response shape:
-          {
-            "success": true,
-            "data": {
-              "groups": [
-                {
-                  "uom_id": 5,
-                  "uom_name": "كغم",
-                  "products": [ ...same shape as /products items... ]
-                },
-                ...
-              ],
-              "total": <total products>,
-              "pricelist_id": <id used>
-            }
-          }
-        """
-        if not self._pos_rest_auth():
-            return self._fail("Unauthorized", 401)
-
-        Product = request.env["product.product"].sudo()
-        pget = self._rest_products_query_params()
-        q = (pget("query") or "").strip()
-
-        lim_raw = self._rest_int_param(pget, "limit", None)
-        if lim_raw is None:
-            lim_raw = 80
-        fetch_all = self._rest_query_bool(pget, "fetch_all", False) or lim_raw == 0
-        limit = None if fetch_all else max(int(lim_raw), 1)
-        offset = max(self._rest_int_param(pget, "offset", 0) or 0, 0)
-
-        domain = []
-        if not self._rest_query_bool(pget, "include_inactive", False):
-            domain.append(("active", "=", True))
-        if not self._rest_query_bool(pget, "include_non_sale", False):
-            domain.append(("sale_ok", "=", True))
-
-        if q:
-            or_terms = [
-                ("name", "ilike", q),
-                ("default_code", "ilike", q),
-                ("barcode", "ilike", q),
-            ]
-            if "foreign_name" in Product._fields:
-                or_terms.append(("foreign_name", "ilike", q))
-            domain = ["&"] + domain + (["|"] * (len(or_terms) - 1)) + or_terms
-
-        categ_raw = pget("categ_id") or pget("category_id")
-        if categ_raw:
-            try:
-                cid = int(categ_raw)
-            except (TypeError, ValueError):
-                cid = None
-            if cid is not None:
-                Cat = request.env["product.category"].sudo().with_context(active_test=False)
-                root = Cat.browse(cid)
-                if not root.exists():
-                    return self._fail("Unknown product category for categ_id.", 404)
-                subtree = Cat.search([("id", "child_of", root.ids)])
-                domain = ["&"] + domain + [("categ_id", "in", subtree.ids)]
-
-        domain = self._rest_products_domain_item_codes(domain, Product, pget)
-
-        pl_id = pget("pricelist_id")
-        pl_rec = False
-        if pl_id:
-            try:
-                pl_rec = request.env["product.pricelist"].sudo().browse(int(pl_id)).exists()
-            except (TypeError, ValueError):
-                pl_rec = False
-        if not pl_rec:
-            pl_rec = self._rest_default_pricelist()
-        pl_used_id = pl_rec.id if pl_rec else None
-        strict_pl = self._strict_pricelist_flag(pget)
-
-        total = Product.search_count(domain)
-        if limit is None:
-            recs = Product.search(domain, order="name")
-        else:
-            recs = Product.search(domain, limit=limit, offset=offset, order="name")
-
-        ctrl = PosPerfumeController()
-
-        # Build rows and determine each product's primary sales UoM
-        groups_map = {}  # uom_id -> {"uom_id": int, "uom_name": str, "products": []}
-        uom_order = []   # preserve first-seen order
-
-        for prod in recs:
-            price_uom = self._rest_price_uom(prod, pget)
-            row = self._rest_product_catalog_row(prod, pl_rec, price_uom, strict_pl, pl_used_id)
-
-            # Determine primary sales UoM: prefer SAP sales_uom_id → product uom_id
-            primary_uom = None
-            if "sap.product.extended" in request.env:
-                ext = request.env["sap.product.extended"].sudo().search(
-                    [("product_id", "=", prod.id)], limit=1
-                )
-                if ext and ext.sales_uom_id and ext.sales_uom_id.id:
-                    primary_uom = ext.sales_uom_id
-            if not primary_uom:
-                primary_uom = prod.uom_id
-
-            uom_id = primary_uom.id if primary_uom else 0
-            uom_name = (primary_uom.name or "") if primary_uom else ""
-
-            if uom_id not in groups_map:
-                groups_map[uom_id] = {"uom_id": uom_id, "uom_name": uom_name, "products": []}
-                uom_order.append(uom_id)
-            groups_map[uom_id]["products"].append(row)
-
-        groups = [groups_map[uid] for uid in uom_order]
-
-        return self._ok(
-            {
-                "groups": groups,
-                "total": total,
-                "returned": sum(len(g["products"]) for g in groups),
-                "fetch_all": bool(limit is None),
-                "pricelist_id": pl_used_id,
-            }
-        )
 
     # --- orders (read list + minimal write stubs) --------------------------
 

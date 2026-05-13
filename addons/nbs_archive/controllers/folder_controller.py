@@ -274,6 +274,83 @@ class NBSFolderController(http.Controller):
             _logger.error(f'Move folder error: {str(e)}', exc_info=True)
             return {'success': False, 'error': str(e)}
     
+    @http.route('/api/folders/batch-delete', type='jsonrpc', auth='none', methods=['POST'], csrf=False, cors='*')
+    def batch_delete_folders(self, folder_ids, force=False, **kwargs):
+        """
+        Delete multiple folders in one request, permanently deleting all
+        documents inside each folder as well.
+
+        Params:
+          folder_ids  list[int]  required  IDs of folders to delete
+          force       bool       optional  If true, delete folders that have
+                                           subfolders by recursively deleting
+                                           children first (default: false —
+                                           raises an error if subfolders exist).
+
+        Response:
+          {
+            "success": true,
+            "deleted": [192, 191, ...],
+            "deleted_count": 20,
+            "skipped": [{"id": 5, "reason": "..."}],
+            "errors":  [{"id": 9, "error": "..."}]
+          }
+        """
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized'}
+
+            if not isinstance(folder_ids, list) or not folder_ids:
+                return {'success': False, 'error': 'folder_ids must be a non-empty list'}
+
+            Folder = request.env['nbs.document.folder'].sudo()
+            deleted = []
+            skipped = []
+            errors  = []
+
+            def _delete_folder_recursive(folder):
+                """Delete subfolders depth-first, then delete this folder."""
+                # Recurse into children first
+                children = Folder.search([('parent_id', '=', folder.id), ('active', '=', True)])
+                for child in children:
+                    _delete_folder_recursive(child)
+                # Now delete this folder (cascade-deletes its documents)
+                folder.unlink()
+
+            for fid in folder_ids:
+                try:
+                    folder = Folder.browse(int(fid))
+                    if not folder.exists():
+                        skipped.append({'id': fid, 'reason': 'not found'})
+                        continue
+
+                    folder_name = folder.name
+                    if force and folder.child_count > 0:
+                        # Recursively delete children first, then this folder
+                        _delete_folder_recursive(folder)
+                    else:
+                        # folder.unlink() raises ValidationError if subfolders exist
+                        folder.unlink()
+
+                    deleted.append(fid)
+                    _logger.info('batch_delete_folders: deleted folder %s (%s)', fid, folder_name)
+
+                except Exception as exc:
+                    _logger.error('batch_delete_folders: error on folder %s: %s', fid, exc)
+                    errors.append({'id': fid, 'error': str(exc)})
+
+            return {
+                'success':       True,
+                'deleted':       deleted,
+                'deleted_count': len(deleted),
+                'skipped':       skipped,
+                'errors':        errors,
+            }
+
+        except Exception as e:
+            _logger.error('batch_delete_folders error: %s', e, exc_info=True)
+            return {'success': False, 'error': str(e)}
+
     @http.route('/api/folders/tree', type='jsonrpc', auth='none', methods=['POST'], csrf=False, cors='*')
     def get_folder_tree(self, department_id=None, **kwargs):
         """Get folder tree structure"""

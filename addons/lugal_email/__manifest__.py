@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
+# File: addons/lugal_email/__manifest__.py
+# Component: Lugal Email — module manifest (lugal_email / __manifest__.py)
 {
     'name': 'Lugal Email',
-    'version': '1.1.0',
+    'version': '1.1.3',
     'category': 'Communication',
     'summary': 'IMAP/SMTP email engine for the Lugal suite — accounts, inbox, send, notifications',
     'description': """
@@ -26,3 +28,4 @@ Features
     'auto_install': False,
     'application': False,
 }
+# TODO: remove - cherry-pick marker

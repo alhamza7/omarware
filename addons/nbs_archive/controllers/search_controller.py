@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import re
 import logging
 from odoo import http
 from odoo.http import request
@@ -7,6 +8,74 @@ from odoo.http import request
 _logger = logging.getLogger(__name__)
 
 from ._auth import ensure_jwt_user_id
+
+
+def _normalize_ws(text: str) -> str:
+    """Collapse any run of whitespace (including \\n, \\t) into a single space."""
+    return re.sub(r'\s+', ' ', text).strip()
+
+
+def _build_ocr_clause(env, q: str):
+    """
+    Return an Odoo domain leaf that matches ``q`` inside ``ocr_text``.
+
+    For single-word queries the fast ORM ``ilike`` is used unchanged.
+    For multi-word queries a raw-SQL ``regexp_replace`` is used so that
+    newline-separated words in the stored OCR text are treated as
+    space-separated, making "ABCD HXH 455223" findable even when Vision
+    stored them on different lines.
+    """
+    tokens = q.split()
+    if len(tokens) <= 1:
+        return ('ocr_text', 'ilike', q)
+
+    normalized_q = ' '.join(tokens)
+    try:
+        env.cr.execute(
+            """
+            SELECT id
+            FROM   nbs_document
+            WHERE  state = 'active'
+              AND  (is_deleted = false OR is_deleted IS NULL)
+              AND  regexp_replace(ocr_text, '\\s+', ' ', 'g') ILIKE %s
+            """,
+            [f'%{normalized_q}%'],
+        )
+        ocr_ids = [row[0] for row in env.cr.fetchall()]
+    except Exception as exc:
+        _logger.warning('OCR multi-word SQL search failed, falling back to ilike: %s', exc)
+        return ('ocr_text', 'ilike', q)
+
+    return ('id', 'in', ocr_ids) if ocr_ids else ('id', 'in', [-1])
+
+
+def _ocr_snippet(ocr_text: str, query: str, radius: int = 120) -> str:
+    """
+    Return a short excerpt from ``ocr_text`` centred around the first
+    occurrence of ``query`` (case-insensitive).
+
+    Whitespace (including newlines inserted by OCR) is normalised before
+    searching so that a multi-word query like "ABCD HXH 455223" is found
+    even when the words were on separate lines in the original scan.
+    The returned snippet is taken from the normalised text so it is always
+    clean and readable.
+    """
+    if not ocr_text:
+        return ''
+    normalized = _normalize_ws(ocr_text)
+    low_text  = normalized.lower()
+    low_query = _normalize_ws((query or '').lower())
+    pos = low_text.find(low_query) if low_query else -1
+    if pos == -1:
+        return normalized[:radius] + ('…' if len(normalized) > radius else '')
+    start = max(0, pos - radius // 2)
+    end   = min(len(normalized), pos + len(low_query) + radius // 2)
+    snippet = normalized[start:end].strip()
+    if start > 0:
+        snippet = '…' + snippet
+    if end < len(normalized):
+        snippet = snippet + '…'
+    return snippet
 
 
 class NBSSearchController(http.Controller):
@@ -39,16 +108,20 @@ class NBSSearchController(http.Controller):
                     'error': 'Search query is required'
                 }
             
-            # Build domain for metadata search (documents)
+            # Build domain for metadata + OCR content search.
+            # OCR clause uses whitespace-normalised SQL for multi-word queries
+            # so that phrases split across lines by the scanner are still found.
+            ocr_clause = _build_ocr_clause(request.env, query)
             domain = [
                 ('state', '=', 'active'),
-                '|', '|', '|', '|', '|',
+                '|', '|', '|', '|', '|', '|',
                 ('name', 'ilike', query),
                 ('barcode', 'ilike', query),
                 ('po_number', 'ilike', query),
                 ('bl_number', 'ilike', query),
                 ('container_number', 'ilike', query),
                 ('invoice_number', 'ilike', query),
+                ocr_clause,
             ]
             
             # Apply filters
@@ -91,6 +164,7 @@ class NBSSearchController(http.Controller):
                     'document_type_name': doc.document_type_id.name,
                     'uploader_name': doc.uploader_id.name,
                     'upload_date': doc.upload_date.isoformat() if doc.upload_date else None,
+                    'document_date': doc.document_date.strftime('%d-%m-%Y') if doc.document_date else None,
                     'barcode': doc.barcode,
                     'file_name': doc.file_name,
                     'highlights': [],  # Will be populated by OpenSearch
@@ -156,18 +230,21 @@ class NBSSearchController(http.Controller):
                     'document_count': getattr(f, 'document_count', None),
                 })
 
-            # Documents
+            # Documents — search metadata AND OCR-extracted content.
+            # OCR clause uses whitespace-normalised SQL for multi-word queries.
+            ocr_clause = _build_ocr_clause(request.env, q)
             Document = request.env['nbs.document'].sudo()
             doc_domain = [
                 ('state', '=', 'active'),
                 ('is_deleted', '=', False),
-                '|', '|', '|', '|', '|',
+                '|', '|', '|', '|', '|', '|',
                 ('name', 'ilike', q),
                 ('barcode', 'ilike', q),
                 ('po_number', 'ilike', q),
                 ('bl_number', 'ilike', q),
                 ('container_number', 'ilike', q),
                 ('invoice_number', 'ilike', q),
+                ocr_clause,
             ]
             documents = Document.search(doc_domain, limit=per_page, order='upload_date desc')
             for doc in documents:
@@ -181,8 +258,11 @@ class NBSSearchController(http.Controller):
                     'document_type_name': doc.document_type_id.name if doc.document_type_id else None,
                     'uploader_name': doc.uploader_id.name if doc.uploader_id else None,
                     'upload_date': doc.upload_date.isoformat() if doc.upload_date else None,
+                    'document_date': doc.document_date.strftime('%d-%m-%Y') if doc.document_date else None,
                     'parent_document_id': doc.parent_document_id.id if doc.parent_document_id else None,
                     'relation_type': 'attachment' if doc.parent_document_id and doc.is_attachment else ('secondary_document' if doc.parent_document_id else None),
+                    'ocr_status': doc.ocr_status,
+                    'ocr_snippet': _ocr_snippet(doc.ocr_text, q),
                 })
 
             # Attachments
@@ -299,3 +379,257 @@ class NBSSearchController(http.Controller):
                 'success': False,
                 'error': str(e)
             }
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # POST /api/documents/report
+    # ─────────────────────────────────────────────────────────────────────────
+    @http.route(
+        '/api/documents/report',
+        type='jsonrpc', auth='none', methods=['POST'], csrf=False, cors='*',
+    )
+    def documents_report(
+        self,
+        from_date=None,
+        to_date=None,
+        company_id=None,
+        company_name=None,
+        department_id=None,
+        department_name=None,
+        document_type_id=None,
+        document_type=None,
+        confidentiality_level=None,
+        uploader_id=None,
+        uploader_name=None,
+        folder_id=None,
+        folder_name=None,
+        document_role=None,
+        state=None,
+        page=1,
+        per_page=50,
+        **kwargs,
+    ):
+        """
+        Return a paginated list of documents uploaded within a date range,
+        with optional filters on company, department, document type,
+        confidentiality level, uploader, and folder.
+
+        ── Request body (all fields optional) ──────────────────────────────
+        {
+          "from_date":            "2026-01-01",          // default: earliest upload ever
+          "to_date":              "2026-12-31",          // default: today
+          "company_id":           7436,
+          "company_name":         "ALCAN",               // partial, case-insensitive
+          "department_id":        4,
+          "department_name":      "Supply Chain",        // partial, case-insensitive
+          "document_type_id":     5,
+          "document_type":        "Invoice",             // partial, case-insensitive
+          "confidentiality_level":"internal",            // public|internal|confidential|strict
+          "uploader_id":          2,
+          "uploader_name":        "admin",               // partial, case-insensitive
+          "folder_id":            45,
+          "folder_name":          "ALCAN-386",           // partial, case-insensitive
+          "document_role":        "main",                // main|sub|attachment|other
+          "state":                "active",              // active|archived|all  (default: active)
+          "page":                 1,
+          "per_page":             50
+        }
+
+        ── Response ────────────────────────────────────────────────────────
+        {
+          "success": true,
+          "summary": {
+            "total":        407,
+            "from_date":    "2026-05-03T08:11:31",
+            "to_date":      "2026-05-04T10:33:00",
+            "filters": { "company": "ALCAN", ... }
+          },
+          "data": [
+            {
+              "id":                   123,
+              "name":                 "Invoice April 2026",
+              "barcode":              "NBS000123",
+              "upload_date":          "2026-05-03T09:00:00",
+              "uploader_id":          2,
+              "uploader_name":        "admin",
+              "department_id":        4,
+              "department_name":      "Supply Chain",
+              "document_type_id":     5,
+              "document_type_name":   "Invoice",
+              "company_id":           7436,
+              "company_name":         "ALCAN",
+              "folder_id":            45,
+              "folder_name":          "ALCAN-386",
+              "confidentiality_level":"internal",
+              "document_role":        "main",            // main|sub|attachment|other
+              "is_attachment":        false,
+              "parent_document_id":   null,
+              "state":                "active",
+              "version_count":        2,
+              "ocr_status":           "completed"
+            }
+          ],
+          "pagination": {
+            "page":        1,
+            "per_page":    50,
+            "total":       407,
+            "total_pages": 9
+          }
+        }
+        """
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized'}
+
+            env = request.env
+            Doc = env['nbs.document'].sudo()
+
+            # ── Resolve default date boundaries ──────────────────────────────
+            from odoo.fields import Datetime as OdooDatetime
+            from datetime import datetime, timezone
+
+            # Default from_date: earliest upload_date ever recorded
+            if not from_date:
+                env.cr.execute(
+                    "SELECT MIN(upload_date) FROM nbs_document WHERE upload_date IS NOT NULL"
+                )
+                row = env.cr.fetchone()
+                earliest = row[0] if row and row[0] else None
+                effective_from = earliest.isoformat() if earliest else '2000-01-01T00:00:00'
+            else:
+                effective_from = from_date
+
+            # Default to_date: now (end of day)
+            if not to_date:
+                effective_to = datetime.now(timezone.utc).strftime('%Y-%m-%dT23:59:59')
+            else:
+                # If date only (no time), set to end-of-day
+                effective_to = to_date if 'T' in str(to_date) else f'{to_date}T23:59:59'
+
+            if 'T' not in str(effective_from):
+                effective_from = f'{effective_from}T00:00:00'
+
+            # ── Build Odoo domain ─────────────────────────────────────────────
+            domain = [
+                ('upload_date', '>=', effective_from),
+                ('upload_date', '<=', effective_to),
+            ]
+
+            # State filter (default: active only, 'all' = active + archived)
+            if state == 'all':
+                domain.append(('is_deleted', '=', False))
+            elif state == 'archived':
+                domain.append(('state', '=', 'archived'))
+            else:
+                domain.append(('state', '=', 'active'))
+
+            # Filters: prefer ID, fall back to name ilike
+            filters_applied = {}
+
+            if company_id:
+                domain.append(('company_id', '=', int(company_id)))
+                filters_applied['company_id'] = int(company_id)
+            elif company_name:
+                domain.append(('company_id.name', 'ilike', company_name))
+                filters_applied['company_name'] = company_name
+
+            if department_id:
+                domain.append(('department_id', '=', int(department_id)))
+                filters_applied['department_id'] = int(department_id)
+            elif department_name:
+                domain.append(('department_id.name', 'ilike', department_name))
+                filters_applied['department_name'] = department_name
+
+            if document_type_id:
+                domain.append(('document_type_id', '=', int(document_type_id)))
+                filters_applied['document_type_id'] = int(document_type_id)
+            elif document_type:
+                domain.append(('document_type_id.name', 'ilike', document_type))
+                filters_applied['document_type'] = document_type
+
+            if confidentiality_level:
+                domain.append(('confidentiality_level', '=', confidentiality_level))
+                filters_applied['confidentiality_level'] = confidentiality_level
+
+            if uploader_id:
+                domain.append(('uploader_id', '=', int(uploader_id)))
+                filters_applied['uploader_id'] = int(uploader_id)
+            elif uploader_name:
+                domain.append(('uploader_id.name', 'ilike', uploader_name))
+                filters_applied['uploader_name'] = uploader_name
+
+            if folder_id:
+                domain.append(('folder_id', '=', int(folder_id)))
+                filters_applied['folder_id'] = int(folder_id)
+            elif folder_name:
+                domain.append(('folder_id.name', 'ilike', folder_name))
+                filters_applied['folder_name'] = folder_name
+
+            if document_role:
+                domain.append(('folder_role', '=', document_role))
+                filters_applied['document_role'] = document_role
+
+            # ── Pagination ────────────────────────────────────────────────────
+            try:
+                page     = max(1, int(page))
+                per_page = min(500, max(1, int(per_page)))
+            except (TypeError, ValueError):
+                page, per_page = 1, 50
+
+            total       = Doc.search_count(domain)
+            total_pages = max(1, (total + per_page - 1) // per_page)
+            offset      = (page - 1) * per_page
+
+            docs = Doc.search(domain, limit=per_page, offset=offset, order='upload_date desc')
+
+            # ── Build response rows ───────────────────────────────────────────
+            data = []
+            for doc in docs:
+                data.append({
+                    'id':                    doc.id,
+                    'name':                  doc.name,
+                    'barcode':               doc.barcode or None,
+                    'upload_date':           doc.upload_date.isoformat() if doc.upload_date else None,
+                    'uploader_id':           doc.uploader_id.id if doc.uploader_id else None,
+                    'uploader_name':         doc.uploader_id.name if doc.uploader_id else None,
+                    'department_id':         doc.department_id.id if doc.department_id else None,
+                    'department_name':       doc.department_id.name if doc.department_id else None,
+                    'document_type_id':      doc.document_type_id.id if doc.document_type_id else None,
+                    'document_type_name':    doc.document_type_id.name if doc.document_type_id else None,
+                    'company_id':            doc.company_id.id if doc.company_id else None,
+                    'company_name':          doc.company_id.name if doc.company_id else None,
+                    'folder_id':             doc.folder_id.id if doc.folder_id else None,
+                    'folder_name':           doc.folder_id.name if doc.folder_id else None,
+                    'confidentiality_level': doc.confidentiality_level,
+                    'document_role':         doc.folder_role or 'other',
+                    'is_attachment':         doc.is_attachment,
+                    'parent_document_id':    doc.parent_document_id.id if doc.parent_document_id else None,
+                    'state':                 doc.state,
+                    'version_count':         doc.version_count or 0,
+                    'ocr_status':            doc.ocr_status or 'pending',
+                    'po_number':             doc.po_number or None,
+                    'bl_number':             doc.bl_number or None,
+                    'invoice_number':        doc.invoice_number or None,
+                    'container_number':      doc.container_number or None,
+                    'document_date':         doc.document_date.strftime('%d-%m-%Y') if doc.document_date else None,
+                })
+
+            return {
+                'success': True,
+                'summary': {
+                    'total':       total,
+                    'from_date':   effective_from,
+                    'to_date':     effective_to,
+                    'filters':     filters_applied,
+                },
+                'data': data,
+                'pagination': {
+                    'page':        page,
+                    'per_page':    per_page,
+                    'total':       total,
+                    'total_pages': total_pages,
+                },
+            }
+
+        except Exception as exc:
+            _logger.error('documents_report error: %s', exc, exc_info=True)
+            return {'success': False, 'error': str(exc)}

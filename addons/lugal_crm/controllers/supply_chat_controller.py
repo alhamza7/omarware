@@ -30,6 +30,7 @@ Routes (all JSON-RPC POST):
 import json
 import logging
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 
 from odoo import http, fields as odoo_fields
@@ -37,7 +38,7 @@ from odoo.http import request
 
 from ._auth import ensure_jwt_user_id
 from ._error import crm_error
-from .upload_controller import _build_attachment_public_path, _build_attachment_url
+from .upload_controller import _build_attachment_url
 
 _logger = logging.getLogger(__name__)
 
@@ -58,7 +59,24 @@ def _to_riyadh_iso(dt):
 
 
 # ---------------------------------------------------------------------------
-# Per-process typing timers: (uid, conv_id) → threading.Timer
+# Per-process typing timers
+#   _typing_timers : (uid, conv_id) → threading.Timer   (auto-stop timer)
+#
+# DESIGN NOTE — why typing_users was removed
+# ------------------------------------------
+# Odoo runs with multiple worker processes (e.g. 16). Each worker holds its
+# own copy of _typing_users.  When User A's heartbeat hits worker-3 and User
+# B's hits worker-7, each worker only knows about "its own" user.  The result
+# was that every typing.start payload contained an incomplete (and often
+# contradictory) typing_users list, which caused the FE state to thrash.
+#
+# The correct pattern (used by Slack / WhatsApp etc.):
+#   • Backend emits per-user events with a monotonic heartbeat_time (ms epoch).
+#   • Frontend maintains its own Map<userId, {name, lastHeartbeat}> and is the
+#     single source of truth for "who is currently typing".
+#   • FE ignores any typing.stop event whose heartbeat_time is older than the
+#     last typing.start it saw for that user.  This filters the stale auto-stop
+#     events that fire from whichever worker handled a previous heartbeat.
 # ---------------------------------------------------------------------------
 _typing_timers: dict = {}
 _typing_lock = threading.Lock()
@@ -307,7 +325,7 @@ def _resolve_thread(uid, thread_id, recipient_ids, group_name=None):
     return None, 'Provide thread_id or recipient_ids'
 
 
-def _notify_participants_resubscribe(conv, participant_ids):
+def _notify_participants_resubscribe(conv, participant_ids, action='resubscribe'):
     """
     After a NEW conversation is created, tell every participant's frontend to
     call busClient.resubscribe() so Odoo adds supply_chat.<conv_id> to their
@@ -323,6 +341,7 @@ def _notify_participants_resubscribe(conv, participant_ids):
         'conversation_id': conv.id,
         'conversation_type': conv.type,
         'name': conv.name or '',
+        'action': action,
     }
     for uid in participant_ids:
         try:
@@ -333,6 +352,15 @@ def _notify_participants_resubscribe(conv, participant_ids):
             )
         except Exception as exc:
             _logger.debug('_notify_participants_resubscribe bus error uid=%s: %s', uid, exc)
+
+
+def _notify_membership_changed(conv, user_ids, action):
+    """
+    Tell affected users to refresh their bus channel subscription after group
+    membership changes.  This keeps long-lived tabs aligned with the backend
+    channel list without requiring logout/login.
+    """
+    _notify_participants_resubscribe(conv, user_ids, action=action)
 
 
 def _publish_new_message(msg, uid, conv):
@@ -512,6 +540,7 @@ class SupplyChatController(http.Controller):
                 return {'success': False, 'error': 'Cannot leave team channels'}
             if uid in conv.participant_ids.ids:
                 conv.write({'participant_ids': [(3, uid)]})
+                _notify_membership_changed(conv, [uid], action='removed')
             return {'success': True}
         except Exception as e:
             return crm_error(e, 'conversation_leave')
@@ -591,15 +620,22 @@ class SupplyChatController(http.Controller):
     @http.route('/api/crm/supply/conversations/<int:conv_id>/typing',
                 type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def conversation_typing(self, conv_id, is_typing=False, **kwargs):
-        """Broadcast a typing indicator to all participants of a conversation.
+        """Broadcast a per-user typing indicator to conversation participants.
 
-        Typing state is intentionally kept ONLY in the in-process timer dict
-        (_typing_timers) — no DB writes are performed.  The previous
-        lugal.supply.typing ORM upsert caused psycopg2 SerializationFailure
-        errors under concurrent worker load (9 workers racing on the same row)
-        which surfaced as HTTP 500 on the FE.  The bus event alone is
-        sufficient: recipients see typing.start / typing.stop immediately via
-        WebSocket and the auto-stop timer fires if the heartbeat stops.
+        Each event carries a heartbeat_time (Unix ms epoch) that the FE uses to
+        discard stale auto-stop events emitted by older Odoo worker processes.
+
+        Backend design
+        --------------
+        • No per-conversation typing_users list is maintained on the server.
+          With N worker processes each holding independent in-memory state,
+          such a list would be wrong most of the time.
+        • The FE is the authoritative source of "who is typing"; it maintains a
+          Map<userId, {name, lastHeartbeat}> and renders from that map.
+        • The auto-stop timer fires _TYPING_EXPIRE_SECS after the LAST heartbeat
+          processed by THIS worker.  If the user sent a newer heartbeat to a
+          DIFFERENT worker that timer's stop event will carry a smaller
+          heartbeat_time and the FE will discard it.
         """
         try:
             uid = ensure_jwt_user_id()
@@ -611,23 +647,31 @@ class SupplyChatController(http.Controller):
             if conv.type != 'team' and uid not in conv.participant_ids.ids:
                 return {'success': False, 'error': 'Forbidden'}
 
-            user = request.env['res.users'].sudo().browse(uid)
-            payload = {
-                'conversation_id': conv.id,
-                'user_id': uid,
-                'user_name': user.name or '',
-                'is_typing': bool(is_typing),
-            }
-
+            user      = request.env['res.users'].sudo().browse(uid)
+            user_name = user.name or ''
             timer_key = (uid, conv_id)
             db_name   = request.env.cr.dbname
 
             if is_typing:
+                # Capture heartbeat_time while still inside the request context.
+                heartbeat_time = int(time.time() * 1000)
+
+                payload = {
+                    'conversation_id': conv.id,
+                    'user_id':         uid,
+                    'user_name':       user_name,
+                    'is_typing':       True,
+                    'heartbeat_time':  heartbeat_time,
+                }
                 _bus_publish(f'supply_chat.{conv.id}', 'supply.chat.typing.start', payload)
 
-                # Arm/reset a pure in-memory auto-stop timer — no DB needed.
-                def _auto_stop():
+                # Arm/reset auto-stop timer.  The closure captures heartbeat_time
+                # so the FE can verify this stop belongs to the most recent start.
+                def _auto_stop(_hb=heartbeat_time):
                     try:
+                        with _typing_lock:
+                            _typing_timers.pop(timer_key, None)
+
                         from odoo.modules.registry import Registry as _Registry
                         with _Registry(db_name).cursor() as cr:
                             from odoo.api import Environment
@@ -637,16 +681,17 @@ class SupplyChatController(http.Controller):
                                 'supply.chat.typing.stop',
                                 {
                                     'conversation_id': conv_id,
-                                    'user_id': uid,
-                                    'user_name': '',
-                                    'is_typing': False,
+                                    'user_id':         uid,
+                                    'user_name':       user_name,
+                                    'is_typing':       False,
+                                    'heartbeat_time':  _hb,
                                 },
                             )
                     except Exception as exc:
                         _logger.debug('typing auto-stop error: %s', exc)
 
                 with _typing_lock:
-                    old_timer = _typing_timers.get(timer_key)
+                    old_timer = _typing_timers.pop(timer_key, None)
                     if old_timer:
                         old_timer.cancel()
                     t = threading.Timer(_TYPING_EXPIRE_SECS, _auto_stop)
@@ -655,12 +700,23 @@ class SupplyChatController(http.Controller):
                     _typing_timers[timer_key] = t
 
             else:
-                # Cancel any pending auto-stop timer and emit stop immediately.
+                # Explicit stop: cancel pending auto-stop and broadcast immediately.
+                # Use a heartbeat_time larger than any start event so the FE always
+                # accepts an explicit stop (user intentionally stopped typing).
+                heartbeat_time = int(time.time() * 1000)
+
                 with _typing_lock:
                     old = _typing_timers.pop(timer_key, None)
                     if old:
                         old.cancel()
 
+                payload = {
+                    'conversation_id': conv.id,
+                    'user_id':         uid,
+                    'user_name':       user_name,
+                    'is_typing':       False,
+                    'heartbeat_time':  heartbeat_time,
+                }
                 _bus_publish(f'supply_chat.{conv.id}', 'supply.chat.typing.stop', payload)
 
             return {'success': True, 'data': payload}
@@ -711,7 +767,15 @@ class SupplyChatController(http.Controller):
             can_add = (uid == creator_id) or (uid in admin_ids) or (uid in supervisor_ids)
             if not can_add:
                 return {'success': False, 'error': 'Only admins and supervisors can add members'}
-            conv.write({'participant_ids': [(4, int(u)) for u in user_ids]})
+            before_ids = set(conv.participant_ids.ids)
+            clean_user_ids = [int(u) for u in user_ids]
+            conv.write({'participant_ids': [(4, u) for u in clean_user_ids]})
+            added_ids = sorted(set(clean_user_ids) - before_ids)
+            if added_ids:
+                # Existing WebSocket subscriptions are built at connection time.
+                # Newly-added members must resubscribe immediately or they can
+                # miss typing/edit/delete/pin events on supply_chat.<conv_id>.
+                _notify_participants_resubscribe(conv, added_ids)
             return {'success': True, 'data': _serialize_conversation(conv, uid)}
         except Exception as e:
             return crm_error(e, 'members_add')
@@ -732,17 +796,20 @@ class SupplyChatController(http.Controller):
                 return {'success': False, 'error': 'Can only remove members from group conversations'}
             if uid not in conv.participant_ids.ids:
                 return {'success': False, 'error': 'Forbidden'}
-            # Only admins (and creator) can remove members
+            # Super admin rule: only the group CREATOR can remove other members.
+            # Regular admins can add members but cannot remove them.
+            # Any member can remove themselves (leave the group).
             creator_id = conv.created_by_id.id if conv.created_by_id else None
-            admin_ids = conv.group_admin_ids.ids if hasattr(conv, 'group_admin_ids') else []
-            is_admin = (uid == creator_id) or (uid in admin_ids)
-            # A member can always remove themselves (leave)
             target_uid = int(user_id)
-            if target_uid != uid and not is_admin:
-                return {'success': False, 'error': 'Only admins can remove other members'}
-            if target_uid == creator_id and uid != creator_id:
+            is_self_remove = (target_uid == uid)
+            is_creator = (uid == creator_id)
+
+            if not is_self_remove and not is_creator:
+                return {'success': False, 'error': 'Only the group creator can remove other members'}
+            if target_uid == creator_id and not is_self_remove:
                 return {'success': False, 'error': 'Cannot remove the group creator'}
             conv.write({'participant_ids': [(3, target_uid)]})
+            _notify_membership_changed(conv, [target_uid], action='removed')
             return {'success': True, 'data': _serialize_conversation(conv, uid)}
         except Exception as e:
             return crm_error(e, 'members_remove')
@@ -938,7 +1005,7 @@ class SupplyChatController(http.Controller):
                             'name': att.name or '',
                             'mimetype': mime,
                             'size': int(att.file_size or 0),
-                            'url': _build_attachment_public_path(att),
+                            'url': _build_attachment_url(att),
                             'file_url': _build_attachment_url(att),
                             'kind': att_kind,
                             'file_type': att_kind,
@@ -1292,6 +1359,110 @@ class SupplyChatController(http.Controller):
     # Messages — forward
     # -----------------------------------------------------------------------
 
+    @http.route('/api/crm/supply/messages/broadcast',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def messages_broadcast(self, content='', conversation_ids=None,
+                           attachments=None, attachment_ids=None,
+                           kind=None, **kwargs):
+        """Send the same message to multiple conversations at once.
+
+        Payload:
+          content         – message text (may be empty if attachments provided)
+          conversation_ids – list of existing conversation IDs to broadcast to
+          attachment_ids  – (optional) list of ir.attachment IDs to include
+          attachments     – (optional) list of attachment dicts (same as messages/create)
+          kind            – 'text' | 'image' | 'video' | 'audio' | 'file' (default 'text')
+
+        Returns per-conversation results so the FE can track which succeeded.
+        """
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+            if not conversation_ids or not isinstance(conversation_ids, list):
+                return {'success': False, 'error': 'conversation_ids must be a non-empty list'}
+            if not content and not attachments and not attachment_ids:
+                return {'success': False, 'error': 'Provide content or attachments'}
+
+            # Build attachment list once (shared across all conversations)
+            att_list = list(attachments or [])
+            inferred_kind = kind or 'text'
+            if attachment_ids:
+                IrAtt = request.env['ir.attachment'].sudo()
+                for att_id in attachment_ids:
+                    att = IrAtt.browse(int(att_id)).exists()
+                    if att:
+                        mime = att.mimetype or ''
+                        if mime.startswith('audio/'):
+                            att_kind = 'voice' if 'voice' in (att.name or '').lower() else 'audio'
+                        elif mime.startswith('video/'):
+                            att_kind = 'video'
+                        elif mime.startswith('image/'):
+                            att_kind = 'image'
+                        else:
+                            att_kind = 'file'
+                        att_list.append({
+                            'id': att.id,
+                            'name': att.name or '',
+                            'mimetype': mime,
+                            'size': int(att.file_size or 0),
+                            'url': _build_attachment_url(att),
+                            'file_url': _build_attachment_url(att),
+                            'kind': att_kind,
+                            'file_type': att_kind,
+                            'duration_seconds': 0,
+                        })
+                        if inferred_kind == 'text' and att_kind in ('audio', 'voice', 'video', 'image'):
+                            inferred_kind = att_kind
+
+            final_kind = kind if kind in ('text', 'image', 'video', 'audio', 'voice', 'file') else inferred_kind
+            atts_json = json.dumps(att_list)
+
+            Msg  = request.env['lugal.supply.message'].sudo()
+            Conv = request.env['lugal.supply.conversation'].sudo()
+            now  = odoo_fields.Datetime.now()
+
+            results = []
+            for conv_id in conversation_ids:
+                try:
+                    conv = Conv.browse(int(conv_id)).exists()
+                    if not conv:
+                        results.append({'conversation_id': conv_id, 'success': False, 'error': 'Not found'})
+                        continue
+                    if conv.type != 'team' and uid not in conv.participant_ids.ids:
+                        results.append({'conversation_id': conv_id, 'success': False, 'error': 'Forbidden'})
+                        continue
+                    msg = Msg.create({
+                        'conversation_id': conv.id,
+                        'sender_id':       uid,
+                        'content':         str(content or ''),
+                        'kind':            final_kind,
+                        'attachments_json': atts_json,
+                    })
+                    conv.write({'last_activity': now})
+                    _publish_new_message(msg, uid, conv)
+                    results.append({
+                        'conversation_id': conv_id,
+                        'success':         True,
+                        'message':         _serialize_message(msg, uid),
+                    })
+                except Exception as inner_exc:
+                    results.append({'conversation_id': conv_id, 'success': False, 'error': str(inner_exc)})
+
+            total     = len(results)
+            succeeded = sum(1 for r in results if r.get('success'))
+            return {
+                'success': True,
+                'data': {
+                    'total':     total,
+                    'succeeded': succeeded,
+                    'failed':    total - succeeded,
+                    'results':   results,
+                },
+            }
+        except Exception as e:
+            return crm_error(e, 'messages_broadcast')
+
     @http.route('/api/crm/supply/messages/forward',
                 type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def messages_forward(self, message_id=None, thread_id=None, recipient_ids=None,
@@ -1402,7 +1573,12 @@ class SupplyChatController(http.Controller):
 
         Channels:
           supply_chat.<conv_id>   — conversation-level events (new msg, typing, reactions)
-          supply_user.<uid>       — user-level events (delivered/read receipts, DM notifications)
+          supply_user.<uid>       — user-level events:
+                                    • delivered/read receipts
+                                    • DM notifications
+                                    • supply.chat.resubscribe  (new conversation created)
+                                    • crm.permissions.updated  (admin changed this user's
+                                        permissions — FE must re-call /api/crm/me/permissions)
         """
         try:
             uid = ensure_jwt_user_id()
@@ -1415,6 +1591,11 @@ class SupplyChatController(http.Controller):
             ])
             channels = [f'supply_chat.{c.id}' for c in convs]
             channels.append(f'supply_user.{uid}')
+            channels.append('supply_stories')
+            try:
+                channels.append(f'supply_session.{request.session.sid}')
+            except Exception:
+                pass
             return {
                 'success': True,
                 'data': {
@@ -1424,3 +1605,4 @@ class SupplyChatController(http.Controller):
             }
         except Exception as e:
             return crm_error(e, 'bus_channels')
+# TODO: remove - cherry-pick marker

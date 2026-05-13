@@ -122,3 +122,4 @@ class LugalSupplyMessage(models.Model):
         if conversation_id is not None:
             dom.append(('conversation_id', '=', int(conversation_id)))
         return dom
+# TODO: remove - cherry-pick marker
