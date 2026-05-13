@@ -7,3 +7,4 @@ access_lugal_supply_negotiation_user,lugal.supply.negotiation.user,model_lugal_s
 access_lugal_supply_item_request_user,lugal.supply.item.request.user,model_lugal_supply_item_request,base.group_user,1,1,1,1
 access_lugal_supply_minmax_user,lugal.supply.minmax.user,model_lugal_supply_minmax,base.group_user,1,1,1,1
 access_lugal_supply_notification_user,lugal.supply.notification.user,model_lugal_supply_notification,base.group_user,1,1,1,1
+access_lugal_supply_negotiation_offer_user,lugal.supply.negotiation.offer.user,model_lugal_supply_negotiation_offer,base.group_user,1,1,1,1
