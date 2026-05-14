@@ -657,6 +657,33 @@ def _message_attachment_buckets(msg):
     return att_list, inline_list
 
 
+def _resolve_cid_refs(body_html, inline_attachments):
+    """Replace cid:<content_id> references in body_html with real attachment URLs.
+
+    Called when building the full message payload so the frontend can render
+    inline images directly without any client-side CID substitution.
+
+    Handles two common encoding variants:
+      • cid:img-abc123@lugal.mail           (no angle brackets — standard)
+      • cid:<img-abc123@lugal.mail>         (with angle brackets — some clients)
+    """
+    if not body_html or not inline_attachments:
+        return body_html
+    resolved = body_html
+    for att in inline_attachments:
+        url = att.get('url')
+        if not url:
+            continue
+        cid_raw = att.get('content_id') or ''
+        if not cid_raw:
+            continue
+        # Replace both encoding variants
+        for pattern in (f'cid:{cid_raw}', f'cid:<{cid_raw}>'):
+            if pattern in resolved:
+                resolved = resolved.replace(pattern, url)
+    return resolved
+
+
 def _message_to_dict(msg, full=False):
     data = {
         'id':             msg.id,
@@ -707,7 +734,15 @@ def _message_to_dict(msg, full=False):
     data['inline_attachment_count'] = len(inline_list)
 
     if full:
-        data['body_html']          = msg.body_html or ''
+        raw_html = msg.body_html or ''
+        # Resolve cid: references in the HTML so the FE can render inline images
+        # without any client-side processing. body_html_resolved replaces every
+        # cid:<content_id> (and cid:<content_id> with angle brackets) with the
+        # corresponding /web/content/<id>?access_token=... URL.
+        # body_html is kept as-is for legacy FE code; body_html_resolved is the
+        # preferred field for rendering.
+        data['body_html']          = raw_html
+        data['body_html_resolved'] = _resolve_cid_refs(raw_html, inline_list)
         data['body_text']          = msg.body_text or ''
         data['body_fetched']       = bool(msg.body_fetched)
         data['attachments']        = att_list      # paperclip-added files only
@@ -1895,6 +1930,7 @@ class LugalEmailController(http.Controller):
             items = []
             for msg in msgs:
                 attachments, inline_attachments = _message_attachment_buckets(msg)
+                raw_html = msg.body_html or ''
                 items.append({
                     'id':                  msg.id,
                     'account_id':          msg.account_id.id,
@@ -1904,7 +1940,8 @@ class LugalEmailController(http.Controller):
                     'read_at':             _to_riyadh_iso(msg.read_at) if msg.read_at else None,
                     'version':             _to_riyadh_iso(msg.write_date),
                     'write_date':          _to_riyadh_iso(msg.write_date),
-                    'body_html':           msg.body_html or '',
+                    'body_html':           raw_html,
+                    'body_html_resolved':  _resolve_cid_refs(raw_html, inline_attachments),
                     'body_text':           msg.body_text or '',
                     'attachments':         attachments,
                     'inline_attachments':  inline_attachments,
