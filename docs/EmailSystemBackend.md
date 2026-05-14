@@ -12111,3 +12111,6741 @@ SENT FOLDER GUARD (model level):
 3. **Assert:** For each inbox message, the corresponding sender's sent copy → `is_read=true`
 4. **Assert:** Any sent-folder message IDs in the request are returned in `skipped_sent_ids`
 
+
+---
+
+## Additional Files: Chat, Notifications, Auth, and WebSocket (missed in first pass)
+
+
+start of _auth.py
+_auth.py
+
+# -*- coding: utf-8 -*-
+"""
+Shared JWT guard helpers for the Lugal suite.
+
+Usage in any Lugal controller:
+
+    from odoo.addons.lugal_auth.controllers._auth import ensure_jwt_user_id
+
+    @http.route('/lugal/crm/...', auth='none', ...)
+    def my_endpoint(self, **kw):
+        uid = ensure_jwt_user_id()
+        if not uid:
+            return {'success': False, 'error': 'Unauthorized'}
+        ...
+"""
+
+import logging
+
+_logger = logging.getLogger(__name__)
+
+
+def _verify_jwt_token():
+    """Extract and verify the Bearer token from the Authorization header."""
+    from odoo.http import request
+    try:
+        auth_header = request.httprequest.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return None
+        token = auth_header.split(' ')[1]
+        if not hasattr(request, 'env') or not request.env:
+            _logger.warning('lugal_auth._auth: request.env not initialized')
+            return None
+        payload = request.env['lugal.jwt.service'].sudo().verify_access_token(token)
+        return payload['user_id'] if payload else None
+    except Exception as exc:
+        _logger.error('lugal_auth._auth: token verification error — %s', exc, exc_info=True)
+        return None
+
+
+def ensure_jwt_user_id():
+    """
+    Authenticate the request via Bearer JWT token OR active session cookie.
+
+    Priority:
+      1. Bearer JWT token in ``Authorization`` header (stateless, for mobile/API clients)
+      2. Active Odoo session cookie (for browser-based clients)
+
+    Returns the Odoo ``uid`` (int) on success or ``None`` on failure.
+    Safe to call from ``auth='none'`` routes.
+    """
+    from odoo.http import request
+    from odoo.api import Environment
+    from odoo.modules.registry import Registry
+    try:
+        dbname = (
+            getattr(request, 'db', None)
+            or request.httprequest.headers.get('X-Odoo-Database')
+        )
+        if not dbname:
+            _logger.warning('lugal_auth._auth: no database name in request')
+            return None
+
+        # Initialise request.env when route uses auth='none'
+        if not hasattr(request, 'env') or not request.env:
+            _logger.info('lugal_auth._auth: initialising request.env (db=%s)', dbname)
+            cr = None
+            try:
+                registry = Registry(dbname)
+                cr = registry.cursor()
+                request._cr  = cr
+                request.uid  = 1
+                request.env  = Environment(cr, 1, {})
+            except Exception as exc:
+                _logger.error('lugal_auth._auth: failed to init env — %s', exc)
+                if cr is not None:
+                    try:
+                        cr.close()
+                    except Exception:
+                        pass
+                return None
+
+        # 1. Bearer JWT — preferred for external/mobile clients
+        auth_header = request.httprequest.headers.get('Authorization', '')
+        if auth_header.lower().startswith('bearer '):
+            uid = _verify_jwt_token()
+            if not uid:
+                return None
+            request.update_env(user=uid)
+            return uid
+
+        # 2. Session cookie fallback — for browser clients (Odoo web/CRM frontend)
+        session_uid = getattr(request.session, 'uid', None)
+        if session_uid and session_uid not in (False, 0, 1):
+            request.update_env(user=session_uid)
+            return session_uid
+
+        _logger.warning('lugal_auth._auth: no valid auth found (no Bearer token, no active session)')
+        return None
+
+    except Exception as exc:
+        _logger.error('lugal_auth._auth: ensure_jwt_user_id error — %s', exc, exc_info=True)
+        return None
+
+
+end of file _auth.py
+--------------------------------------------------------------------------------
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+
+
+start of auth_controller.py
+auth_controller.py
+
+# -*- coding: utf-8 -*-
+
+import logging
+import secrets
+import time
+from odoo import http
+from odoo.http import request, root
+from odoo.service.security import compute_session_token
+
+_logger = logging.getLogger(__name__)
+
+_RESET_TOKEN_TTL = 3600          # 1 hour before the link expires
+_RESET_PARAM_PREFIX = 'lugal.pwd.reset.'
+
+_WS_SESSION_MAX_AGE = 86400  # 24 h — matches ws_session.py
+
+
+def _attach_ws_session(uid):
+    """Create an Odoo session for *uid* and inject a Set-Cookie into the response.
+
+    Called from login and refresh so the browser receives the session_id cookie
+    in the same HTTP response that returns the JWT tokens.  The WebSocket can
+    then be opened immediately — no separate POST /api/crm/ws/session call needed.
+
+    When the current request session already belongs to a DIFFERENT user (e.g.
+    the browser kept a stale cookie from a previous login), we push a
+    'session.reconnect_required' bus event on the old user's channels so any
+    open WebSocket for the old session can close immediately.  The _authenticate()
+    override in lugal_ir_websocket.py will independently detect the uid change
+    and raise SessionExpiredException (close 4001) — this bus push is just an
+    additional fast-path signal for the FE.
+
+    Returns the session SID string on success, or None if session setup fails
+    (tokens are still valid; the FE can fall back to /api/crm/ws/session).
+    """
+    try:
+        session = request.session
+        old_uid = session.uid  # uid of the previous owner (may be None or different user)
+
+        session.uid   = uid
+        session.db    = request.db or request.httprequest.headers.get('X-Odoo-Database')
+        session.login = request.env['res.users'].sudo().browse(uid).login
+
+        if old_uid and old_uid != uid:
+            # A DIFFERENT user is taking over this session.
+            #
+            # Intentionally do NOT recalculate session_token here.  The stored
+            # token was computed for old_uid; it will NOT match what
+            # check_session() computes for new uid.  The next time
+            # _dispatch_bus_notifications() runs (triggered by the bus push
+            # below), check_session() returns False → SessionExpiredException
+            # → WebSocket closes with code 4001.
+            #
+            # Why this matters: _authenticate() only runs when the FE sends a
+            # WS frame (subscribe, custom event).  After the initial subscribe
+            # storm the FE goes quiet — the uid-change in _authenticate() never
+            # fires.  By invalidating the token here we guarantee the DISPATCH
+            # path (server-initiated) also detects the uid change and closes
+            # the stale connection, even with zero client frames.
+            pass
+        else:
+            # Same user or fresh session — compute a valid token.
+            session.session_token = compute_session_token(session, request.env)
+
+        session.can_save = True
+        session.touch()
+        root.session_store.save(session)
+
+        # Push a bus signal when a DIFFERENT user is taking over this session.
+        # This gives the old user's WS a fast-path close signal in addition to
+        # the uid-change detection in _authenticate().
+        if old_uid and old_uid != uid:
+            try:
+                session_sid = session.sid
+                bus = request.env['bus.bus'].sudo()
+                # Per-session signal (fastest — hits only the browser whose cookie
+                # matches this session SID).
+                bus._sendone(
+                    f'supply_session.{session_sid}',
+                    'session.reconnect_required',
+                    {'reason': 'user_changed', 'old_uid': old_uid, 'new_uid': uid},
+                )
+                # Per-user fallback (catches any other tab open as the old user).
+                bus._sendone(
+                    f'supply_user.{old_uid}',
+                    'session.reconnect_required',
+                    {'reason': 'user_changed', 'session_id': session_sid},
+                )
+                _logger.info(
+                    '_attach_ws_session: pushed reconnect signal — '
+                    'session %s reassigned from uid=%s to uid=%s',
+                    session_sid[:8], old_uid, uid,
+                )
+            except Exception as be:
+                _logger.debug('_attach_ws_session: bus signal failed: %s', be)
+
+        return session.sid
+    except Exception as exc:
+        _logger.warning('_attach_ws_session failed for uid=%s: %s', uid, exc)
+        return None
+
+
+class LugalAuthController(http.Controller):
+    """
+    Centralized login, refresh, and logout endpoints for the Lugal suite.
+
+    POST /lugal/auth/login    — obtain tokens + WS session cookie (rate-limited per username+IP)
+    POST /lugal/auth/refresh  — renew access token + WS session cookie
+    POST /lugal/auth/logout   — revoke current token immediately
+    """
+
+    # ------------------------------------------------------------------
+    # Login
+    # ------------------------------------------------------------------
+
+    @http.route('/lugal/auth/login', type='jsonrpc', auth='none', methods=['POST'], csrf=False)
+    def login(self, **kwargs):
+        """
+        Authenticate with username + password and return JWT tokens.
+
+        Params: username (str), password (str), remember_me (bool, optional)
+        Response: access_token, refresh_token, token_type, user, ws_session_id
+
+        The response also carries a Set-Cookie: session_id=... header so the
+        browser has the Odoo session cookie ready for the WebSocket upgrade
+        immediately — no separate POST /api/crm/ws/session call is required.
+
+        When remember_me is True a long-lived refresh token (30 days) is issued
+        instead of the default 7-day one.  The access-token lifetime is unchanged.
+        """
+        try:
+            username   = (kwargs.get('username') or '').strip()
+            password   = kwargs.get('password') or ''
+            remember_me = bool(kwargs.get('remember_me', False))
+
+            if not username or not password:
+                return {'success': False, 'error': 'username and password are required'}
+
+            dbname = getattr(request, 'db', None) or \
+                     request.httprequest.headers.get('X-Odoo-Database')
+            if not dbname:
+                return {'success': False, 'error': 'Database not specified'}
+
+            rate_limiter = request.env['lugal.auth.rate.limit'].sudo()
+
+            client_ip  = request.httprequest.remote_addr or 'unknown'
+            identifier = f'{username}:{client_ip}'
+
+            if rate_limiter.is_locked(identifier):
+                _logger.warning('lugal_auth: login blocked for %s (rate limit)', identifier)
+                return {
+                    'success': False,
+                    'error':   'Too many failed attempts. Please try again later.',
+                }
+
+            result = request.env['lugal.jwt.service'].sudo().authenticate_user(
+                username, password, remember_me=remember_me
+            )
+
+            if not result:
+                locked = rate_limiter.record_failure(identifier)
+                msg = ('Too many failed attempts. Please try again later.'
+                       if locked else 'Invalid credentials')
+                return {'success': False, 'error': msg}
+
+            rate_limiter.record_success(identifier)
+
+            # Create WS session — browser receives Set-Cookie in this same response
+            uid = result['user']['id']
+            ws_sid = _attach_ws_session(uid)
+            if ws_sid:
+                result['ws_session_id'] = ws_sid
+
+            # Wake the IMAP IDLE supervisor immediately so the user's inbox
+            # watcher starts without waiting for the 5-second watchdog cycle.
+            # Non-fatal: tokens are already valid if this fails.
+            try:
+                request.env['lugal.email.idle.watcher'].sudo().start_all()
+            except Exception as exc_imap:
+                _logger.warning('login: start_all() failed: %s', exc_imap)
+
+            # Trigger a FORCED background IMAP sync for this user's accounts on login.
+            # force=True bypasses the throttle so users always see fresh emails right away.
+            # For accounts that have NEVER been synced we WAIT for the sync to complete
+            # (up to 10 seconds) so the first inbox load shows real emails instead of
+            # an empty list.  Subsequent logins use fire-and-forget.
+            try:
+                db_name = request.env.cr.dbname
+                from odoo.addons.lugal_email.controllers.email_controller import (
+                    _run_imap_sync_bg,
+                )
+                user_accounts = request.env['lugal.email.account'].sudo().search([
+                    ('user_id', '=', uid),
+                    ('is_active', '=', True),
+                    ('is_deleted', '=', False),
+                ])
+                seen_creds: set = set()
+                first_time_threads = []
+                for acc in user_accounts:
+                    if not (acc.password or '').strip():
+                        continue
+                    cred = (
+                        (acc.imap_host or '').strip(),
+                        int(acc.imap_port or 993),
+                        (acc.username or acc.email_address or '').strip(),
+                    )
+                    if cred in seen_creds:
+                        continue  # one sync per credential group is enough
+                    seen_creds.add(cred)
+                    t = _run_imap_sync_bg(acc.id, db_name, force=True)
+                    # Wait for first-time syncs (sync_status='never') so the FE
+                    # immediately receives emails on first login without a second trip.
+                    if t and (not acc.last_sync_date or acc.sync_status == 'never'):
+                        first_time_threads.append(t)
+                # Block for at most 10 s — enough for a typical IMAP cold start.
+                for t in first_time_threads:
+                    t.join(timeout=10.0)
+            except Exception as exc_sync:
+                _logger.warning('login: immediate email sync failed: %s', exc_sync)
+
+            return {'success': True, 'data': result}
+
+        except Exception as exc:
+            _logger.error('lugal_auth login error: %s', exc, exc_info=True)
+            return {'success': False, 'error': 'Authentication error'}
+
+    # ------------------------------------------------------------------
+    # Refresh
+    # ------------------------------------------------------------------
+
+    @http.route('/lugal/auth/refresh', type='jsonrpc', auth='none', methods=['POST'], csrf=False)
+    def refresh(self, **kwargs):
+        """
+        Exchange a refresh token for a new access token.
+
+        Params: refresh_token (str)
+        Response: access_token, token_type, ws_session_id
+
+        Also sets a fresh Set-Cookie: session_id so the WS session stays alive
+        after a token refresh (e.g. app wakes from background / tab reload).
+        """
+        try:
+            refresh_token = kwargs.get('refresh_token') or ''
+            if not refresh_token:
+                return {'success': False, 'error': 'refresh_token is required'}
+
+            result = request.env['lugal.jwt.service'].sudo().refresh_access_token(
+                refresh_token
+            )
+            if not result:
+                return {'success': False, 'error': 'Invalid or expired refresh token'}
+
+            # Re-attach WS session for the refreshed user
+            uid = result.get('user_id')
+            if uid:
+                ws_sid = _attach_ws_session(uid)
+                if ws_sid:
+                    result['ws_session_id'] = ws_sid
+
+            return {'success': True, 'data': result}
+
+        except Exception as exc:
+            _logger.error('lugal_auth refresh error: %s', exc, exc_info=True)
+            return {'success': False, 'error': 'Token refresh error'}
+
+    # ------------------------------------------------------------------
+    # Logout
+    # ------------------------------------------------------------------
+
+    @http.route('/lugal/auth/logout', type='jsonrpc', auth='none', methods=['POST'], csrf=False)
+    def logout(self, **kwargs):
+        """
+        Revoke the current access token immediately.
+
+        The token is extracted from the Authorization: Bearer header.
+        After logout the token is blacklisted — further requests with it
+        will receive 401 Unauthorized.
+
+        Also invalidates the Odoo session so any open WebSocket connection
+        for this user detects uid=None on its next frame, raises
+        SessionExpiredException (code 4001), and closes cleanly.
+
+        The FE WebSocket handler's _handleClose(4001) should attempt
+        _ensureSession() which will get 401 (token revoked) → stop reconnecting
+        and redirect to the login screen.
+
+        Params: (none — token is read from header)
+        Response: { success: true }
+        """
+        try:
+            auth_header = request.httprequest.headers.get('Authorization', '')
+            if not auth_header.startswith('Bearer '):
+                return {'success': False, 'error': 'No Bearer token in Authorization header'}
+
+            token = auth_header.split(' ', 1)[1]
+
+            # Decode uid from JWT BEFORE revoking so we can push bus notifications.
+            uid = None
+            session_sid = None
+            try:
+                payload = request.env['lugal.jwt.service'].sudo().decode_token(token)
+                uid = payload.get('uid') if payload else None
+            except Exception:
+                pass
+
+            # Revoke the JWT.
+            request.env['lugal.jwt.service'].sudo().revoke_token(token, reason='logout')
+
+            # Invalidate the Odoo session so the WS connection for this session
+            # detects uid=None on the next heartbeat/frame and closes (code 4001).
+            try:
+                old_session = request.session
+                session_sid = old_session.sid if old_session else None
+                if old_session and old_session.uid:
+                    old_session.logout(keep_db=True)
+                    root.session_store.save(old_session)
+                    _logger.info(
+                        'logout: session %s invalidated for uid=%s',
+                        (session_sid or '')[:8], old_session.uid,
+                    )
+            except Exception as se:
+                _logger.debug('logout: session cleanup failed: %s', se)
+
+            # Push a bus event so the WS client for THIS session closes immediately
+            # rather than waiting for the next heartbeat cycle (up to 60 s).
+            # supply_session.{sid} targets only this browser's WS connection.
+            # supply_user.{uid} is sent as a fallback for tabs that may have missed
+            # the per-session signal.
+            if session_sid or uid:
+                try:
+                    bus = request.env['bus.bus'].sudo()
+                    if session_sid:
+                        bus._sendone(
+                            f'supply_session.{session_sid}',
+                            'session.logout',
+                            {'reason': 'logout', 'uid': uid},
+                        )
+                    if uid:
+                        bus._sendone(
+                            f'supply_user.{uid}',
+                            'session.logout',
+                            {'reason': 'logout', 'session_id': session_sid},
+                        )
+                except Exception as be:
+                    _logger.debug('logout: bus notification failed: %s', be)
+
+            return {'success': True, 'data': {'message': 'Logged out successfully'}}
+
+        except Exception as exc:
+            _logger.error('lugal_auth logout error: %s', exc, exc_info=True)
+            return {'success': False, 'error': 'Logout error'}
+
+    # ------------------------------------------------------------------
+    # Forgot password — request a reset link
+    # ------------------------------------------------------------------
+
+    @http.route('/lugal/auth/forgot-password', type='jsonrpc', auth='none', methods=['POST'], csrf=False)
+    def forgot_password(self, **kwargs):
+        """
+        Request a password-reset e-mail.
+
+        Params:
+          email_or_username (str, required) — registered e-mail address or system login
+          fe_url            (str, optional) — base URL of the frontend app
+                            e.g. "http://192.168.1.10:5173"
+                            When supplied it is persisted as lugal.frontend.base.url so all
+                            future reset links use the same origin automatically.
+
+        Response: { success: true, data: { message: "..." } }
+
+        Always returns success=true even when the account is not found so that
+        callers cannot enumerate valid e-mail addresses.
+        """
+        try:
+            email_or_username = (kwargs.get('email_or_username') or '').strip()
+            fe_url            = (kwargs.get('fe_url')            or '').strip().rstrip('/')
+
+            if not email_or_username:
+                return {'success': False, 'error': 'email_or_username is required'}
+
+            ICP   = request.env['ir.config_parameter'].sudo()
+            Users = request.env['res.users'].sudo()
+            user  = None
+
+            # Persist the supplied fe_url so future resets pick it up automatically
+            if fe_url:
+                ICP.set_param('lugal.frontend.base.url', fe_url)
+
+            # Try matching against e-mail first, then system login
+            if '@' in email_or_username:
+                user = Users.search([('email', '=ilike', email_or_username), ('active', '=', True)], limit=1)
+            if not user:
+                user = Users.search([('login', '=', email_or_username), ('active', '=', True)], limit=1)
+            if not user:
+                user = Users.search([('email', '=ilike', email_or_username), ('active', '=', True)], limit=1)
+
+            # Always respond the same way — do not leak whether the account exists
+            generic_msg = 'If that account exists, a password-reset link has been sent to the registered e-mail.'
+
+            if not user or not user.email:
+                return {'success': True, 'data': {'message': generic_msg}}
+
+            # Generate a cryptographically secure token and store it with expiry
+            token     = secrets.token_urlsafe(40)
+            param_key = _RESET_PARAM_PREFIX + token
+            expires   = int(time.time()) + _RESET_TOKEN_TTL
+            ICP.set_param(param_key, f'{user.id}:{expires}')
+
+            # Build the reset URL:
+            # Priority: fe_url (this request) > lugal.frontend.base.url (saved) > web.base.url (fallback)
+            base = (
+                fe_url
+                or ICP.get_param('lugal.frontend.base.url')
+                or ICP.get_param('web.base.url')
+                or ''
+            ).rstrip('/')
+            reset_url = f'{base}/reset-password?token={token}'
+
+            # Send via the user's own email account (if they have one),
+            # otherwise fall back to any active account in the system.
+            LugalAcc = request.env['lugal.email.account'].sudo()
+            sender_acc = (
+                LugalAcc.search([
+                    ('user_id', '=', user.id),
+                    ('is_active', '=', True),
+                    ('is_deleted', '=', False),
+                ], order='is_default desc', limit=1)
+                or LugalAcc.search([
+                    ('is_active', '=', True),
+                    ('is_deleted', '=', False),
+                ], order='is_default desc', limit=1)
+            )
+
+            if not sender_acc:
+                _logger.warning('forgot_password: no email account available for sending — uid=%s', user.id)
+                return {'success': True, 'data': {'message': generic_msg}}
+
+            subject   = 'Password Reset Request'
+            body_html = f"""<p>Hello {user.name},</p>
+<p>We received a request to reset your password. Click the link below to set a new password:</p>
+<p style="margin:16px 0"><a href="{reset_url}" style="background:#1a56db;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold;">Reset Password</a></p>
+<p>Or copy this link into your browser:<br/><a href="{reset_url}">{reset_url}</a></p>
+<p>This link expires in <strong>1 hour</strong>.</p>
+<p>If you did not request this, you can safely ignore this e-mail.</p>"""
+            body_text = (
+                f"Hello {user.name},\n\n"
+                f"Reset your password using this link:\n{reset_url}\n\n"
+                f"This link expires in 1 hour.\n"
+                f"If you did not request this, ignore this email."
+            )
+
+            # Import the working SMTP helper from the email controller
+            from odoo.addons.lugal_email.controllers.email_controller import _send_via_smtp
+
+            delivered, smtp_err, _ = _send_via_smtp(
+                sender_acc, [user.email], subject, body_html, body_text
+            )
+
+            if not delivered:
+                # Primary account failed — try every other active account until one works
+                _logger.warning(
+                    'forgot_password: primary SMTP failed for uid=%s (%s), trying fallback accounts',
+                    user.id, smtp_err,
+                )
+                for fallback in LugalAcc.search([
+                    ('id', '!=', sender_acc.id),
+                    ('is_active', '=', True),
+                    ('is_deleted', '=', False),
+                ], order='is_default desc', limit=10):
+                    delivered, smtp_err, _ = _send_via_smtp(
+                        fallback, [user.email], subject, body_html, body_text
+                    )
+                    if delivered:
+                        sender_acc = fallback
+                        break
+
+            if delivered:
+                _logger.info('forgot_password: reset link sent to uid=%s email=%s via acc=%s',
+                             user.id, user.email, sender_acc.email_address)
+            else:
+                _logger.error('forgot_password: all SMTP accounts failed for uid=%s: %s',
+                              user.id, smtp_err)
+
+            return {'success': True, 'data': {'message': generic_msg}}
+
+        except Exception as exc:
+            _logger.error('lugal_auth forgot_password error: %s', exc, exc_info=True)
+            # Still return success to avoid leaking info
+            return {'success': True, 'data': {'message': 'If that account exists, a password-reset link has been sent to the registered e-mail.'}}
+
+    # ------------------------------------------------------------------
+    # Reset password — validate token and set new password
+    # ------------------------------------------------------------------
+
+    @http.route('/lugal/auth/reset-password', type='jsonrpc', auth='none', methods=['POST'], csrf=False)
+    def reset_password(self, **kwargs):
+        """
+        Set a new password using a valid reset token.
+
+        Params:
+          token            (str) — from the e-mail link query-string
+          new_password     (str) — desired new password
+          confirm_password (str) — must match new_password
+
+        Response: { success: true, data: { message: "Password updated." } }
+        """
+        try:
+            token            = (kwargs.get('token')            or '').strip()
+            new_password     = (kwargs.get('new_password')     or '').strip()
+            confirm_password = (kwargs.get('confirm_password') or '').strip()
+
+            if not token:
+                return {'success': False, 'error': 'Reset token is required'}
+            if not new_password:
+                return {'success': False, 'error': 'new_password is required'}
+            if new_password != confirm_password:
+                return {'success': False, 'error': 'Passwords do not match'}
+            if len(new_password) < 6:
+                return {'success': False, 'error': 'Password must be at least 6 characters'}
+
+            ICP       = request.env['ir.config_parameter'].sudo()
+            param_key = _RESET_PARAM_PREFIX + token
+            stored    = ICP.get_param(param_key) or ''
+
+            if not stored:
+                return {'success': False, 'error': 'Invalid or expired reset link'}
+
+            parts = stored.split(':')
+            if len(parts) != 2:
+                return {'success': False, 'error': 'Invalid reset token format'}
+
+            uid_str, expires_str = parts
+            try:
+                uid     = int(uid_str)
+                expires = int(expires_str)
+            except ValueError:
+                return {'success': False, 'error': 'Invalid reset token'}
+
+            if int(time.time()) > expires:
+                ICP.set_param(param_key, '')  # clean up
+                return {'success': False, 'error': 'Reset link has expired. Please request a new one.'}
+
+            user = request.env['res.users'].sudo().browse(uid)
+            if not user.exists():
+                return {'success': False, 'error': 'Account not found'}
+
+            # Update password and invalidate the one-time token
+            user.write({'password': new_password})
+            ICP.set_param(param_key, '')   # one-time use — delete after use
+
+            # Revoke any blacklist entries already associated with this user
+            # (e.g. from a previous logout). New active tokens carry JTIs that
+            # are not stored here, so they will expire naturally. A savepoint
+            # prevents a cleanup failure from aborting the outer transaction.
+            try:
+                with request.env.cr.savepoint():
+                    request.env['lugal.jwt.blacklist'].sudo().search(
+                        [('user_id', '=', uid)]
+                    ).write({'reason': 'password_reset'})
+            except Exception as bl_exc:
+                _logger.debug('reset_password: blacklist cleanup skipped for uid=%s: %s', uid, bl_exc)
+
+            _logger.info('reset_password: password updated for uid=%s', uid)
+            return {'success': True, 'data': {'message': 'Password updated successfully. You can now log in with your new password.'}}
+
+        except Exception as exc:
+            _logger.error('lugal_auth reset_password error (%s): %s', type(exc).__name__, exc, exc_info=True)
+            return {'success': False, 'error': 'Password reset failed'}
+
+
+end of file auth_controller.py
+--------------------------------------------------------------------------------
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+
+
+start of supply_chat_controller.py
+supply_chat_controller.py
+
+# -*- coding: utf-8 -*-
+"""
+Supply Chat API — all conversation, message, typing and bus_channels endpoints.
+
+Routes (all JSON-RPC POST):
+  /api/crm/supply/conversations/list
+  /api/crm/supply/conversations/create
+  /api/crm/supply/conversations/<id>/get
+  /api/crm/supply/conversations/<id>/rename
+  /api/crm/supply/conversations/<id>/archive
+  /api/crm/supply/conversations/<id>/leave
+  /api/crm/supply/conversations/<id>/update
+  /api/crm/supply/conversations/<id>/mark_read
+  /api/crm/supply/conversations/<id>/typing
+  /api/crm/supply/conversations/<id>/members/list
+  /api/crm/supply/conversations/<id>/members/add
+  /api/crm/supply/conversations/<id>/members/remove
+  /api/crm/supply/conversations/<id>/members/role    (stub — no role field yet)
+  /api/crm/supply/messages/list
+  /api/crm/supply/messages/create
+  /api/crm/supply/messages/forward
+  /api/crm/supply/messages/search
+  /api/crm/supply/messages/<id>/edit
+  /api/crm/supply/messages/<id>/react
+  /api/crm/supply/messages/<id>/delivered
+  /api/crm/supply/messages/<id>/read
+  /api/crm/supply/chat/bus_channels
+"""
+
+import json
+import logging
+import threading
+import time
+from datetime import datetime, timedelta, timezone
+
+from odoo import http, fields as odoo_fields
+from odoo.http import request
+
+from ._auth import ensure_jwt_user_id
+from ._error import crm_error
+from .upload_controller import _build_attachment_url
+
+_logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Timezone helper — all API timestamps in Asia/Riyadh (UTC+3, no DST)
+# ---------------------------------------------------------------------------
+_RIYADH_TZ = timezone(timedelta(hours=3))
+
+
+def _to_riyadh_iso(dt):
+    """Convert a naive-UTC Odoo datetime to ISO 8601 with +03:00 (Riyadh) offset.
+    Odoo returns False (not None) for unset Datetime fields, so we guard for both."""
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(_RIYADH_TZ).isoformat(timespec='seconds')
+
+
+# ---------------------------------------------------------------------------
+# Per-process typing timers
+#   _typing_timers : (uid, conv_id) → threading.Timer   (auto-stop timer)
+#
+# DESIGN NOTE — why typing_users was removed
+# ------------------------------------------
+# Odoo runs with multiple worker processes (e.g. 16). Each worker holds its
+# own copy of _typing_users.  When User A's heartbeat hits worker-3 and User
+# B's hits worker-7, each worker only knows about "its own" user.  The result
+# was that every typing.start payload contained an incomplete (and often
+# contradictory) typing_users list, which caused the FE state to thrash.
+#
+# The correct pattern (used by Slack / WhatsApp etc.):
+#   • Backend emits per-user events with a monotonic heartbeat_time (ms epoch).
+#   • Frontend maintains its own Map<userId, {name, lastHeartbeat}> and is the
+#     single source of truth for "who is currently typing".
+#   • FE ignores any typing.stop event whose heartbeat_time is older than the
+#     last typing.start it saw for that user.  This filters the stale auto-stop
+#     events that fire from whichever worker handled a previous heartbeat.
+# ---------------------------------------------------------------------------
+_typing_timers: dict = {}
+_typing_lock = threading.Lock()
+_TYPING_EXPIRE_SECS = 8
+
+
+# ===========================================================================
+# Helpers
+# ===========================================================================
+
+def _bus_publish(channel: str, event_type: str, payload: dict):
+    """Publish one bus notification; swallows exceptions so it never crashes a handler."""
+    try:
+        request.env['bus.bus'].sudo()._sendone(channel, event_type, payload)
+    except Exception as exc:
+        _logger.warning('bus_publish failed (%s %s): %s', channel, event_type, exc)
+
+
+def _user_avatar_url(user):
+    if not user or not user.id:
+        return None
+    return f'/web/image/res.users/{user.id}/avatar_128'
+
+
+def _serialize_participant(user):
+    return {
+        'id': user.id,
+        'name': user.name or '',
+        'avatar': _user_avatar_url(user),
+    }
+
+
+def _unread_count_for(conv, uid):
+    """Messages in conv sent by others that the caller has not read."""
+    Msg = request.env['lugal.supply.message'].sudo()
+    return Msg.search_count([
+        ('conversation_id', '=', conv.id),
+        ('sender_id', '!=', uid),
+        ('read_user_ids', 'not in', [uid]),
+        ('is_deleted', '=', False),
+        ('hidden_user_ids', 'not in', [uid]),
+    ])
+
+
+def _serialize_conversation(conv, uid):
+    participants = conv.participant_ids
+    # Determine the current user's role in the group
+    creator_id = conv.created_by_id.id if conv.created_by_id else None
+    admin_ids = []
+    supervisor_ids = []
+    if conv.type == 'group':
+        admin_ids = conv.group_admin_ids.ids if hasattr(conv, 'group_admin_ids') else []
+        supervisor_ids = conv.group_supervisor_ids.ids if hasattr(conv, 'group_supervisor_ids') else []
+
+    is_creator = (uid == creator_id)
+    is_admin = is_creator or (uid in admin_ids)
+    is_supervisor = (uid in supervisor_ids)
+
+    role = 'admin' if is_admin else ('supervisor' if is_supervisor else 'member')
+
+    return {
+        'id': conv.id,
+        'type': conv.type,
+        'name': conv.name or '',
+        'participant_ids': participants.ids,
+        'participants': [_serialize_participant(u) for u in participants],
+        'last_activity': _to_riyadh_iso(conv.last_activity),
+        'is_archived': conv.is_archived,
+        'unread_count': _unread_count_for(conv, uid),
+        'created_by_id': creator_id,
+        # Group role fields (empty for dm/team)
+        'group_admin_ids': admin_ids,
+        'group_supervisor_ids': supervisor_ids,
+        'only_admins_can_send': getattr(conv, 'only_admins_can_send', False),
+        'group_description': getattr(conv, 'group_description', '') or '',
+        'my_role': role,
+        'is_admin': is_admin,
+        'is_supervisor': is_supervisor,
+    }
+
+
+def _delivery_state_for(msg, uid):
+    """
+    Compute delivery_state string for a message as seen by `uid`.
+    - If uid is NOT the sender: always 'received' (they can see it).
+    - If uid IS the sender:
+        'read'       if any other participant has read it
+        'delivered'  if any other participant has it delivered (but not read)
+        'sent'       otherwise
+    """
+    if msg.sender_id.id != uid:
+        return 'received'
+    other_read = [u for u in msg.read_user_ids if u.id != uid]
+    if other_read:
+        return 'read'
+    other_delivered = [u for u in msg.delivered_user_ids if u.id != uid]
+    if other_delivered:
+        return 'delivered'
+    return 'sent'
+
+
+def _serialize_message(msg, uid):
+    try:
+        attachments = json.loads(msg.attachments_json or '[]')
+    except Exception:
+        attachments = []
+    try:
+        reactions = json.loads(msg.reactions_json or '{}')
+    except Exception:
+        reactions = {}
+
+    reply_content = None
+    reply_sender = None
+    if msg.reply_to_id:
+        reply_content = (msg.reply_to_id.content or '')[:200]
+        reply_sender = msg.reply_to_id.sender_id.name if msg.reply_to_id.sender_id else None
+
+    # Build read_receipts: list of {user_id, user_name, read_at}
+    try:
+        receipts_map = json.loads(msg.read_receipts_json or '{}')
+    except Exception:
+        receipts_map = {}
+    # Include all users in read_user_ids, merging with timestamps where available
+    read_receipts = []
+    for ru in msg.read_user_ids:
+        read_at = receipts_map.get(str(ru.id))
+        read_receipts.append({
+            'user_id': ru.id,
+            'user_name': ru.name or f'User #{ru.id}',
+            'read_at': read_at,  # ISO string or None
+        })
+
+    conv = msg.conversation_id
+    return {
+        'id': msg.id,
+        'thread_id': conv.id if conv else None,
+        'conversation_type': conv.type if conv else None,
+        'sender_id': msg.sender_id.id if msg.sender_id else None,
+        'sender_name': msg.sender_id.name if msg.sender_id else '',
+        'sender_avatar': _user_avatar_url(msg.sender_id) if msg.sender_id else None,
+        'participant_ids': conv.participant_ids.ids if conv else [],
+        'content': msg.content or '',
+        'kind': msg.kind or 'text',
+        'duration_seconds': float(msg.duration_seconds or 0),
+        'attachments': attachments,
+        'created_at': _to_riyadh_iso(msg.create_date),
+        'edited_at': _to_riyadh_iso(msg.edited_at),
+        'reply_to_id': msg.reply_to_id.id if msg.reply_to_id else None,
+        'reply_to_content': reply_content,
+        'reply_to_sender': reply_sender,
+        'reactions': reactions,
+        'is_deleted': msg.is_deleted,
+        'is_pinned': msg.is_pinned,
+        'pinned_at': _to_riyadh_iso(msg.pinned_at),
+        'pinned_by_id': msg.pinned_by_id.id if msg.pinned_by_id else None,
+        'delivery_state': _delivery_state_for(msg, uid),
+        'delivered_to': msg.delivered_user_ids.ids,
+        'read_by': msg.read_user_ids.ids,
+        'read_receipts': read_receipts,
+        'client_message_id': msg.client_message_id or None,
+    }
+
+
+def _find_or_create_dm(uid, other_uid):
+    """Return (conversation, created_bool) for a DM between uid and other_uid."""
+    Conv = request.env['lugal.supply.conversation'].sudo()
+    existing = Conv.search([
+        ('type', '=', 'dm'),
+        ('participant_ids', 'in', [uid]),
+        ('participant_ids', 'in', [other_uid]),
+    ], limit=10)
+    for c in existing:
+        ids = set(c.participant_ids.ids)
+        if ids == {uid, other_uid}:
+            return c, False
+    # Create
+    users = request.env['res.users'].sudo().browse([uid, other_uid])
+    names = [u.name for u in users if u.exists()]
+    conv = Conv.create({
+        'name': ' & '.join(names),
+        'type': 'dm',
+        'participant_ids': [(6, 0, [uid, other_uid])],
+        'last_activity': odoo_fields.Datetime.now(),
+    })
+    # Tell BOTH participants to resubscribe so the new supply_chat.<id>
+    # channel is added to their live WebSocket connection immediately.
+    _notify_participants_resubscribe(conv, [uid, other_uid])
+    return conv, True
+
+
+def _find_or_create_group(uid, recipient_ids, group_name=None):
+    """Find or create a group conversation for uid + recipient_ids."""
+    all_ids = sorted(set([uid] + list(recipient_ids)))
+    Conv = request.env['lugal.supply.conversation'].sudo()
+    # Try to match an existing group with exact participants
+    existing = Conv.search([
+        ('type', '=', 'group'),
+        ('participant_ids', 'in', [uid]),
+    ], limit=50)
+    for c in existing:
+        if set(c.participant_ids.ids) == set(all_ids):
+            return c, False
+    users = request.env['res.users'].sudo().browse(all_ids)
+    name = group_name or ', '.join(u.name for u in users if u.exists())
+    conv = Conv.create({
+        'name': name,
+        'type': 'group',
+        'participant_ids': [(6, 0, all_ids)],
+        'created_by_id': uid,
+        'last_activity': odoo_fields.Datetime.now(),
+    })
+    # Creator is automatically a group admin
+    if hasattr(conv, 'group_admin_ids'):
+        conv.write({'group_admin_ids': [(4, uid)]})
+    # Tell ALL participants to resubscribe so the new supply_chat.<id>
+    # channel is included in their live WebSocket connection immediately.
+    _notify_participants_resubscribe(conv, all_ids)
+    return conv, True
+
+
+def _resolve_thread(uid, thread_id, recipient_ids, group_name=None):
+    """
+    Return (conversation, error_str | None).
+    Resolves thread_id (or conversation_id alias) OR creates/finds dm/group via recipient_ids.
+    """
+    Conv = request.env['lugal.supply.conversation'].sudo()
+    if thread_id:
+        try:
+            conv = Conv.browse(int(thread_id)).exists()
+        except (ValueError, TypeError):
+            return None, 'Invalid conversation id'
+        if not conv:
+            return None, 'Conversation not found'
+        if conv.type != 'team' and uid not in conv.participant_ids.ids:
+            return None, 'Forbidden'
+        return conv, None
+
+    if recipient_ids:
+        ids = [int(r) for r in recipient_ids]
+        if len(ids) == 1:
+            conv, _ = _find_or_create_dm(uid, ids[0])
+        else:
+            conv, _ = _find_or_create_group(uid, ids, group_name)
+        return conv, None
+
+    return None, 'Provide thread_id or recipient_ids'
+
+
+def _notify_participants_resubscribe(conv, participant_ids, action='resubscribe'):
+    """
+    After a NEW conversation is created, tell every participant's frontend to
+    call busClient.resubscribe() so Odoo adds supply_chat.<conv_id> to their
+    active WebSocket subscription.
+
+    Without this, the recipient(s) never subscribe to the new channel and miss
+    all messages until they manually reload the browser.
+
+    Publishes to supply_user.<uid> — the per-user personal channel that every
+    user is already subscribed to from their initial connect.
+    """
+    payload = {
+        'conversation_id': conv.id,
+        'conversation_type': conv.type,
+        'name': conv.name or '',
+        'action': action,
+    }
+    for uid in participant_ids:
+        try:
+            request.env['bus.bus'].sudo()._sendone(
+                f'supply_user.{uid}',
+                'supply.chat.resubscribe',
+                payload,
+            )
+        except Exception as exc:
+            _logger.debug('_notify_participants_resubscribe bus error uid=%s: %s', uid, exc)
+
+
+def _notify_membership_changed(conv, user_ids, action):
+    """
+    Tell affected users to refresh their bus channel subscription after group
+    membership changes.  This keeps long-lived tabs aligned with the backend
+    channel list without requiring logout/login.
+    """
+    _notify_participants_resubscribe(conv, user_ids, action=action)
+
+
+def _publish_new_message(msg, uid, conv):
+    """Broadcast a new message to all participants via two paths:
+
+    Path 1 — conversation channel (supply_chat.<conv_id>):
+      Reaches every user who is already subscribed to this conversation.
+      Covers all normal cases (existing conversations, reconnected users).
+
+    Path 2 — personal channel (supply_user.<recipient_uid>):
+      Reaches every non-sender participant via their always-subscribed personal
+      channel.  This is the fallback that eliminates the race condition for
+      brand-new conversations: the resubscribe event and the first message are
+      published at the same instant, so the recipient may not have added
+      supply_chat.<conv_id> to their active subscription yet.  Publishing to
+      supply_user.<uid> guarantees immediate delivery regardless of subscription
+      state.
+
+    FE deduplication: both copies carry identical message_id.  The frontend
+    MUST deduplicate incoming CHAT_MESSAGE_NEW events by message_id so the
+    user never sees a double notification or duplicate message bubble.
+    """
+    payload = _serialize_message(msg, uid)
+    # Path 1 — conversation channel (no extra flag; this is the primary copy)
+    _bus_publish(f'supply_chat.{conv.id}', 'supply.chat.message.new', payload)
+    # Path 2 — personal channel for every non-sender participant (fallback delivery)
+    # We add _via_personal_channel=True so the FE can deduplicate: if the
+    # same message_id already arrived via the conversation channel, ignore this copy.
+    personal_payload = dict(payload, _via_personal_channel=True)
+    sender_id = msg.sender_id.id if msg.sender_id else uid
+    sender_name = msg.sender_id.name if msg.sender_id else 'New message'
+    msg_preview = (msg.content or '').strip()[:80] or '📎 Attachment'
+
+    for participant in conv.participant_ids:
+        if participant.id != sender_id:
+            try:
+                request.env['bus.bus'].sudo()._sendone(
+                    f'supply_user.{participant.id}',
+                    'supply.chat.message.new',
+                    personal_payload,
+                )
+            except Exception as exc:
+                _logger.debug(
+                    '_publish_new_message personal fallback error uid=%s: %s',
+                    participant.id, exc,
+                )
+            # Web Push — reaches the user even when the browser tab is closed
+            try:
+                PushSub = request.env['lugal.push.subscription'].sudo()
+                PushSub.send_push_to_user(
+                    participant.id,
+                    title=sender_name,
+                    body=msg_preview,
+                    data={
+                        'type': 'chat',
+                        'conversation_id': conv.id,
+                        'message_id': msg.id,
+                        'url': f'/conversations?conversation={conv.id}',
+                    },
+                )
+            except Exception:
+                pass  # push is best-effort — never crash the message send
+
+
+# ===========================================================================
+# Controller
+# ===========================================================================
+
+class SupplyChatController(http.Controller):
+
+    # -----------------------------------------------------------------------
+    # Conversations
+    # -----------------------------------------------------------------------
+
+    @http.route('/api/crm/supply/conversations/list',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def conversations_list(self, **kwargs):
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+            Conv = request.env['lugal.supply.conversation'].sudo()
+            convs = Conv.search([
+                ('is_archived', '=', False),
+                ('participant_ids', 'in', [uid]),
+            ], order='last_activity desc, id desc')
+            items = [_serialize_conversation(c, uid) for c in convs]
+            return {'success': True, 'data': {'items': items, 'total': len(items)}}
+        except Exception as e:
+            return crm_error(e, 'conversations_list')
+
+    @http.route('/api/crm/supply/conversations/create',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def conversations_create(self, recipient_ids=None, group_name=None, **kwargs):
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+            if not recipient_ids:
+                return {'success': False, 'error': 'recipient_ids is required'}
+            ids = [int(r) for r in recipient_ids]
+            if len(ids) == 1:
+                conv, _ = _find_or_create_dm(uid, ids[0])
+            else:
+                conv, _ = _find_or_create_group(uid, ids, group_name)
+            return {'success': True, 'data': _serialize_conversation(conv, uid)}
+        except Exception as e:
+            return crm_error(e, 'conversations_create')
+
+    @http.route('/api/crm/supply/conversations/<int:conv_id>/get',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def conversation_get(self, conv_id, **kwargs):
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+            conv = request.env['lugal.supply.conversation'].sudo().browse(conv_id).exists()
+            if not conv:
+                return {'success': False, 'error': 'Not found'}
+            if conv.type != 'team' and uid not in conv.participant_ids.ids:
+                return {'success': False, 'error': 'Forbidden'}
+            return {'success': True, 'data': _serialize_conversation(conv, uid)}
+        except Exception as e:
+            return crm_error(e, 'conversation_get')
+
+    @http.route('/api/crm/supply/conversations/<int:conv_id>/rename',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def conversation_rename(self, conv_id, name=None, **kwargs):
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+            if not name or not str(name).strip():
+                return {'success': False, 'error': 'name is required'}
+            conv = request.env['lugal.supply.conversation'].sudo().browse(conv_id).exists()
+            if not conv:
+                return {'success': False, 'error': 'Not found'}
+            if conv.type in ('dm', 'team'):
+                return {'success': False, 'error': 'Cannot rename dm or team conversations'}
+            if uid not in conv.participant_ids.ids:
+                return {'success': False, 'error': 'Forbidden'}
+            conv.write({'name': str(name).strip()})
+            return {'success': True, 'data': _serialize_conversation(conv, uid)}
+        except Exception as e:
+            return crm_error(e, 'conversation_rename')
+
+    @http.route('/api/crm/supply/conversations/<int:conv_id>/archive',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def conversation_archive(self, conv_id, **kwargs):
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+            conv = request.env['lugal.supply.conversation'].sudo().browse(conv_id).exists()
+            if not conv:
+                return {'success': False, 'error': 'Not found'}
+            if conv.type == 'team':
+                return {'success': False, 'error': 'Cannot archive team channels'}
+            if uid not in conv.participant_ids.ids:
+                return {'success': False, 'error': 'Forbidden'}
+            conv.write({'is_archived': True})
+            return {'success': True}
+        except Exception as e:
+            return crm_error(e, 'conversation_archive')
+
+    @http.route('/api/crm/supply/conversations/<int:conv_id>/leave',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def conversation_leave(self, conv_id, **kwargs):
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+            conv = request.env['lugal.supply.conversation'].sudo().browse(conv_id).exists()
+            if not conv:
+                return {'success': False, 'error': 'Not found'}
+            if conv.type == 'team':
+                return {'success': False, 'error': 'Cannot leave team channels'}
+            if uid in conv.participant_ids.ids:
+                conv.write({'participant_ids': [(3, uid)]})
+                _notify_membership_changed(conv, [uid], action='removed')
+            return {'success': True}
+        except Exception as e:
+            return crm_error(e, 'conversation_leave')
+
+    @http.route('/api/crm/supply/conversations/<int:conv_id>/update',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def conversation_update(self, conv_id, **kwargs):
+        """Generic update (mute, pin, name, etc.). Only supported fields are applied."""
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+            conv = request.env['lugal.supply.conversation'].sudo().browse(conv_id).exists()
+            if not conv:
+                return {'success': False, 'error': 'Not found'}
+            if conv.type != 'team' and uid not in conv.participant_ids.ids:
+                return {'success': False, 'error': 'Forbidden'}
+            vals = {}
+            if 'name' in kwargs and conv.type == 'group':
+                vals['name'] = str(kwargs['name']).strip()
+            if vals:
+                conv.write(vals)
+            return {'success': True, 'data': _serialize_conversation(conv, uid)}
+        except Exception as e:
+            return crm_error(e, 'conversation_update')
+
+    @http.route('/api/crm/supply/conversations/<int:conv_id>/mark_read',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def conversation_mark_read(self, conv_id, **kwargs):
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+            conv = request.env['lugal.supply.conversation'].sudo().browse(conv_id).exists()
+            if not conv:
+                return {'success': False, 'error': 'Not found'}
+            if conv.type != 'team' and uid not in conv.participant_ids.ids:
+                return {'success': False, 'error': 'Forbidden'}
+            Msg = request.env['lugal.supply.message'].sudo()
+            unread = Msg.search([
+                ('conversation_id', '=', conv.id),
+                ('sender_id', '!=', uid),
+                ('read_user_ids', 'not in', [uid]),
+                ('is_deleted', '=', False),
+            ])
+            if unread:
+                unread.write({'read_user_ids': [(4, uid)]})
+                # Record the read timestamp in read_receipts_json (Riyadh time)
+                now_iso = datetime.now(tz=_RIYADH_TZ).isoformat(timespec='seconds')
+                for m in unread:
+                    try:
+                        receipts = json.loads(m.read_receipts_json or '{}')
+                    except Exception:
+                        receipts = {}
+                    receipts[str(uid)] = now_iso
+                    m.write({'read_receipts_json': json.dumps(receipts)})
+                # Notify senders about the read (for delivery ticks)
+                senders = set(unread.mapped('sender_id.id')) - {uid}
+                for sender_uid in senders:
+                    _bus_publish(
+                        f'supply_user.{sender_uid}',
+                        'supply.chat.message.read',
+                        {
+                            'conversation_id': conv.id,
+                            'read_by_uid': uid,
+                            'message_ids': unread.ids,
+                        },
+                    )
+            return {'success': True, 'data': {'conversation_id': conv.id, 'unread_count': 0}}
+        except Exception as e:
+            return crm_error(e, 'conversation_mark_read')
+
+    # -----------------------------------------------------------------------
+    # Typing
+    # -----------------------------------------------------------------------
+
+    @http.route('/api/crm/supply/conversations/<int:conv_id>/typing',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def conversation_typing(self, conv_id, is_typing=False, **kwargs):
+        """Broadcast a per-user typing indicator to conversation participants.
+
+        Each event carries a heartbeat_time (Unix ms epoch) that the FE uses to
+        discard stale auto-stop events emitted by older Odoo worker processes.
+
+        Backend design
+        --------------
+        • No per-conversation typing_users list is maintained on the server.
+          With N worker processes each holding independent in-memory state,
+          such a list would be wrong most of the time.
+        • The FE is the authoritative source of "who is typing"; it maintains a
+          Map<userId, {name, lastHeartbeat}> and renders from that map.
+        • The auto-stop timer fires _TYPING_EXPIRE_SECS after the LAST heartbeat
+          processed by THIS worker.  If the user sent a newer heartbeat to a
+          DIFFERENT worker that timer's stop event will carry a smaller
+          heartbeat_time and the FE will discard it.
+        """
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+            conv = request.env['lugal.supply.conversation'].sudo().browse(conv_id).exists()
+            if not conv:
+                return {'success': False, 'error': 'Not found'}
+            if conv.type != 'team' and uid not in conv.participant_ids.ids:
+                return {'success': False, 'error': 'Forbidden'}
+
+            user      = request.env['res.users'].sudo().browse(uid)
+            user_name = user.name or ''
+            timer_key = (uid, conv_id)
+            db_name   = request.env.cr.dbname
+
+            if is_typing:
+                # Capture heartbeat_time while still inside the request context.
+                heartbeat_time = int(time.time() * 1000)
+
+                payload = {
+                    'conversation_id': conv.id,
+                    'user_id':         uid,
+                    'user_name':       user_name,
+                    'is_typing':       True,
+                    'heartbeat_time':  heartbeat_time,
+                }
+                _bus_publish(f'supply_chat.{conv.id}', 'supply.chat.typing.start', payload)
+
+                # Arm/reset auto-stop timer.  The closure captures heartbeat_time
+                # so the FE can verify this stop belongs to the most recent start.
+                def _auto_stop(_hb=heartbeat_time):
+                    try:
+                        with _typing_lock:
+                            _typing_timers.pop(timer_key, None)
+
+                        from odoo.modules.registry import Registry as _Registry
+                        with _Registry(db_name).cursor() as cr:
+                            from odoo.api import Environment
+                            env = Environment(cr, uid, {})
+                            env['bus.bus'].sudo()._sendone(
+                                f'supply_chat.{conv_id}',
+                                'supply.chat.typing.stop',
+                                {
+                                    'conversation_id': conv_id,
+                                    'user_id':         uid,
+                                    'user_name':       user_name,
+                                    'is_typing':       False,
+                                    'heartbeat_time':  _hb,
+                                },
+                            )
+                    except Exception as exc:
+                        _logger.debug('typing auto-stop error: %s', exc)
+
+                with _typing_lock:
+                    old_timer = _typing_timers.pop(timer_key, None)
+                    if old_timer:
+                        old_timer.cancel()
+                    t = threading.Timer(_TYPING_EXPIRE_SECS, _auto_stop)
+                    t.daemon = True
+                    t.start()
+                    _typing_timers[timer_key] = t
+
+            else:
+                # Explicit stop: cancel pending auto-stop and broadcast immediately.
+                # Use a heartbeat_time larger than any start event so the FE always
+                # accepts an explicit stop (user intentionally stopped typing).
+                heartbeat_time = int(time.time() * 1000)
+
+                with _typing_lock:
+                    old = _typing_timers.pop(timer_key, None)
+                    if old:
+                        old.cancel()
+
+                payload = {
+                    'conversation_id': conv.id,
+                    'user_id':         uid,
+                    'user_name':       user_name,
+                    'is_typing':       False,
+                    'heartbeat_time':  heartbeat_time,
+                }
+                _bus_publish(f'supply_chat.{conv.id}', 'supply.chat.typing.stop', payload)
+
+            return {'success': True, 'data': payload}
+        except Exception as e:
+            return crm_error(e, 'conversation_typing')
+
+    # -----------------------------------------------------------------------
+    # Group members
+    # -----------------------------------------------------------------------
+
+    @http.route('/api/crm/supply/conversations/<int:conv_id>/members/list',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def members_list(self, conv_id, **kwargs):
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+            conv = request.env['lugal.supply.conversation'].sudo().browse(conv_id).exists()
+            if not conv:
+                return {'success': False, 'error': 'Not found'}
+            if conv.type != 'team' and uid not in conv.participant_ids.ids:
+                return {'success': False, 'error': 'Forbidden'}
+            members = [_serialize_participant(u) for u in conv.participant_ids]
+            return {'success': True, 'data': {'members': members, 'total': len(members)}}
+        except Exception as e:
+            return crm_error(e, 'members_list')
+
+    @http.route('/api/crm/supply/conversations/<int:conv_id>/members/add',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def members_add(self, conv_id, user_ids=None, **kwargs):
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+            if not user_ids:
+                return {'success': False, 'error': 'user_ids required'}
+            conv = request.env['lugal.supply.conversation'].sudo().browse(conv_id).exists()
+            if not conv:
+                return {'success': False, 'error': 'Not found'}
+            if conv.type != 'group':
+                return {'success': False, 'error': 'Can only add members to group conversations'}
+            if uid not in conv.participant_ids.ids:
+                return {'success': False, 'error': 'Forbidden'}
+            # Only admins and supervisors can add members
+            creator_id = conv.created_by_id.id if conv.created_by_id else None
+            admin_ids = conv.group_admin_ids.ids if hasattr(conv, 'group_admin_ids') else []
+            supervisor_ids = conv.group_supervisor_ids.ids if hasattr(conv, 'group_supervisor_ids') else []
+            can_add = (uid == creator_id) or (uid in admin_ids) or (uid in supervisor_ids)
+            if not can_add:
+                return {'success': False, 'error': 'Only admins and supervisors can add members'}
+            before_ids = set(conv.participant_ids.ids)
+            clean_user_ids = [int(u) for u in user_ids]
+            conv.write({'participant_ids': [(4, u) for u in clean_user_ids]})
+            added_ids = sorted(set(clean_user_ids) - before_ids)
+            if added_ids:
+                # Existing WebSocket subscriptions are built at connection time.
+                # Newly-added members must resubscribe immediately or they can
+                # miss typing/edit/delete/pin events on supply_chat.<conv_id>.
+                _notify_participants_resubscribe(conv, added_ids)
+            return {'success': True, 'data': _serialize_conversation(conv, uid)}
+        except Exception as e:
+            return crm_error(e, 'members_add')
+
+    @http.route('/api/crm/supply/conversations/<int:conv_id>/members/remove',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def members_remove(self, conv_id, user_id=None, **kwargs):
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+            if not user_id:
+                return {'success': False, 'error': 'user_id required'}
+            conv = request.env['lugal.supply.conversation'].sudo().browse(conv_id).exists()
+            if not conv:
+                return {'success': False, 'error': 'Not found'}
+            if conv.type != 'group':
+                return {'success': False, 'error': 'Can only remove members from group conversations'}
+            if uid not in conv.participant_ids.ids:
+                return {'success': False, 'error': 'Forbidden'}
+            # Super admin rule: only the group CREATOR can remove other members.
+            # Regular admins can add members but cannot remove them.
+            # Any member can remove themselves (leave the group).
+            creator_id = conv.created_by_id.id if conv.created_by_id else None
+            target_uid = int(user_id)
+            is_self_remove = (target_uid == uid)
+            is_creator = (uid == creator_id)
+
+            if not is_self_remove and not is_creator:
+                return {'success': False, 'error': 'Only the group creator can remove other members'}
+            if target_uid == creator_id and not is_self_remove:
+                return {'success': False, 'error': 'Cannot remove the group creator'}
+            conv.write({'participant_ids': [(3, target_uid)]})
+            _notify_membership_changed(conv, [target_uid], action='removed')
+            return {'success': True, 'data': _serialize_conversation(conv, uid)}
+        except Exception as e:
+            return crm_error(e, 'members_remove')
+
+    @http.route('/api/crm/supply/conversations/<int:conv_id>/members/role',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def members_role(self, conv_id, user_id=None, role=None, **kwargs):
+        """
+        Assign or remove a group role for a member.
+
+        Params:
+          user_id  (int)   — target user
+          role     (str)   — 'admin' | 'supervisor' | 'member' (demotes)
+
+        Only the group creator or existing admins can call this.
+        Extra group settings:
+          only_admins_can_send (bool)  — toggle admin-only messaging
+          group_description (str)     — update group description
+        """
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+
+            conv = request.env['lugal.supply.conversation'].sudo().browse(conv_id).exists()
+            if not conv:
+                return {'success': False, 'error': 'Conversation not found'}
+            if conv.type != 'group':
+                return {'success': False, 'error': 'Only group conversations support roles'}
+            if uid not in conv.participant_ids.ids:
+                return {'success': False, 'error': 'Forbidden'}
+
+            # Only admins (and creator) can change roles
+            creator_id = conv.created_by_id.id if conv.created_by_id else None
+            admin_ids = conv.group_admin_ids.ids if hasattr(conv, 'group_admin_ids') else []
+            is_admin = (uid == creator_id) or (uid in admin_ids)
+
+            # Handle group settings updates (no user_id required)
+            if 'only_admins_can_send' in kwargs:
+                if not is_admin:
+                    return {'success': False, 'error': 'Only admins can change group settings'}
+                conv.write({'only_admins_can_send': bool(kwargs['only_admins_can_send'])})
+            if 'group_description' in kwargs:
+                if not is_admin:
+                    return {'success': False, 'error': 'Only admins can change group description'}
+                conv.write({'group_description': kwargs['group_description'] or ''})
+
+            if user_id and role:
+                if not is_admin:
+                    return {'success': False, 'error': 'Only admins can assign roles'}
+                target_uid = int(user_id)
+                if target_uid == creator_id:
+                    return {'success': False, 'error': 'Cannot change the primary creator role'}
+                if target_uid not in conv.participant_ids.ids:
+                    return {'success': False, 'error': 'User is not a group member'}
+
+                role = (role or '').strip().lower()
+                if role == 'admin':
+                    conv.write({
+                        'group_admin_ids': [(4, target_uid)],
+                        'group_supervisor_ids': [(3, target_uid)],
+                    })
+                elif role == 'supervisor':
+                    conv.write({
+                        'group_supervisor_ids': [(4, target_uid)],
+                        'group_admin_ids': [(3, target_uid)],
+                    })
+                elif role == 'member':
+                    conv.write({
+                        'group_admin_ids': [(3, target_uid)],
+                        'group_supervisor_ids': [(3, target_uid)],
+                    })
+                else:
+                    return {'success': False, 'error': f'Invalid role: {role}'}
+
+            return {'success': True, 'data': _serialize_conversation(conv, uid)}
+        except Exception as e:
+            return crm_error(e, 'members_role')
+
+    # -----------------------------------------------------------------------
+    # Messages — list
+    # -----------------------------------------------------------------------
+
+    @http.route('/api/crm/supply/messages/list',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def messages_list(self, thread_id=None, conversation_id=None, recipient_ids=None,
+                      group_name=None,
+                      page=1, per_page=20, before_id=None, limit=None, direction=None,
+                      **kwargs):
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+
+            effective_thread_id = thread_id or conversation_id
+            conv, err = _resolve_thread(uid, effective_thread_id, recipient_ids, group_name)
+            if err:
+                return {'success': False, 'error': err}
+
+            Msg = request.env['lugal.supply.message'].sudo()
+            domain = [
+                ('conversation_id', '=', conv.id),
+                # Include is_deleted=True messages so the frontend can render
+                # "This message was deleted" (WhatsApp-style). Only filter out
+                # messages hidden for this specific user ("delete for me").
+                ('hidden_user_ids', 'not in', [uid]),
+            ]
+
+            # Cursor-based pagination: before_id loads messages older than the given id.
+            # This replaces the old page/offset approach which returned stale old messages.
+            per_page_n = int(limit or per_page)
+            if before_id:
+                domain = domain + [('id', '<', int(before_id))]
+
+            total = Msg.search_count(domain)
+
+            # Fetch newest-first so page 1 always returns the most recent messages.
+            # Fetch one extra to detect whether more older messages exist.
+            rows = Msg.search(domain, order='create_date desc, id desc',
+                              limit=per_page_n + 1)
+            has_more_older = len(rows) > per_page_n
+            msgs = rows[:per_page_n]
+
+            # Oldest id in the result set — FE uses this as before_id to load even older messages.
+            anchor_before_id = msgs[-1].id if msgs else None
+
+            items = [_serialize_message(m, uid) for m in msgs]
+            return {
+                'success': True,
+                'data': {
+                    'items': items,
+                    'total': total,
+                    'has_more_older': has_more_older,
+                    'anchor_before_id': anchor_before_id,
+                    'thread_id': conv.id,
+                    'conversation_type': conv.type,
+                },
+            }
+        except Exception as e:
+            return crm_error(e, 'messages_list')
+
+    # -----------------------------------------------------------------------
+    # Messages — create
+    # -----------------------------------------------------------------------
+
+    @http.route('/api/crm/supply/messages/create',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def messages_create(self, content='', thread_id=None, conversation_id=None,
+                        recipient_ids=None,
+                        group_name=None, attachments=None, reply_to_id=None,
+                        client_message_id=None, attachment_ids=None,
+                        kind=None, duration_seconds=None, **kwargs):
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+
+            # Accept both thread_id and conversation_id as aliases for the conversation
+            effective_thread_id = thread_id or conversation_id
+            conv, err = _resolve_thread(uid, effective_thread_id, recipient_ids, group_name)
+            if err:
+                return {'success': False, 'error': err}
+
+            # Enforce only-admins-can-send restriction
+            if (conv.type == 'group' and
+                    getattr(conv, 'only_admins_can_send', False)):
+                creator_id = conv.created_by_id.id if conv.created_by_id else None
+                admin_ids = conv.group_admin_ids.ids if hasattr(conv, 'group_admin_ids') else []
+                is_admin = (uid == creator_id) or (uid in admin_ids)
+                if not is_admin:
+                    return {'success': False, 'error': 'Only admins can send messages in this group'}
+
+            # Resolve ir.attachment ids into {name, url, kind, ...} objects if provided
+            att_list = list(attachments or [])
+            inferred_kind = kind or 'text'
+
+            if attachment_ids:
+                IrAtt = request.env['ir.attachment'].sudo()
+                for att_id in attachment_ids:
+                    att = IrAtt.browse(int(att_id)).exists()
+                    if att:
+                        mime = att.mimetype or ''
+                        if mime.startswith('audio/'):
+                            att_kind = 'voice' if 'voice' in (att.name or '').lower() else 'audio'
+                        elif mime.startswith('video/'):
+                            att_kind = 'video'
+                        elif mime.startswith('image/'):
+                            att_kind = 'image'
+                        else:
+                            att_kind = 'file'
+                        att_list.append({
+                            'id': att.id,
+                            'name': att.name or '',
+                            'mimetype': mime,
+                            'size': int(att.file_size or 0),
+                            'url': _build_attachment_url(att),
+                            'file_url': _build_attachment_url(att),
+                            'kind': att_kind,
+                            'file_type': att_kind,
+                            'duration_seconds': 0,
+                        })
+                        # Infer message kind from first media attachment
+                        if inferred_kind == 'text' and att_kind in ('audio', 'voice', 'video', 'image'):
+                            inferred_kind = att_kind
+
+            # Explicit kind param overrides inference
+            final_kind = kind if kind in ('text', 'image', 'video', 'audio', 'voice', 'file') else inferred_kind
+
+            try:
+                final_duration = float(duration_seconds or 0)
+            except (ValueError, TypeError):
+                final_duration = 0.0
+
+            Msg = request.env['lugal.supply.message'].sudo()
+            vals = {
+                'conversation_id': conv.id,
+                'sender_id': uid,
+                'content': str(content or ''),
+                'kind': final_kind,
+                'duration_seconds': final_duration,
+                'attachments_json': json.dumps(att_list),
+            }
+            if reply_to_id:
+                r = Msg.browse(int(reply_to_id)).exists()
+                if r and r.conversation_id.id == conv.id:
+                    vals['reply_to_id'] = r.id
+            if client_message_id:
+                vals['client_message_id'] = str(client_message_id)
+
+            msg = Msg.create(vals)
+
+            # Touch conversation activity timestamp
+            conv.write({'last_activity': odoo_fields.Datetime.now()})
+
+            serialized = _serialize_message(msg, uid)
+            _publish_new_message(msg, uid, conv)
+
+            return {'success': True, 'data': serialized}
+        except Exception as e:
+            return crm_error(e, 'messages_create')
+
+    # -----------------------------------------------------------------------
+    # Messages — edit
+    # -----------------------------------------------------------------------
+
+    @http.route('/api/crm/supply/messages/<int:message_id>/edit',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def message_edit(self, message_id, content=None, **kwargs):
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+            if content is None:
+                return {'success': False, 'error': 'content is required'}
+            Msg = request.env['lugal.supply.message'].sudo()
+            msg = Msg.browse(message_id).exists()
+            if not msg:
+                return {'success': False, 'error': 'Message not found'}
+            if msg.sender_id.id != uid:
+                return {'success': False, 'error': 'Only the sender can edit this message'}
+            if msg.is_deleted:
+                return {'success': False, 'error': 'Cannot edit a deleted message'}
+            # Enforce 5-minute edit window
+            # Both odoo_fields.Datetime.now() and msg.create_date use the same
+            # clock reference (server local time stored as TIMESTAMP WITHOUT TIMEZONE),
+            # so their difference is always correct regardless of server timezone.
+            if msg.create_date:
+                age = (odoo_fields.Datetime.now() - msg.create_date).total_seconds()
+                if age > 300:
+                    return {
+                        'success': False,
+                        'error': 'Messages can only be edited within 5 minutes of sending',
+                        'code': 'EDIT_WINDOW_EXPIRED',
+                    }
+            msg.write({'content': str(content), 'edited_at': odoo_fields.Datetime.now()})
+            serialized = _serialize_message(msg, uid)
+            _bus_publish(f'supply_chat.{msg.conversation_id.id}',
+                         'supply.chat.message.updated', serialized)
+            return {'success': True, 'data': serialized}
+        except Exception as e:
+            return crm_error(e, 'message_edit')
+
+    # -----------------------------------------------------------------------
+    # Messages — pin / unpin
+    # -----------------------------------------------------------------------
+
+    @http.route('/api/crm/supply/messages/<int:message_id>/pin',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def message_pin(self, message_id, **kwargs):
+        """
+        Pin or unpin a message in its conversation.
+        Any conversation participant can pin/unpin.
+
+        Body params (optional):
+          pin  bool  default True — pass false to unpin
+        """
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+
+            pin = kwargs.get('pin', True)
+            if isinstance(pin, str):
+                pin = pin.lower() not in ('false', '0', 'no')
+
+            Msg = request.env['lugal.supply.message'].sudo()
+            msg = Msg.browse(message_id).exists()
+            if not msg:
+                return {'success': False, 'error': 'Message not found'}
+
+            conv = msg.conversation_id
+            if not conv:
+                return {'success': False, 'error': 'Conversation not found'}
+            if conv.type != 'team' and uid not in conv.participant_ids.ids:
+                return {'success': False, 'error': 'Forbidden'}
+            if msg.is_deleted:
+                return {'success': False, 'error': 'Cannot pin a deleted message'}
+
+            if pin:
+                msg.write({
+                    'is_pinned': True,
+                    'pinned_at': odoo_fields.Datetime.now(),
+                    'pinned_by_id': uid,
+                })
+            else:
+                msg.write({
+                    'is_pinned': False,
+                    'pinned_at': False,
+                    'pinned_by_id': False,
+                })
+
+            serialized = _serialize_message(msg, uid)
+            _bus_publish(
+                f'supply_chat.{conv.id}',
+                'supply.chat.message.pinned',
+                {
+                    'message_id': msg.id,
+                    'conversation_id': conv.id,
+                    'is_pinned': msg.is_pinned,
+                    'pinned_by_id': uid,
+                    'pinned_at': _to_riyadh_iso(msg.pinned_at),
+                    'message': serialized,
+                },
+            )
+            return {'success': True, 'data': serialized}
+        except Exception as e:
+            return crm_error(e, 'message_pin')
+
+    # -----------------------------------------------------------------------
+    # Messages — react
+    # -----------------------------------------------------------------------
+
+    @http.route('/api/crm/supply/messages/<int:message_id>/react',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def message_react(self, message_id, emoji=None, **kwargs):
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+            if not emoji:
+                return {'success': False, 'error': 'emoji is required'}
+            Msg = request.env['lugal.supply.message'].sudo()
+            msg = Msg.browse(message_id).exists()
+            if not msg:
+                return {'success': False, 'error': 'Message not found'}
+            conv = msg.conversation_id
+            if conv.type != 'team' and uid not in conv.participant_ids.ids:
+                return {'success': False, 'error': 'Forbidden'}
+            try:
+                reactions = json.loads(msg.reactions_json or '{}')
+            except Exception:
+                reactions = {}
+            users = reactions.get(emoji, [])
+            if uid in users:
+                users.remove(uid)
+            else:
+                users.append(uid)
+            if users:
+                reactions[emoji] = users
+            else:
+                reactions.pop(emoji, None)
+            msg.write({'reactions_json': json.dumps(reactions)})
+            payload = {'message_id': msg.id, 'conversation_id': conv.id, 'reactions': reactions}
+            _bus_publish(f'supply_chat.{conv.id}', 'supply.chat.message.reaction.changed', payload)
+            # Also notify the message author on their personal channel so the
+            # notification bell registers the reaction (like WhatsApp).
+            # Skip if the reactor IS the message author (reacting to your own msg still
+            # sends a notification per user request, unless removed).
+            author_id = msg.sender_id.id if msg.sender_id else None
+            if author_id and uid in users:  # uid in users means emoji was just ADDED
+                try:
+                    reactor_name = request.env['res.users'].sudo().browse(uid).name or 'Someone'
+                    _bus_publish(
+                        f'supply_user.{author_id}',
+                        'supply.chat.message.reaction.notify',
+                        {
+                            'message_id': msg.id,
+                            'conversation_id': conv.id,
+                            'emoji': emoji,
+                            'reactor_id': uid,
+                            'reactor_name': reactor_name,
+                        },
+                    )
+                except Exception:
+                    pass
+            return {'success': True, 'data': {'reactions': reactions}}
+        except Exception as e:
+            return crm_error(e, 'message_react')
+
+    # -----------------------------------------------------------------------
+    # Messages — delivered
+    # -----------------------------------------------------------------------
+
+    @http.route('/api/crm/supply/messages/<int:message_id>/delivered',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def message_delivered(self, message_id, **kwargs):
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+            Msg = request.env['lugal.supply.message'].sudo()
+            msg = Msg.browse(message_id).exists()
+            if not msg:
+                return {'success': False, 'error': 'Message not found'}
+            # Only mark delivered if the caller is NOT the sender
+            if msg.sender_id.id != uid and uid not in msg.delivered_user_ids.ids:
+                msg.write({'delivered_user_ids': [(4, uid)]})
+                # Notify the sender
+                if msg.sender_id:
+                    _bus_publish(
+                        f'supply_user.{msg.sender_id.id}',
+                        'supply.chat.message.delivered',
+                        {
+                            'message_id': msg.id,
+                            'conversation_id': msg.conversation_id.id,
+                            'delivery_state': 'delivered',
+                            'delivered_to': msg.delivered_user_ids.ids,
+                        },
+                    )
+            return {
+                'success': True,
+                'data': {
+                    'message_id': msg.id,
+                    'conversation_id': msg.conversation_id.id,
+                    'delivery_state': _delivery_state_for(msg, msg.sender_id.id if msg.sender_id else uid),
+                    'delivered_to': msg.delivered_user_ids.ids,
+                    'delivered_count': len(msg.delivered_user_ids),
+                },
+            }
+        except Exception as e:
+            return crm_error(e, 'message_delivered')
+
+    # -----------------------------------------------------------------------
+    # Messages — read (single message)
+    # -----------------------------------------------------------------------
+
+    @http.route('/api/crm/supply/messages/<int:message_id>/read',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def message_read(self, message_id, **kwargs):
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+            Msg = request.env['lugal.supply.message'].sudo()
+            msg = Msg.browse(message_id).exists()
+            if not msg:
+                return {'success': False, 'error': 'Message not found'}
+            if msg.sender_id.id != uid and uid not in msg.read_user_ids.ids:
+                msg.write({'read_user_ids': [(4, uid)]})
+                # Also auto-mark delivered if not already
+                if uid not in msg.delivered_user_ids.ids:
+                    msg.write({'delivered_user_ids': [(4, uid)]})
+                # Record the read timestamp in read_receipts_json (Riyadh time)
+                read_at_iso = datetime.now(tz=_RIYADH_TZ).isoformat(timespec='seconds')
+                try:
+                    receipts = json.loads(msg.read_receipts_json or '{}')
+                except Exception:
+                    receipts = {}
+                receipts[str(uid)] = read_at_iso
+                msg.write({'read_receipts_json': json.dumps(receipts)})
+                # Notify the sender
+                if msg.sender_id:
+                    unread_remaining = Msg.search_count([
+                        ('conversation_id', '=', msg.conversation_id.id),
+                        ('sender_id', '!=', uid),
+                        ('read_user_ids', 'not in', [uid]),
+                        ('is_deleted', '=', False),
+                    ])
+                    # Build read_receipts for the WS payload
+                    try:
+                        receipts_pub = json.loads(msg.read_receipts_json or '{}')
+                    except Exception:
+                        receipts_pub = {}
+                    read_receipts_payload = [
+                        {
+                            'user_id': ru.id,
+                            'user_name': ru.name or f'User #{ru.id}',
+                            'read_at': receipts_pub.get(str(ru.id)),
+                        }
+                        for ru in msg.read_user_ids
+                    ]
+                    _bus_publish(
+                        f'supply_user.{msg.sender_id.id}',
+                        'supply.chat.message.read',
+                        {
+                            'message_id': msg.id,
+                            'conversation_id': msg.conversation_id.id,
+                            'delivery_state': 'read',
+                            'read_by': msg.read_user_ids.ids,
+                            'read_receipts': read_receipts_payload,
+                        },
+                    )
+            unread_count = Msg.search_count([
+                ('conversation_id', '=', msg.conversation_id.id),
+                ('sender_id', '!=', uid),
+                ('read_user_ids', 'not in', [uid]),
+                ('is_deleted', '=', False),
+            ])
+            # Build read_receipts for the HTTP response
+            try:
+                receipts_map = json.loads(msg.read_receipts_json or '{}')
+            except Exception:
+                receipts_map = {}
+            read_receipts = [
+                {
+                    'user_id': ru.id,
+                    'user_name': ru.name or f'User #{ru.id}',
+                    'read_at': receipts_map.get(str(ru.id)),
+                }
+                for ru in msg.read_user_ids
+            ]
+            return {
+                'success': True,
+                'data': {
+                    'message_id': msg.id,
+                    'conversation_id': msg.conversation_id.id,
+                    'delivery_state': _delivery_state_for(msg, msg.sender_id.id if msg.sender_id else uid),
+                    'read_by': msg.read_user_ids.ids,
+                    'read_receipts': read_receipts,
+                    'unread_count': unread_count,
+                },
+            }
+        except Exception as e:
+            return crm_error(e, 'message_read')
+
+    # -----------------------------------------------------------------------
+    # Messages — forward
+    # -----------------------------------------------------------------------
+
+    @http.route('/api/crm/supply/messages/broadcast',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def messages_broadcast(self, content='', conversation_ids=None,
+                           attachments=None, attachment_ids=None,
+                           kind=None, **kwargs):
+        """Send the same message to multiple conversations at once.
+
+        Payload:
+          content         – message text (may be empty if attachments provided)
+          conversation_ids – list of existing conversation IDs to broadcast to
+          attachment_ids  – (optional) list of ir.attachment IDs to include
+          attachments     – (optional) list of attachment dicts (same as messages/create)
+          kind            – 'text' | 'image' | 'video' | 'audio' | 'file' (default 'text')
+
+        Returns per-conversation results so the FE can track which succeeded.
+        """
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+            if not conversation_ids or not isinstance(conversation_ids, list):
+                return {'success': False, 'error': 'conversation_ids must be a non-empty list'}
+            if not content and not attachments and not attachment_ids:
+                return {'success': False, 'error': 'Provide content or attachments'}
+
+            # Build attachment list once (shared across all conversations)
+            att_list = list(attachments or [])
+            inferred_kind = kind or 'text'
+            if attachment_ids:
+                IrAtt = request.env['ir.attachment'].sudo()
+                for att_id in attachment_ids:
+                    att = IrAtt.browse(int(att_id)).exists()
+                    if att:
+                        mime = att.mimetype or ''
+                        if mime.startswith('audio/'):
+                            att_kind = 'voice' if 'voice' in (att.name or '').lower() else 'audio'
+                        elif mime.startswith('video/'):
+                            att_kind = 'video'
+                        elif mime.startswith('image/'):
+                            att_kind = 'image'
+                        else:
+                            att_kind = 'file'
+                        att_list.append({
+                            'id': att.id,
+                            'name': att.name or '',
+                            'mimetype': mime,
+                            'size': int(att.file_size or 0),
+                            'url': _build_attachment_url(att),
+                            'file_url': _build_attachment_url(att),
+                            'kind': att_kind,
+                            'file_type': att_kind,
+                            'duration_seconds': 0,
+                        })
+                        if inferred_kind == 'text' and att_kind in ('audio', 'voice', 'video', 'image'):
+                            inferred_kind = att_kind
+
+            final_kind = kind if kind in ('text', 'image', 'video', 'audio', 'voice', 'file') else inferred_kind
+            atts_json = json.dumps(att_list)
+
+            Msg  = request.env['lugal.supply.message'].sudo()
+            Conv = request.env['lugal.supply.conversation'].sudo()
+            now  = odoo_fields.Datetime.now()
+
+            results = []
+            for conv_id in conversation_ids:
+                try:
+                    conv = Conv.browse(int(conv_id)).exists()
+                    if not conv:
+                        results.append({'conversation_id': conv_id, 'success': False, 'error': 'Not found'})
+                        continue
+                    if conv.type != 'team' and uid not in conv.participant_ids.ids:
+                        results.append({'conversation_id': conv_id, 'success': False, 'error': 'Forbidden'})
+                        continue
+                    msg = Msg.create({
+                        'conversation_id': conv.id,
+                        'sender_id':       uid,
+                        'content':         str(content or ''),
+                        'kind':            final_kind,
+                        'attachments_json': atts_json,
+                    })
+                    conv.write({'last_activity': now})
+                    _publish_new_message(msg, uid, conv)
+                    results.append({
+                        'conversation_id': conv_id,
+                        'success':         True,
+                        'message':         _serialize_message(msg, uid),
+                    })
+                except Exception as inner_exc:
+                    results.append({'conversation_id': conv_id, 'success': False, 'error': str(inner_exc)})
+
+            total     = len(results)
+            succeeded = sum(1 for r in results if r.get('success'))
+            return {
+                'success': True,
+                'data': {
+                    'total':     total,
+                    'succeeded': succeeded,
+                    'failed':    total - succeeded,
+                    'results':   results,
+                },
+            }
+        except Exception as e:
+            return crm_error(e, 'messages_broadcast')
+
+    @http.route('/api/crm/supply/messages/forward',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def messages_forward(self, message_id=None, thread_id=None, recipient_ids=None,
+                         group_name=None, **kwargs):
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+            if not message_id:
+                return {'success': False, 'error': 'message_id required'}
+            Msg = request.env['lugal.supply.message'].sudo()
+            src = Msg.browse(int(message_id)).exists()
+            if not src:
+                return {'success': False, 'error': 'Source message not found'}
+            conv, err = _resolve_thread(uid, thread_id, recipient_ids, group_name)
+            if err:
+                return {'success': False, 'error': err}
+            fwd = Msg.create({
+                'conversation_id': conv.id,
+                'sender_id': uid,
+                'content': src.content or '',
+                'attachments_json': src.attachments_json or '[]',
+            })
+            conv.write({'last_activity': odoo_fields.Datetime.now()})
+            serialized = _serialize_message(fwd, uid)
+            _publish_new_message(fwd, uid, conv)
+            return {'success': True, 'data': serialized}
+        except Exception as e:
+            return crm_error(e, 'messages_forward')
+
+    # -----------------------------------------------------------------------
+    # Messages — search
+    # -----------------------------------------------------------------------
+
+    @http.route('/api/crm/supply/conversations/<int:conv_id>/pinned',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def messages_pinned(self, conv_id, **kwargs):
+        """Return all currently-pinned messages in a conversation, newest pin first."""
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+            conv = request.env['lugal.supply.conversation'].sudo().browse(conv_id).exists()
+            if not conv:
+                return {'success': False, 'error': 'Not found'}
+            if conv.type != 'team' and uid not in conv.participant_ids.ids:
+                return {'success': False, 'error': 'Forbidden'}
+            Msg = request.env['lugal.supply.message'].sudo()
+            msgs = Msg.search([
+                ('conversation_id', '=', conv.id),
+                ('is_pinned', '=', True),
+                ('is_deleted', '=', False),
+            ], order='pinned_at desc')
+            return {
+                'success': True,
+                'data': {'items': [_serialize_message(m, uid) for m in msgs]},
+            }
+        except Exception as e:
+            return crm_error(e, 'messages_pinned')
+
+    # -----------------------------------------------------------------------
+    # Messages — search
+    # -----------------------------------------------------------------------
+
+    @http.route('/api/crm/supply/messages/search',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def messages_search(self, query='', thread_id=None, page=1, per_page=20, **kwargs):
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+            Msg = request.env['lugal.supply.message'].sudo()
+            domain = [
+                ('hidden_user_ids', 'not in', [uid]),
+                ('is_deleted', '=', False),
+                ('content', 'ilike', str(query or '')),
+            ]
+            if thread_id:
+                conv = request.env['lugal.supply.conversation'].sudo().browse(int(thread_id)).exists()
+                if conv and (conv.type == 'team' or uid in conv.participant_ids.ids):
+                    domain.append(('conversation_id', '=', conv.id))
+                else:
+                    domain.append(('conversation_id.participant_ids', 'in', [uid]))
+            else:
+                domain.append(('conversation_id.participant_ids', 'in', [uid]))
+            total = Msg.search_count(domain)
+            offset = (int(page) - 1) * int(per_page)
+            msgs = Msg.search(domain, order='create_date desc', limit=int(per_page), offset=offset)
+            return {
+                'success': True,
+                'data': {
+                    'items': [_serialize_message(m, uid) for m in msgs],
+                    'total': total,
+                },
+            }
+        except Exception as e:
+            return crm_error(e, 'messages_search')
+
+    # -----------------------------------------------------------------------
+    # Bus channel discovery
+    # -----------------------------------------------------------------------
+
+    @http.route('/api/crm/supply/chat/bus_channels',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def bus_channels(self, **kwargs):
+        """
+        Returns the list of bus channel names this user should subscribe to in /web/bus/poll.
+
+        Channels:
+          supply_chat.<conv_id>   — conversation-level events (new msg, typing, reactions)
+          supply_user.<uid>       — user-level events:
+                                    • delivered/read receipts
+                                    • DM notifications
+                                    • supply.chat.resubscribe  (new conversation created)
+                                    • crm.permissions.updated  (admin changed this user's
+                                        permissions — FE must re-call /api/crm/me/permissions)
+        """
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+            Conv = request.env['lugal.supply.conversation'].sudo()
+            convs = Conv.search([
+                ('is_archived', '=', False),
+                ('participant_ids', 'in', [uid]),
+            ])
+            channels = [f'supply_chat.{c.id}' for c in convs]
+            channels.append(f'supply_user.{uid}')
+            channels.append('supply_stories')
+            try:
+                channels.append(f'supply_session.{request.session.sid}')
+            except Exception:
+                pass
+            return {
+                'success': True,
+                'data': {
+                    'channels': channels,
+                    'uid': uid,
+                },
+            }
+        except Exception as e:
+            return crm_error(e, 'bus_channels')
+
+
+end of file supply_chat_controller.py
+--------------------------------------------------------------------------------
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+
+
+start of crm_notifications_controller.py
+crm_notifications_controller.py
+
+# -*- coding: utf-8 -*-
+"""
+Unified CRM Notifications API
+
+Combines chat (supply messages) and email unread counts into a single
+polling endpoint so the FE can maintain a single notification badge and
+notification feed without querying two separate systems.
+
+Routes:
+  GET  /api/crm/notifications          — unified unread counts + recent items
+  POST /api/crm/notifications/mark_read — mark chat/email/all as read
+"""
+
+import json
+import logging
+from datetime import datetime, timedelta, timezone
+
+from odoo import http
+from odoo.http import request, Response
+
+from ._auth import ensure_jwt_user_id
+from ._error import crm_error
+
+_logger = logging.getLogger(__name__)
+
+# Riyadh = UTC+3, no DST
+_RIYADH_TZ = timezone(timedelta(hours=3))
+
+
+def _to_riyadh_iso(dt):
+    """Convert a naive-UTC Odoo datetime to ISO 8601 with +03:00 (Riyadh) offset.
+    Odoo returns False (not None) for unset Datetime fields, so we guard for both."""
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(_RIYADH_TZ).isoformat(timespec='seconds')
+
+
+def _json_response(data, status=200):
+    resp = Response(
+        json.dumps(data),
+        status=status,
+        mimetype='application/json',
+        headers=[('Cache-Control', 'no-store')],
+    )
+    resp.headers['Access-Control-Allow-Origin']  = '*'
+    resp.headers['Access-Control-Allow-Headers'] = 'Authorization, Content-Type, X-Odoo-Database'
+    resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, PATCH, PUT, DELETE, OPTIONS'
+    return resp
+
+
+class CrmNotificationsController(http.Controller):
+
+    # -----------------------------------------------------------------------
+    # GET /api/crm/notifications
+    # -----------------------------------------------------------------------
+
+    @http.route('/api/crm/notifications', type='http', auth='none', csrf=False,
+                methods=['GET', 'OPTIONS'])
+    def notifications(self, **kwargs):
+        """
+        Unified notifications endpoint — chat + email in one response.
+
+        Query params:
+          since=<ISO datetime>   Optional. Return only new_messages / new_emails
+                                  received/created after this timestamp.
+          limit=<int>            Max items in each section (default 20, max 50).
+
+        Response shape:
+          {
+            "success": true,
+            "data": {
+              "total_unread":  <int>,          // sum of chat + email unread
+              "chat": {
+                "unread":       <int>,         // total unread chat messages
+                "conversations": [             // conversations with unread messages
+                  {
+                    "id":           <int>,
+                    "name":         <str>,
+                    "type":         "dm"|"group"|"team",
+                    "unread_count": <int>,
+                    "last_message": <str>,     // content preview
+                    "last_activity":<str>      // ISO-8601
+                  }
+                ]
+              },
+              "email": {
+                "unread":      <int>,          // total unread inbox emails
+                "items": [                     // recent unread email summaries
+                  {
+                    "id":           <int>,
+                    "account_id":   <int>,
+                    "subject":      <str>,
+                    "from_name":    <str>,
+                    "from_address": <str>,
+                    "date":         <str>       // ISO-8601
+                  }
+                ]
+              },
+              "checked_at": <ISO-8601 UTC>
+            }
+          }
+        """
+        if request.httprequest.method == 'OPTIONS':
+            return _json_response({})
+
+        uid = ensure_jwt_user_id()
+        if not uid:
+            return _json_response({'success': False, 'error': 'Unauthorized'}, 401)
+
+        try:
+            params    = request.httprequest.args
+            since_str = params.get('since', '')
+            limit     = min(int(params.get('limit', 20) or 20), 50)
+
+            since_dt = None
+            if since_str:
+                try:
+                    from odoo.fields import Datetime as OdooDatetime
+                    since_dt = OdooDatetime.from_string(since_str.replace('T', ' ')[:19])
+                except Exception:
+                    pass
+
+            # ── Chat unread ───────────────────────────────────────────────
+            chat_unread   = 0
+            chat_convs    = []
+
+            if 'lugal.supply.conversation' in request.env:
+                Conv = request.env['lugal.supply.conversation'].sudo()
+                Msg  = request.env['lugal.supply.message'].sudo()
+
+                # Conversations where this user is a participant and not archived
+                convs = Conv.search([
+                    ('is_archived', '=', False),
+                    ('participant_ids', 'in', [uid]),
+                ])
+
+                for conv in convs:
+                    msg_domain = [
+                        ('conversation_id', '=', conv.id),
+                        ('sender_id', '!=', uid),
+                        ('read_user_ids', 'not in', [uid]),
+                        ('is_deleted', '=', False),
+                        ('hidden_user_ids', 'not in', [uid]),
+                    ]
+                    if since_dt:
+                        msg_domain.append(('create_date', '>', since_dt))
+
+                    count = Msg.search_count(msg_domain)
+                    if count:
+                        chat_unread += count
+                        # Last message preview
+                        last = Msg.search(
+                            [('conversation_id', '=', conv.id), ('is_deleted', '=', False)],
+                            order='create_date desc', limit=1,
+                        )
+                        preview = ''
+                        if last:
+                            kind = getattr(last, 'kind', 'text') or 'text'
+                            if kind == 'voice':
+                                preview = '🎤 Voice message'
+                            elif kind == 'audio':
+                                preview = '🎵 Audio'
+                            elif kind == 'video':
+                                preview = '🎥 Video'
+                            elif kind == 'image':
+                                preview = '🖼 Image'
+                            elif kind == 'file':
+                                preview = '📎 File'
+                            else:
+                                preview = (last.content or '')[:80]
+                        chat_convs.append({
+                            'id':            conv.id,
+                            'name':          conv.name or '',
+                            'type':          conv.type,
+                            'unread_count':  count,
+                            'last_message':  preview,
+                            'last_activity': _to_riyadh_iso(conv.last_activity),
+                        })
+
+                # Sort by most unread first
+                chat_convs.sort(key=lambda c: c['unread_count'], reverse=True)
+                chat_convs = chat_convs[:limit]
+
+            # ── Email unread ──────────────────────────────────────────────
+            email_unread = 0
+            email_items  = []
+
+            if 'lugal.email.account' in request.env:
+                Acc      = request.env['lugal.email.account'].sudo()
+                EmailMsg = request.env['lugal.email.message'].sudo()
+
+                acc_ids  = Acc.search([('user_id', '=', uid)]).ids
+                if acc_ids:
+                    # Count unread inbound mail across inbox + custom rule
+                    # folders.  Sender-folder rules move messages out of the
+                    # literal inbox immediately, and inbox-only notification
+                    # domains make those arrivals show as toast-only with no
+                    # bell/tab badge.
+                    notification_folder_domain = [
+                        ('folder', 'not in', ['sent', 'drafts', 'trash', 'spam']),
+                    ]
+                    domain = [
+                        ('account_id', 'in', acc_ids),
+                        ('is_read', '=', False),
+                        ('is_deleted', '=', False),
+                    ] + notification_folder_domain
+                    count_domain = list(domain)
+                    if since_dt:
+                        domain.append(('date', '>', since_dt))
+
+                    email_unread = EmailMsg.search_count(count_domain)
+                    recent = EmailMsg.search(domain, order='date desc', limit=limit)
+                    for m in recent:
+                        email_items.append({
+                            'id':           m.id,
+                            'account_id':   m.account_id.id if m.account_id else None,
+                            'subject':      m.subject or '(no subject)',
+                            'from_name':    m.from_name or '',
+                            'from_address': m.from_address or '',
+                            'date':         _to_riyadh_iso(m.date),
+                            'folder':       m.folder or 'inbox',
+                        })
+
+            checked_at = datetime.now(tz=_RIYADH_TZ).strftime('%Y-%m-%dT%H:%M:%S+03:00')
+
+            return _json_response({
+                'success': True,
+                'data': {
+                    'total_unread': chat_unread + email_unread,
+                    'chat': {
+                        'unread':        chat_unread,
+                        'conversations': chat_convs,
+                    },
+                    'email': {
+                        'unread': email_unread,
+                        'items':  email_items,
+                    },
+                    'checked_at': checked_at,
+                },
+            })
+
+        except Exception as exc:
+            _logger.exception('crm_notifications error')
+            return _json_response({'success': False, 'error': str(exc)}, 500)
+
+    # -----------------------------------------------------------------------
+    # POST /api/crm/notifications/mark_read
+    # -----------------------------------------------------------------------
+
+    @http.route('/api/crm/notifications/mark_read', type='http', auth='none', csrf=False,
+                methods=['POST', 'OPTIONS'])
+    def mark_read(self, **kwargs):
+        """
+        Mark notifications as read.
+
+        JSON body options:
+
+          // Mark all unread messages in a chat conversation as read
+          { "type": "chat", "conversation_id": 8 }
+
+          // Mark specific email messages as read
+          { "type": "email", "message_ids": [55, 56, 57] }
+
+          // Mark everything read (all chat conversations + all inbox emails)
+          { "type": "all" }
+
+        Response:
+          {
+            "success": true,
+            "data": {
+              "chat_marked":  <int>,    // number of chat messages marked read
+              "email_marked": <int>     // number of email messages marked read
+            }
+          }
+        """
+        if request.httprequest.method == 'OPTIONS':
+            return _json_response({})
+
+        uid = ensure_jwt_user_id()
+        if not uid:
+            return _json_response({'success': False, 'error': 'Unauthorized'}, 401)
+
+        try:
+            body        = json.loads(request.httprequest.data or '{}')
+            mark_type   = (body.get('type') or 'all').lower()
+            chat_marked = 0
+            email_marked = 0
+
+            # ── Chat mark read ────────────────────────────────────────────
+            if mark_type in ('chat', 'all') and 'lugal.supply.message' in request.env:
+                Msg  = request.env['lugal.supply.message'].sudo()
+                Conv = request.env['lugal.supply.conversation'].sudo()
+
+                if mark_type == 'chat' and body.get('conversation_id'):
+                    conv_ids = [int(body['conversation_id'])]
+                else:
+                    convs = Conv.search([
+                        ('is_archived', '=', False),
+                        ('participant_ids', 'in', [uid]),
+                    ])
+                    conv_ids = convs.ids
+
+                for conv_id in conv_ids:
+                    unread = Msg.search([
+                        ('conversation_id', '=', conv_id),
+                        ('sender_id', '!=', uid),
+                        ('read_user_ids', 'not in', [uid]),
+                        ('is_deleted', '=', False),
+                    ])
+                    if unread:
+                        unread.write({'read_user_ids': [(4, uid)]})
+                        chat_marked += len(unread)
+                        # Notify senders via bus
+                        try:
+                            senders = set(unread.mapped('sender_id.id')) - {uid}
+                            for sender_uid in senders:
+                                request.env['bus.bus'].sudo()._sendone(
+                                    f'supply_user.{sender_uid}',
+                                    'supply.chat.message.read',
+                                    {
+                                        'conversation_id': conv_id,
+                                        'read_by_uid': uid,
+                                        'message_ids': unread.ids,
+                                    },
+                                )
+                        except Exception as bus_exc:
+                            _logger.debug('bus notify error: %s', bus_exc)
+
+            # ── Email mark read ───────────────────────────────────────────
+            if mark_type in ('email', 'all') and 'lugal.email.message' in request.env:
+                EmailMsg = request.env['lugal.email.message'].sudo()
+                Acc      = request.env['lugal.email.account'].sudo()
+                acc_ids  = Acc.search([('user_id', '=', uid)]).ids
+
+                if mark_type == 'email' and body.get('message_ids'):
+                    msgs = EmailMsg.search([
+                        ('id', 'in', [int(i) for i in body['message_ids']]),
+                        ('account_id', 'in', acc_ids),
+                    ])
+                else:
+                    notification_folder_domain = [
+                        ('folder', 'not in', ['sent', 'drafts', 'trash', 'spam']),
+                    ]
+                    msgs = EmailMsg.search([
+                        ('account_id', 'in', acc_ids),
+                        ('is_read', '=', False),
+                        ('is_deleted', '=', False),
+                    ] + notification_folder_domain)
+
+                if msgs:
+                    msgs.write({'is_read': True})
+                    email_marked = len(msgs)
+                    for acc in Acc.browse(acc_ids):
+                        unread_count = EmailMsg.search_count([
+                            ('account_id', '=', acc.id),
+                            ('folder', 'not in', ['sent', 'drafts', 'trash', 'spam']),
+                            ('is_read', '=', False),
+                            ('is_deleted', '=', False),
+                        ])
+                        acc.write({'unread_count': unread_count})
+
+            return _json_response({
+                'success': True,
+                'data': {
+                    'chat_marked':  chat_marked,
+                    'email_marked': email_marked,
+                },
+            })
+
+        except Exception as exc:
+            _logger.exception('crm_notifications_mark_read error')
+            return _json_response({'success': False, 'error': str(exc)}, 500)
+
+
+end of file crm_notifications_controller.py
+--------------------------------------------------------------------------------
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+
+
+start of bus_compat_controller.py
+bus_compat_controller.py
+
+# -*- coding: utf-8 -*-
+"""
+Backward-compatible /web/bus/poll endpoint for Odoo 19.
+
+Odoo 19 replaced long-polling with a WebSocket-based system (/websocket).
+Custom frontends (like NBS-CRM) that still call the old /web/bus/poll endpoint
+receive a proper response from this shim controller, which delegates to the
+same bus.bus._poll() model method.
+
+Old request format  (still accepted):
+    POST /web/bus/poll
+    Body (JSON-RPC): { "channels": [...], "last": N }
+
+Old response format (returned):
+    { "result": [{"id": N, "message": {...}}, ...] }
+"""
+
+import json
+import logging
+
+from odoo import http
+from odoo.http import request
+
+_logger = logging.getLogger(__name__)
+
+
+class BusPollCompatController(http.Controller):
+    """Provides /web/bus/poll for frontends that haven't migrated to WebSocket."""
+
+    @http.route('/web/bus/poll', type='jsonrpc', auth='public', csrf=False,
+                methods=['POST'], cors='*')
+    def bus_poll(self, channels=None, last=0, options=None, **kwargs):
+        """
+        Accept legacy long-poll requests and service them via bus.bus._poll().
+
+        Parameters (JSON-RPC params):
+            channels  – list of channel identifiers (strings, lists, or dicts)
+            last      – last notification id the client received (0 = first poll)
+            options   – optional dict (ignored, kept for forward compat)
+
+        Returns a list of notification objects:
+            [{"id": <int>, "message": <dict>}, ...]
+        """
+        try:
+            if channels is None:
+                channels = []
+
+            db = request.db
+            if not db:
+                return []
+
+            # Import bus utilities using Odoo's module path
+            from odoo.addons.bus.models.bus import channel_with_db
+
+            channels_with_db = [
+                channel_with_db(db, c) for c in (channels or [])
+            ]
+
+            try:
+                last_id = int(last or 0)
+            except (ValueError, TypeError):
+                last_id = 0
+
+            notifications = request.env['bus.bus'].sudo()._poll(
+                channels_with_db, last_id
+            )
+            return notifications
+
+        except Exception as e:
+            _logger.exception('bus_poll compat error: %s', e)
+            return []
+
+
+end of file bus_compat_controller.py
+--------------------------------------------------------------------------------
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+
+
+start of channel_controller.py
+channel_controller.py
+
+# -*- coding: utf-8 -*-
+
+import logging
+from odoo import http
+from odoo.http import request
+from ._auth import ensure_jwt_user_id
+from ._audit import crm_audit
+from ._error import crm_error
+
+_logger = logging.getLogger(__name__)
+
+
+def _channel_config_to_dict(config):
+    """Serialize channel config including SLA and work hours fields."""
+    return {
+        'id': config.id,
+        'channel': config.channel,
+        'display_name': config.display_name or '',
+        'color_hex': config.color_hex or '',
+        'icon': config.icon or '',
+        'branch_id': config.branch_id.id if config.branch_id else None,
+        'branch_name': config.branch_id.name if config.branch_id else '',
+        'assigned_user_ids': config.assigned_user_ids.ids,
+        'assigned_user_names': [u.name for u in config.assigned_user_ids],
+        'is_free_for_all': config.is_free_for_all,
+        'is_active': config.is_active,
+        'sla_threshold_seconds': config.sla_threshold_seconds,
+        'work_hours_start': config.work_hours_start,
+        'work_hours_end': config.work_hours_end,
+    }
+
+
+def _message_to_dict(m):
+    """Serialize omnichannel message to dict."""
+    return {
+        'id': m.id,
+        'customer_id': m.customer_id.id if m.customer_id else None,
+        'customer_name': m.customer_id.name if m.customer_id else '',
+        'channel': m.channel,
+        'direction': m.direction,
+        'channel_identity_id': m.channel_identity_id.id if m.channel_identity_id else None,
+        'content': m.content or '',
+        'media_url': m.media_url or '',
+        'sent_at': m.sent_at.isoformat() if m.sent_at else None,
+        'read_at': m.read_at.isoformat() if m.read_at else None,
+        'replied_by_agent_at': m.replied_by_agent_at.isoformat() if m.replied_by_agent_at else None,
+        'assigned_to_id': m.assigned_to_id.id if m.assigned_to_id else None,
+        'assigned_to_name': m.assigned_to_id.name if m.assigned_to_id else '',
+        'owner_id': m.owner_id.id if m.owner_id else None,
+        'owner_name': m.owner_id.name if m.owner_id else '',
+        'conversation_id': m.conversation_id or '',
+        'status': m.status,
+        'sla_breached': m.sla_breached,
+        'waiting_customer_response': m.waiting_customer_response,
+        'branch_id': m.branch_id.id if m.branch_id else None,
+    }
+
+
+class ChannelController(http.Controller):
+
+    # ─── Channel Config ────────────────────────────────────────────────────
+
+    @http.route('/api/crm/channels/config_list', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def config_list(self, branch_id=None, **kwargs):
+        """List channel configs, optionally filtered by branch."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized'}
+            domain = [('is_deleted', '=', False), ('active', '=', True)]
+            if branch_id:
+                domain.append(('branch_id', '=', branch_id))
+            configs = request.env['lugal.crm.channel.config'].search(domain, order='channel asc')
+            return {'success': True, 'data': {'items': [_channel_config_to_dict(c) for c in configs]}}
+        except Exception as e:
+            return crm_error(e, 'config_list')
+
+    @http.route('/api/crm/channels/config/create', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def config_create(self, channel, branch_id=None, display_name=None, color_hex=None,
+                      is_free_for_all=True, sla_threshold_seconds=300,
+                      work_hours_start=8.0, work_hours_end=18.0, **kwargs):
+        """Create a new channel configuration."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized'}
+            config = request.env['lugal.crm.channel.config'].create({
+                'channel': channel,
+                'branch_id': branch_id,
+                'display_name': display_name or '',
+                'color_hex': color_hex or '',
+                'is_free_for_all': is_free_for_all,
+                'sla_threshold_seconds': sla_threshold_seconds,
+                'work_hours_start': work_hours_start,
+                'work_hours_end': work_hours_end,
+            })
+            return {'success': True, 'data': _channel_config_to_dict(config)}
+        except Exception as e:
+            return crm_error(e, 'config_create')
+
+    @http.route('/api/crm/channels/config/<int:config_id>/update', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def config_update(self, config_id, **kwargs):
+        """Update channel config (including SLA, work hours, assignments)."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized'}
+            config = request.env['lugal.crm.channel.config'].browse(config_id)
+            if not config.exists() or config.is_deleted:
+                return {'success': False, 'error': 'Config not found'}
+            allowed = {
+                'display_name', 'color_hex', 'icon', 'branch_id', 'is_free_for_all',
+                'is_active', 'sla_threshold_seconds', 'work_hours_start', 'work_hours_end',
+            }
+            vals = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
+            # Handle assigned_user_ids separately (list replacement)
+            if 'assigned_user_ids' in kwargs and kwargs['assigned_user_ids'] is not None:
+                vals['assigned_user_ids'] = [(6, 0, kwargs['assigned_user_ids'])]
+            if vals:
+                config.write(vals)
+            return {'success': True, 'data': _channel_config_to_dict(config)}
+        except Exception as e:
+            return crm_error(e, 'config_update')
+
+    @http.route('/api/crm/channels/config/<int:config_id>/delete', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def config_delete(self, config_id, **kwargs):
+        """Soft-delete a channel configuration."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized'}
+            config = request.env['lugal.crm.channel.config'].browse(config_id)
+            if not config.exists():
+                return {'success': False, 'error': 'Config not found'}
+            config.write({'is_deleted': True, 'active': False, 'is_active': False})
+            return {'success': True}
+        except Exception as e:
+            return crm_error(e, 'config_delete')
+
+    # ─── Messages ─────────────────────────────────────────────────────────
+
+    @http.route('/api/crm/channels/messages/list', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def message_list(self, page=1, per_page=50, customer_id=None, channel=None, status=None,
+                     branch_id=None, assigned_to_id=None, sla_breached=None, **kwargs):
+        """List omnichannel inbox messages with filters."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized'}
+            domain = [('is_deleted', '=', False)]
+            if customer_id:
+                domain.append(('customer_id', '=', customer_id))
+            if channel:
+                domain.append(('channel', '=', channel))
+            if status:
+                domain.append(('status', '=', status))
+            if branch_id:
+                domain.append(('branch_id', '=', branch_id))
+            if assigned_to_id:
+                domain.append(('assigned_to_id', '=', assigned_to_id))
+            if sla_breached is not None:
+                domain.append(('sla_breached', '=', sla_breached))
+            Message = request.env['lugal.crm.omnichannel.message']
+            total = Message.search_count(domain)
+            offset = (page - 1) * per_page
+            messages = Message.search(domain, limit=per_page, offset=offset, order='sent_at desc')
+            return {
+                'success': True,
+                'data': {
+                    'items': [_message_to_dict(m) for m in messages],
+                    'total': total,
+                    'page': page,
+                    'per_page': per_page,
+                },
+            }
+        except Exception as e:
+            return crm_error(e, 'message_list')
+
+    @http.route('/api/crm/channels/messages/conversation', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def conversation(self, conversation_id, **kwargs):
+        """Get full conversation thread by conversation_id."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized'}
+            if not conversation_id:
+                return {'success': False, 'error': 'conversation_id required'}
+            messages = request.env['lugal.crm.omnichannel.message'].search([
+                ('conversation_id', '=', conversation_id),
+                ('is_deleted', '=', False),
+            ], order='sent_at asc')
+            return {'success': True, 'data': {'items': [_message_to_dict(m) for m in messages]}}
+        except Exception as e:
+            return crm_error(e, 'conversation')
+
+    @http.route('/api/crm/channels/messages/create', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def message_create(self, customer_id, channel, content, direction='inbound',
+                       conversation_id=None, branch_id=None, media_url=None, **kwargs):
+        """
+        Create a new inbound or outbound message.
+        For outbound: sets replied_by_agent_at, waiting_customer_response, owner_id.
+        """
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized'}
+            from odoo.fields import Datetime
+            vals = {
+                'customer_id': customer_id,
+                'channel': channel,
+                'direction': direction,
+                'content': content,
+                'sent_at': Datetime.now(),
+                'conversation_id': conversation_id,
+                'branch_id': branch_id,
+                'media_url': media_url,
+                'status': 'pending' if direction == 'inbound' else 'assigned',
+            }
+            if direction == 'outbound':
+                uid = request.env.uid
+                vals['assigned_to_id'] = uid
+                vals['replied_by_agent_at'] = Datetime.now()
+                vals['owner_id'] = uid
+                vals['waiting_customer_response'] = True
+            msg = request.env['lugal.crm.omnichannel.message'].create(
+                {k: v for k, v in vals.items() if v is not None})
+            crm_audit('message_created', customer_id=customer_id,
+                      record_model='lugal.crm.omnichannel.message', record_id=msg.id,
+                      details={'channel': channel, 'direction': direction})
+            return {'success': True, 'data': _message_to_dict(msg)}
+        except Exception as e:
+            return crm_error(e, 'message_create')
+
+    @http.route('/api/crm/channels/messages/<int:message_id>/assign', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def message_assign(self, message_id, assigned_to_id=None, **kwargs):
+        """Assign a conversation to a user (or current user)."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized'}
+            msg = request.env['lugal.crm.omnichannel.message'].browse(message_id)
+            if not msg.exists() or msg.is_deleted:
+                return {'success': False, 'error': 'Message not found'}
+            uid = assigned_to_id or request.env.uid
+            msg.write({'assigned_to_id': uid, 'status': 'assigned'})
+            return {'success': True, 'data': _message_to_dict(msg)}
+        except Exception as e:
+            return crm_error(e, 'message_assign')
+
+    @http.route('/api/crm/channels/messages/<int:message_id>/reply', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def message_reply(self, message_id, content, media_url=None, **kwargs):
+        """
+        Send an outbound reply to a message.
+        Creates a new outbound message, sets ownership, FRT, and waiting_customer_response.
+        """
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized'}
+            from odoo.fields import Datetime
+            original = request.env['lugal.crm.omnichannel.message'].browse(message_id)
+            if not original.exists() or original.is_deleted:
+                return {'success': False, 'error': 'Message not found'}
+
+            uid = request.env.uid
+            now = Datetime.now()
+
+            # Mark original as owned if not already
+            if not original.owner_id:
+                original.write({'owner_id': uid})
+
+            # Create outbound reply
+            reply = request.env['lugal.crm.omnichannel.message'].create({
+                'customer_id': original.customer_id.id,
+                'channel': original.channel,
+                'direction': 'outbound',
+                'content': content,
+                'sent_at': now,
+                'conversation_id': original.conversation_id,
+                'branch_id': original.branch_id.id if original.branch_id else False,
+                'assigned_to_id': uid,
+                'owner_id': uid,
+                'replied_by_agent_at': now,
+                'waiting_customer_response': True,
+                'status': 'assigned',
+                'media_url': media_url,
+            })
+
+            # Mark original as replied
+            original.write({
+                'status': 'assigned',
+                'replied_by_agent_at': original.replied_by_agent_at or now,
+                'waiting_customer_response': True,
+            })
+
+            crm_audit('message_replied',
+                      customer_id=original.customer_id.id if original.customer_id else None,
+                      record_model='lugal.crm.omnichannel.message', record_id=reply.id,
+                      details={'channel': original.channel, 'conversation_id': original.conversation_id})
+            return {'success': True, 'data': _message_to_dict(reply)}
+        except Exception as e:
+            return crm_error(e, 'message_reply')
+
+    @http.route('/api/crm/channels/messages/<int:message_id>/resolve', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def message_resolve(self, message_id, **kwargs):
+        """Mark a conversation as resolved."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized'}
+            msg = request.env['lugal.crm.omnichannel.message'].browse(message_id)
+            if not msg.exists() or msg.is_deleted:
+                return {'success': False, 'error': 'Message not found'}
+            msg.write({'status': 'resolved', 'waiting_customer_response': False})
+            # Resolve all messages in same conversation
+            if msg.conversation_id:
+                request.env['lugal.crm.omnichannel.message'].search([
+                    ('conversation_id', '=', msg.conversation_id),
+                    ('status', '!=', 'resolved'),
+                    ('is_deleted', '=', False),
+                ]).write({'status': 'resolved'})
+            crm_audit('message_resolved',
+                      customer_id=msg.customer_id.id if msg.customer_id else None,
+                      record_model='lugal.crm.omnichannel.message', record_id=message_id,
+                      details={'conversation_id': msg.conversation_id})
+            return {'success': True}
+        except Exception as e:
+            return crm_error(e, 'message_resolve')
+
+    @http.route('/api/crm/channels/messages/<int:message_id>/transfer', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def message_transfer(self, message_id, new_owner_id, **kwargs):
+        """Transfer conversation ownership to another agent."""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized'}
+            msg = request.env['lugal.crm.omnichannel.message'].browse(message_id)
+            if not msg.exists() or msg.is_deleted:
+                return {'success': False, 'error': 'Message not found'}
+            # Transfer all messages in conversation
+            if msg.conversation_id:
+                request.env['lugal.crm.omnichannel.message'].search([
+                    ('conversation_id', '=', msg.conversation_id),
+                    ('is_deleted', '=', False),
+                ]).write({'owner_id': new_owner_id, 'assigned_to_id': new_owner_id})
+            else:
+                msg.write({'owner_id': new_owner_id, 'assigned_to_id': new_owner_id})
+            crm_audit('message_transferred',
+                      customer_id=msg.customer_id.id if msg.customer_id else None,
+                      record_model='lugal.crm.omnichannel.message', record_id=message_id,
+                      details={'new_owner_id': new_owner_id, 'conversation_id': msg.conversation_id})
+            return {'success': True}
+        except Exception as e:
+            return crm_error(e, 'message_transfer')
+
+
+end of file channel_controller.py
+--------------------------------------------------------------------------------
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+
+
+start of crm_omnichannel_message.py
+crm_omnichannel_message.py
+
+# -*- coding: utf-8 -*-
+
+import logging
+from datetime import datetime, timedelta
+from odoo import models, fields, api
+
+_logger = logging.getLogger(__name__)
+
+
+class CrmOmnichannelMessage(models.Model):
+    """Omnichannel message — inbox entry from WhatsApp, Instagram, etc."""
+    _name = 'lugal.crm.omnichannel.message'
+    _description = 'CRM Omnichannel Message'
+    _inherit = ['mail.thread', 'mail.activity.mixin']
+    _order = 'sent_at desc, id desc'
+    _rec_name = 'content'
+
+    customer_id = fields.Many2one(
+        'lugal.crm.customer',
+        string='Customer / العميل',
+        required=True,
+        ondelete='cascade',
+        index=True,
+        tracking=True,
+    )
+    channel = fields.Selection([
+        ('whatsapp', 'WhatsApp'),
+        ('instagram', 'Instagram'),
+        ('telegram', 'Telegram'),
+        ('tiktok', 'TikTok'),
+        ('x', 'X'),
+        ('snapchat', 'Snapchat'),
+        ('email', 'Email'),
+        ('website', 'Website'),
+    ], string='Channel / القناة', required=True, index=True, tracking=True)
+    direction = fields.Selection([
+        ('inbound', 'Inbound / وارد'),
+        ('outbound', 'Outbound / صادر'),
+    ], string='Direction / الاتجاه', required=True, index=True, tracking=True)
+    channel_identity_id = fields.Many2one(
+        'lugal.crm.channel.identity',
+        string='Channel Identity / هوية القناة',
+        ondelete='set null',
+        index=True,
+        tracking=True,
+    )
+    content = fields.Text(string='Content / المحتوى', tracking=True)
+    media_url = fields.Char(string='Media URL', tracking=True)
+    sent_at = fields.Datetime(string='Sent At / وقت الإرسال', required=True, index=True, tracking=True)
+    read_at = fields.Datetime(string='Read At / وقت القراءة', tracking=True)
+    assigned_to_id = fields.Many2one(
+        'res.users',
+        string='Assigned To / مُعيَّن لـ',
+        ondelete='set null',
+        index=True,
+        tracking=True,
+    )
+    branch_id = fields.Many2one(
+        'lugal.crm.branch',
+        string='Branch / الفرع',
+        ondelete='set null',
+        index=True,
+        tracking=True,
+    )
+    conversation_id = fields.Char(string='Conversation ID / معرف المحادثة', index=True, tracking=True)
+    status = fields.Selection([
+        ('pending', 'Pending / قيد الانتظار'),
+        ('assigned', 'Assigned / مُعيَّن'),
+        ('resolved', 'Resolved / محلول'),
+    ], string='Status / الحالة', default='pending', index=True, tracking=True)
+
+    # Agent reply tracking — "opened" only counts when agent actually replies
+    replied_by_agent_at = fields.Datetime(
+        string='First Reply At / وقت أول رد من الموظف',
+        tracking=True,
+        help='Timestamp of the first outbound reply by the agent. Used to compute FRT.',
+    )
+
+    # Conversation ownership — auto-assigned when agent first replies
+    owner_id = fields.Many2one(
+        'res.users',
+        string='Owner / المالك',
+        ondelete='set null',
+        index=True,
+        tracking=True,
+        help='Agent who owns this conversation (auto-set on first reply).',
+    )
+
+    # SLA breach flag — set by a scheduler or on write if threshold exceeded
+    sla_breached = fields.Boolean(
+        string='SLA Breached / تجاوز SLA',
+        default=False,
+        index=True,
+        tracking=True,
+    )
+
+    # Waiting for customer response after agent reply
+    waiting_customer_response = fields.Boolean(
+        string='Waiting Customer Response / ننتظر رد العميل',
+        default=False,
+        index=True,
+        tracking=True,
+    )
+
+    active = fields.Boolean(string='Active', default=True)
+    is_deleted = fields.Boolean(string='Soft Deleted', default=False, index=True)
+
+    @api.model
+    def _cron_flag_sla_breaches(self):
+        """
+        Every 5 min: flag inbound messages that have not been replied to
+        within the SLA threshold defined in the channel config.
+        """
+        Config = self.env['lugal.crm.channel.config']
+        now = datetime.now()
+
+        # Group pending messages by channel+branch and check their SLA
+        pending = self.search([
+            ('direction', '=', 'inbound'),
+            ('status', '=', 'pending'),
+            ('sla_breached', '=', False),
+            ('is_deleted', '=', False),
+        ])
+        for msg in pending:
+            try:
+                # Lookup channel config for this channel+branch
+                config = Config.search([
+                    ('channel', '=', msg.channel),
+                    ('branch_id', '=', msg.branch_id.id if msg.branch_id else False),
+                ], limit=1)
+                threshold = config.sla_threshold_seconds if config else 300
+                if msg.sent_at:
+                    elapsed = (now - msg.sent_at).total_seconds()
+                    if elapsed > threshold:
+                        msg.write({'sla_breached': True})
+            except Exception:
+                _logger.exception('SLA cron error for message %s', msg.id)
+
+
+end of file crm_omnichannel_message.py
+--------------------------------------------------------------------------------
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+
+
+start of lugal_supply_notification.py
+lugal_supply_notification.py
+
+# -*- coding: utf-8 -*-
+from odoo import models, fields
+
+
+class LugalSupplyNotification(models.Model):
+    """In-app supply-chain notifications pushed to individual users."""
+    _name = 'lugal.supply.notification'
+    _description = 'Lugal Supply Notification'
+    _order = 'create_date desc, id desc'
+    _rec_name = 'title'
+
+    user_id = fields.Many2one(
+        'res.users',
+        string='User / المستخدم',
+        required=True,
+        ondelete='cascade',
+        index=True,
+    )
+    notif_type = fields.Selection([
+        ('po_created', 'PO Created'),
+        ('po_status_change', 'PO Status Changed'),
+        ('container_arrived', 'Container Arrived'),
+        ('clearance_done', 'Clearance Done'),
+        ('low_stock', 'Low Stock'),
+        ('negotiation_update', 'Negotiation Update'),
+        ('item_request_update', 'Item Request Update'),
+        ('general', 'General'),
+    ], string='Type / النوع', default='general', required=True, index=True)
+    title = fields.Char(string='Title / العنوان', required=True)
+    body = fields.Text(string='Body / النص')
+    related_type = fields.Char(string='Related Model / النموذج المرتبط', index=True)
+    related_id = fields.Integer(string='Related ID / معرّف المرتبط', index=True)
+    is_read = fields.Boolean(string='Read / مقروء', default=False, index=True)
+    read_at = fields.Datetime(string='Read At / وقت القراءة')
+    is_deleted = fields.Boolean(string='Soft Deleted', default=False, index=True)
+
+
+end of file lugal_supply_notification.py
+--------------------------------------------------------------------------------
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+
+
+start of websocket_controller.py
+websocket_controller.py
+
+# -*- coding: utf-8 -*-
+
+import logging
+from odoo import http
+from odoo.http import request
+
+_logger = logging.getLogger(__name__)
+
+from ._auth import ensure_jwt_user_id
+
+
+class NBSWebSocketController(http.Controller):
+    """WebSocket controller for real-time notifications"""
+    
+    @http.route('/api/ws/poll', type='jsonrpc', auth='none', methods=['POST'], csrf=False, cors='*')
+    def poll_notifications(self, last_poll_id=0, **kwargs):
+        """
+        Poll for new notifications (simple polling as fallback to WebSocket)
+        
+        Params:
+        - last_poll_id: int - last notification ID received
+        """
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'data': [], 'has_new': False}
+
+            # Get new notifications since last poll
+            notifications = request.env['nbs.notification'].search([
+                ('user_id', '=', request.env.user.id),
+                ('id', '>', last_poll_id),
+                ('is_read', '=', False)
+            ], order='create_date desc')
+            
+            return {
+                'success': True,
+                'data': [{
+                    'id': notif.id,
+                    'title': notif.title,
+                    'message': notif.message,
+                    'notification_type': notif.notification_type,
+                    'created_date': notif.create_date.isoformat() if notif.create_date else None,
+                    'related_document_id': notif.related_document_id.id if notif.related_document_id else None,
+                } for notif in notifications],
+                'has_new': len(notifications) > 0
+            }
+        
+        except Exception as e:
+            _logger.error(f'Poll notifications error: {str(e)}')
+            return {
+                'success': False,
+                'error': str(e),
+                'data': []
+            }
+
+
+end of file websocket_controller.py
+--------------------------------------------------------------------------------
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+
+
+start of notification_controller.py
+notification_controller.py
+
+# -*- coding: utf-8 -*-
+
+import logging
+from odoo import http
+from odoo.http import request
+
+_logger = logging.getLogger(__name__)
+
+from ._auth import ensure_jwt_user_id
+
+
+class NBSNotificationController(http.Controller):
+    """Notification management controller"""
+    
+    @http.route('/api/notifications', type='jsonrpc', auth='none', methods=['POST'], csrf=False, cors='*')
+    def get_notifications(self, unread_only=False, page=1, per_page=20, **kwargs):
+        """Get user notifications"""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized'}
+
+            domain = [('user_id', '=', request.env.user.id)]
+            
+            if unread_only:
+                domain.append(('is_read', '=', False))
+            
+            Notification = request.env['nbs.notification']
+            notifications = Notification.search(domain, limit=per_page, offset=(page-1)*per_page, order='create_date desc')
+            total = Notification.search_count(domain)
+            unread_count = Notification.search_count([('user_id', '=', request.env.user.id), ('is_read', '=', False)])
+            
+            return {
+                'success': True,
+                'data': [{
+                    'id': notif.id,
+                    'title': notif.title,
+                    'message': notif.message,
+                    'notification_type': notif.notification_type,
+                    'is_read': notif.is_read,
+                    'created_date': notif.create_date.isoformat() if notif.create_date else None,
+                    'related_document_id': notif.related_document_id.id if notif.related_document_id else None,
+                } for notif in notifications],
+                'unread_count': unread_count,
+                'pagination': {
+                    'total': total,
+                    'page': page,
+                    'per_page': per_page,
+                }
+            }
+        
+        except Exception as e:
+            _logger.error(f'Get notifications error: {str(e)}')
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
+    @http.route('/api/notifications/<int:notification_id>/mark-read', type='jsonrpc', auth='none', methods=['POST'], csrf=False, cors='*')
+    def mark_as_read(self, notification_id, **kwargs):
+        """Mark notification as read"""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized'}
+
+            notification = request.env['nbs.notification'].browse(notification_id)
+            
+            if not notification.exists():
+                return {
+                    'success': False,
+                    'error': 'Notification not found'
+                }
+            
+            # Check if notification belongs to current user
+            if notification.user_id.id != request.env.user.id:
+                return {
+                    'success': False,
+                    'error': 'Access denied'
+                }
+            
+            notification.write({'is_read': True})
+            
+            return {
+                'success': True,
+                'message': 'Notification marked as read'
+            }
+        
+        except Exception as e:
+            _logger.error(f'Mark read error: {str(e)}')
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
+    @http.route('/api/notifications/mark-all-read', type='jsonrpc', auth='none', methods=['POST'], csrf=False, cors='*')
+    def mark_all_read(self, **kwargs):
+        """Mark all notifications as read"""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized'}
+
+            notifications = request.env['nbs.notification'].search([
+                ('user_id', '=', request.env.user.id),
+                ('is_read', '=', False)
+            ])
+            
+            notifications.write({'is_read': True})
+            
+            return {
+                'success': True,
+                'message': f'{len(notifications)} notifications marked as read'
+            }
+        
+        except Exception as e:
+            _logger.error(f'Mark all read error: {str(e)}')
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
+    @http.route('/api/notifications/unread-count', type='jsonrpc', auth='none', methods=['POST'], csrf=False, cors='*')
+    def get_unread_count(self, **kwargs):
+        """Get count of unread notifications"""
+        try:
+            if not ensure_jwt_user_id():
+                return {'success': False, 'error': 'Unauthorized', 'count': 0}
+
+            count = request.env['nbs.notification'].search_count([
+                ('user_id', '=', request.env.user.id),
+                ('is_read', '=', False)
+            ])
+            
+            return {
+                'success': True,
+                'count': count
+            }
+        
+        except Exception as e:
+            _logger.error(f'Unread count error: {str(e)}')
+            return {
+                'success': False,
+                'error': str(e),
+                'count': 0
+            }
+
+
+end of file notification_controller.py
+--------------------------------------------------------------------------------
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+
+
+start of nbs_notification.py
+nbs_notification.py
+
+# -*- coding: utf-8 -*-
+
+from odoo import models, fields, api, _
+
+
+class NBSNotification(models.Model):
+    _name = 'nbs.notification'
+    _description = 'Notification'
+    _order = 'create_date desc'
+    _rec_name = 'title'
+    
+    user_id = fields.Many2one(
+        'res.users',
+        string='User',
+        required=True,
+        index=True,
+        ondelete='cascade'
+    )
+    title = fields.Char(
+        string='Title',
+        required=True,
+        translate=True
+    )
+    message = fields.Text(
+        string='Message',
+        translate=True
+    )
+    
+    notification_type = fields.Selection([
+        ('upload', 'New Upload'),
+        ('edit_request', 'Edit Request'),
+        ('approval', 'Approval'),
+        ('rejection', 'Rejection'),
+        ('new_version', 'New Version'),
+        ('archive', 'Archive'),
+        ('mention', 'Mention'),
+        ('system', 'System'),
+    ], string='Type', index=True)
+    
+    document_id = fields.Many2one(
+        'nbs.document',
+        string='Document',
+        ondelete='cascade'
+    )
+    edit_request_id = fields.Many2one(
+        'nbs.edit.request',
+        string='Edit Request',
+        ondelete='cascade'
+    )
+    
+    is_read = fields.Boolean(
+        string='Read',
+        default=False,
+        index=True
+    )
+    read_date = fields.Datetime(
+        string='Read Date'
+    )
+    
+    create_date = fields.Datetime(
+        string='Created',
+        readonly=True
+    )
+    
+    # Related fields for easy filtering
+    department_id = fields.Many2one(
+        related='document_id.department_id',
+        string='Department',
+        store=True,
+        index=True
+    )
+    
+    @api.model
+    def create(self, vals):
+        notif = super().create(vals)
+        
+        # Send via Odoo bus (WebSocket) for real-time notification
+        notif._send_bus_notification()
+        
+        return notif
+    
+    def _send_bus_notification(self):
+        """Send notification via Odoo bus for real-time updates"""
+        self.ensure_one()
+        
+        channel = f'nbs_notification_{self.user_id.id}'
+        message = {
+            'type': 'nbs_notification',
+            'id': self.id,
+            'title': self.title,
+            'message': self.message,
+            'notification_type': self.notification_type,
+            'document_id': self.document_id.id if self.document_id else None,
+            'created_date': fields.Datetime.to_string(self.create_date),
+            'is_read': self.is_read,
+        }
+        
+        # Send to specific user channel
+        self.env['bus.bus']._sendone(
+            self.user_id.partner_id,
+            'nbs_notification',
+            message
+        )
+    
+    def action_mark_read(self):
+        """Mark notification as read"""
+        for notif in self:
+            if not notif.is_read:
+                notif.write({
+                    'is_read': True,
+                    'read_date': fields.Datetime.now()
+                })
+        return True
+    
+    def action_mark_unread(self):
+        """Mark notification as unread"""
+        self.write({
+            'is_read': False,
+            'read_date': False
+        })
+        return True
+    
+    @api.model
+    def mark_all_read(self, user_id=None):
+        """Mark all notifications as read for a user"""
+        if not user_id:
+            user_id = self.env.user.id
+        
+        unread = self.search([
+            ('user_id', '=', user_id),
+            ('is_read', '=', False)
+        ])
+        unread.action_mark_read()
+        
+        return len(unread)
+    
+    @api.model
+    def get_unread_count(self, user_id=None):
+        """Get count of unread notifications"""
+        if not user_id:
+            user_id = self.env.user.id
+        
+        return self.search_count([
+            ('user_id', '=', user_id),
+            ('is_read', '=', False)
+        ])
+    
+    @api.model
+    def get_recent_notifications(self, user_id=None, limit=20):
+        """Get recent notifications for a user"""
+        if not user_id:
+            user_id = self.env.user.id
+        
+        notifications = self.search([
+            ('user_id', '=', user_id)
+        ], limit=limit, order='create_date desc')
+        
+        return notifications.read([
+            'id', 'title', 'message', 'notification_type',
+            'is_read', 'create_date', 'document_id', 'edit_request_id'
+        ])
+
+
+
+
+end of file nbs_notification.py
+--------------------------------------------------------------------------------
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+
+
+start of res_users.py
+res_users.py
+
+# -*- coding: utf-8 -*-
+
+from odoo import models, fields, api
+
+
+class ResUsers(models.Model):
+    _inherit = 'res.users'
+    
+    # NBS-specific fields
+    nbs_department_ids = fields.Many2many(
+        'nbs.department',
+        'nbs_dept_user_rel',
+        'user_id',
+        'department_id',
+        string='NBS Departments',
+        help='Departments this user has access to'
+    )
+    
+    nbs_manager_department_ids = fields.Many2many(
+        'nbs.department',
+        'nbs_dept_manager_rel',
+        'user_id',
+        'department_id',
+        string='Managed Departments',
+        help='Departments this user manages'
+    )
+    
+    preferred_nbs_language = fields.Selection([
+        ('ar_SA', 'العربية (Arabic)'),
+        ('en_US', 'English'),
+    ], string='Preferred Language', default='ar_SA')
+    
+    # Statistics
+    uploaded_document_count = fields.Integer(
+        string='Uploaded Documents',
+        compute='_compute_document_stats',
+        store=False
+    )
+    pending_edit_request_count = fields.Integer(
+        string='Pending Edit Requests',
+        compute='_compute_edit_request_stats',
+        store=False
+    )
+    unread_notification_count = fields.Integer(
+        string='Unread Notifications',
+        compute='_compute_notification_stats',
+        store=False
+    )
+    
+    @api.depends_context('uid')
+    def _compute_document_stats(self):
+        for user in self:
+            user.uploaded_document_count = self.env['nbs.document'].search_count([
+                ('uploader_id', '=', user.id)
+            ])
+    
+    @api.depends_context('uid')
+    def _compute_edit_request_stats(self):
+        for user in self:
+            # Count pending requests where user is manager of the department
+            pending_count = 0
+            for dept in user.nbs_manager_department_ids:
+                pending_count += self.env['nbs.edit.request'].search_count([
+                    ('department_id', '=', dept.id),
+                    ('state', '=', 'pending')
+                ])
+            user.pending_edit_request_count = pending_count
+    
+    @api.depends_context('uid')
+    def _compute_notification_stats(self):
+        for user in self:
+            user.unread_notification_count = self.env['nbs.notification'].search_count([
+                ('user_id', '=', user.id),
+                ('is_read', '=', False)
+            ])
+    
+    def action_toggle_nbs_language(self):
+        """Toggle between Arabic and English"""
+        self.ensure_one()
+        new_lang = 'en_US' if self.preferred_nbs_language == 'ar_SA' else 'ar_SA'
+        self.write({'preferred_nbs_language': new_lang})
+        
+        # Update Odoo context language
+        self.env.context = dict(self.env.context, lang=new_lang)
+        
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'reload'
+        }
+    
+    def action_view_my_documents(self):
+        """View documents uploaded by this user"""
+        self.ensure_one()
+        return {
+            'type': 'ir.actions.act_window',
+            'name': 'My Documents',
+            'res_model': 'nbs.document',
+            'view_mode': 'kanban,tree,form',
+            'domain': [('uploader_id', '=', self.id)],
+            'context': {'default_uploader_id': self.id}
+        }
+    
+    def action_view_pending_approvals(self):
+        """View pending edit requests for managed departments"""
+        self.ensure_one()
+        return {
+            'type': 'ir.actions.act_window',
+            'name': 'Pending Approvals',
+            'res_model': 'nbs.edit.request',
+            'view_mode': 'tree,form',
+            'domain': [
+                ('department_id', 'in', self.nbs_manager_department_ids.ids),
+                ('state', '=', 'pending')
+            ]
+        }
+    
+    def action_view_notifications(self):
+        """View all notifications"""
+        self.ensure_one()
+        return {
+            'type': 'ir.actions.act_window',
+            'name': 'Notifications',
+            'res_model': 'nbs.notification',
+            'view_mode': 'tree,form',
+            'domain': [('user_id', '=', self.id)],
+            'context': {'default_user_id': self.id}
+        }
+    
+    @api.model
+    def get_user_departments_with_roles(self, user_id=None):
+        """Get user's departments with their roles"""
+        if not user_id:
+            user_id = self.env.user.id
+        
+        user = self.browse(user_id)
+        result = []
+        
+        for dept in user.nbs_department_ids:
+            role = 'manager' if dept in user.nbs_manager_department_ids else 'user'
+            result.append({
+                'id': dept.id,
+                'name': dept.name,
+                'code': dept.code,
+                'role': role
+            })
+        
+        return result
+
+
+
+
+end of file res_users.py
+--------------------------------------------------------------------------------
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+
