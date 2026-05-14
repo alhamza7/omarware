@@ -279,7 +279,13 @@ class SapRealtimeSync(models.Model):
         time_str = since_dt.strftime('%H:%M:%S')
 
         def _fetch_by_filter(odata_filter):
-            """Paginate through SAP Items with the given OData filter."""
+            """Paginate through SAP Items with the given OData filter.
+
+            Uses skip += len(actual_batch) so the cursor is always correct
+            regardless of the server-side $top cap (some SAP B1 SL instances
+            silently enforce a lower page size than requested, e.g. 20).
+            Stops only when an empty page is returned.
+            """
             params = {'$filter': odata_filter, '$top': 500}
             results = []
             skip = 0
@@ -296,10 +302,10 @@ class SapRealtimeSync(models.Model):
                 if not response or 'value' not in response:
                     break
                 batch = response['value']
+                if not batch:
+                    break  # empty page → all pages consumed
                 results.extend(batch)
-                if len(batch) < 500:
-                    break
-                skip += 500
+                skip += len(batch)  # advance by actual rows, not requested $top
             return results
 
         # ── Query 1: items updated since since_dt ──────────────────────────
@@ -392,10 +398,10 @@ class SapRealtimeSync(models.Model):
                 if not response or 'value' not in response:
                     break
                 batch = response.get('value', [])
+                if not batch:
+                    break  # empty page → done
                 out.extend(batch)
-                if len(batch) < 500:
-                    break
-                skip += 500
+                skip += len(batch)  # advance by actual rows, not requested $top
             return out
 
         all_partners = []
@@ -1024,8 +1030,8 @@ class SapRealtimeSync(models.Model):
                         if code:
                             affected_codes.add(code)
 
-                if len(rows) < 500:
-                    break
-                skip += 500
+                if not rows:
+                    break  # empty page → done
+                skip += len(rows)  # advance by actual rows, not requested $top
 
         return affected_codes
