@@ -64,6 +64,24 @@ class SapRealtimeSync(models.Model):
     total_runs = fields.Integer(string='Total Runs', readonly=True, default=0)
     total_errors = fields.Integer(string='Total Errors', readonly=True, default=0)
 
+    # Stock-from-documents sync fields (separate from the main delta sync so
+    # stock changes from direct SAP sales are caught independently of UpdateDate)
+    stock_doc_sync_active = fields.Boolean(
+        string='Enable Document-Based Stock Sync',
+        default=True,
+        help='When enabled, the stock-document cron queries SAP delivery/goods-issue '
+             'documents to detect stock changes that bypass the Items.UpdateDate filter.',
+    )
+    last_stock_doc_sync_at = fields.Datetime(
+        string='Last Stock-Doc Sync At', readonly=True,
+    )
+    last_stock_doc_sync_log = fields.Text(
+        string='Last Stock-Doc Sync Log', readonly=True,
+    )
+    last_stock_doc_items_changed = fields.Integer(
+        string='Stock-Doc Items Changed (Last Run)', readonly=True, default=0,
+    )
+
     _sql_constraints = [
         ('unique_backend_entity', 'unique(backend_id, entity_type)',
          'There can only be one realtime sync config per backend and entity type.'),
@@ -779,3 +797,235 @@ class SapRealtimeSync(models.Model):
                 )
 
         return synced
+
+    # ------------------------------------------------------------------
+    # Stock-from-documents sync — catches stock changes from direct SAP sales
+    # ------------------------------------------------------------------
+
+    @api.model
+    def cron_run_stock_doc_sync(self):
+        """
+        Called by the 5-minute cron job.
+        Scans SAP delivery/goods-issue documents for stock movements that do NOT
+        update Items.UpdateDate, then re-syncs quantities for affected products.
+        """
+        configs = self.search([
+            ('active', '=', True),
+            ('stock_doc_sync_active', '=', True),
+            ('entity_type', 'in', ('stock', 'all')),
+        ])
+        if not configs:
+            _logger.debug('SAP Stock-Doc Sync: no active configs, skipping.')
+            return
+        for config in configs:
+            try:
+                config._run_stock_from_documents()
+            except Exception as exc:
+                _logger.error(
+                    'SAP Stock-Doc Sync: unhandled error for config %s: %s',
+                    config.name, exc, exc_info=True,
+                )
+
+    def action_run_stock_doc_sync_now(self):
+        """Manual trigger for the document-based stock sync."""
+        self.ensure_one()
+        self._run_stock_from_documents()
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'SAP Stock-Doc Sync',
+                'message': f'Finished — see Last Stock-Doc Sync Log for details.',
+                'type': 'success' if self.last_stock_doc_sync_log else 'info',
+                'sticky': False,
+            },
+        }
+
+    def _run_stock_from_documents(self):
+        """
+        Core logic for document-based stock sync.
+
+        Strategy:
+          1. Query SAP documents that track stock OUT  (DeliveryNotes, Invoices,
+             GoodsIssues) and stock IN (GoodsReceiptsPO, Returns, GoodsReceipts)
+             using their own UpdateDate — these ARE updated on every movement.
+          2. Collect unique ItemCodes touched by those documents.
+          3. Re-fetch the full Item record for each affected ItemCode from SAP
+             to get a fresh ItemWarehouseInfoCollection.
+          4. Push the updated warehouse quantities into Odoo via the existing
+             sync_warehouse_info_from_sap helper.
+
+        This approach is event-driven and minimal — only products that actually
+        moved in SAP are re-synced, keeping API load proportional to activity.
+        """
+        self.ensure_one()
+        backend = self.backend_id
+        log_lines = []
+        items_changed = 0
+
+        try:
+            connection = backend.get_connection()
+
+            # Determine since_dt for document scan
+            if self.last_stock_doc_sync_at:
+                since_dt = self.last_stock_doc_sync_at - timedelta(seconds=OVERLAP_SECONDS)
+            else:
+                since_dt = datetime.now() - timedelta(hours=24)
+
+            log_lines.append(f'Stock-doc scan from: {since_dt.strftime("%Y-%m-%d %H:%M:%S")}')
+
+            # Step 1: collect affected ItemCodes from SAP movement documents
+            affected_codes = self._fetch_stock_movement_item_codes(connection, since_dt)
+            log_lines.append(f'Affected ItemCodes from SAP documents: {len(affected_codes)}')
+
+            if not affected_codes:
+                self.write({
+                    'last_stock_doc_sync_at': fields.Datetime.now(),
+                    'last_stock_doc_sync_log': '\n'.join(log_lines),
+                    'last_stock_doc_items_changed': 0,
+                })
+                self.env.cr.commit()
+                return
+
+            # Step 2: re-fetch fresh warehouse info for each affected item
+            WarehouseInfo = self.env['sap.product.warehouse.info']
+            Product = self.env['product.product']
+
+            for item_code in affected_codes:
+                try:
+                    product = Product.search(
+                        [('default_code', '=', item_code)], limit=1
+                    )
+                    if not product:
+                        _logger.debug(
+                            'SAP Stock-Doc Sync: ItemCode %s not found in Odoo — skipping.',
+                            item_code,
+                        )
+                        continue
+
+                    # Re-fetch this single item from SAP to get fresh warehouse data
+                    esc = str(item_code).replace("'", "''")
+                    try:
+                        resp = connection.get(
+                            'Items',
+                            params={'$filter': f"ItemCode eq '{esc}'", '$top': 1},
+                        )
+                    except Exception as fetch_exc:
+                        _logger.warning(
+                            'SAP Stock-Doc Sync: could not re-fetch Item %s: %s',
+                            item_code, fetch_exc,
+                        )
+                        continue
+
+                    rows = (resp or {}).get('value') or []
+                    if not rows:
+                        continue
+
+                    warehouse_data = rows[0].get('ItemWarehouseInfoCollection') or []
+                    if not warehouse_data:
+                        _logger.debug(
+                            'SAP Stock-Doc Sync: %s has empty ItemWarehouseInfoCollection.',
+                            item_code,
+                        )
+                        continue
+
+                    WarehouseInfo.sync_warehouse_info_from_sap(product, backend, warehouse_data)
+                    items_changed += 1
+                    _logger.debug(
+                        'SAP Stock-Doc Sync: synced %d warehouse row(s) for %s',
+                        len(warehouse_data), item_code,
+                    )
+
+                except Exception as item_exc:
+                    _logger.warning(
+                        'SAP Stock-Doc Sync: error syncing %s: %s', item_code, item_exc,
+                    )
+
+            log_lines.append(f'Products re-synced: {items_changed}')
+            self.write({
+                'last_stock_doc_sync_at': fields.Datetime.now(),
+                'last_stock_doc_sync_log': '\n'.join(log_lines),
+                'last_stock_doc_items_changed': items_changed,
+            })
+            _logger.info(
+                'SAP Stock-Doc Sync [%s]: %d product(s) stock updated from documents.',
+                self.name, items_changed,
+            )
+
+        except Exception as exc:
+            log_lines.append(f'ERROR: {exc}')
+            self.write({
+                'last_stock_doc_sync_log': '\n'.join(log_lines),
+            })
+            _logger.error(
+                'SAP Stock-Doc Sync [%s] failed: %s', self.name, exc, exc_info=True,
+            )
+        finally:
+            self.env.cr.commit()
+
+    def _fetch_stock_movement_item_codes(self, connection, since_dt):
+        """
+        Query SAP document endpoints that record stock movements and return a
+        deduplicated set of ItemCodes affected since since_dt.
+
+        Documents scanned:
+          - DeliveryNotes       (A/R Delivery — stock OUT from sales)
+          - Returns             (A/R Return   — stock IN from sales returns)
+          - GoodsIssues         (Manual goods issue — stock OUT)
+          - GoodsReceipts       (Manual goods receipt — stock IN)
+          - PurchaseDeliveryNotes (A/P Delivery — stock IN from purchases)
+
+        Each endpoint is filtered by UpdateDate so we only page through recent
+        activity, keeping the query volume proportional to actual throughput.
+        """
+        date_str = since_dt.strftime('%Y-%m-%d')
+        time_str = since_dt.strftime('%H:%M:%S')
+
+        # Documents to scan: (SAP endpoint name, line-collection key, line ItemCode key)
+        doc_sources = [
+            ('DeliveryNotes',         'DocumentLines',  'ItemCode'),
+            ('Returns',               'DocumentLines',  'ItemCode'),
+            ('GoodsIssues',           'DocumentLines',  'ItemCode'),
+            ('GoodsReceipts',         'DocumentLines',  'ItemCode'),
+            ('PurchaseDeliveryNotes', 'DocumentLines',  'ItemCode'),
+        ]
+
+        affected_codes = set()
+        doc_date_filter = (
+            f"(DocDate ge datetime'{date_str}T00:00:00') or "
+            f"(UpdateDate gt datetime'{date_str}T00:00:00') or "
+            f"(UpdateDate eq datetime'{date_str}T00:00:00' and UpdateTime ge '{time_str}')"
+        )
+
+        for endpoint, lines_key, code_key in doc_sources:
+            skip = 0
+            while True:
+                try:
+                    resp = connection.get(endpoint, params={
+                        '$filter': doc_date_filter,
+                        '$select': f'{lines_key}/{code_key}',
+                        '$top': 500,
+                        '$skip': skip,
+                    })
+                except Exception as exc:
+                    _logger.debug(
+                        'SAP Stock-Doc Sync: %s query failed (may not exist on this server): %s',
+                        endpoint, exc,
+                    )
+                    break  # endpoint may not be licensed/available — skip silently
+
+                rows = (resp or {}).get('value') or []
+                if not rows:
+                    break
+
+                for doc in rows:
+                    for line in (doc.get(lines_key) or []):
+                        code = (line.get(code_key) or '').strip()
+                        if code:
+                            affected_codes.add(code)
+
+                if len(rows) < 500:
+                    break
+                skip += 500
+
+        return affected_codes

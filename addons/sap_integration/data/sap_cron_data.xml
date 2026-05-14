@@ -98,5 +98,21 @@
             <field name="priority">10</field>
         </record>
 
+        <!-- SAP Stock-Document Sync — runs every 5 minutes -->
+        <!-- Catches stock changes from direct SAP sales/purchases that do NOT update Items.UpdateDate.
+             Queries DeliveryNotes, Returns, GoodsIssues, GoodsReceipts, PurchaseDeliveryNotes
+             and re-syncs warehouse quantities for every affected ItemCode. -->
+        <record id="ir_cron_sap_stock_doc_sync" model="ir.cron">
+            <field name="name">SAP Stock Document Sync (Direct SAP Sales/Purchases)</field>
+            <field name="model_id" ref="model_sap_realtime_sync"/>
+            <field name="state">code</field>
+            <field name="code">model.cron_run_stock_doc_sync()</field>
+            <field name="interval_number">5</field>
+            <field name="interval_type">minutes</field>
+            <field name="nextcall" eval="(datetime.now() + timedelta(minutes=5)).replace(second=0)"/>
+            <field name="active" eval="True"/>
+            <field name="priority">10</field>
+        </record>
+
     </data>
 </odoo>
