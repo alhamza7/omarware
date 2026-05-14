@@ -146,21 +146,28 @@ class LugalEmailMessage(models.Model):
 
     @api.model_create_multi
     def create(self, vals_list):
-        now = fields.Datetime.now()
-        for vals in vals_list:
-            # Auto-stamp read_at when a new message is created already marked as
-            # read (e.g. outgoing sent/reply messages composed by the user).
-            if vals.get('is_read') and not vals.get('read_at'):
-                vals['read_at'] = now
+        # Auto-stamp read_at when a new message is created already marked as
+        # read (e.g. outgoing sent/reply messages composed by the user).
+        # Skip when called from IMAP sync — read_at must only be set when the
+        # user explicitly opens the mail in the Lugal app.
+        is_imap_sync = bool(self.env.context.get('lugal_imap_sync'))
+        if not is_imap_sync:
+            now = fields.Datetime.now()
+            for vals in vals_list:
+                if vals.get('is_read') and not vals.get('read_at'):
+                    vals['read_at'] = now
         return super().create(vals_list)
 
     def write(self, vals):
         # Auto-stamp read_at the first time is_read transitions to True.
+        # Skip when called from IMAP sync — only stamp read_at on explicit
+        # user actions (open, mark-read, notification dismiss).
+        is_imap_sync = bool(self.env.context.get('lugal_imap_sync'))
         if (
-            vals.get('is_read')
+            not is_imap_sync
+            and vals.get('is_read')
             and not vals.get('read_at')
             and any(not rec.is_read and not rec.read_at for rec in self)
         ):
             vals = dict(vals, read_at=fields.Datetime.now())
         return super().write(vals)
-# TODO: remove - cherry-pick marker

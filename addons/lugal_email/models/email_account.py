@@ -38,6 +38,47 @@ def _pg_advisory_lock_key(*parts) -> int:
     return int.from_bytes(digest, 'big') & 0x7FFFFFFFFFFFFFFF
 
 
+def _extract_composed_text(body_text, body_html):
+    """Return only the newly-composed text of an email, stripping:
+    - Quoted/replied content (lines starting with ">", or <blockquote> in HTML)
+    - Email signature (content after "-- " RFC 3676 delimiter, or common sig divs)
+
+    Used exclusively for is_mentioned detection so we don't fire on mentions
+    that appear only in quoted history or signatures.
+    """
+    text = ''
+
+    if body_text:
+        composed_lines = []
+        for line in body_text.splitlines():
+            # RFC 3676 signature separator: standalone "--" or "-- "
+            if line.rstrip() in ('--', '-- '):
+                break
+            # Skip quoted lines (lines starting with ">")
+            if line.startswith('>'):
+                continue
+            composed_lines.append(line)
+        text = '\n'.join(composed_lines).strip()
+
+    if not text and body_html:
+        html = body_html
+        # Remove blockquote elements (quoted/replied content)
+        html = re.sub(r'<blockquote[^>]*>.*?</blockquote>', '', html,
+                      flags=re.DOTALL | re.IGNORECASE)
+        # Remove common signature containers
+        html = re.sub(
+            r'<(?:div|p|span)[^>]*(?:class|id)\s*=\s*["\'][^"\']*'
+            r'(?:signature|gmail_signature|yahoo_quoted|x_gmail_com|moz-signature)[^"\']*["\'][^>]*>.*?</(?:div|p|span)>',
+            '', html, flags=re.DOTALL | re.IGNORECASE,
+        )
+        # Strip all remaining tags and collapse whitespace
+        text = re.sub(r'<[^>]+>', ' ', html)
+        text = re.sub(r'&(?:nbsp|amp|lt|gt|quot);', ' ', text, flags=re.IGNORECASE)
+        text = re.sub(r'\s+', ' ', text).strip()
+
+    return text
+
+
 # Serialize IMAP logins for the same (host, port, login) within this OS process.
 # Parallel HTTP handlers, polling, and fire-and-forget MOVE/STORE threads otherwise
 # burst past mail_max_userip_connections on shared mail hosts.
@@ -875,10 +916,44 @@ class LugalEmailAccount(models.Model):
         is_read = self._parse_flags_from_fetch_response(flags_meta)
 
         own_email = (self.email_address or '').strip().lower()
-        to_emails_lower = [pair[1].lower() for pair in getaddresses(msg.get_all('To', [])) if pair[1]]
-        # is_mentioned: True when the account owner's email is in the To: header
-        # (direct recipient, not just CC'd). Matches Outlook "Mentioned Mail".
-        is_mentioned = bool(own_email and own_email in to_emails_lower)
+        own_username = own_email.split('@')[0] if '@' in own_email else own_email
+
+        # Collect all participant addresses (To + Cc + Bcc headers).
+        all_recipient_hdrs = (
+            msg.get_all('To', []) + msg.get_all('Cc', []) + msg.get_all('Bcc', [])
+        )
+        participant_emails = {
+            pair[1].strip().lower()
+            for pair in getaddresses(all_recipient_hdrs)
+            if pair[1]
+        }
+
+        # is_mentioned: True ONLY when:
+        #   1. The account owner is a participant (in To/Cc/Bcc), AND
+        #   2. They are explicitly @-mentioned or referenced by full email in the
+        #      COMPOSED body text (not in headers, signature, or quoted reply).
+        # Matching is case-insensitive.  Patterns:
+        #   a) Full email address  — omar@nooralnibras.com
+        #   b) @username           — @omar
+        #   c) @full-email         — @omar@nooralnibras.com
+        is_mentioned = False
+        if own_email and own_email in participant_emails and own_username:
+            composed_text = _extract_composed_text(body_text, body_html)
+            if composed_text:
+                _body_check = composed_text.lower()
+                _mention_patterns = [
+                    # Full standalone email (not part of a longer token)
+                    r'(?<![a-zA-Z0-9._+\-])' + re.escape(own_email) + r'(?![a-zA-Z0-9._+\-@])',
+                    # @full-email
+                    r'@' + re.escape(own_email),
+                    # @username NOT followed by @ (to avoid matching @user as prefix of @user@domain
+                    # which is already caught by the @full-email pattern above)
+                    r'@' + re.escape(own_username) + r'(?![a-zA-Z0-9._\-@])',
+                ]
+                for _pat in _mention_patterns:
+                    if re.search(_pat, _body_check, re.IGNORECASE):
+                        is_mentioned = True
+                        break
 
         # is_important: parse standard priority/importance headers sent by the
         # sender. Check in priority order:
@@ -955,7 +1030,10 @@ class LugalEmailAccount(models.Model):
                 _body_for_detect = re.sub(r'<[^>]+>', '', body_html)
             written_in_arabic = bool(_arabic_re.search(_body_for_detect))
 
-        Message = self.env['lugal.email.message'].sudo()
+        # lugal_imap_sync context prevents the create/write overrides from
+        # auto-stamping read_at.  read_at must only be set when the user
+        # explicitly opens the mail inside the Lugal app.
+        Message = self.env['lugal.email.message'].sudo().with_context(lugal_imap_sync=True)
 
         # ── Subject-based thread linking (fallback) ───────────────────────────
         # Some email clients (mobile apps, certain web mailers) do NOT include
@@ -1143,12 +1221,14 @@ class LugalEmailAccount(models.Model):
             vals['body_html']    = body_html or False
             vals['body_fetched'] = True
 
-        # read_at: when a message arrives already marked as read (\\Seen on server —
-        # e.g. user read it in webmail), stamp read_at with the message date so the
-        # FE can show when it was read.  Without this, read_at stays null forever
-        # because the write() override only fires on False→True transitions on UPDATE.
-        if is_read and not existing:
-            vals['read_at'] = dt
+        # read_at is intentionally NOT set here, even when the message arrives
+        # already \Seen on the IMAP server.  read_at must only be stamped when
+        # the user explicitly opens or marks the email read inside the Lugal app
+        # (via GET /messages/<id> in CRM, POST /messages/<id>/read, or PATCH).
+        # Setting it to the IMAP message date (delivery time) or to the sync
+        # timestamp gives a misleading "when you read it" value.
+        # The lugal_imap_sync context on the Message env above also prevents the
+        # model's create/write overrides from auto-stamping read_at.
 
         created_new = False
 
@@ -2036,10 +2116,33 @@ class LugalEmailAccount(models.Model):
         for part in email_msg.walk():
             disposition = part.get_content_disposition() or ''
             filename = part.get_filename()
+
+            # Extract Content-ID early — needed for inline-without-filename handling.
+            raw_cid = part.get('Content-ID') or ''
+            cid_value = raw_cid.strip('<> ')
+
+            # Skip non-attachment, non-inline parts that also have no filename.
             if not filename and 'attachment' not in disposition and 'inline' not in disposition:
                 continue
+
+            # Some senders (mobile apps, certain webmail clients) emit inline images
+            # with a Content-ID and Content-Disposition: inline but WITHOUT an
+            # explicit filename parameter.  Synthesise a filename from the MIME type
+            # so the image is stored and served correctly.
+            if not filename and 'inline' in disposition and cid_value:
+                _mime_type = part.get_content_type().lower()
+                _ext_map = {
+                    'image/jpeg': 'jpg', 'image/jpg': 'jpg',
+                    'image/png': 'png', 'image/gif': 'gif',
+                    'image/webp': 'webp', 'image/svg+xml': 'svg',
+                    'image/bmp': 'bmp', 'image/tiff': 'tiff',
+                }
+                _ext = _ext_map.get(_mime_type, 'bin')
+                filename = f'inline_{cid_value[:12]}.{_ext}'
+
             if not filename:
                 continue
+
             filename = self._decode_mime_header(filename)
             if filename in existing_names:
                 continue
@@ -2051,8 +2154,6 @@ class LugalEmailAccount(models.Model):
             mime = part.get_content_type() or _mimetypes.guess_type(filename)[0] or 'application/octet-stream'
             att_token = _uuid.uuid4().hex
 
-            raw_cid = part.get('Content-ID') or ''
-            cid_value = raw_cid.strip('<> ')
             is_inline_part = ('inline' in disposition) and bool(cid_value)
             description = f'__inline_cid__:{cid_value}' if is_inline_part else None
 
