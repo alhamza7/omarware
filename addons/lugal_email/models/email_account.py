@@ -861,7 +861,7 @@ class LugalEmailAccount(models.Model):
                         # Update both recipient_read_at (MDN provenance) and the
                         # canonical is_read/read_at so the sender's sent-folder view
                         # correctly shows the message as read by the recipient.
-                        _sent.write({
+                        _sent.with_context(lugal_recipient_read=True).write({
                             'recipient_read_at': _read_ts,
                             'is_read':           True,
                             'read_at':           _read_ts,

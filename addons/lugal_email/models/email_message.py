@@ -8,6 +8,16 @@ import logging
 _logger = logging.getLogger(__name__)
 
 
+def _is_sent_folder_value(folder):
+    value = (folder or '').strip().lower()
+    tail = value.replace('\\', '/').replace('.', '/').split('/')[-1]
+    return value in {'sent', 'sent items', 'sent messages'} or tail in {
+        'sent',
+        'sent items',
+        'sent messages',
+    }
+
+
 class LugalEmailMessage(models.Model):
     """
     Cached/stored email message.
@@ -146,8 +156,19 @@ class LugalEmailMessage(models.Model):
 
     @api.model_create_multi
     def create(self, vals_list):
-        # Auto-stamp read_at when a new message is created already marked as
-        # read (e.g. outgoing sent/reply messages composed by the user).
+        # Sent-folder is_read/read_at is a recipient-read signal. Sender-owned
+        # actions must not initialize or stamp it unless an explicit recipient
+        # read event (internal read propagation or MDN) allows it.
+        allow_recipient_read = bool(self.env.context.get('lugal_recipient_read'))
+        if not allow_recipient_read:
+            for vals in vals_list:
+                if _is_sent_folder_value(vals.get('folder')):
+                    if vals.get('is_read'):
+                        vals['is_read'] = False
+                    vals.pop('read_at', None)
+
+        # Auto-stamp read_at when a non-sent message is created already marked as
+        # read.
         # Skip when called from IMAP sync — read_at must only be set when the
         # user explicitly opens the mail in the Lugal app.
         is_imap_sync = bool(self.env.context.get('lugal_imap_sync'))
@@ -159,6 +180,24 @@ class LugalEmailMessage(models.Model):
         return super().create(vals_list)
 
     def write(self, vals):
+        # Hard invariant: for sent-folder rows, is_read/read_at mean "recipient
+        # read this", never "sender opened their Sent item".  Any normal write
+        # attempting to change those fields on sent rows is stripped unless it is
+        # explicitly marked as a recipient-read event.
+        allow_recipient_read = bool(self.env.context.get('lugal_recipient_read'))
+        read_fields = {'is_read', 'read_at'} & set(vals)
+        if read_fields and not allow_recipient_read:
+            sent_records = self.filtered(lambda rec: _is_sent_folder_value(rec.folder))
+            if sent_records:
+                other_records = self - sent_records
+                sent_vals = {key: value for key, value in vals.items() if key not in read_fields}
+                result = True
+                if other_records:
+                    result = super(LugalEmailMessage, other_records).write(vals) and result
+                if sent_vals:
+                    result = super(LugalEmailMessage, sent_records).write(sent_vals) and result
+                return result
+
         # Auto-stamp read_at the first time is_read transitions to True.
         # Skip when called from IMAP sync — only stamp read_at on explicit
         # user actions (open, mark-read, notification dismiss).

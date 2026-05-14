@@ -7,7 +7,7 @@ CRM-context wrappers around the email engine (JSON-RPC format).
 
 import logging
 from datetime import timedelta, timezone
-from odoo import http
+from odoo import http, fields
 from odoo.http import request
 from odoo.addons.lugal_auth.controllers._auth import ensure_jwt_user_id
 
@@ -29,6 +29,16 @@ def _to_riyadh_iso(dt):
 def _folder_role(folder):
     value = (folder or 'inbox').strip().lower()
     return value if value in {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'} else 'custom'
+
+
+def _is_sent_folder(folder):
+    value = (folder or '').strip().lower()
+    tail = value.replace('\\', '/').replace('.', '/').split('/')[-1]
+    return value in {'sent', 'sent items', 'sent messages'} or tail in {
+        'sent',
+        'sent items',
+        'sent messages',
+    }
 
 
 def _crm_error(exc, handler=''):
@@ -187,20 +197,36 @@ class CrmEmailController(http.Controller):
             msg = request.env['lugal.email.message'].sudo().browse(message_id)
             if not msg.exists() or msg.account_id.user_id.id != uid or msg.is_deleted:
                 return {'success': False, 'error': 'Not found'}
-            if not preview and not msg.is_read:
-                from datetime import datetime
-                msg.write({'is_read': True, 'read_at': datetime.utcnow()})
+            if not preview and not msg.is_read and not _is_sent_folder(msg.folder):
+                was_already_read = bool(msg.read_at)
+                read_at = fields.Datetime.now()
+                msg.write({'is_read': True, 'read_at': read_at})
                 try:
                     from odoo.addons.lugal_email.controllers.email_controller import (
+                        _propagate_read_to_sent_copies,
                         _refresh_account_unread_count,
                         _resolve_imap_folder,
+                        _send_mdn_async,
                     )
+                    if not was_already_read and msg.message_id:
+                        _propagate_read_to_sent_copies(request.env, msg.message_id, msg.read_at or read_at)
                     _refresh_account_unread_count(msg.account_id)
                     if msg.imap_uid:
                         msg.account_id.sudo()._imap_store_async(
                             msg.imap_uid,
                             _resolve_imap_folder(msg.account_id, msg.folder),
                             add_flags=['\\Seen'],
+                        )
+                    if (not was_already_read
+                            and msg.request_read_receipt
+                            and msg.from_address
+                            and msg.message_id):
+                        _send_mdn_async(
+                            acc=msg.account_id,
+                            to_address=msg.from_address,
+                            original_message_id=msg.message_id,
+                            original_subject=msg.subject or '',
+                            recipient_email=msg.account_id.email_address,
                         )
                 except Exception:
                     _logger.warning('CRM email detail read sync failed msg=%s', msg.id)
@@ -273,9 +299,46 @@ class CrmEmailController(http.Controller):
                 return {'success': False, 'error': 'Unauthorized'}
             if not message_ids:
                 return {'success': False, 'error': 'message_ids required'}
-            msgs = request.env['lugal.email.message'].sudo().browse(message_ids)
-            msgs.write({'is_read': True})
-            return {'success': True, 'updated': len(msgs)}
+            msgs = request.env['lugal.email.message'].sudo().browse(message_ids).filtered(
+                lambda msg: msg.exists() and msg.account_id.user_id.id == uid and not msg.is_deleted
+            )
+            readable_msgs = msgs.filtered(lambda msg: not _is_sent_folder(msg.folder))
+            unread_msgs = readable_msgs.filtered(lambda msg: not msg.is_read or not msg.read_at)
+            read_at = fields.Datetime.now()
+            if unread_msgs:
+                unread_msgs.write({'is_read': True, 'read_at': read_at})
+                try:
+                    from odoo.addons.lugal_email.controllers.email_controller import (
+                        _propagate_read_to_sent_copies,
+                        _refresh_account_unread_count,
+                        _resolve_imap_folder,
+                        _send_mdn_async,
+                    )
+                    for msg in unread_msgs:
+                        if msg.message_id:
+                            _propagate_read_to_sent_copies(request.env, msg.message_id, msg.read_at or read_at)
+                        _refresh_account_unread_count(msg.account_id)
+                        if msg.imap_uid:
+                            msg.account_id.sudo()._imap_store_async(
+                                msg.imap_uid,
+                                _resolve_imap_folder(msg.account_id, msg.folder),
+                                add_flags=['\\Seen'],
+                            )
+                        if msg.request_read_receipt and msg.from_address and msg.message_id:
+                            _send_mdn_async(
+                                acc=msg.account_id,
+                                to_address=msg.from_address,
+                                original_message_id=msg.message_id,
+                                original_subject=msg.subject or '',
+                                recipient_email=msg.account_id.email_address,
+                            )
+                except Exception:
+                    _logger.warning('CRM email bulk read sync failed ids=%s', unread_msgs.ids)
+            return {
+                'success': True,
+                'updated': len(unread_msgs),
+                'skipped_sent_ids': msgs.filtered(lambda msg: _is_sent_folder(msg.folder)).ids,
+            }
         except Exception as exc:
             return _crm_error(exc, 'bulk_read')
 

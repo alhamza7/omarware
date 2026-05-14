@@ -329,12 +329,15 @@ def _propagate_read_to_sent_copies(env, message_id, read_at):
     try:
         sent_copies = env['lugal.email.message'].sudo().search([
             ('message_id', '=', message_id),
-            ('folder', '=', 'sent'),
             ('is_read', '=', False),
             ('is_deleted', '=', False),
         ])
+        sent_copies = sent_copies.filtered(lambda msg: _is_sent_folder(msg.folder))
         if sent_copies:
-            sent_copies.write({'is_read': True, 'read_at': read_at})
+            sent_copies.with_context(lugal_recipient_read=True).write({
+                'is_read': True,
+                'read_at': read_at,
+            })
             _logger.info(
                 '_propagate_read_to_sent_copies: marked %d sent copy(s) read '
                 'for message_id=%s', len(sent_copies), message_id,
@@ -600,6 +603,16 @@ def _folder_role(folder):
     low = value.lower()
     logical = {'inbox', 'sent', 'drafts', 'trash', 'archive', 'spam'}
     return low if low in logical else 'custom'
+
+
+def _is_sent_folder(folder):
+    value = (folder or '').strip().lower()
+    tail = value.replace('\\', '/').replace('.', '/').split('/')[-1]
+    return value in {'sent', 'sent items', 'sent messages'} or tail in {
+        'sent',
+        'sent items',
+        'sent messages',
+    }
 
 
 def _attachment_payload(att, inline=False, cid_value=None):
@@ -1662,12 +1675,14 @@ class LugalEmailController(http.Controller):
                 if 'is_important' in body:
                     vals['is_important'] = bool(body['is_important'])
 
+                sent_read_noop = False
                 if 'is_read' in body:
                     is_read = bool(body['is_read'])
-                    if msg.folder == 'sent':
+                    if _is_sent_folder(msg.folder):
                         # Sent-folder: is_read/read_at track RECIPIENT read status.
                         # Sender patching their own sent copy is cosmetic-only; push
                         # \Seen to IMAP but do not alter DB is_read/read_at.
+                        sent_read_noop = True
                         if imap_uid and is_read:
                             msg.account_id.sudo()._imap_store_async(
                                 imap_uid, imap_folder, add_flags=['\\Seen']
@@ -1712,6 +1727,8 @@ class LugalEmailController(http.Controller):
                                 _logger.warning('MDN trigger failed (patch): %s', _mdn_exc)
 
                 if not vals:
+                    if sent_read_noop:
+                        return _json_response({'success': True, 'data': _message_to_dict(msg)})
                     return _json_response(
                         {'success': False, 'error': 'Provide at least one of: is_flagged, is_starred, is_important, is_read'},
                         400,
@@ -2634,7 +2651,7 @@ class LugalEmailController(http.Controller):
             # We still push \Seen to IMAP so the sender's client clears the unread
             # badge, but the DB fields remain driven solely by recipient activity
             # (_propagate_read_to_sent_copies, MDN handler).
-            if msg.folder == 'sent':
+            if _is_sent_folder(msg.folder):
                 if msg.imap_uid and is_read:
                     imap_folder = _resolve_imap_folder(msg.account_id, msg.folder)
                     msg.account_id.sudo()._imap_store_async(
