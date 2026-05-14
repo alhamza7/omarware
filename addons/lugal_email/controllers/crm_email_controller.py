@@ -10,6 +10,10 @@ from datetime import timedelta, timezone
 from odoo import http, fields
 from odoo.http import request
 from odoo.addons.lugal_auth.controllers._auth import ensure_jwt_user_id
+from odoo.addons.lugal_email.controllers.email_controller import (
+    _message_attachment_buckets,
+    _resolve_cid_refs,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -75,9 +79,13 @@ def _msg_to_dict(msg, full=False):
         },
     }
     if full:
-        data['body_html']   = msg.body_html or ''
-        data['body_text']   = msg.body_text or ''
-        data['attachments'] = []
+        raw_html = msg.body_html or ''
+        att_list, inline_list = _message_attachment_buckets(msg)
+        data['body_html']          = raw_html
+        data['body_html_resolved'] = _resolve_cid_refs(raw_html, inline_list)
+        data['body_text']          = msg.body_text or ''
+        data['attachments']        = att_list
+        data['inline_attachments'] = inline_list
     return data
 
 

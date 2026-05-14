@@ -751,7 +751,11 @@ def _message_to_dict(msg, full=False):
 
 
 def _build_quoted_html(msg):
-    """Return an HTML block with the original message quoted below the reply area."""
+    """Return an HTML block with the original message quoted below the reply area.
+
+    CID inline-image references in the quoted body are resolved to real attachment
+    URLs so images display correctly in the reply/forward compose preview.
+    """
     date_str = _to_riyadh_iso(msg.date) or ''
     sender   = msg.from_name or msg.from_address or 'Unknown'
     addr     = msg.from_address or ''
@@ -761,7 +765,9 @@ def _build_quoted_html(msg):
         f'{(" &lt;" + addr + "&gt;") if addr else ""} wrote:</b>'
         f'</div>'
     )
-    original = msg.body_html or (msg.body_text or '').replace('\n', '<br>')
+    raw_html = msg.body_html or (msg.body_text or '').replace('\n', '<br>')
+    _, inline_list = _message_attachment_buckets(msg)
+    original = _resolve_cid_refs(raw_html, inline_list)
     return (
         f'<br><br>{header}'
         f'<blockquote style="margin:8px 0 0 8px;padding-left:12px;'
