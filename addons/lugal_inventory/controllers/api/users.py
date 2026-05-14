@@ -12,7 +12,7 @@ class InventoryUsersController(http.Controller):
         """Return paginated list of inventory users."""
         try:
             page = max(1, int(page))
-            per_page = min(int(per_page), 200)
+            per_page = min(int(per_page), 5000)
             offset = (page - 1) * per_page
 
             domain = []
