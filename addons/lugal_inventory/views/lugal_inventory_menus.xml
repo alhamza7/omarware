@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <menuitem id="menu_lugal_inventory_root"
+              name="Inventory App"
+              sequence="80"/>
+
+    <menuitem id="menu_lugal_inventory_sessions"
+              name="Sessions"
+              parent="menu_lugal_inventory_root"
+              action="action_lugal_inventory_session"
+              sequence="10"/>
+
+    <menuitem id="menu_lugal_inventory_audits"
+              name="Audit Lines"
+              parent="menu_lugal_inventory_root"
+              action="action_lugal_inventory_audit"
+              sequence="20"/>
+
+    <menuitem id="menu_lugal_inventory_admin"
+              name="Admin"
+              parent="menu_lugal_inventory_root"
+              sequence="90"/>
+
+    <menuitem id="menu_lugal_inventory_users"
+              name="Users"
+              parent="menu_lugal_inventory_admin"
+              action="action_lugal_inventory_user"
+              sequence="20"/>
+
+</odoo>
