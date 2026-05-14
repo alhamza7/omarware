@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- ==================== Session ==================== -->
+    <record id="view_lugal_inventory_session_list" model="ir.ui.view">
+        <field name="name">lugal.inventory.session.list</field>
+        <field name="model">lugal.inventory.session</field>
+        <field name="arch" type="xml">
+            <list string="Inventory Sessions">
+                <field name="name"/>
+                <field name="warehouse_id"/>
+                <field name="state"/>
+                <field name="audit_count"/>
+                <field name="user_id"/>
+                <field name="create_date"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_lugal_inventory_session_form" model="ir.ui.view">
+        <field name="name">lugal.inventory.session.form</field>
+        <field name="model">lugal.inventory.session</field>
+        <field name="arch" type="xml">
+            <form string="Inventory Session">
+                <sheet>
+                    <group>
+                        <field name="name"/>
+                        <field name="warehouse_id"/>
+                        <field name="state"/>
+                        <field name="user_id"/>
+                        <field name="audit_count"/>
+                    </group>
+                    <field name="note" placeholder="Notes..."/>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_lugal_inventory_session" model="ir.actions.act_window">
+        <field name="name">Inventory Sessions</field>
+        <field name="res_model">lugal.inventory.session</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <!-- ==================== Audit ==================== -->
+    <record id="view_lugal_inventory_audit_list" model="ir.ui.view">
+        <field name="name">lugal.inventory.audit.list</field>
+        <field name="model">lugal.inventory.audit</field>
+        <field name="arch" type="xml">
+            <list string="Audit Lines">
+                <field name="product_code"/>
+                <field name="product_name"/>
+                <field name="warehouse_name"/>
+                <field name="quantity"/>
+                <field name="uom_id"/>
+                <field name="user_name"/>
+                <field name="barcode_used"/>
+                <field name="create_date"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_lugal_inventory_audit_form" model="ir.ui.view">
+        <field name="name">lugal.inventory.audit.form</field>
+        <field name="model">lugal.inventory.audit</field>
+        <field name="arch" type="xml">
+            <form string="Audit Line">
+                <sheet>
+                    <group>
+                        <field name="product_id"/>
+                        <field name="warehouse_id"/>
+                        <field name="quantity"/>
+                        <field name="uom_id"/>
+                        <field name="user_id"/>
+                        <field name="barcode_used"/>
+                        <field name="session_id"/>
+                    </group>
+                    <field name="note" placeholder="Notes..."/>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_lugal_inventory_audit" model="ir.actions.act_window">
+        <field name="name">Inventory Audits</field>
+        <field name="res_model">lugal.inventory.audit</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <!-- ==================== User ==================== -->
+    <record id="view_lugal_inventory_user_list" model="ir.ui.view">
+        <field name="name">lugal.inventory.user.list</field>
+        <field name="model">lugal.inventory.user</field>
+        <field name="arch" type="xml">
+            <list string="Inventory Users" editable="bottom">
+                <field name="user_id"/>
+                <field name="full_name"/>
+                <field name="username"/>
+                <field name="role"/>
+                <field name="warehouse_id"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="action_lugal_inventory_user" model="ir.actions.act_window">
+        <field name="name">Inventory Users</field>
+        <field name="res_model">lugal.inventory.user</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+</odoo>

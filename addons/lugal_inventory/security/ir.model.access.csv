@@ -1,0 +1,4 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_lugal_inventory_session_user,access.lugal.inventory.session.user,model_lugal_inventory_session,base.group_user,1,1,1,1
+access_lugal_inventory_audit_user,access.lugal.inventory.audit.user,model_lugal_inventory_audit,base.group_user,1,1,1,1
+access_lugal_inventory_user_user,access.lugal.inventory.user.user,model_lugal_inventory_user,base.group_user,1,1,1,1
