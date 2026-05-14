@@ -12,7 +12,7 @@ import json
 import logging
 import threading
 from datetime import timedelta, timezone
-from odoo import http
+from odoo import http, fields
 from odoo.http import request, Response
 from odoo.addons.lugal_auth.controllers._auth import ensure_jwt_user_id
 
@@ -314,6 +314,35 @@ def _refresh_account_unread_count(account):
     ])
     account.sudo().write({'unread_count': unread_count})
     return unread_count
+
+
+def _propagate_read_to_sent_copies(env, message_id, read_at):
+    """
+    When a recipient marks an inbox message as read, find the matching sent-folder
+    copy (same RFC 2822 Message-ID) in any Lugal account and mark it read too.
+
+    This is what drives is_read/read_at on *sent* messages — they track whether the
+    recipient has read the message, not whether the sender opened their own copy.
+    """
+    if not message_id:
+        return
+    try:
+        sent_copies = env['lugal.email.message'].sudo().search([
+            ('message_id', '=', message_id),
+            ('folder', '=', 'sent'),
+            ('is_read', '=', False),
+            ('is_deleted', '=', False),
+        ])
+        if sent_copies:
+            sent_copies.write({'is_read': True, 'read_at': read_at})
+            _logger.info(
+                '_propagate_read_to_sent_copies: marked %d sent copy(s) read '
+                'for message_id=%s', len(sent_copies), message_id,
+            )
+    except Exception as exc:
+        _logger.warning(
+            '_propagate_read_to_sent_copies failed message_id=%s: %s', message_id, exc,
+        )
 
 
 def _folder_tail(folder_path):
@@ -1635,37 +1664,52 @@ class LugalEmailController(http.Controller):
 
                 if 'is_read' in body:
                     is_read = bool(body['is_read'])
-                    was_already_read = bool(msg.read_at)
-                    vals['is_read'] = is_read
-                    if is_read and not msg.read_at:
-                        from datetime import datetime
-                        vals['read_at'] = datetime.utcnow()
-                    if imap_uid:
-                        if is_read:
+                    if msg.folder == 'sent':
+                        # Sent-folder: is_read/read_at track RECIPIENT read status.
+                        # Sender patching their own sent copy is cosmetic-only; push
+                        # \Seen to IMAP but do not alter DB is_read/read_at.
+                        if imap_uid and is_read:
                             msg.account_id.sudo()._imap_store_async(
                                 imap_uid, imap_folder, add_flags=['\\Seen']
                             )
-                        else:
-                            msg.account_id.sudo()._imap_store_async(
-                                imap_uid, imap_folder, remove_flags=['\\Seen']
+                    else:
+                        was_already_read = bool(msg.read_at)
+                        vals['is_read'] = is_read
+                        if is_read and not msg.read_at:
+                            from datetime import datetime
+                            vals['read_at'] = datetime.utcnow()
+                        if imap_uid:
+                            if is_read:
+                                msg.account_id.sudo()._imap_store_async(
+                                    imap_uid, imap_folder, add_flags=['\\Seen']
+                                )
+                            else:
+                                msg.account_id.sudo()._imap_store_async(
+                                    imap_uid, imap_folder, remove_flags=['\\Seen']
+                                )
+                        # Propagate read confirmation to the sender's sent copy.
+                        if is_read and not was_already_read and msg.message_id:
+                            _propagate_read_to_sent_copies(
+                                request.env, msg.message_id,
+                                msg.read_at or fields.Datetime.now()
                             )
-                    # Send MDN if marking inbox message as read for the first time
-                    # and sender requested a read receipt.
-                    if (is_read and not was_already_read
-                            and msg.request_read_receipt
-                            and msg.folder in ('inbox',)
-                            and msg.from_address
-                            and msg.message_id):
-                        try:
-                            _send_mdn_async(
-                                acc=msg.account_id,
-                                to_address=msg.from_address,
-                                original_message_id=msg.message_id,
-                                original_subject=msg.subject or '',
-                                recipient_email=msg.account_id.email_address,
-                            )
-                        except Exception as _mdn_exc:
-                            _logger.warning('MDN trigger failed (patch): %s', _mdn_exc)
+                        # Send MDN if marking inbox message as read for the first time
+                        # and sender requested a read receipt.
+                        if (is_read and not was_already_read
+                                and msg.request_read_receipt
+                                and msg.folder in ('inbox',)
+                                and msg.from_address
+                                and msg.message_id):
+                            try:
+                                _send_mdn_async(
+                                    acc=msg.account_id,
+                                    to_address=msg.from_address,
+                                    original_message_id=msg.message_id,
+                                    original_subject=msg.subject or '',
+                                    recipient_email=msg.account_id.email_address,
+                                )
+                            except Exception as _mdn_exc:
+                                _logger.warning('MDN trigger failed (patch): %s', _mdn_exc)
 
                 if not vals:
                     return _json_response(
@@ -2584,6 +2628,26 @@ class LugalEmailController(http.Controller):
                 return _not_found()
             body     = json.loads(request.httprequest.data or '{}')
             is_read  = body.get('is_read', True)
+
+            # ── Sent-folder messages: is_read/read_at track RECIPIENT read status ──
+            # The sender viewing their own sent copy must NOT update is_read/read_at.
+            # We still push \Seen to IMAP so the sender's client clears the unread
+            # badge, but the DB fields remain driven solely by recipient activity
+            # (_propagate_read_to_sent_copies, MDN handler).
+            if msg.folder == 'sent':
+                if msg.imap_uid and is_read:
+                    imap_folder = _resolve_imap_folder(msg.account_id, msg.folder)
+                    msg.account_id.sudo()._imap_store_async(
+                        msg.imap_uid, imap_folder, add_flags=['\\Seen']
+                    )
+                unread_count = _refresh_account_unread_count(msg.account_id)
+                return _json_response({'success': True, 'data': {
+                    'is_read': msg.is_read,
+                    'read_at': _to_riyadh_iso(msg.read_at) if msg.read_at else None,
+                    'unread_count': unread_count,
+                }})
+
+            # ── Inbox / custom-folder messages: normal read handling ──────────────
             # Capture pre-write state before the write() override may stamp read_at
             was_already_read = bool(msg.read_at)
             msg.write({'is_read': is_read})
@@ -2599,6 +2663,12 @@ class LugalEmailController(http.Controller):
                     msg.account_id.sudo()._imap_store_async(
                         msg.imap_uid, imap_folder, remove_flags=['\\Seen']
                     )
+            # Propagate read confirmation to the sender's sent-folder copy so the
+            # sender sees is_read=True once any recipient actually reads the message.
+            if is_read and not was_already_read and msg.message_id:
+                _propagate_read_to_sent_copies(
+                    request.env, msg.message_id, msg.read_at or fields.Datetime.now()
+                )
             # Send MDN if: marking as read for the first time, the original
             # sender requested a receipt, and this is an inbox message.
             if (is_read and not was_already_read

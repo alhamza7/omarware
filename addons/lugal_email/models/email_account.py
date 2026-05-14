@@ -858,9 +858,17 @@ class LugalEmailAccount(models.Model):
                     ], limit=1)
                     if _sent:
                         _read_ts = dt or fields.Datetime.now()
-                        _sent.write({'recipient_read_at': _read_ts})
+                        # Update both recipient_read_at (MDN provenance) and the
+                        # canonical is_read/read_at so the sender's sent-folder view
+                        # correctly shows the message as read by the recipient.
+                        _sent.write({
+                            'recipient_read_at': _read_ts,
+                            'is_read':           True,
+                            'read_at':           _read_ts,
+                        })
                         _logger.info(
-                            'MDN: marked sent msg id=%s (mid=%s) recipient_read_at=%s',
+                            'MDN: marked sent msg id=%s (mid=%s) read '
+                            'recipient_read_at=%s',
                             _sent.id, _orig_mid, _read_ts,
                         )
                     # Discard MDN — do not store it as a regular inbox message
@@ -914,6 +922,14 @@ class LugalEmailAccount(models.Model):
 
         body_text, body_html = self._extract_best_body(msg)
         is_read = self._parse_flags_from_fetch_response(flags_meta)
+        # For sent-folder messages the IMAP \Seen flag means the SENDER has viewed
+        # their own copy — it has nothing to do with whether the RECIPIENT read it.
+        # is_read/read_at on sent messages are driven exclusively by inbox-to-sent
+        # propagation (_propagate_read_to_sent_copies) and MDN receipts.
+        # Ignoring \Seen here prevents IMAP re-sync from falsely marking sent
+        # messages read whenever the sender's mail client opens the Sent folder.
+        if folder_key == 'sent':
+            is_read = False
 
         own_email = (self.email_address or '').strip().lower()
         own_username = own_email.split('@')[0] if '@' in own_email else own_email
