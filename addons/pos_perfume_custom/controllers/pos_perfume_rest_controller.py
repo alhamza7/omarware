@@ -1674,14 +1674,16 @@ class PosPerfumeRestController(http.Controller):
     def orders(self, **kwargs):
         if not self._pos_rest_auth():
             return self._fail("Unauthorized", 401)
-        Order = request.env["pos.perfume.order"]
+        Order = request.env["pos.perfume.order"].sudo()
         if request.httprequest.method == "GET":
             limit = min(int(request.httprequest.args.get("limit") or 80), 500)
             offset = int(request.httprequest.args.get("offset") or 0)
-            domain = []
+            domain = [("state", "!=", "cancel")]
             st = request.httprequest.args.get("state")
             if st:
-                domain.append(("state", "=", st))
+                domain = [("state", "=", st)]
+            elif request.httprequest.args.get("include_cancelled") == "1":
+                domain = []
             if request.httprequest.args.get("partner_id"):
                 try:
                     domain.append(("partner_id", "=", int(request.httprequest.args.get("partner_id"))))
@@ -1698,6 +1700,9 @@ class PosPerfumeRestController(http.Controller):
                     "state": o.state,
                     "amount_total": o.amount_total,
                     "date_order": o.date.isoformat() if getattr(o, "date", None) else None,
+                    "sale_order_name": o.sale_order_id.name if o.sale_order_id else "",
+                    "sap_synced": o.sale_order_id.sap_synced if o.sale_order_id else False,
+                    "sap_doc_entry": int(o.sale_order_id.sap_doc_entry or 0) if o.sale_order_id else 0,
                 }
                 for o in recs
             ]
@@ -1973,10 +1978,9 @@ class PosPerfumeRestController(http.Controller):
         o = request.env["pos.perfume.order"].sudo().browse(order_id).exists()
         if not o:
             return self._fail("Order not found", 404)
-        if o.state not in ("draft",):
-            # Already confirmed — idempotent: return current state as success
+        if o.state not in ("draft", "quotation"):
+            # Already confirmed as sale — idempotent
             if o.state == "sale":
-                # If not yet synced, try SAP now
                 sap_result = {"sap_synced": bool(o.sale_order_id.sap_synced) if o.sale_order_id else False,
                               "sap_doc_entry": int(o.sale_order_id.sap_doc_entry or 0) if o.sale_order_id else 0,
                               "sap_error": None}
@@ -1998,7 +2002,8 @@ class PosPerfumeRestController(http.Controller):
                 f"Cannot confirm order in state '{o.state}'", 409
             )
         try:
-            o.action_confirm()
+            # force_sale_order=True: confirms sale.order and sends to SAP as Sale Order
+            o.with_context(force_sale_order=True).action_confirm()
         except Exception as exc:
             _logger.exception("POST /orders/%s/confirm — action_confirm failed", order_id)
             return self._fail(f"Confirm failed: {exc}", 500)
@@ -2036,6 +2041,13 @@ class PosPerfumeRestController(http.Controller):
         if not o:
             return self._fail("Order not found", 404)
         if not o.sale_order_id:
+            # Create the draft sale.order if it doesn't exist yet
+            try:
+                o.action_ensure_sale_order()
+                o.invalidate_recordset()
+            except Exception as exc:
+                return self._fail(f"Could not create sale order: {exc}", 500)
+        if not o.sale_order_id:
             return self._fail("Order has no linked sale order — confirm the order first", 422)
         try:
             o.sale_order_id._send_to_sap(force_as_quotation=True)
@@ -2053,6 +2065,11 @@ class PosPerfumeRestController(http.Controller):
             sap_synced = False
             sap_doc_entry = 0
             sap_error = str(exc)
+        # Update POS order state to 'quotation'
+        try:
+            o.action_quotation()
+        except Exception as exc:
+            _logger.warning("POST /orders/%s/quotation — action_quotation failed: %s", order_id, exc)
         return self._ok(
             {
                 "id": o.id,
