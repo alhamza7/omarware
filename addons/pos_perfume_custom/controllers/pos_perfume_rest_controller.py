@@ -1730,6 +1730,8 @@ class PosPerfumeRestController(http.Controller):
         except Exception as exc:
             _logger.warning("REST API — SAP sync failed for %s: %s", sale_order.name, exc)
             return {"sap_synced": False, "sap_doc_entry": 0, "sap_error": str(exc)}
+
+    def _build_rest_order_line_vals(self, data):
         """
         Build a single order-line vals dict for pos.perfume.order.line.
         Returns (vals_dict, error_str). Uses sudo() — caller already authorised via _pos_rest_auth().
