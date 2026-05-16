@@ -621,13 +621,14 @@ class SaleOrder(models.Model):
                 error_msg = f"❌ Error sending quotation {quotation.name} to SAP: {str(e)}"
                 _logger.error(error_msg, exc_info=True)
                 sync_successful = False
-                # تعيين sap_synced = False بشكل صريح عند الفشل
                 try:
-                    quotation.sudo().write({'sap_synced': False})
+                    quotation.sudo().write({
+                        'sap_synced': False,
+                        'sap_error_message': str(e)[:512],
+                        'sap_last_sync_date': fields.Datetime.now(),
+                    })
                 except Exception as write_error:
                     _logger.error(f"Failed to update sap_synced for quotation {quotation.name}: {str(write_error)}")
-                # لا نرفع exception حتى لا نمنع حفظ الـ quotation في Odoo
-                # يمكن إضافة notification للمستخدم هنا
             finally:
                 # Log final status
                 if sync_successful:
