@@ -1940,8 +1940,19 @@ class PosPerfumeRestController(http.Controller):
         if not o:
             return self._fail("Order not found", 404)
         if o.state not in ("draft",):
+            # Already confirmed — idempotent: return current state as success
+            if o.state == "sale":
+                return self._ok(
+                    {
+                        "id": o.id,
+                        "name": o.name,
+                        "state": o.state,
+                        "amount_total": o.amount_total,
+                        "sale_order_name": o.sale_order_id.name if o.sale_order_id else "",
+                    }
+                )
             return self._fail(
-                f"Order is already in state '{o.state}' and cannot be confirmed", 409
+                f"Cannot confirm order in state '{o.state}'", 409
             )
         try:
             o.action_confirm()
