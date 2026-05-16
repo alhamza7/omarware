@@ -2076,22 +2076,37 @@ class PosPerfumeRestController(http.Controller):
                 return self._fail(f"Could not create sale order: {exc}", 500)
         if not o.sale_order_id:
             return self._fail("Order has no linked sale order — confirm the order first", 422)
-        try:
-            o.sale_order_id._send_to_sap(force_as_quotation=True)
-            o.sale_order_id.env.cr.flush()
-            o.sale_order_id.env.cr.execute(
-                "SELECT sap_synced, sap_doc_entry, sap_error_message FROM sale_order WHERE id=%s",
-                (o.sale_order_id.id,)
-            )
-            row = o.sale_order_id.env.cr.fetchone()
-            sap_synced = bool(row[0]) if row else False
-            sap_doc_entry = int(row[1] or 0) if row else 0
-            sap_error = row[2] or None if row else None
-        except Exception as exc:
-            _logger.warning("POST /orders/%s/quotation — SAP sync failed: %s", order_id, exc)
-            sap_synced = False
-            sap_doc_entry = 0
-            sap_error = str(exc)
+
+        so = o.sale_order_id
+
+        # If the document is already in SAP (sap_doc_entry set), we do NOT re-push it
+        # as a Quotation — the document may already be a Sales Order.  Just reconcile
+        # the sap_synced flag and return the existing SAP reference.
+        if so.sap_doc_entry and so.sap_doc_entry > 0:
+            if not so.sap_synced:
+                so.sudo().write({'sap_synced': True, 'sap_error_message': False})
+                so.env.cr.flush()
+            sap_synced = True
+            sap_doc_entry = int(so.sap_doc_entry)
+            sap_error = None
+        else:
+            # No prior SAP document — push as Quotation now
+            try:
+                so._send_to_sap(force_as_quotation=True)
+                so.env.cr.flush()
+                so.env.cr.execute(
+                    "SELECT sap_synced, sap_doc_entry, sap_error_message FROM sale_order WHERE id=%s",
+                    (so.id,)
+                )
+                row = so.env.cr.fetchone()
+                sap_synced = bool(row[0]) if row else False
+                sap_doc_entry = int(row[1] or 0) if row else 0
+                sap_error = row[2] or None if row else None
+            except Exception as exc:
+                _logger.warning("POST /orders/%s/quotation — SAP sync failed: %s", order_id, exc)
+                sap_synced = False
+                sap_doc_entry = 0
+                sap_error = str(exc)
         # Update POS order state to 'quotation'
         try:
             o.action_quotation()

@@ -577,7 +577,11 @@ class SaleOrder(models.Model):
                         else:
                             error_msg = f"❌ Failed to update quotation {quotation.name} in SAP: update_quotation returned None"
                             _logger.error(error_msg)
-                            quotation.sudo().write({'sap_synced': False})
+                            quotation.sudo().write({
+                                'sap_synced': False,
+                                'sap_error_message': error_msg[:512],
+                                'sap_last_sync_date': fields.Datetime.now(),
+                            })
                             raise Exception(error_msg)
                     else:
                         # إنشاء quotation جديد في SAP (ليس لديه DocEntry بعد)
