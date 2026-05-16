@@ -1680,7 +1680,157 @@ class PosPerfumeRestController(http.Controller):
                 for o in recs
             ]
             return self._ok({"items": items, "total": total})
-        return self._fail("Create order via Odoo POS UI or extend this endpoint", 501)
+
+        # POST — create a new pos.perfume.order
+        return self._create_order()
+
+    def _build_rest_order_line_vals(self, data):
+        """
+        Build a single order-line vals dict for pos.perfume.order.line.
+        Returns (vals_dict, error_str).  Uses sudo() — caller already authorised via _pos_rest_auth().
+        """
+        product_id = data.get("product_id")
+        warehouse_id = data.get("warehouse_id")
+        if not product_id:
+            return None, "product_id is required for each order line"
+        if not warehouse_id:
+            return None, "warehouse_id is required for each order line"
+
+        product = request.env["product.product"].sudo().browse(int(product_id))
+        if not product.exists():
+            return None, f"Product {product_id} not found"
+
+        warehouse = request.env["stock.warehouse"].sudo().browse(int(warehouse_id))
+        if not warehouse.exists():
+            return None, f"Warehouse {warehouse_id} not found"
+
+        # Resolve UoM: prefer SAP sales UoM → Odoo product UoM
+        uom = product.uom_id
+        try:
+            ext = request.env["sap.product.extended"].sudo().search(
+                [("product_id", "=", product.id)], limit=1
+            )
+            if ext and ext.sales_uom_id:
+                uom = ext.sales_uom_id
+        except Exception:
+            pass
+
+        if data.get("product_uom_id"):
+            override_uom = request.env["uom.uom"].sudo().browse(int(data["product_uom_id"]))
+            if not override_uom.exists():
+                return None, f"UoM {data['product_uom_id']} not found"
+            uom = override_uom
+
+        location_id = warehouse.lot_stock_id.id if warehouse.lot_stock_id else False
+
+        return {
+            "product_id": product.id,
+            "product_uom_id": uom.id,
+            "warehouse_id": warehouse.id,
+            "location_id": location_id,
+            "quantity": float(data.get("quantity", 1.0)),
+            "unit_price": float(data.get("unit_price", product.list_price)),
+            "discount_percent": float(data.get("discount_percent", 0.0)),
+            "custom_product_name": data.get("custom_product_name") or "",
+            "sequence": int(data.get("sequence", 10)),
+        }, None
+
+    def _create_order(self):
+        """Handle POST /api/pos_perfume/v1/orders — create and optionally confirm a pos.perfume.order."""
+        try:
+            body = json.loads(request.httprequest.data.decode("utf-8") or "{}")
+        except (ValueError, UnicodeDecodeError) as exc:
+            return self._fail(f"Invalid JSON body: {exc}", 400)
+
+        partner_id = body.get("partner_id")
+        if not partner_id:
+            return self._fail("partner_id is required", 400)
+
+        partner = request.env["res.partner"].sudo().browse(int(partner_id))
+        if not partner.exists():
+            return self._fail(f"Customer {partner_id} not found", 404)
+
+        Order = request.env["pos.perfume.order"].sudo()
+
+        # Resolve pricelist
+        pl = None
+        if body.get("pricelist_id"):
+            pl = request.env["product.pricelist"].sudo().browse(int(body["pricelist_id"]))
+            if not pl.exists():
+                return self._fail(f"Pricelist {body['pricelist_id']} not found", 404)
+        if not pl:
+            try:
+                default_pl_id = Order._get_default_pricelist()
+                if default_pl_id:
+                    pl = request.env["product.pricelist"].sudo().browse(default_pl_id)
+            except Exception:
+                pass
+        if not pl or not pl.exists():
+            # Last resort: first active pricelist
+            pl = request.env["product.pricelist"].sudo().search([("active", "=", True)], limit=1)
+        if not pl or not pl.exists():
+            return self._fail("No pricelist available", 422)
+
+        order_vals = {
+            "partner_id": partner.id,
+            "pricelist_id": pl.id,
+            "state": "draft",
+            "invoice_type": str(body.get("invoice_type") or "1"),
+            "user_id": request.env.user.id,
+        }
+
+        if body.get("exchange_rate") is not None:
+            try:
+                order_vals["exchange_rate"] = float(body["exchange_rate"])
+            except (TypeError, ValueError):
+                return self._fail("exchange_rate must be a number", 400)
+
+        if body.get("note"):
+            order_vals["note"] = str(body["note"])
+
+        # Build order lines
+        line_vals_list = []
+        for idx, line_data in enumerate(body.get("order_lines") or []):
+            lv, err = self._build_rest_order_line_vals(line_data)
+            if err:
+                return self._fail(f"Line {idx}: {err}", 400)
+            line_vals_list.append((0, 0, lv))
+
+        if line_vals_list:
+            order_vals["order_line_ids"] = line_vals_list
+
+        try:
+            order = Order.create(order_vals)
+        except Exception as exc:
+            _logger.exception("POST /orders — ORM create failed")
+            return self._fail(f"Order creation failed: {exc}", 500)
+
+        # Confirm only if lines were provided (matches bridge controller behaviour)
+        if line_vals_list:
+            try:
+                order.action_confirm()
+            except Exception as exc:
+                _logger.warning("POST /orders — action_confirm failed (order %s): %s", order.id, exc)
+
+        return _json(
+            {
+                "success": True,
+                "message": "Order created",
+                "data": {
+                    "id": order.id,
+                    "name": order.name,
+                    "state": order.state,
+                    "partner_id": order.partner_id.id,
+                    "partner_name": order.partner_id.name,
+                    "pricelist_id": order.pricelist_id.id,
+                    "amount_total": order.amount_total,
+                    "sale_order_name": order.sale_order_id.name if order.sale_order_id else "",
+                    "invoice_type": order.invoice_type,
+                    "note": order.note or "",
+                },
+            },
+            status=201,
+        )
 
     @http.route(
         f"{_PREFIX}/orders/<int:order_id>",
