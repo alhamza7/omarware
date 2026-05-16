@@ -735,18 +735,16 @@ def _message_to_dict(msg, full=False):
 
     if full:
         raw_html = msg.body_html or ''
-        # Resolve cid: references in the HTML so the FE can render inline images
-        # without any client-side processing. body_html_resolved replaces every
-        # cid:<content_id> (and cid:<content_id> with angle brackets) with the
-        # corresponding /web/content/<id>?access_token=... URL.
-        # body_html is kept as-is for legacy FE code; body_html_resolved is the
-        # preferred field for rendering.
-        data['body_html']          = raw_html
-        data['body_html_resolved'] = _resolve_cid_refs(raw_html, inline_list)
+        resolved_html = _resolve_cid_refs(raw_html, inline_list)
+        # body_html is returned with CID references already resolved so the
+        # frontend can render inline images without any extra processing.
+        # inline_attachments is kept as an empty list for API compatibility.
+        data['body_html']          = resolved_html
+        data['body_html_resolved'] = resolved_html
         data['body_text']          = msg.body_text or ''
         data['body_fetched']       = bool(msg.body_fetched)
         data['attachments']        = att_list      # paperclip-added files only
-        data['inline_attachments'] = inline_list   # pasted / dropped / inserted images
+        data['inline_attachments'] = []            # images already embedded in body_html
     return data
 
 
@@ -1937,6 +1935,7 @@ class LugalEmailController(http.Controller):
             for msg in msgs:
                 attachments, inline_attachments = _message_attachment_buckets(msg)
                 raw_html = msg.body_html or ''
+                resolved_html = _resolve_cid_refs(raw_html, inline_attachments)
                 items.append({
                     'id':                  msg.id,
                     'account_id':          msg.account_id.id,
@@ -1946,11 +1945,11 @@ class LugalEmailController(http.Controller):
                     'read_at':             _to_riyadh_iso(msg.read_at) if msg.read_at else None,
                     'version':             _to_riyadh_iso(msg.write_date),
                     'write_date':          _to_riyadh_iso(msg.write_date),
-                    'body_html':           raw_html,
-                    'body_html_resolved':  _resolve_cid_refs(raw_html, inline_attachments),
+                    'body_html':           resolved_html,
+                    'body_html_resolved':  resolved_html,
                     'body_text':           msg.body_text or '',
                     'attachments':         attachments,
-                    'inline_attachments':  inline_attachments,
+                    'inline_attachments':  [],
                 })
 
             return _json_response({
