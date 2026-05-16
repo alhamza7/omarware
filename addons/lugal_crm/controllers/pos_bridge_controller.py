@@ -45,19 +45,15 @@ def _get_setup_data():
     exchange_rate = float(
         env['ir.config_parameter'].sudo().get_param('pos_perfume.default_exchange_rate_usd_iqd', '1470.0')
     )
-    invoice_types = [
-        {'key': '1', 'label': 'زبون محل'},
-        {'key': '2', 'label': 'شركات توصيل'},
-        {'key': '3', 'label': 'نقليات'},
-        {'key': '4', 'label': 'ديلفري'},
-        {'key': '5', 'label': 'NBS'},
-        {'key': '6', 'label': 'شورجة'},
-        {'key': '7', 'label': 'NA'},
-        {'key': '8', 'label': 'مكاتب الشورجة'},
-    ]
+    invoice_types = []
     default_pl_id = False
     if _pos_available():
-        default_pl_id = request.env['pos.perfume.order']._get_default_pricelist()
+        # Read invoice_type choices directly from the model — single source of truth
+        sel = env['pos.perfume.order']._fields['invoice_type'].selection
+        if callable(sel):
+            sel = sel(env['pos.perfume.order'])
+        invoice_types = [{'key': k, 'label': v} for k, v in sel]
+        default_pl_id = env['pos.perfume.order']._get_default_pricelist()
     if not default_pl_id and pricelist_data:
         default_pl_id = pricelist_data[0]['id']
     return {
