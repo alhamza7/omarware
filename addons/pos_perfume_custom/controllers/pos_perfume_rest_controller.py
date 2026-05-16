@@ -2084,6 +2084,85 @@ class PosPerfumeRestController(http.Controller):
         # PUT
         return self._update_order(o)
 
+    # ── Report / PDF download ────────────────────────────────────────────────
+    _REPORT_TYPES = {
+        # key → (qweb template xmlid, forced output format)
+        "nbs":     ("pos_perfume_custom.report_pos_perfume_order_nbs",    "pdf"),
+        "simple":  ("pos_perfume_custom.report_pos_perfume_order_simple", "pdf"),
+        "gold":    ("pos_perfume_custom.report_pos_perfume_order_gold",   "html"),
+        "default": ("pos_perfume_custom.report_pos_perfume_order",        "html"),
+    }
+    _REPORT_DEFAULT = "nbs"
+
+    @http.route(
+        f"{_PREFIX}/orders/<int:order_id>/report",
+        type="http",
+        auth="none",
+        methods=["GET"],
+        csrf=False,
+        cors="*",
+    )
+    def order_report(self, order_id, **kwargs):
+        """
+        Render and return an order report.
+
+        Query params:
+          type     : nbs (default) | simple | gold | default
+          format   : pdf (default) | html   — override output format
+          download : true (default) | false — Content-Disposition header
+        """
+        if not self._pos_rest_auth():
+            return self._fail("Unauthorized", 401)
+
+        o = request.env["pos.perfume.order"].sudo().browse(order_id).exists()
+        if not o:
+            return self._fail("Order not found", 404)
+
+        pget = request.httprequest.args.get
+        rtype   = (pget("type")   or self._REPORT_DEFAULT).strip().lower()
+        fmt_arg = (pget("format") or "").strip().lower()
+        download = (pget("download") or "true").strip().lower() not in ("0", "false", "no")
+
+        if rtype not in self._REPORT_TYPES:
+            return self._fail(
+                f"Unknown report type '{rtype}'. Allowed: {', '.join(self._REPORT_TYPES)}",
+                400,
+            )
+
+        xmlid, default_fmt = self._REPORT_TYPES[rtype]
+        output_fmt = fmt_arg if fmt_arg in ("pdf", "html") else default_fmt
+
+        try:
+            Report = request.env["ir.actions.report"].sudo()
+
+            if output_fmt == "pdf":
+                pdf_content, _mime = Report._render_qweb_pdf(xmlid, [o.id])
+                fname = f"order_{o.name}.pdf".replace("/", "-")
+                headers = [
+                    ("Content-Type", "application/pdf"),
+                    ("Content-Length", str(len(pdf_content))),
+                ]
+                if download:
+                    headers.append(("Content-Disposition", f'attachment; filename="{fname}"'))
+                return request.make_response(pdf_content, headers=headers)
+
+            else:  # html
+                html_content, _mime = Report._render_qweb_html(xmlid, [o.id])
+                if isinstance(html_content, bytes):
+                    html_content = html_content.decode("utf-8")
+                fname = f"order_{o.name}.html".replace("/", "-")
+                headers = [
+                    ("Content-Type", "text/html; charset=utf-8"),
+                    ("Content-Length", str(len(html_content.encode("utf-8")))),
+                ]
+                if download:
+                    headers.append(("Content-Disposition", f'attachment; filename="{fname}"'))
+                return request.make_response(html_content, headers=headers)
+
+        except Exception as exc:
+            _logger.exception("order_report: failed to render report for order %s", order_id)
+            return self._fail(f"Report generation failed: {exc}", 500)
+
     def _try_sync_quotation_to_sap(self, sale_order):
         """
         Re-sync sale_order to SAP as a Quotation (force_as_quotation=True).
