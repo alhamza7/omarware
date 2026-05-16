@@ -1689,6 +1689,14 @@ class PosPerfumeRestController(http.Controller):
                     domain.append(("partner_id", "=", int(request.httprequest.args.get("partner_id"))))
                 except ValueError:
                     pass
+            q = (request.httprequest.args.get("query") or "").strip()
+            if q:
+                domain = ["&"] + domain + [
+                    "|", "|",
+                    ("name", "ilike", q),
+                    ("partner_id.name", "ilike", q),
+                    ("sale_order_id.name", "ilike", q),
+                ]
             total = Order.search_count(domain)
             recs = Order.search(domain, limit=limit, offset=offset, order="id desc")
             items = [
@@ -1704,6 +1712,7 @@ class PosPerfumeRestController(http.Controller):
                     "global_discount_amount": getattr(o, "global_discount_amount", 0.0),
                     "amount_total": o.amount_total,
                     "date_order": o.date.isoformat() if getattr(o, "date", None) else None,
+                    "updated_at": o.write_date.isoformat() if o.write_date else None,
                     "sale_order_name": o.sale_order_id.name if o.sale_order_id else "",
                     "sap_synced": o.sale_order_id.sap_synced if o.sale_order_id else False,
                     "sap_doc_entry": int(o.sale_order_id.sap_doc_entry or 0) if o.sale_order_id else 0,
@@ -2028,6 +2037,7 @@ class PosPerfumeRestController(http.Controller):
                     "name": o.name,
                     "state": o.state,
                     "date_order": o.date.isoformat() if o.date else None,
+                    "updated_at": o.write_date.isoformat() if o.write_date else None,
                     "partner_id": o.partner_id.id,
                     "partner_name": o.partner_id.name or "",
                     "partner_phone": o.partner_id.phone or o.partner_id.mobile or "",
@@ -2162,9 +2172,17 @@ class PosPerfumeRestController(http.Controller):
                 return self._fail("global_discount_percent must be a number", 400)
 
         # ── 2. Build ORM commands for order_line_ids ──────────────────────────
+        #
+        # REST semantics: when "order_lines" is provided in the payload the list
+        # represents the DESIRED final state of the order.  Any existing line
+        # whose id is NOT mentioned (updated or explicitly deleted) is
+        # automatically removed — no _delete flag required.
         line_commands = []
         if "order_lines" in body:
             existing_ids = {ln.id for ln in o.order_line_ids}
+            referenced_ids = set()   # ids that appear in the payload
+            explicitly_deleted = set()
+
             for idx, ld in enumerate(body["order_lines"] or []):
                 line_id = ld.get("id")
                 if ld.get("_delete"):
@@ -2172,6 +2190,7 @@ class PosPerfumeRestController(http.Controller):
                         return self._fail(f"Line {idx}: id required for _delete", 400)
                     if int(line_id) not in existing_ids:
                         return self._fail(f"Line {idx}: id {line_id} not found on this order", 404)
+                    explicitly_deleted.add(int(line_id))
                     line_commands.append((2, int(line_id), 0))
                     continue
                 lv, err = self._build_rest_order_line_vals(ld)
@@ -2180,9 +2199,15 @@ class PosPerfumeRestController(http.Controller):
                 if line_id:
                     if int(line_id) not in existing_ids:
                         return self._fail(f"Line {idx}: id {line_id} not found on this order", 404)
+                    referenced_ids.add(int(line_id))
                     line_commands.append((1, int(line_id), lv))
                 else:
                     line_commands.append((0, 0, lv))
+
+            # Auto-delete existing lines that are absent from the payload
+            stale_ids = existing_ids - referenced_ids - explicitly_deleted
+            for stale_id in sorted(stale_ids):
+                line_commands.insert(0, (2, stale_id, 0))
 
         if line_commands:
             header_vals["order_line_ids"] = line_commands
@@ -2284,6 +2309,7 @@ class PosPerfumeRestController(http.Controller):
             "name": o.name,
             "state": o.state,
             "date_order": o.date.isoformat() if o.date else None,
+            "updated_at": o.write_date.isoformat() if o.write_date else None,
             "partner_id": o.partner_id.id,
             "partner_name": o.partner_id.name or "",
             "partner_phone": o.partner_id.phone or o.partner_id.mobile or "",
