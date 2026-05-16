@@ -175,10 +175,12 @@ class PosPerfumeController(http.Controller):
             result.insert(0, {'id': effective_base_uom.id, 'name': effective_base_uom.name, 'price': product.list_price})
 
         # Step 7: Derive prices for zero-priced UoMs using SAP group conversion factors.
-        # When a product has a price only for one UoM (e.g. كارتون=67.50) but the
-        # pricelist holds 0 for others (قطعه, درزن), we compute the missing prices via
-        # the sap.uom.group.line base_equiv factors so the POS always shows sensible values.
+        # Two sub-cases are handled:
+        #   (a) UoM present in pricelist with price=0  → derive from anchor
+        #   (b) UoM in SAP group but entirely absent from pricelist → inject with
+        #       price=0 first, then derive — so the POS always shows all group UoMs.
         if extended_info and extended_info.sap_uom_group_id:
+            result = self._inject_absent_group_uoms(result, extended_info.sap_uom_group_id)
             result = self._derive_missing_prices(result, extended_info.sap_uom_group_id)
 
         _logger.info(f"[POS] Returning {len(result)} UoMs")
@@ -187,6 +189,24 @@ class PosPerfumeController(http.Controller):
     # SAP exports the base-unit price with product_uom_id = Units (id=1) regardless
     # of the product's actual UoM. We must remap it to the product's real base UoM.
     SAP_GENERIC_UOM_ID = 1  # "Units" - SAP's catch-all UoM code
+
+    def _inject_absent_group_uoms(self, uom_list, sap_group):
+        """
+        Ensure every UoM that belongs to the SAP group is present in ``uom_list``.
+        UoMs that have no pricelist item at all are injected with price=0 so that
+        ``_derive_missing_prices`` can subsequently fill them via conversion factors.
+        UoMs already present (with any price) are left untouched.
+        """
+        existing_ids = {entry['id'] for entry in uom_list}
+        lines = request.env['sap.uom.group.line'].sudo().search([
+            ('group_id', '=', sap_group.id)
+        ])
+        for line in lines:
+            uom = line.odoo_uom_id
+            if uom and uom.id not in existing_ids:
+                uom_list.append({'id': uom.id, 'name': uom.name, 'price': 0.0})
+                _logger.info(f"[POS]   Injected absent group UoM {uom.name} with price=0 for derivation")
+        return uom_list
 
     def _derive_missing_prices(self, uom_list, sap_group):
         """
