@@ -1,6 +1,6 @@
 # Email System — Complete Backend API Reference
 
-> **Last Updated:** May 2026  
+> **Last Updated:** May 16 2026  
 > **Audience:** Frontend developers  
 > **Base URL:** All endpoints are relative to the server root (e.g. `http://192.168.116.228:5172`)  
 > **Auth:** Every endpoint requires a JWT token in the `Authorization: Bearer <token>` header.
@@ -903,8 +903,11 @@ Every message endpoint returns this structure (abbreviated fields marked with `*
 
   // Only in full detail responses (GET /messages/<id>, bulk details, thread):
   "body_html": "<p>Hi</p>",
+  "body_html_resolved": "<p>Hi <img src=\"/web/content/42?access_token=...\"/></p>",
   "body_text": "Hi",
   "body_fetched": true,
+  "has_inline_attachments": true,
+  "inline_attachments": [],
   "attachments": [
     {
       "id": 42,
@@ -921,6 +924,10 @@ Every message endpoint returns this structure (abbreviated fields marked with `*
 - `is_mentioned` — `true` when you are in the `To:` header (not just CC). Use this to power the "Mentioned Mail" filter.
 - `is_starred` and `is_flagged` are **independent** — setting one does not affect the other.
 - `has_attachments` / `attachment_count` are always present (even in list view) so you can show the paperclip icon without fetching the full message.
+- `body_html_resolved` — **always use this field to render the email body.** It is identical to `body_html` but with all `cid:` image references replaced by real `/web/content/...` URLs. Inline images are fully embedded so no further processing is needed.
+- `body_html` — raw HTML exactly as stored (may contain unresolved `cid:` references). Kept for compatibility; prefer `body_html_resolved` for display.
+- `has_inline_attachments` — `true` if the message contained any inline images (embedded in the body). Useful to decide whether to show a "has embedded images" indicator.
+- `inline_attachments` — **always an empty array `[]`**. Inline images are already resolved into `body_html_resolved`. This field is kept for API compatibility but will never contain data.
 - Inline images are **never** included in `attachments[]` — only downloadable file attachments appear there.
 - `message_size` is the approximate RFC-822 size in bytes.
 
@@ -950,6 +957,9 @@ All errors follow:
 | Inline image upload | `POST /attachments/upload` with `inline: true` | Returns `cid` to embed in HTML |
 | Inline image in MIME | Automatic | Backend builds `multipart/related` |
 | Inline images excluded from attachment list | Automatic | Never appear in `attachments[]` |
+| Inline images resolved in body | `body_html_resolved` field | CID refs replaced with real URLs; use this field to render the email |
+| `inline_attachments` always empty | Automatic | Images are embedded in `body_html_resolved`; `inline_attachments` is always `[]` |
+| `has_inline_attachments` flag | On full message detail | `true` when message has embedded images |
 | Read receipt | `"request_read_receipt": true` in any send body | Adds `Disposition-Notification-To` header |
 | High importance | `"importance": "high"` in any send body | Sets Outlook/Mail priority flags |
 | `is_mentioned` field | On every message | True when you are in To: |
