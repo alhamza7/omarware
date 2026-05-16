@@ -2041,7 +2041,242 @@ class PosPerfumeRestController(http.Controller):
             except Exception as exc:
                 return self._fail(str(exc), 409)
             return self._ok({"id": o.id, "state": o.state})
-        return self._fail("PUT order: use Odoo or extend endpoint", 501)
+        # PUT
+        return self._update_order(o)
+
+    def _try_sync_quotation_to_sap(self, sale_order):
+        """
+        Re-sync sale_order to SAP as a Quotation (force_as_quotation=True).
+        Used after updating a quotation-state POS order.
+        Never raises — SAP failures are non-fatal.
+        """
+        if not sale_order or not sale_order.exists():
+            return {"sap_synced": False, "sap_doc_entry": 0, "sap_error": "No sale order linked"}
+        try:
+            sale_order._send_to_sap(force_as_quotation=True)
+            sale_order.env.cr.flush()
+            sale_order.env.cr.execute(
+                "SELECT sap_synced, sap_doc_entry, sap_error_message FROM sale_order WHERE id=%s",
+                (sale_order.id,),
+            )
+            row = sale_order.env.cr.fetchone()
+            return {
+                "sap_synced": bool(row[0]) if row else False,
+                "sap_doc_entry": int(row[1] or 0) if row else 0,
+                "sap_error": row[2] or None if row else None,
+            }
+        except Exception as exc:
+            _logger.warning("REST API — SAP quotation re-sync failed for %s: %s", sale_order.name, exc)
+            return {"sap_synced": False, "sap_doc_entry": 0, "sap_error": str(exc)}
+
+    def _update_order(self, o):
+        """
+        Handle PUT /api/pos_perfume/v1/orders/<id>.
+
+        Accepts a JSON body with any combination of:
+          partner_id       int
+          pricelist_id     int
+          invoice_type     str  (selection key)
+          note             str
+          exchange_rate    float
+          sync_to_sap      bool  (default true — re-push to SAP when sap_doc_entry is set)
+          order_lines      list of line objects:
+            id               int    — existing line id (omit to create new)
+            _delete          bool   — set true to delete this line (requires id)
+            product_id       int    required for create/update
+            warehouse_id     int    required for create/update
+            product_uom_id   int    optional UoM override
+            quantity         float
+            unit_price       float
+            discount_percent float
+            custom_product_name str
+
+        After the Odoo write the linked sale.order is kept in sync, and
+        when sap_doc_entry > 0 the document is re-pushed to SAP via the
+        existing update_quotation / update_order PATCH path.
+        """
+        try:
+            body = json.loads(request.httprequest.data.decode("utf-8") or "{}")
+        except (ValueError, UnicodeDecodeError) as exc:
+            return self._fail(f"Invalid JSON body: {exc}", 400)
+
+        if o.state in ("done", "cancel"):
+            return self._fail(f"Cannot update order in state '{o.state}'", 409)
+
+        # ── 1. Validate and collect header field changes ─────────────────────
+        header_vals = {}
+
+        if "partner_id" in body:
+            partner = request.env["res.partner"].sudo().browse(int(body["partner_id"]))
+            if not partner.exists():
+                return self._fail(f"Customer {body['partner_id']} not found", 404)
+            header_vals["partner_id"] = partner.id
+
+        if "pricelist_id" in body:
+            pl = request.env["product.pricelist"].sudo().browse(int(body["pricelist_id"]))
+            if not pl.exists():
+                return self._fail(f"Pricelist {body['pricelist_id']} not found", 404)
+            header_vals["pricelist_id"] = pl.id
+
+        if "invoice_type" in body:
+            header_vals["invoice_type"] = str(body["invoice_type"])
+
+        if "note" in body:
+            header_vals["note"] = str(body["note"])
+
+        if "exchange_rate" in body:
+            try:
+                header_vals["exchange_rate"] = float(body["exchange_rate"])
+            except (TypeError, ValueError):
+                return self._fail("exchange_rate must be a number", 400)
+
+        # ── 2. Build ORM commands for order_line_ids ──────────────────────────
+        line_commands = []
+        if "order_lines" in body:
+            existing_ids = {ln.id for ln in o.order_line_ids}
+            for idx, ld in enumerate(body["order_lines"] or []):
+                line_id = ld.get("id")
+                if ld.get("_delete"):
+                    if not line_id:
+                        return self._fail(f"Line {idx}: id required for _delete", 400)
+                    if int(line_id) not in existing_ids:
+                        return self._fail(f"Line {idx}: id {line_id} not found on this order", 404)
+                    line_commands.append((2, int(line_id), 0))
+                    continue
+                lv, err = self._build_rest_order_line_vals(ld)
+                if err:
+                    return self._fail(f"Line {idx}: {err}", 400)
+                if line_id:
+                    if int(line_id) not in existing_ids:
+                        return self._fail(f"Line {idx}: id {line_id} not found on this order", 404)
+                    line_commands.append((1, int(line_id), lv))
+                else:
+                    line_commands.append((0, 0, lv))
+
+        if line_commands:
+            header_vals["order_line_ids"] = line_commands
+
+        # ── 3. Apply updates to pos.perfume.order ─────────────────────────────
+        if header_vals:
+            try:
+                o.write(header_vals)
+                o.invalidate_recordset()
+            except Exception as exc:
+                _logger.exception("PUT /orders/%s — ORM write failed", o.id)
+                return self._fail(f"Update failed: {exc}", 500)
+
+        # ── 4. Propagate changes to the linked sale.order ─────────────────────
+        if o.sale_order_id and o.sale_order_id.exists():
+            so = o.sale_order_id
+            so_vals = {}
+            if "partner_id" in body:
+                so_vals["partner_id"] = o.partner_id.id
+            if "pricelist_id" in body:
+                so_vals["pricelist_id"] = o.pricelist_id.id
+            if "invoice_type" in body:
+                so_vals["invoice_type"] = o.invoice_type
+            if "note" in body:
+                so_vals["note"] = o.note
+
+            # Rebuild sale.order lines to match updated POS lines
+            if "order_lines" in body:
+                sol_commands = [(5, 0, 0)]  # unlink all existing SOL first
+                sol_model = request.env["sale.order.line"].sudo()
+                for ln in o.order_line_ids:
+                    if not ln.product_id:
+                        continue
+                    uom_id = ln.product_uom_id.id if ln.product_uom_id else ln.product_id.uom_id.id
+                    sol_vals = {
+                        "product_id": ln.product_id.id,
+                        "product_uom_qty": ln.quantity or 1.0,
+                        "product_uom_id": uom_id,
+                        "price_unit": ln.unit_price or 0.0,
+                        "discount": ln.discount_percent or 0.0,
+                    }
+                    if ln.custom_product_name:
+                        sol_vals["custom_product_name"] = ln.custom_product_name
+                    if ln.warehouse_id and "product_warehouse_id" in sol_model._fields:
+                        sol_vals["product_warehouse_id"] = ln.warehouse_id.id
+                    sol_commands.append((0, 0, sol_vals))
+                so_vals["order_line"] = sol_commands
+
+            if so_vals:
+                try:
+                    # skip_sap_sync prevents the write override from triggering
+                    # an automatic re-push — we control that explicitly in step 5.
+                    so.with_context(skip_sap_sync=True).write(so_vals)
+                    so.invalidate_recordset()
+                except Exception as exc:
+                    _logger.warning(
+                        "PUT /orders/%s — sale.order propagation failed: %s", o.id, exc
+                    )
+
+        # ── 5. Re-sync to SAP when document already exists there ──────────────
+        sap_result = {
+            "sap_synced": bool(o.sap_synced) if hasattr(o, "sap_synced") else False,
+            "sap_doc_entry": int(o.sap_doc_entry or 0),
+            "sap_error": None,
+        }
+        should_sync = str(body.get("sync_to_sap", "true")).lower() not in ("false", "0", "no")
+        so = o.sale_order_id
+        if should_sync and so and so.exists() and so.sap_doc_entry:
+            if o.state == "quotation":
+                sap_result = self._try_sync_quotation_to_sap(so)
+            else:
+                sap_result = self._try_sync_sale_to_sap(so)
+
+        # ── 6. Return full updated order payload ──────────────────────────────
+        o.invalidate_recordset()
+        lines = []
+        for ln in o.order_line_ids:
+            lines.append({
+                "id": ln.id,
+                "sequence": ln.sequence,
+                "product_id": ln.product_id.id,
+                "product_name": ln.product_id.name,
+                "product_code": ln.product_code or ln.product_id.default_code or "",
+                "product_foreign_name": ln.product_foreign_name or "",
+                "custom_product_name": ln.custom_product_name or "",
+                "quantity": ln.quantity,
+                "product_uom_qty": ln.quantity,
+                "product_uom_id": ln.product_uom_id.id if ln.product_uom_id else None,
+                "product_uom_name": ln.product_uom_id.name if ln.product_uom_id else "",
+                "warehouse_id": ln.warehouse_id.id if ln.warehouse_id else None,
+                "warehouse_name": ln.warehouse_id.name if ln.warehouse_id else "",
+                "price_unit": ln.unit_price,
+                "discount_percent": ln.discount_percent,
+                "line_subtotal": getattr(ln, "line_subtotal", 0.0),
+                "discount_amount": getattr(ln, "discount_amount", 0.0),
+            })
+        return self._ok({
+            "id": o.id,
+            "name": o.name,
+            "state": o.state,
+            "date_order": o.date.isoformat() if o.date else None,
+            "partner_id": o.partner_id.id,
+            "partner_name": o.partner_id.name or "",
+            "partner_phone": o.partner_id.phone or o.partner_id.mobile or "",
+            "partner_email": o.partner_id.email or "",
+            "pricelist_id": o.pricelist_id.id if o.pricelist_id else None,
+            "pricelist_name": o.pricelist_id.name if o.pricelist_id else "",
+            "currency_id": o.currency_id.id if o.currency_id else None,
+            "currency_name": o.currency_id.name if o.currency_id else "",
+            "exchange_rate": o.exchange_rate or 0.0,
+            "amount_total": o.amount_total,
+            "amount_subtotal": getattr(o, "amount_subtotal", 0.0),
+            "amount_discount": getattr(o, "amount_discount", 0.0),
+            "invoice_type": o.invoice_type or "",
+            "note": o.note or "",
+            "user_id": o.user_id.id if o.user_id else None,
+            "user_name": o.user_id.name if o.user_id else "",
+            "sale_order_id": o.sale_order_id.id if o.sale_order_id else None,
+            "sale_order_name": o.sale_order_id.name if o.sale_order_id else "",
+            "sap_synced": sap_result["sap_synced"],
+            "sap_doc_entry": sap_result["sap_doc_entry"],
+            "sap_doc_num": o.sap_doc_num or "",
+            "sap_error": sap_result["sap_error"],
+            "order_line_ids": lines,
+        })
 
     @http.route(
         f"{_PREFIX}/orders/<int:order_id>/confirm",
