@@ -1858,14 +1858,26 @@ class PosPerfumeRestController(http.Controller):
             _logger.exception("POST /orders — ORM create failed")
             return self._fail(f"Order creation failed: {exc}", 500)
 
-        # Determine intent: quotation-first flow vs. immediate confirmed Sales Order
-        # send_as_quotation=true  → create draft sale.order, push to SAP as Quotation
-        # send_as_quotation=false → confirm order and push to SAP as Sales Order (default)
+        # Determine intent:
+        # send_as_quotation=true → create draft sale.order, push to SAP as Quotation (one-step)
+        # create_only=true       → create draft POS order only, no SAP sync (frontend calls /quotation after)
+        # default                → confirm order and push to SAP as Sales Order
         send_as_quotation = bool(body.get("send_as_quotation", False))
+        create_only = bool(body.get("create_only", False))
 
         sap_result = {"sap_synced": False, "sap_doc_entry": 0, "sap_error": None}
         if line_vals_list:
-            if send_as_quotation:
+            if create_only:
+                # --- Draft-only flow: create POS order + draft sale.order, NO SAP sync ---
+                # Frontend will call POST /orders/:id/quotation to push to SAP as Quotation
+                try:
+                    order.with_context(force_quotation=True).action_ensure_sale_order()
+                    order.invalidate_recordset()
+                except Exception as exc:
+                    _logger.warning("POST /orders (create_only) — action_ensure_sale_order failed: %s", exc)
+                # Leave state as draft — don't confirm, don't send to SAP
+
+            elif send_as_quotation:
                 # --- Quotation flow ---
                 # 1. Create a draft sale.order without confirming (no SAP sync via write override)
                 try:
