@@ -1706,7 +1706,30 @@ class PosPerfumeRestController(http.Controller):
         # POST — create a new pos.perfume.order
         return self._create_order()
 
-    def _build_rest_order_line_vals(self, data):
+    def _try_sync_sale_to_sap(self, sale_order):
+        """
+        Attempt to send sale_order to SAP immediately.
+        Returns dict: {sap_synced, sap_doc_entry, sap_error}.
+        Never raises — SAP failures are non-fatal for the API response.
+        """
+        if not sale_order or not sale_order.exists():
+            return {"sap_synced": False, "sap_doc_entry": 0, "sap_error": "No sale order linked"}
+        try:
+            sale_order._send_to_sap()
+            sale_order.env.cr.flush()
+            sale_order.env.cr.execute(
+                "SELECT sap_synced, sap_doc_entry, sap_error_message FROM sale_order WHERE id=%s",
+                (sale_order.id,)
+            )
+            row = sale_order.env.cr.fetchone()
+            return {
+                "sap_synced": bool(row[0]) if row else False,
+                "sap_doc_entry": int(row[1] or 0) if row else 0,
+                "sap_error": row[2] or None if row else None,
+            }
+        except Exception as exc:
+            _logger.warning("REST API — SAP sync failed for %s: %s", sale_order.name, exc)
+            return {"sap_synced": False, "sap_doc_entry": 0, "sap_error": str(exc)}
         """
         Build a single order-line vals dict for pos.perfume.order.line.
         Returns (vals_dict, error_str). Uses sudo() — caller already authorised via _pos_rest_auth().
@@ -1829,6 +1852,7 @@ class PosPerfumeRestController(http.Controller):
             return self._fail(f"Order creation failed: {exc}", 500)
 
         # Confirm only if lines were provided (matches bridge controller behaviour)
+        sap_result = {"sap_synced": False, "sap_doc_entry": 0, "sap_error": None}
         if line_vals_list:
             try:
                 order.action_confirm()
@@ -1850,10 +1874,15 @@ class PosPerfumeRestController(http.Controller):
                             "sale_order_name": order.sale_order_id.name if order.sale_order_id else "",
                             "invoice_type": order.invoice_type,
                             "note": order.note or "",
+                            "sap_synced": False,
+                            "sap_doc_entry": 0,
+                            "sap_error": None,
                         },
                     },
                     status=207,
                 )
+            # Send to SAP immediately — no need to wait for cron
+            sap_result = self._try_sync_sale_to_sap(order.sale_order_id)
 
         return _json(
             {
@@ -1870,6 +1899,9 @@ class PosPerfumeRestController(http.Controller):
                     "sale_order_name": order.sale_order_id.name if order.sale_order_id else "",
                     "invoice_type": order.invoice_type,
                     "note": order.note or "",
+                    "sap_synced": sap_result["sap_synced"],
+                    "sap_doc_entry": sap_result["sap_doc_entry"],
+                    "sap_error": sap_result["sap_error"],
                 },
             },
             status=201,
@@ -1942,6 +1974,12 @@ class PosPerfumeRestController(http.Controller):
         if o.state not in ("draft",):
             # Already confirmed — idempotent: return current state as success
             if o.state == "sale":
+                # If not yet synced, try SAP now
+                sap_result = {"sap_synced": bool(o.sale_order_id.sap_synced) if o.sale_order_id else False,
+                              "sap_doc_entry": int(o.sale_order_id.sap_doc_entry or 0) if o.sale_order_id else 0,
+                              "sap_error": None}
+                if o.sale_order_id and not o.sale_order_id.sap_synced:
+                    sap_result = self._try_sync_sale_to_sap(o.sale_order_id)
                 return self._ok(
                     {
                         "id": o.id,
@@ -1949,6 +1987,9 @@ class PosPerfumeRestController(http.Controller):
                         "state": o.state,
                         "amount_total": o.amount_total,
                         "sale_order_name": o.sale_order_id.name if o.sale_order_id else "",
+                        "sap_synced": sap_result["sap_synced"],
+                        "sap_doc_entry": sap_result["sap_doc_entry"],
+                        "sap_error": sap_result["sap_error"],
                     }
                 )
             return self._fail(
@@ -1959,6 +2000,8 @@ class PosPerfumeRestController(http.Controller):
         except Exception as exc:
             _logger.exception("POST /orders/%s/confirm — action_confirm failed", order_id)
             return self._fail(f"Confirm failed: {exc}", 500)
+        # Send to SAP immediately after confirmation
+        sap_result = self._try_sync_sale_to_sap(o.sale_order_id)
         return self._ok(
             {
                 "id": o.id,
@@ -1966,6 +2009,9 @@ class PosPerfumeRestController(http.Controller):
                 "state": o.state,
                 "amount_total": o.amount_total,
                 "sale_order_name": o.sale_order_id.name if o.sale_order_id else "",
+                "sap_synced": sap_result["sap_synced"],
+                "sap_doc_entry": sap_result["sap_doc_entry"],
+                "sap_error": sap_result["sap_error"],
             }
         )
 
