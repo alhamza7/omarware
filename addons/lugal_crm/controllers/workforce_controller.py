@@ -568,9 +568,10 @@ class WorkforceController(http.Controller):
             ]
 
             # Search filter — applied at DB level (supports Arabic / Unicode)
+            # Matches on display name OR login (email address)
             q = (search or '').strip()
             if q:
-                domain.append(('name', 'ilike', q))
+                domain += ['|', ('name', 'ilike', q), ('login', 'ilike', q)]
 
             # Optional branch filter — intersect with branch user ids
             if branch_id:
