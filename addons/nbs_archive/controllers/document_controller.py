@@ -485,6 +485,18 @@ class NBSDocumentController(http.Controller):
                         {'success': False, 'error': 'Invalid parent_document_id'}, status=400
                     )
 
+            # If a parent document is given but no explicit folder, derive folder from the parent.
+            # This prevents sub/attachment docs from becoming orphaned when the FE only passes
+            # parent_document_id without a folder_id.
+            if resolved_parent_id and not folder_ids_to_link:
+                parent_doc = request.env['nbs.document'].sudo().browse(resolved_parent_id)
+                if parent_doc.exists():
+                    # Prefer the parent's primary folder_id; fall back to its first M2M folder
+                    if parent_doc.folder_id:
+                        folder_ids_to_link = [parent_doc.folder_id.id]
+                    elif parent_doc.folder_ids:
+                        folder_ids_to_link = [parent_doc.folder_ids[0].id]
+
             # Apply parent / role flags
             if upload_kind in ('sub', 'attachment'):
                 # Accept: folder_id, folder_ids, parent_document_id, create_folder, or no linkage

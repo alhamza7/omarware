@@ -186,7 +186,17 @@ class NBSRelationsController(http.Controller):
                 ('is_deleted', '=', False)
             ])
             docs_via_many2many = folder.document_ids.filtered(lambda d: not d.is_deleted)
-            all_doc_ids = list(set(docs_via_folder_id.ids + docs_via_many2many.ids))
+            direct_doc_ids = set(docs_via_folder_id.ids + docs_via_many2many.ids)
+
+            # Also include sub/attachment docs whose parent_document_id points to any document
+            # already in this folder.  This covers the edge-case where a sub-document was
+            # uploaded with only parent_document_id (no explicit folder_id), which would
+            # otherwise leave it invisible in the folder listing.
+            docs_via_parent_chain = request.env['nbs.document'].search([
+                ('parent_document_id', 'in', list(direct_doc_ids)),
+                ('is_deleted', '=', False)
+            ]) if direct_doc_ids else request.env['nbs.document']
+            all_doc_ids = list(direct_doc_ids | set(docs_via_parent_chain.ids))
 
             # Apply date filters via ORM for proper type handling
             doc_domain = [('id', 'in', all_doc_ids)]

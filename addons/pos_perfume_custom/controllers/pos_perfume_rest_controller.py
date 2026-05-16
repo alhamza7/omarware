@@ -2073,6 +2073,7 @@ class PosPerfumeRestController(http.Controller):
                     "sap_doc_num": o.sap_doc_num or (o.sale_order_id.sap_doc_num if o.sale_order_id else ""),
                     "sap_error": o.sap_error_message or (o.sale_order_id.sap_error_message if o.sale_order_id else None),
                     "order_line_ids": lines,
+                    "order_activity": self._build_order_activity(o),
                 }
             )
         if method == "DELETE":
@@ -2084,8 +2085,142 @@ class PosPerfumeRestController(http.Controller):
         # PUT
         return self._update_order(o)
 
-    # ── Report / PDF download ────────────────────────────────────────────────
-    _REPORT_TYPES = {
+    # ── Order activity log ───────────────────────────────────────────────────
+
+    _STATE_LABELS = {
+        "draft":     "Draft",
+        "quotation": "Quotation",
+        "sale":      "Sale Order",
+        "done":      "Locked",
+        "cancel":    "Cancelled",
+    }
+
+    def _build_order_activity(self, order):
+        """
+        Build a chronological activity log for a pos.perfume.order.
+
+        Sources:
+          1. A synthetic "created" entry from order.create_date / create_uid.
+          2. mail.message records (chatter) for this order — each message carries:
+               - tracking_value_ids  → field-level change details
+               - body                → human-readable note/comment text
+               - author_id / date    → who / when
+
+        Returns a list of activity dicts ordered oldest → newest.
+        """
+        import re as _re
+
+        def _tv_to_str(tv, side):
+            """Return the display string for one side of a tracking value."""
+            char_val = getattr(tv, f"{side}_value_char", None)
+            if char_val:
+                return char_val
+            int_val = getattr(tv, f"{side}_value_integer", None)
+            flt_val = getattr(tv, f"{side}_value_float", None)
+            if flt_val not in (None, 0.0):
+                return str(round(flt_val, 6))
+            if int_val not in (None, 0):
+                return str(int_val)
+            return ""
+
+        def _strip_html(html):
+            text = _re.sub(r"<[^>]+>", " ", html or "")
+            text = _re.sub(r"\s+", " ", text).strip()
+            return text
+
+        activities = []
+
+        # ── 1. Synthetic "created" entry ─────────────────────────────────────
+        activities.append(
+            {
+                "id":          None,
+                "type":        "created",
+                "timestamp":   order.create_date.isoformat() if order.create_date else None,
+                "author_id":   order.create_uid.id if order.create_uid else None,
+                "author":      order.create_uid.name if order.create_uid else "System",
+                "description": f"Order {order.name} created",
+                "changes":     [],
+            }
+        )
+
+        # ── 2. Chatter messages (field changes + notes + comments) ───────────
+        messages = (
+            request.env["mail.message"]
+            .sudo()
+            .search(
+                [
+                    ("model", "=", "pos.perfume.order"),
+                    ("res_id", "=", order.id),
+                    ("message_type", "in", ["comment", "email", "notification"]),
+                ],
+                order="date asc",
+            )
+        )
+
+        for msg in messages:
+            # Build field-change list from tracking values
+            changes = []
+            for tv in msg.sudo().tracking_value_ids:
+                field_name  = tv.field_id.name if tv.field_id else ""
+                field_label = tv.field_id.field_description if tv.field_id else field_name
+                old_val     = _tv_to_str(tv, "old")
+                new_val     = _tv_to_str(tv, "new")
+
+                # Translate state codes → human labels
+                if field_name == "state":
+                    old_val = self._STATE_LABELS.get(old_val, old_val)
+                    new_val = self._STATE_LABELS.get(new_val, new_val)
+
+                changes.append(
+                    {
+                        "field":       field_name,
+                        "field_label": field_label,
+                        "old_value":   old_val,
+                        "new_value":   new_val,
+                    }
+                )
+
+            # Determine entry type
+            if changes:
+                state_changed = any(c["field"] == "state" for c in changes)
+                entry_type = "state_changed" if state_changed else "updated"
+            elif msg.message_type == "comment":
+                entry_type = "note"
+            else:
+                entry_type = "notification"
+
+            body_text = _strip_html(msg.body)
+
+            # Skip empty system notifications with no content or tracking
+            if not changes and not body_text:
+                continue
+
+            # Build a human-readable description
+            if entry_type == "state_changed":
+                sc = next(c for c in changes if c["field"] == "state")
+                description = f"Status changed: {sc['old_value']} → {sc['new_value']}"
+            elif entry_type == "updated" and changes:
+                field_names = ", ".join(c["field_label"] for c in changes)
+                description = f"Updated: {field_names}"
+            else:
+                description = body_text or entry_type.replace("_", " ").title()
+
+            activities.append(
+                {
+                    "id":          msg.id,
+                    "type":        entry_type,
+                    "timestamp":   msg.date.isoformat() if msg.date else None,
+                    "author_id":   msg.author_id.id if msg.author_id else None,
+                    "author":      msg.author_id.name if msg.author_id else "System",
+                    "description": description,
+                    "changes":     changes,
+                    "note":        body_text if entry_type in ("note", "notification") else "",
+                }
+            )
+
+        return activities
+
+    # ── Report / PDF download ────────────────────────────────────────────────    _REPORT_TYPES = {
         # key → (qweb template xmlid, forced output format)
         "nbs":     ("pos_perfume_custom.report_pos_perfume_order_nbs",    "pdf"),
         "simple":  ("pos_perfume_custom.report_pos_perfume_order_simple", "pdf"),
