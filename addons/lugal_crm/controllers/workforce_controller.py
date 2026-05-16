@@ -481,58 +481,123 @@ class WorkforceController(http.Controller):
     # ─── Employees (CRM system users with branch info) ────────────────────────
 
     @http.route('/api/crm/employees/list', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
-    def employees_list(self, branch_id=None, active=True, limit=100, offset=0, **kwargs):
+    def employees_list(
+        self,
+        branch_id=None,
+        # active flag — accept both naming conventions from callers
+        active=None,
+        is_active=None,
+        # pagination — accept both (page/per_page) and (limit/offset) styles
+        page=None,
+        per_page=None,
+        limit=None,
+        offset=None,
+        # search / filter
+        search=None,
+        include_kpi=False,
+        **kwargs,
+    ):
         """
-        List all active CRM employees (res.users with CRM group membership).
+        List CRM employees (res.users) with optional search and pagination.
 
-        Filters:
-          branch_id — restrict to employees of a specific branch
-          active    — default True; pass False to include deactivated accounts
-          limit / offset — pagination
+        Accepted params (all optional):
+          search    — free-text filter on employee name (ilike, supports Arabic)
+          is_active — bool (default True); pass False to list deactivated accounts
+          active    — legacy alias for is_active
+          page      — 1-based page number (used together with per_page)
+          per_page  — page size when using page/per_page pagination
+          limit     — max records (used when page/per_page not given)
+          offset    — skip N records (used when page/per_page not given)
+          branch_id — restrict to employees belonging to this branch
+          include_kpi — reserved for future use; accepted but not yet applied
         """
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
 
-            # Collect all users that belong to ANY CRM role group.
-            # Querying only group_lugal_crm_agent misses supervisors, managers, etc.
+            # ── Resolve active flag ──────────────────────────────────────────
+            # Prefer is_active; fall back to active; default True
+            if is_active is not None:
+                resolved_active = bool(is_active)
+            elif active is not None:
+                resolved_active = bool(active)
+            else:
+                resolved_active = True
+
+            # ── Resolve pagination ───────────────────────────────────────────
+            if page is not None and per_page is not None:
+                resolved_page = max(1, int(page))
+                resolved_per_page = max(1, int(per_page))
+                resolved_offset = (resolved_page - 1) * resolved_per_page
+                resolved_limit = resolved_per_page
+            else:
+                resolved_limit = max(1, int(limit or 100))
+                resolved_offset = max(0, int(offset or 0))
+                resolved_page = resolved_offset // resolved_limit + 1
+                resolved_per_page = resolved_limit
+
+            # ── Collect CRM user IDs (one DB hit per group) ──────────────────
             crm_group_xmlids = list(_ROLE_GROUP_MAP.values()) + [
                 'lugal_crm.group_lugal_crm_general_manager',
                 'lugal_crm.group_lugal_crm_qa',
                 'lugal_crm.group_lugal_crm_qa_supervisor',
             ]
-            seen_ids = set()
-            user_list = request.env['res.users'].sudo().browse()  # empty recordset
+            crm_user_ids = set()
             for xmlid in crm_group_xmlids:
                 grp = request.env.ref(xmlid, raise_if_not_found=False)
                 if grp:
-                    for u in grp.sudo().user_ids:
-                        if u.id not in seen_ids and u.active == active:
-                            seen_ids.add(u.id)
-                            user_list |= u
+                    crm_user_ids.update(grp.sudo().user_ids.ids)
 
-            # Sort by partner name ascending (same order as before)
-            users = user_list.sorted(key=lambda u: (u.partner_id.name or u.login or '').lower())
-            total = len(users)
+            if not crm_user_ids:
+                return {
+                    'success': True,
+                    'data': {
+                        'items': [],
+                        'total': 0,
+                        'limit': resolved_limit,
+                        'offset': resolved_offset,
+                        'page': resolved_page,
+                        'per_page': resolved_per_page,
+                    },
+                }
 
-            # Pagination
-            off = int(offset)
-            lim = int(limit)
-            users = users[off: off + lim]
+            # ── Build ORM domain ─────────────────────────────────────────────
+            domain = [
+                ('id', 'in', list(crm_user_ids)),
+                ('active', '=', resolved_active),
+            ]
 
-            # Optional branch filter
+            # Search filter — applied at DB level (supports Arabic / Unicode)
+            q = (search or '').strip()
+            if q:
+                domain.append(('name', 'ilike', q))
+
+            # Optional branch filter — intersect with branch user ids
             if branch_id:
-                branch = request.env['lugal.crm.branch'].browse(int(branch_id))
+                branch = request.env['lugal.crm.branch'].sudo().browse(int(branch_id))
                 if branch.exists():
-                    users = users.filtered(lambda u: u in branch.user_ids)
+                    branch_uids = branch.user_ids.ids
+                    domain.append(('id', 'in', branch_uids))
+
+            # ── Query DB with search + pagination ────────────────────────────
+            Users = request.env['res.users'].sudo()
+            total = Users.search_count(domain)
+            users = Users.search(
+                domain,
+                limit=resolved_limit,
+                offset=resolved_offset,
+                order='name asc',
+            )
 
             return {
                 'success': True,
                 'data': {
                     'items': [_build_employee_dict(u) for u in users],
                     'total': total,
-                    'limit': int(limit),
-                    'offset': int(offset),
+                    'limit': resolved_limit,
+                    'offset': resolved_offset,
+                    'page': resolved_page,
+                    'per_page': resolved_per_page,
                 },
             }
         except Exception as e:
