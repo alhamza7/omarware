@@ -128,6 +128,15 @@ class PosPerfumeOrder(models.Model):
         ('cancel', 'Cancelled')
     ], string='Status', default='draft', tracking=True, required=True)
     
+    # Global order-level discount (header discount applied after line discounts)
+    global_discount_percent = fields.Float(
+        string='Global Discount %',
+        default=0.0,
+        digits=(5, 2),
+        tracking=True,
+        help='Extra discount % applied to the net total after all line discounts (sent to SAP as DocDiscount)'
+    )
+
     # Totals
     amount_subtotal = fields.Monetary(
         string='Subtotal',
@@ -135,12 +144,21 @@ class PosPerfumeOrder(models.Model):
         store=True,
         currency_field='currency_id'
     )
-    
+
     amount_discount = fields.Monetary(
         string='Total Discount',
         compute='_compute_amounts',
         store=True,
-        currency_field='currency_id'
+        currency_field='currency_id',
+        help='Sum of all line discounts + global order discount'
+    )
+
+    global_discount_amount = fields.Monetary(
+        string='Global Discount Amount',
+        compute='_compute_amounts',
+        store=True,
+        currency_field='currency_id',
+        help='Monetary value of the global_discount_percent applied to the net-after-line-discounts amount'
     )
     
     amount_tax = fields.Monetary(
@@ -318,22 +336,26 @@ class PosPerfumeOrder(models.Model):
         help="نوع الفاتورة الذي سيتم إرساله إلى SAP (U_InvType)\nالرقم يُرسل إلى SAP، والاسم يظهر في الواجهة"
     )
     
-    @api.depends('order_line_ids.line_subtotal', 'order_line_ids.discount_amount')
+    @api.depends('order_line_ids.line_subtotal', 'order_line_ids.discount_amount', 'global_discount_percent')
     def _compute_amounts(self):
-        """Calculate order totals from lines"""
+        """Calculate order totals from lines + optional global (header) discount."""
         for order in self:
             amount_subtotal = 0.0
-            amount_discount = 0.0
-            amount_tax = 0.0
-            
+            lines_discount = 0.0
+
             for line in order.order_line_ids:
                 amount_subtotal += line.line_subtotal
-                amount_discount += line.discount_amount
-            
+                lines_discount += line.discount_amount
+
+            net_after_lines = amount_subtotal - lines_discount
+            global_pct = order.global_discount_percent or 0.0
+            global_disc = round(net_after_lines * global_pct / 100.0, 6) if global_pct else 0.0
+
             order.amount_subtotal = amount_subtotal
-            order.amount_discount = amount_discount
-            order.amount_tax = amount_tax
-            order.amount_total = amount_subtotal - amount_discount + amount_tax
+            order.global_discount_amount = global_disc
+            order.amount_discount = lines_discount + global_disc
+            order.amount_tax = 0.0
+            order.amount_total = net_after_lines - global_disc
     
     @api.depends('amount_total', 'exchange_rate')
     def _compute_amount_iqd(self):

@@ -1698,6 +1698,10 @@ class PosPerfumeRestController(http.Controller):
                     "partner_id": o.partner_id.id,
                     "partner_name": o.partner_id.name,
                     "state": o.state,
+                    "amount_subtotal": getattr(o, "amount_subtotal", 0.0),
+                    "amount_discount": getattr(o, "amount_discount", 0.0),
+                    "global_discount_percent": getattr(o, "global_discount_percent", 0.0),
+                    "global_discount_amount": getattr(o, "global_discount_amount", 0.0),
                     "amount_total": o.amount_total,
                     "date_order": o.date.isoformat() if getattr(o, "date", None) else None,
                     "sale_order_name": o.sale_order_id.name if o.sale_order_id else "",
@@ -1841,6 +1845,15 @@ class PosPerfumeRestController(http.Controller):
         if body.get("note"):
             order_vals["note"] = str(body["note"])
 
+        if body.get("global_discount_percent") is not None:
+            try:
+                gdp = float(body["global_discount_percent"])
+                if not (0.0 <= gdp <= 100.0):
+                    return self._fail("global_discount_percent must be between 0 and 100", 400)
+                order_vals["global_discount_percent"] = gdp
+            except (TypeError, ValueError):
+                return self._fail("global_discount_percent must be a number", 400)
+
         # Build order lines
         line_vals_list = []
         for idx, line_data in enumerate(body.get("order_lines") or []):
@@ -1954,6 +1967,10 @@ class PosPerfumeRestController(http.Controller):
                     "partner_id": order.partner_id.id,
                     "partner_name": order.partner_id.name,
                     "pricelist_id": order.pricelist_id.id,
+                    "amount_subtotal": getattr(order, "amount_subtotal", 0.0),
+                    "amount_discount": getattr(order, "amount_discount", 0.0),
+                    "global_discount_percent": getattr(order, "global_discount_percent", 0.0),
+                    "global_discount_amount": getattr(order, "global_discount_amount", 0.0),
                     "amount_total": order.amount_total,
                     "sale_order_name": order.sale_order_id.name if order.sale_order_id else "",
                     "invoice_type": order.invoice_type,
@@ -2020,6 +2037,11 @@ class PosPerfumeRestController(http.Controller):
                     "currency_id": o.currency_id.id if o.currency_id else None,
                     "currency_name": o.currency_id.name if o.currency_id else "",
                     "exchange_rate": o.exchange_rate or 0.0,
+                    "amount_subtotal": getattr(o, "amount_subtotal", 0.0),
+                    "amount_discount": getattr(o, "amount_discount", 0.0),
+                    "global_discount_percent": getattr(o, "global_discount_percent", 0.0),
+                    "global_discount_amount": getattr(o, "global_discount_amount", 0.0),
+                    "amount_tax": getattr(o, "amount_tax", 0.0),
                     "amount_total": o.amount_total,
                     "amount_total_iqd": getattr(o, "amount_total_iqd", 0.0),
                     "invoice_type": o.invoice_type or "",
@@ -2129,6 +2151,15 @@ class PosPerfumeRestController(http.Controller):
                 header_vals["exchange_rate"] = float(body["exchange_rate"])
             except (TypeError, ValueError):
                 return self._fail("exchange_rate must be a number", 400)
+
+        if "global_discount_percent" in body:
+            try:
+                gdp = float(body["global_discount_percent"])
+                if not (0.0 <= gdp <= 100.0):
+                    return self._fail("global_discount_percent must be between 0 and 100", 400)
+                header_vals["global_discount_percent"] = gdp
+            except (TypeError, ValueError):
+                return self._fail("global_discount_percent must be a number", 400)
 
         # ── 2. Build ORM commands for order_line_ids ──────────────────────────
         line_commands = []
@@ -2262,9 +2293,12 @@ class PosPerfumeRestController(http.Controller):
             "currency_id": o.currency_id.id if o.currency_id else None,
             "currency_name": o.currency_id.name if o.currency_id else "",
             "exchange_rate": o.exchange_rate or 0.0,
-            "amount_total": o.amount_total,
             "amount_subtotal": getattr(o, "amount_subtotal", 0.0),
             "amount_discount": getattr(o, "amount_discount", 0.0),
+            "global_discount_percent": getattr(o, "global_discount_percent", 0.0),
+            "global_discount_amount": getattr(o, "global_discount_amount", 0.0),
+            "amount_tax": getattr(o, "amount_tax", 0.0),
+            "amount_total": o.amount_total,
             "invoice_type": o.invoice_type or "",
             "note": o.note or "",
             "user_id": o.user_id.id if o.user_id else None,

@@ -855,6 +855,19 @@ class SaleOrder(models.Model):
             'CardCode': quotation.partner_id.ref or '',
             'DocumentLines': document_lines,
         }
+        # Global (header-level) discount — sourced from linked POS order's global_discount_percent
+        try:
+            pos_order = self.env['pos.perfume.order'].sudo().search(
+                [('sale_order_id', '=', quotation.id)], limit=1
+            )
+            if pos_order and pos_order.global_discount_percent:
+                quotation_data['DocDiscount'] = float(pos_order.global_discount_percent)
+                _logger.info(
+                    f"[SAP] Adding DocDiscount={pos_order.global_discount_percent}% "
+                    f"from POS order {pos_order.name} to SAP payload"
+                )
+        except Exception as _disc_err:
+            _logger.warning(f"[SAP] Could not resolve global_discount_percent: {_disc_err}")
         # العملة وتاريخ المستند حتى يستخدم SAP سعر الصرف لليوم نفسه (Exchange Rates and Indexes)
         currency = (quotation.currency_id and quotation.currency_id.name) or ''
         if currency:
