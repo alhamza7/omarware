@@ -174,12 +174,92 @@ class PosPerfumeController(http.Controller):
             # list_price fallback until SAP sends a dedicated price for it.
             result.insert(0, {'id': effective_base_uom.id, 'name': effective_base_uom.name, 'price': product.list_price})
 
+        # Step 7: Derive prices for zero-priced UoMs using SAP group conversion factors.
+        # When a product has a price only for one UoM (e.g. كارتون=67.50) but the
+        # pricelist holds 0 for others (قطعه, درزن), we compute the missing prices via
+        # the sap.uom.group.line base_equiv factors so the POS always shows sensible values.
+        if extended_info and extended_info.sap_uom_group_id:
+            result = self._derive_missing_prices(result, extended_info.sap_uom_group_id)
+
         _logger.info(f"[POS] Returning {len(result)} UoMs")
         return result or [{'id': effective_base_uom.id, 'name': effective_base_uom.name, 'price': product.list_price}]
 
     # SAP exports the base-unit price with product_uom_id = Units (id=1) regardless
     # of the product's actual UoM. We must remap it to the product's real base UoM.
     SAP_GENERIC_UOM_ID = 1  # "Units" - SAP's catch-all UoM code
+
+    def _derive_missing_prices(self, uom_list, sap_group):
+        """
+        For UoMs in ``uom_list`` that carry price=0, compute a price from a
+        sibling UoM that has a known non-zero price, using the conversion factors
+        stored in ``sap.uom.group.line`` records.
+
+        Formula
+        -------
+        Each group-line stores ``sap_base_equiv = sap_base_qty / sap_alt_qty``,
+        i.e. "how many base-UoM units equals one unit of this UoM".
+
+        Examples for group "كارتون 108 ق" (base = درزن):
+            درزن  : base_equiv = 1.0
+            قطعه  : base_equiv = 1/12 ≈ 0.0833
+            كارتون: base_equiv = 9.0
+
+        Given price_carton = 67.50:
+            price_per_base  = 67.50 / 9.0          = 7.50   (per درزن)
+            price_dozen     = 7.50  * 1.0           = 7.50
+            price_piece     = 7.50  * (1/12)        = 0.625
+
+        The method only fills in zeros — it never overwrites an explicit price.
+        """
+        if not uom_list:
+            return uom_list
+
+        # Build a lookup: uom_id → base_equiv from the group lines
+        lines = request.env['sap.uom.group.line'].sudo().search([
+            ('group_id', '=', sap_group.id)
+        ])
+        if not lines:
+            _logger.info(f"[POS] No group-lines for group {sap_group.name} — skipping price derivation")
+            return uom_list
+
+        equiv_map = {line.odoo_uom_id.id: line.sap_base_equiv for line in lines}
+
+        # Identify the best "anchor" — highest non-zero price among UoMs whose
+        # factor we know (pick the one with the highest base_equiv to minimise
+        # rounding when dividing back down to small units).
+        anchor_price_per_base = None
+        for entry in uom_list:
+            uid = entry['id']
+            price = entry.get('price', 0.0)
+            if price and price > 0 and uid in equiv_map and equiv_map[uid] > 0:
+                price_per_base = price / equiv_map[uid]
+                if anchor_price_per_base is None:
+                    anchor_price_per_base = price_per_base
+                else:
+                    # Average anchors when multiple exist to stay consistent
+                    anchor_price_per_base = (anchor_price_per_base + price_per_base) / 2.0
+
+        if anchor_price_per_base is None:
+            _logger.info(f"[POS] No anchor price found in group {sap_group.name} — skipping derivation")
+            return uom_list
+
+        # Fill in zeros
+        derived_count = 0
+        for entry in uom_list:
+            uid = entry['id']
+            if entry.get('price', 0.0) == 0 and uid in equiv_map and equiv_map[uid] > 0:
+                derived_price = round(anchor_price_per_base * equiv_map[uid], 6)
+                _logger.info(
+                    f"[POS]   Derived price for UoM {entry['name']}: "
+                    f"{anchor_price_per_base:.4f} × {equiv_map[uid]} = {derived_price}"
+                )
+                entry['price'] = derived_price
+                entry['price_derived'] = True
+                derived_count += 1
+
+        if derived_count:
+            _logger.info(f"[POS] Derived prices for {derived_count} UoM(s) from group {sap_group.name}")
+        return uom_list
 
     def _process_pricelist_items(self, items, product, available_uom_ids):
         """

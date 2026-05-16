@@ -6,6 +6,64 @@ import logging
 _logger = logging.getLogger(__name__)
 
 
+class SapUomGroupLine(models.Model):
+    """
+    Stores the SAP UoMGroupDefinitionCollection entries for a group.
+
+    Each row records how many AlternateQty units of a given UoM equal
+    BaseQty units of the group's base UoM.  From this we derive
+    ``base_equiv`` = BaseQty / AlternateQty, which expresses "how many
+    base-UoM units is one unit of this UoM worth".
+
+    Examples for group "كارتون 108 ق" (base = درزن):
+        درزن  : alt=1  base=1  → base_equiv = 1.0   (the base unit itself)
+        قطعه  : alt=12 base=1  → base_equiv = 1/12 ≈ 0.0833
+        كارتون: alt=1  base=9  → base_equiv = 9.0
+        10كارتون: alt=1 base=90 → base_equiv = 90.0
+    """
+    _name = 'sap.uom.group.line'
+    _description = 'SAP UoM Group Definition Line'
+    _order = 'sap_base_equiv asc'
+
+    group_id = fields.Many2one(
+        'sap.uom.group', string='UoM Group',
+        required=True, ondelete='cascade', index=True,
+    )
+    odoo_uom_id = fields.Many2one(
+        'uom.uom', string='Odoo UoM',
+        required=True, index=True,
+    )
+    sap_uom_entry = fields.Integer('SAP UoM Entry', index=True)
+
+    # SAP UoMGroupDefinitionCollection fields
+    sap_alt_qty = fields.Float(
+        'Alternate Qty', default=1.0,
+        help="AlternateQuantity from SAP: number of this UoM units",
+    )
+    sap_base_qty = fields.Float(
+        'Base Qty', default=1.0,
+        help="BaseQuantity from SAP: number of base-UoM units",
+    )
+    sap_base_equiv = fields.Float(
+        'Base Equivalent', compute='_compute_base_equiv',
+        store=True, digits=(16, 6),
+        help="sap_base_qty / sap_alt_qty — how many base-UoM units = 1 of this UoM",
+    )
+
+    _sql_constraints = [
+        ('unique_group_uom', 'UNIQUE(group_id, odoo_uom_id)',
+         'A definition line for this UoM already exists in this group.'),
+    ]
+
+    @api.depends('sap_alt_qty', 'sap_base_qty')
+    def _compute_base_equiv(self):
+        for rec in self:
+            rec.sap_base_equiv = (
+                rec.sap_base_qty / rec.sap_alt_qty
+                if rec.sap_alt_qty else 1.0
+            )
+
+
 class SapUomGroup(models.Model):
     """SAP Unit of Measure Group
     
@@ -64,6 +122,11 @@ class SapUomGroup(models.Model):
         'uom_sync_id',
         string='UoMs in Group',
         help="All UoMs that belong to this group (inverse of Many2many)"
+    )
+    line_ids = fields.One2many(
+        'sap.uom.group.line', 'group_id',
+        string='Conversion Factors',
+        help="SAP UoMGroupDefinitionCollection — stores AlternateQty/BaseQty per UoM",
     )
     
     # Counts
@@ -128,7 +191,7 @@ class SapUomGroup(models.Model):
         }
     
     def action_sync_from_sap(self):
-        """Re-sync this group from SAP to get all UoMs"""
+        """Re-sync this group from SAP to get all UoMs and store conversion factors."""
         self.ensure_one()
         try:
             connection = self.backend_id.get_connection()
@@ -138,39 +201,35 @@ class SapUomGroup(models.Model):
             # Fetch group details
             group_data = connection.get(f'UnitOfMeasurementGroups({self.sap_abs_entry})', {})
             definitions = group_data.get('UoMGroupDefinitionCollection', [])
-            
+
             if not definitions:
                 raise UserError(f"No UoM definitions found for group {self.name}")
-            
-            # Process each definition
+
             uom_sync_model = self.env['sap.uom.sync']
+            line_model = self.env['sap.uom.group.line']
             created_count = 0
             updated_count = 0
-            
+
             for defn in definitions:
                 alternate_uom_entry = defn.get('AlternateUoM', 0)
                 if not alternate_uom_entry:
                     continue
-                
-                # Check if exists
+
+                alt_qty = float(defn.get('AlternateQuantity', 1.0))
+                base_qty = float(defn.get('BaseQuantity', 1.0))
+                factor = base_qty / alt_qty if alt_qty != 0 else 1.0
+
                 existing = uom_sync_model.search([
                     ('backend_id', '=', self.backend_id.id),
                     ('sap_uom_entry', '=', alternate_uom_entry)
                 ], limit=1)
-                
+
                 if not existing:
-                    # Fetch UoM details and create
                     try:
                         uom_detail = connection.get(f'UnitOfMeasurements({alternate_uom_entry})', {})
                         uom_code = uom_detail.get('Code')
                         uom_name = uom_detail.get('Name', uom_code)
-                        
-                        # Calculate factor
-                        base_qty = float(defn.get('BaseQuantity', 1.0))
-                        alt_qty = float(defn.get('AlternateQuantity', 1.0))
-                        factor = base_qty / alt_qty if alt_qty != 0 else 1.0
-                        
-                        # Create UoM in Odoo
+
                         odoo_uom = self.env['uom.uom'].search([('name', '=', uom_name)], limit=1)
                         if not odoo_uom:
                             odoo_uom = self.env['uom.uom'].create({
@@ -179,40 +238,55 @@ class SapUomGroup(models.Model):
                                 'rounding': 0.01,
                                 'active': True,
                             })
-                        
-                        # Create sync record
-                        uom_sync_model.create({
+
+                        existing = uom_sync_model.create({
                             'backend_id': self.backend_id.id,
                             'sap_uom_id': uom_code,
                             'sap_uom_name': uom_name,
                             'sap_uom_entry': alternate_uom_entry,
-                            'sap_group_ids': [(4, self.id)],  # Many2many link
+                            'sap_group_ids': [(4, self.id)],
                             'odoo_uom_id': odoo_uom.id,
                             'sync_direction': 'sap_to_odoo',
                             'sync_status': 'success',
                             'last_sync': fields.Datetime.now(),
                         })
-                        
                         created_count += 1
                     except Exception as e:
                         _logger.error(f"Error creating UoM {alternate_uom_entry}: {str(e)}")
+                        continue
                 else:
-                    # Update existing - add to groups (Many2many)
                     if self.id not in existing.sap_group_ids.ids:
-                        existing.write({
-                            'sap_group_ids': [(4, self.id)]  # Add link
-                        })
+                        existing.write({'sap_group_ids': [(4, self.id)]})
                         updated_count += 1
-            
-            # Update last sync
+
+                # Create or update the group definition line (stores conversion factors)
+                if existing and existing.odoo_uom_id:
+                    existing_line = line_model.search([
+                        ('group_id', '=', self.id),
+                        ('odoo_uom_id', '=', existing.odoo_uom_id.id),
+                    ], limit=1)
+                    line_vals = {
+                        'sap_uom_entry': alternate_uom_entry,
+                        'sap_alt_qty': alt_qty,
+                        'sap_base_qty': base_qty,
+                    }
+                    if existing_line:
+                        existing_line.write(line_vals)
+                    else:
+                        line_model.create({
+                            'group_id': self.id,
+                            'odoo_uom_id': existing.odoo_uom_id.id,
+                            **line_vals,
+                        })
+
             self.last_sync = fields.Datetime.now()
-            
+
             return {
                 'type': 'ir.actions.client',
                 'tag': 'display_notification',
                 'params': {
                     'title': 'Sync Complete',
-                    'message': f'Created {created_count} UoMs, Updated {updated_count} links',
+                    'message': f'Created {created_count} UoMs, Updated {updated_count} links, factors stored',
                     'type': 'success',
                     'sticky': False,
                 }
