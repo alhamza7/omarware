@@ -2220,7 +2220,8 @@ class PosPerfumeRestController(http.Controller):
 
         return activities
 
-    # ── Report / PDF download ────────────────────────────────────────────────    _REPORT_TYPES = {
+    # ── Report / PDF download ────────────────────────────────────────────────
+    _REPORT_TYPES = {
         # key → (qweb template xmlid, forced output format)
         "nbs":     ("pos_perfume_custom.report_pos_perfume_order_nbs",    "pdf"),
         "simple":  ("pos_perfume_custom.report_pos_perfume_order_simple", "pdf"),
