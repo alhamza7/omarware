@@ -7,6 +7,7 @@ from datetime import timedelta
 
 from odoo import fields, http
 from odoo.http import request, Response
+from odoo.osv import expression
 
 from .pos_perfume_controller import PosPerfumeController
 
@@ -1691,12 +1692,19 @@ class PosPerfumeRestController(http.Controller):
                     pass
             q = (request.httprequest.args.get("query") or "").strip()
             if q:
-                domain = ["&"] + domain + [
-                    "|", "|",
-                    ("name", "ilike", q),
-                    ("partner_id.name", "ilike", q),
-                    ("sale_order_id.name", "ilike", q),
+                # Two-step: find sale.order ids that match the query first
+                # (avoids unreliable dot-notation traversal on Many2one in custom models)
+                matched_so_ids = request.env["sale.order"].sudo().search(
+                    [("name", "ilike", q)]
+                ).ids
+                q_conditions = [
+                    [("name", "ilike", q)],
+                    [("partner_id.name", "ilike", q)],
                 ]
+                if matched_so_ids:
+                    q_conditions.append([("sale_order_id", "in", matched_so_ids)])
+                q_domain = expression.OR(q_conditions)
+                domain = expression.AND([domain, q_domain])
             total = Order.search_count(domain)
             recs = Order.search(domain, limit=limit, offset=offset, order="id desc")
             items = [
