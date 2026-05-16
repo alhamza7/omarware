@@ -43,11 +43,16 @@ def _get_setup_data():
     warehouses = env['stock.warehouse'].search([('active', '=', True)])
     warehouse_data = [{'id': w.id, 'name': w.name, 'code': w.code} for w in warehouses]
     exchange_rate = float(
-        env['ir.config_parameter'].sudo().get_param('pos_perfume.default_exchange_rate_usd_iqd', '1470.0')
+        env['ir.config_parameter'].sudo().get_param('pos_perfume.default_exchange_rate_usd_iqd', '1560.0')
     )
     invoice_types = []
     default_pl_id = False
     if _pos_available():
+        # Use model's canonical method — same path used by POS UI and REST /setup
+        try:
+            exchange_rate = float(env['pos.perfume.order'].get_exchange_rate_from_db() or exchange_rate)
+        except Exception:
+            pass
         # Read invoice_type choices directly from the model — single source of truth
         sel = env['pos.perfume.order']._fields['invoice_type'].selection
         if callable(sel):
@@ -68,7 +73,11 @@ def _get_setup_data():
 
 
 def _build_line_vals(data):
-    """Build order line vals for pos.perfume.order.line. Returns (vals_dict, error_message)."""
+    """
+    Build order line vals for pos.perfume.order.line. Returns (vals_dict, error_message).
+    Mirrors PosPerfumeRestController._build_rest_order_line_vals (pos_perfume_rest_controller.py).
+    Both must be kept in sync if pos.perfume.order.line fields change.
+    """
     product_id = data.get('product_id')
     product_uom_id = data.get('product_uom_id')
     warehouse_id = data.get('warehouse_id')

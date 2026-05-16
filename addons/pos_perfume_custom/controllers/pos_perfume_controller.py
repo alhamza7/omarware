@@ -3,7 +3,6 @@ from odoo import http, fields
 from odoo.http import request
 import logging
 import io
-import base64
 
 _logger = logging.getLogger(__name__)
 

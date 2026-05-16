@@ -763,7 +763,7 @@ class PosPerfumeRestController(http.Controller):
             return self._fail("Unauthorized", 401)
         env = request.env
         pls = env["product.pricelist"].search([("active", "=", True)], order="id asc", limit=100)
-        whs = env["stock.warehouse"].search([])
+        whs = env["stock.warehouse"].search([("active", "=", True)])
         users = env["res.users"].search([("share", "=", False), ("active", "=", True)])
         sel = env["pos.perfume.order"]._fields["invoice_type"].selection
         if callable(sel):
@@ -1709,7 +1709,8 @@ class PosPerfumeRestController(http.Controller):
     def _build_rest_order_line_vals(self, data):
         """
         Build a single order-line vals dict for pos.perfume.order.line.
-        Returns (vals_dict, error_str).  Uses sudo() — caller already authorised via _pos_rest_auth().
+        Returns (vals_dict, error_str). Uses sudo() — caller already authorised via _pos_rest_auth().
+        Mirrors pos_bridge_controller._build_line_vals — both must stay in sync.
         """
         product_id = data.get("product_id")
         warehouse_id = data.get("warehouse_id")
@@ -1897,8 +1898,11 @@ class PosPerfumeRestController(http.Controller):
                         "id": ln.id,
                         "product_id": ln.product_id.id,
                         "product_name": ln.product_id.name,
+                        "quantity": ln.quantity,
                         "product_uom_qty": ln.quantity,
+                        "product_uom_id": ln.product_uom_id.id if ln.product_uom_id else None,
                         "price_unit": ln.unit_price,
+                        "discount_percent": ln.discount_percent,
                     }
                 )
             return self._ok(
