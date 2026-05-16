@@ -92,7 +92,7 @@ class PosPerfumeController(http.Controller):
         if product.uom_id.id != self.SAP_GENERIC_UOM_ID:
             return product.uom_id
 
-        extended_info = request.env['sap.product.extended'].search(
+        extended_info = request.env['sap.product.extended'].sudo().search(
             [('product_id', '=', product.id)],
             order='write_date desc, id desc',
             limit=1,

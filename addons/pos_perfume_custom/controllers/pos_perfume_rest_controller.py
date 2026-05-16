@@ -812,6 +812,9 @@ class PosPerfumeRestController(http.Controller):
             except (TypeError, ValueError):
                 rate = 0.0
             return self._ok({"exchange_rate": rate})
+        # Writing a global financial parameter requires admin
+        if not request.env.user.has_group("base.group_system"):
+            return self._fail("Forbidden: admin required to update exchange rate", 403)
         rate = body.get("exchange_rate")
         if rate is None:
             return self._fail("exchange_rate required", 400)
@@ -884,7 +887,10 @@ class PosPerfumeRestController(http.Controller):
                 for p in recs
             ]
             return self._ok({"items": items, "total": total})
-        body = json.loads(request.httprequest.data.decode("utf-8") or "{}")
+        try:
+            body = json.loads(request.httprequest.data.decode("utf-8") or "{}")
+        except (ValueError, UnicodeDecodeError) as exc:
+            return self._fail(f"Invalid JSON body: {exc}", 400)
         vals = {
             "name": body.get("name") or "Customer",
             "email": body.get("email"),
@@ -933,7 +939,10 @@ class PosPerfumeRestController(http.Controller):
                     "country_id": p.country_id.id or None,
                 }
             )
-        body = json.loads(request.httprequest.data.decode("utf-8") or "{}")
+        try:
+            body = json.loads(request.httprequest.data.decode("utf-8") or "{}")
+        except (ValueError, UnicodeDecodeError) as exc:
+            return self._fail(f"Invalid JSON body: {exc}", 400)
         p.write({k: body[k] for k in ("name", "email", "phone", "street", "city") if k in body})
         return self._ok(
             {
@@ -1606,7 +1615,10 @@ class PosPerfumeRestController(http.Controller):
     def product_data(self, **kwargs):
         if not self._pos_rest_auth():
             return self._fail("Unauthorized", 401)
-        body = json.loads(request.httprequest.data.decode("utf-8") or "{}")
+        try:
+            body = json.loads(request.httprequest.data.decode("utf-8") or "{}")
+        except (ValueError, UnicodeDecodeError) as exc:
+            return self._fail(f"Invalid JSON body: {exc}", 400)
         pid = body.get("product_id")
         if not pid:
             return self._fail("product_id required", 400)
@@ -1627,10 +1639,20 @@ class PosPerfumeRestController(http.Controller):
     def uom_price(self, **kwargs):
         if not self._pos_rest_auth():
             return self._fail("Unauthorized", 401)
-        body = json.loads(request.httprequest.data.decode("utf-8") or "{}")
+        try:
+            body = json.loads(request.httprequest.data.decode("utf-8") or "{}")
+        except (ValueError, UnicodeDecodeError) as exc:
+            return self._fail(f"Invalid JSON body: {exc}", 400)
+        pid_raw = body.get("product_id") or 0
+        try:
+            pid_int = int(pid_raw)
+        except (TypeError, ValueError):
+            return self._fail("product_id must be an integer", 400)
+        if not pid_int:
+            return self._fail("product_id required", 400)
         ctrl = PosPerfumeController()
         res = ctrl.get_product_data(
-            int(body.get("product_id") or 0),
+            pid_int,
             body.get("pricelist_id"),
             body.get("uom_id"),
             body.get("warehouse_id"),
@@ -1811,6 +1833,26 @@ class PosPerfumeRestController(http.Controller):
                 order.action_confirm()
             except Exception as exc:
                 _logger.warning("POST /orders — action_confirm failed (order %s): %s", order.id, exc)
+                return _json(
+                    {
+                        "success": True,
+                        "message": "Order created as draft; confirmation failed — use /confirm to retry",
+                        "warning": str(exc),
+                        "data": {
+                            "id": order.id,
+                            "name": order.name,
+                            "state": order.state,
+                            "partner_id": order.partner_id.id,
+                            "partner_name": order.partner_id.name,
+                            "pricelist_id": order.pricelist_id.id,
+                            "amount_total": order.amount_total,
+                            "sale_order_name": order.sale_order_id.name if order.sale_order_id else "",
+                            "invoice_type": order.invoice_type,
+                            "note": order.note or "",
+                        },
+                    },
+                    status=207,
+                )
 
         return _json(
             {
@@ -1843,7 +1885,7 @@ class PosPerfumeRestController(http.Controller):
     def order_one(self, order_id, **kwargs):
         if not self._pos_rest_auth():
             return self._fail("Unauthorized", 401)
-        o = request.env["pos.perfume.order"].browse(order_id).exists()
+        o = request.env["pos.perfume.order"].sudo().browse(order_id).exists()
         if not o:
             return self._fail("Order not found", 404)
         method = request.httprequest.method
@@ -1872,8 +1914,11 @@ class PosPerfumeRestController(http.Controller):
                 }
             )
         if method == "DELETE":
-            o.write({"state": "cancel"})
-            return self._ok({"id": o.id, "state": "cancel"})
+            try:
+                o.action_cancel()
+            except Exception as exc:
+                return self._fail(str(exc), 409)
+            return self._ok({"id": o.id, "state": o.state})
         return self._fail("PUT order: use Odoo or extend endpoint", 501)
 
     @http.route(
@@ -1917,4 +1962,5 @@ class PosPerfumeRestController(http.Controller):
         sel = env["pos.perfume.order"]._fields["invoice_type"].selection
         if callable(sel):
             sel = sel(env["pos.perfume.order"])
-        return self._ok([{"key": k, "label": v} for k, v in sel])
+        items = [{"key": k, "label": v} for k, v in sel]
+        return self._ok({"items": items, "total": len(items)})

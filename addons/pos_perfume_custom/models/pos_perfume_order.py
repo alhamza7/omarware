@@ -394,7 +394,6 @@ class PosPerfumeOrder(models.Model):
         pass
     
     @api.model_create_multi
-    @api.model_create_multi
     def create(self, vals_list):
         """Generate sequence number for new orders"""
         for vals in vals_list:

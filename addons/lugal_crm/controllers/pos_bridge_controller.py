@@ -76,16 +76,16 @@ def _build_line_vals(data):
         return None, 'product_id is required for each order line'
     if not warehouse_id:
         return None, 'warehouse_id is required for each order line'
-    product = request.env['product.product'].browse(int(product_id))
+    product = request.env['product.product'].sudo().browse(int(product_id))
     if not product.exists():
         return None, 'Product not found'
     # Default to sales UoM (SAP-linked), not the inventory UoM
     uom = _get_sales_uom(product)
     if product_uom_id:
-        uom = request.env['uom.uom'].browse(int(product_uom_id))
+        uom = request.env['uom.uom'].sudo().browse(int(product_uom_id))
         if not uom.exists():
             return None, 'UoM not found'
-    warehouse = request.env['stock.warehouse'].browse(int(warehouse_id))
+    warehouse = request.env['stock.warehouse'].sudo().browse(int(warehouse_id))
     if not warehouse.exists():
         return None, 'Warehouse not found'
     location_id = warehouse.lot_stock_id.id if warehouse.lot_stock_id else False
