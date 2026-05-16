@@ -1875,3 +1875,46 @@ class PosPerfumeRestController(http.Controller):
             o.write({"state": "cancel"})
             return self._ok({"id": o.id, "state": "cancel"})
         return self._fail("PUT order: use Odoo or extend endpoint", 501)
+
+    @http.route(
+        f"{_PREFIX}/orders/<int:order_id>/confirm",
+        type="http",
+        auth="none",
+        methods=["POST"],
+        csrf=False,
+        cors="*",
+    )
+    def order_confirm(self, order_id, **kwargs):
+        if not self._pos_rest_auth():
+            return self._fail("Unauthorized", 401)
+        o = request.env["pos.perfume.order"].sudo().browse(order_id).exists()
+        if not o:
+            return self._fail("Order not found", 404)
+        if o.state not in ("draft",):
+            return self._fail(
+                f"Order is already in state '{o.state}' and cannot be confirmed", 409
+            )
+        try:
+            o.action_confirm()
+        except Exception as exc:
+            _logger.exception("POST /orders/%s/confirm — action_confirm failed", order_id)
+            return self._fail(f"Confirm failed: {exc}", 500)
+        return self._ok(
+            {
+                "id": o.id,
+                "name": o.name,
+                "state": o.state,
+                "amount_total": o.amount_total,
+                "sale_order_name": o.sale_order_id.name if o.sale_order_id else "",
+            }
+        )
+
+    @http.route(f"{_PREFIX}/invoice-types", type="http", auth="none", methods=["GET"], csrf=False, cors="*")
+    def invoice_types(self, **kwargs):
+        if not self._pos_rest_auth():
+            return self._fail("Unauthorized", 401)
+        env = request.env
+        sel = env["pos.perfume.order"]._fields["invoice_type"].selection
+        if callable(sel):
+            sel = sel(env["pos.perfume.order"])
+        return self._ok([{"key": k, "label": v} for k, v in sel])
