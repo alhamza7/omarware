@@ -1858,38 +1858,78 @@ class PosPerfumeRestController(http.Controller):
             _logger.exception("POST /orders — ORM create failed")
             return self._fail(f"Order creation failed: {exc}", 500)
 
-        # Confirm only if lines were provided (matches bridge controller behaviour)
+        # Determine intent: quotation-first flow vs. immediate confirmed Sales Order
+        # send_as_quotation=true  → create draft sale.order, push to SAP as Quotation
+        # send_as_quotation=false → confirm order and push to SAP as Sales Order (default)
+        send_as_quotation = bool(body.get("send_as_quotation", False))
+
         sap_result = {"sap_synced": False, "sap_doc_entry": 0, "sap_error": None}
         if line_vals_list:
-            try:
-                order.action_confirm()
-            except Exception as exc:
-                _logger.warning("POST /orders — action_confirm failed (order %s): %s", order.id, exc)
-                return _json(
-                    {
-                        "success": True,
-                        "message": "Order created as draft; confirmation failed — use /confirm to retry",
-                        "warning": str(exc),
-                        "data": {
-                            "id": order.id,
-                            "name": order.name,
-                            "state": order.state,
-                            "partner_id": order.partner_id.id,
-                            "partner_name": order.partner_id.name,
-                            "pricelist_id": order.pricelist_id.id,
-                            "amount_total": order.amount_total,
-                            "sale_order_name": order.sale_order_id.name if order.sale_order_id else "",
-                            "invoice_type": order.invoice_type,
-                            "note": order.note or "",
-                            "sap_synced": False,
-                            "sap_doc_entry": 0,
-                            "sap_error": None,
+            if send_as_quotation:
+                # --- Quotation flow ---
+                # 1. Create a draft sale.order without confirming (no SAP sync via write override)
+                try:
+                    order.with_context(force_quotation=True).action_ensure_sale_order()
+                    order.invalidate_recordset()
+                except Exception as exc:
+                    _logger.warning("POST /orders — action_ensure_sale_order failed: %s", exc)
+
+                # 2. Push to SAP as Quotation
+                if order.sale_order_id:
+                    try:
+                        order.sale_order_id._send_to_sap(force_as_quotation=True)
+                        order.sale_order_id.env.cr.flush()
+                        order.sale_order_id.env.cr.execute(
+                            "SELECT sap_synced, sap_doc_entry, sap_error_message FROM sale_order WHERE id=%s",
+                            (order.sale_order_id.id,)
+                        )
+                        row = order.sale_order_id.env.cr.fetchone()
+                        sap_result = {
+                            "sap_synced": bool(row[0]) if row else False,
+                            "sap_doc_entry": int(row[1] or 0) if row else 0,
+                            "sap_error": row[2] or None if row else None,
+                        }
+                    except Exception as exc:
+                        _logger.warning("POST /orders — SAP quotation sync failed: %s", exc)
+                        sap_result = {"sap_synced": False, "sap_doc_entry": 0, "sap_error": str(exc)}
+
+                # 3. Set POS order state to 'quotation'
+                try:
+                    order.action_quotation()
+                except Exception as exc:
+                    _logger.warning("POST /orders — action_quotation failed: %s", exc)
+
+            else:
+                # --- Confirmed Sales Order flow (default) ---
+                try:
+                    order.action_confirm()
+                except Exception as exc:
+                    _logger.warning("POST /orders — action_confirm failed (order %s): %s", order.id, exc)
+                    return _json(
+                        {
+                            "success": True,
+                            "message": "Order created as draft; confirmation failed — use /confirm to retry",
+                            "warning": str(exc),
+                            "data": {
+                                "id": order.id,
+                                "name": order.name,
+                                "state": order.state,
+                                "partner_id": order.partner_id.id,
+                                "partner_name": order.partner_id.name,
+                                "pricelist_id": order.pricelist_id.id,
+                                "amount_total": order.amount_total,
+                                "sale_order_name": order.sale_order_id.name if order.sale_order_id else "",
+                                "invoice_type": order.invoice_type,
+                                "note": order.note or "",
+                                "sap_synced": False,
+                                "sap_doc_entry": 0,
+                                "sap_error": None,
+                            },
                         },
-                    },
-                    status=207,
-                )
-            # Send to SAP immediately — no need to wait for cron
-            sap_result = self._try_sync_sale_to_sap(order.sale_order_id)
+                        status=207,
+                    )
+                # Send to SAP immediately as Sales Order
+                sap_result = self._try_sync_sale_to_sap(order.sale_order_id)
 
         return _json(
             {
