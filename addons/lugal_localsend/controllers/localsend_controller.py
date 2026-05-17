@@ -337,3 +337,221 @@ class LocalSendCrmController(http.Controller):
         except Exception as exc:
             _logger.exception("localsend_device_create failed")
             return {"success": False, "error": str(exc), "data": None}
+
+    # ------------------------------------------------------------------
+    # Transfers
+    # ------------------------------------------------------------------
+
+    def _serialize_transfer(self, t):
+        return {
+            "id":                   t.id,
+            "name":                 t.name or "",
+            "status":               t.status,
+            "source_user_id":       t.source_user_id.id if t.source_user_id else None,
+            "source_user_name":     t.source_user_id.name if t.source_user_id else "",
+            "target_user_id":       t.target_user_id.id if t.target_user_id else None,
+            "target_user_name":     t.target_user_id.name if t.target_user_id else "",
+            "source_device_id":     t.source_device_id.id if t.source_device_id else None,
+            "source_device_name":   t.source_device_id.name if t.source_device_id else "",
+            "target_device_id":     t.target_device_id.id if t.target_device_id else None,
+            "target_device_name":   t.target_device_id.name if t.target_device_id else "",
+            "attachment_id":        t.attachment_id.id if t.attachment_id else None,
+            "file_name":            t.attachment_id.name if t.attachment_id else "",
+            "file_size":            t.file_size or 0,
+            "mime_type":            t.mime_type or "",
+            "error_message":        t.error_message or "",
+            "localsend_session_id": t.localsend_session_id or "",
+            "started_at":           t.started_at.isoformat() if t.started_at else None,
+            "finished_at":          t.finished_at.isoformat() if t.finished_at else None,
+            "created_at":           t.create_date.isoformat() if t.create_date else None,
+        }
+
+    @http.route(
+        "/api/crm/localsend/transfers/create",
+        type="jsonrpc",
+        auth="none",
+        csrf=False,
+        methods=["POST"],
+    )
+    def localsend_transfer_create(self, **kwargs):
+        """Create a LocalSend transfer record and optionally trigger sending immediately.
+
+        Required params:
+          target_user_id   — recipient user ID
+          attachment_id    — ir.attachment ID of the file to send
+
+        Optional params:
+          target_device_id — specific device ID for the recipient (auto-resolved if omitted)
+          name             — human-readable label for the transfer
+          send_now         — true/false (default true) — trigger the send immediately
+        """
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {"success": False, "error": "Unauthorized", "data": None}
+
+            target_user_id = int(kwargs.get("target_user_id") or 0)
+            attachment_id  = int(kwargs.get("attachment_id")  or 0)
+            if not target_user_id:
+                return {"success": False, "error": "target_user_id is required", "data": None}
+            if not attachment_id:
+                return {"success": False, "error": "attachment_id is required", "data": None}
+
+            env = request.env
+
+            # Resolve sender device
+            sender_device = _resolve_sender_device(env, uid)
+            if not sender_device:
+                return {"success": False, "error": "Sender has no registered device. Call /devices/register first.", "data": None}
+
+            # Resolve target device
+            tid = int(kwargs.get("target_device_id") or 0) or None
+            target_device, err = _resolve_receiver_device(env, target_user_id, tid)
+            if not target_device:
+                return {"success": False, "error": err or "Target device not found", "data": None}
+
+            # Verify attachment belongs to caller (or caller is manager)
+            att = env["ir.attachment"].sudo().browse(attachment_id).exists()
+            if not att:
+                return {"success": False, "error": "Attachment not found", "data": None}
+
+            transfer_name = (kwargs.get("name") or "").strip() or (att.name or "File Transfer")
+
+            transfer = env["lugal.localsend.transfer"].sudo().create({
+                "name":             transfer_name,
+                "source_user_id":   uid,
+                "target_user_id":   target_user_id,
+                "source_device_id": sender_device.id,
+                "target_device_id": target_device.id,
+                "attachment_id":    attachment_id,
+                "status":           "draft",
+            })
+
+            send_now = str(kwargs.get("send_now", "true")).lower() not in ("false", "0", "no")
+            if send_now:
+                try:
+                    transfer._send_via_localsend()
+                except Exception as send_exc:
+                    # Transfer record is already updated to failed by _send_via_localsend
+                    _logger.warning("localsend_transfer_create: send failed: %s", send_exc)
+                    return {
+                        "success": False,
+                        "error": str(send_exc),
+                        "data": self._serialize_transfer(transfer),
+                    }
+
+            return {"success": True, "data": self._serialize_transfer(transfer)}
+        except Exception as exc:
+            _logger.exception("localsend_transfer_create failed")
+            return {"success": False, "error": str(exc), "data": None}
+
+    @http.route(
+        "/api/crm/localsend/transfers/list",
+        type="jsonrpc",
+        auth="none",
+        csrf=False,
+        methods=["POST"],
+    )
+    def localsend_transfers_list(self, **kwargs):
+        """List transfers for the current user (sent and received).
+
+        Optional params:
+          direction  — 'sent' | 'received' | 'all' (default 'all')
+          status     — filter by status (draft/queued/sending/sent/failed/cancelled)
+          limit      — max records (default 50)
+          offset     — skip N records (default 0)
+        """
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {"success": False, "error": "Unauthorized", "data": None}
+
+            direction = (kwargs.get("direction") or "all").strip().lower()
+            status    = (kwargs.get("status")    or "").strip()
+            limit     = max(1, int(kwargs.get("limit")  or 50))
+            offset    = max(0, int(kwargs.get("offset") or 0))
+
+            if direction == "sent":
+                domain = [("source_user_id", "=", uid)]
+            elif direction == "received":
+                domain = [("target_user_id", "=", uid)]
+            else:
+                domain = ["|", ("source_user_id", "=", uid), ("target_user_id", "=", uid)]
+
+            if status:
+                domain.append(("status", "=", status))
+
+            Transfer = request.env["lugal.localsend.transfer"].sudo()
+            total = Transfer.search_count(domain)
+            rows  = Transfer.search(domain, limit=limit, offset=offset, order="create_date desc")
+
+            return {
+                "success": True,
+                "data": {
+                    "total":  total,
+                    "limit":  limit,
+                    "offset": offset,
+                    "items":  [self._serialize_transfer(t) for t in rows],
+                },
+            }
+        except Exception as exc:
+            _logger.exception("localsend_transfers_list failed")
+            return {"success": False, "error": str(exc), "data": None}
+
+    @http.route(
+        "/api/crm/localsend/transfers/<int:transfer_id>/send",
+        type="jsonrpc",
+        auth="none",
+        csrf=False,
+        methods=["POST"],
+    )
+    def localsend_transfer_send(self, transfer_id, **kwargs):
+        """Trigger (or re-trigger) the actual LocalSend file push for an existing transfer."""
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {"success": False, "error": "Unauthorized", "data": None}
+
+            t = request.env["lugal.localsend.transfer"].sudo().browse(transfer_id).exists()
+            if not t:
+                return {"success": False, "error": "Transfer not found", "data": None}
+            if t.source_user_id.id != uid and not _is_localsend_manager(request.env):
+                return {"success": False, "error": "Forbidden", "data": None}
+
+            try:
+                t._send_via_localsend()
+            except Exception as send_exc:
+                return {"success": False, "error": str(send_exc), "data": self._serialize_transfer(t)}
+
+            return {"success": True, "data": self._serialize_transfer(t)}
+        except Exception as exc:
+            _logger.exception("localsend_transfer_send failed")
+            return {"success": False, "error": str(exc), "data": None}
+
+    @http.route(
+        "/api/crm/localsend/transfers/<int:transfer_id>/cancel",
+        type="jsonrpc",
+        auth="none",
+        csrf=False,
+        methods=["POST"],
+    )
+    def localsend_transfer_cancel(self, transfer_id, **kwargs):
+        """Cancel a pending/queued transfer."""
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {"success": False, "error": "Unauthorized", "data": None}
+
+            t = request.env["lugal.localsend.transfer"].sudo().browse(transfer_id).exists()
+            if not t:
+                return {"success": False, "error": "Transfer not found", "data": None}
+            if t.source_user_id.id != uid and not _is_localsend_manager(request.env):
+                return {"success": False, "error": "Forbidden", "data": None}
+            if t.status in ("sent", "cancelled"):
+                return {"success": False, "error": f"Cannot cancel a transfer with status '{t.status}'", "data": None}
+
+            t.action_cancel()
+            return {"success": True, "data": self._serialize_transfer(t)}
+        except Exception as exc:
+            _logger.exception("localsend_transfer_cancel failed")
+            return {"success": False, "error": str(exc), "data": None}
