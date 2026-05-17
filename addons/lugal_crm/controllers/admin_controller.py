@@ -1403,14 +1403,14 @@ class CrmAdminController(http.Controller):
                 return {'success': False, 'error': f'No user found for "{email}"'}
 
             all_groups = {gid: request.env.ref(gid, raise_if_not_found=False) for gid in _ALL_CRM_GROUPS}
-            remove = [(3, g.id) for g in all_groups.values() if g and g in user.sudo().groups_id]
+            remove = [(3, g.id) for g in all_groups.values() if g and g in user.sudo().group_ids]
             add    = []
             tgid   = _ROLE_GROUP[role]
             if tgid:
                 tg = request.env.ref(tgid, raise_if_not_found=False)
                 if tg:
                     add = [(4, tg.id)]
-            user.sudo().write({'groups_id': remove + add})
+            user.sudo().write({'group_ids': remove + add})
             user.sudo().invalidate_recordset()
             return {'success': True, 'data': _user_to_dict(user)}
         except Exception as e:
@@ -1446,14 +1446,14 @@ class CrmAdminController(http.Controller):
                     continue
                 try:
                     all_groups = {gid: request.env.ref(gid, raise_if_not_found=False) for gid in _ALL_CRM_GROUPS}
-                    remove = [(3, g.id) for g in all_groups.values() if g and g in user.sudo().groups_id]
+                    remove = [(3, g.id) for g in all_groups.values() if g and g in user.sudo().group_ids]
                     add = []
                     tgid = _ROLE_GROUP[role]
                     if tgid:
                         tg = request.env.ref(tgid, raise_if_not_found=False)
                         if tg:
                             add = [(4, tg.id)]
-                    user.sudo().write({'groups_id': remove + add})
+                    user.sudo().write({'group_ids': remove + add})
                     user.sudo().invalidate_recordset()
                     results.append({'email': email, 'role': role, 'success': True, 'user': _user_to_dict(user, include_permissions=False)})
                 except Exception as ex:
