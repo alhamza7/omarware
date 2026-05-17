@@ -2908,21 +2908,23 @@ class LugalEmailController(http.Controller):
     def message_bulk_permanent_delete(self, **kwargs):
         """Hard-delete multiple messages in one call.
 
-        All messages must be in the 'trash' folder and owned by the caller.
-        Messages that are not in trash, not found, or belong to another user
-        are silently skipped and reported in 'skipped_ids'.
+        By default only messages in the 'trash' folder are deleted.
+        Pass force=true in the JSON body to delete from any folder immediately.
 
         Request body (JSON):
-          { "message_ids": [1, 2, 3] }   — max 1000 IDs per call.
+          { "message_ids": [1, 2, 3], "force": false }   — max 1000 IDs per call.
 
         Response:
           {
             "success": true,
             "data": {
-              "deleted_ids": [1, 2],
-              "skipped_ids": [3]
+              "deleted_ids":  [1, 2],
+              "skipped_ids":  [3],
+              "skip_reasons": { "3": "not_in_trash" }
             }
           }
+
+        skip_reason values: not_found | already_deleted | wrong_owner | not_in_trash
         """
         if request.httprequest.method == 'OPTIONS':
             return _json_response({})
@@ -2932,6 +2934,7 @@ class LugalEmailController(http.Controller):
         try:
             body = json.loads(request.httprequest.data or '{}')
             message_ids = body.get('message_ids')
+            force = bool(body.get('force', False))
             if not isinstance(message_ids, list) or not message_ids:
                 return _json_response(
                     {'success': False, 'error': 'message_ids must be a non-empty array'},
@@ -2948,20 +2951,34 @@ class LugalEmailController(http.Controller):
                     400,
                 )
 
-            user_account_ids = _get_user_accounts(uid).ids
+            user_account_ids = set(_get_user_accounts(uid).ids)
             Msg = request.env['lugal.email.message'].sudo()
             msgs = Msg.browse(message_ids)
 
-            to_delete = msgs.filtered(
-                lambda m: m.exists()
-                and not m.is_deleted
-                and m.account_id.id in user_account_ids
-                and m.folder == 'trash'
-            )
-            deleted_ids  = to_delete.ids
-            skipped_ids  = [i for i in message_ids if i not in deleted_ids]
-            affected_accounts = to_delete.mapped('account_id')
-            to_delete.unlink()
+            deleted_ids  = []
+            skipped_ids  = []
+            skip_reasons = {}
+
+            for m in msgs:
+                if not m.exists():
+                    skipped_ids.append(m.id)
+                    skip_reasons[str(m.id)] = 'not_found'
+                elif m.is_deleted:
+                    skipped_ids.append(m.id)
+                    skip_reasons[str(m.id)] = 'already_deleted'
+                elif m.account_id.id not in user_account_ids:
+                    skipped_ids.append(m.id)
+                    skip_reasons[str(m.id)] = 'wrong_owner'
+                elif not force and m.folder != 'trash':
+                    skipped_ids.append(m.id)
+                    skip_reasons[str(m.id)] = 'not_in_trash'
+                else:
+                    deleted_ids.append(m.id)
+
+            affected_accounts = Msg.browse(deleted_ids).mapped('account_id') if deleted_ids else Msg.browse()
+            if deleted_ids:
+                Msg.browse(deleted_ids).unlink()
+
             unread_counts = {
                 str(acc.id): _refresh_account_unread_count(acc)
                 for acc in affected_accounts
@@ -2970,8 +2987,9 @@ class LugalEmailController(http.Controller):
             return _json_response({
                 'success': True,
                 'data': {
-                    'deleted_ids': deleted_ids,
-                    'skipped_ids': skipped_ids,
+                    'deleted_ids':  deleted_ids,
+                    'skipped_ids':  skipped_ids,
+                    'skip_reasons': skip_reasons,
                     'unread_counts': unread_counts,
                 },
             })

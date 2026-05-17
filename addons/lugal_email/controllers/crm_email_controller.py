@@ -473,17 +473,24 @@ class CrmEmailController(http.Controller):
     @http.route('/api/crm/email/messages/bulk_delete',
                 type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def bulk_permanent_delete(self, message_ids=None, **kwargs):
-        """Hard-delete messages that are already in the trash folder.
+        """Hard-delete messages permanently.
 
-        Only messages owned by the caller that are in the 'trash' folder are
-        deleted. Messages in any other folder, or belonging to another user,
-        are skipped (reported in skipped_ids) without raising an error.
+        By default only messages already in the 'trash' folder are deleted.
+        Pass force=true to delete messages from any folder immediately.
 
         Params (JSON-RPC):
           message_ids: list[int]  — max 1000 per call, required.
+          force:       bool       — if true, delete from any folder (default false).
 
         Response:
-          { "success": true, "data": { "deleted_ids": [...], "skipped_ids": [...] } }
+          {
+            "success": true,
+            "data": {
+              "deleted_ids":  [...],
+              "skipped_ids":  [...],
+              "skip_reasons": { "<id>": "not_in_trash|not_found|wrong_owner|already_deleted" }
+            }
+          }
         """
         try:
             uid = ensure_jwt_user_id()
@@ -494,31 +501,47 @@ class CrmEmailController(http.Controller):
             if len(message_ids) > 1000:
                 return {'success': False, 'error': 'message_ids may not exceed 1000 per request'}
 
+            force = bool(kwargs.get('force') or False)
+
             user_accounts = request.env['lugal.email.account'].sudo().search([
                 ('user_id', '=', uid),
                 ('is_deleted', '=', False),
                 ('is_active', '=', True),
             ])
-            user_account_ids = user_accounts.ids
+            user_account_ids = set(user_accounts.ids)
 
             Msg = request.env['lugal.email.message'].sudo()
             msgs = Msg.browse(message_ids)
 
-            to_delete = msgs.filtered(
-                lambda m: m.exists()
-                and not m.is_deleted
-                and m.account_id.id in user_account_ids
-                and m.folder == 'trash'
-            )
-            deleted_ids = to_delete.ids
-            skipped_ids = [i for i in message_ids if i not in deleted_ids]
-            to_delete.unlink()
+            deleted_ids  = []
+            skipped_ids  = []
+            skip_reasons = {}
+
+            for m in msgs:
+                if not m.exists():
+                    skipped_ids.append(m.id)
+                    skip_reasons[str(m.id)] = 'not_found'
+                elif m.is_deleted:
+                    skipped_ids.append(m.id)
+                    skip_reasons[str(m.id)] = 'already_deleted'
+                elif m.account_id.id not in user_account_ids:
+                    skipped_ids.append(m.id)
+                    skip_reasons[str(m.id)] = 'wrong_owner'
+                elif not force and m.folder != 'trash':
+                    skipped_ids.append(m.id)
+                    skip_reasons[str(m.id)] = 'not_in_trash'
+                else:
+                    deleted_ids.append(m.id)
+
+            if deleted_ids:
+                Msg.browse(deleted_ids).unlink()
 
             return {
                 'success': True,
                 'data': {
-                    'deleted_ids': deleted_ids,
-                    'skipped_ids': skipped_ids,
+                    'deleted_ids':  deleted_ids,
+                    'skipped_ids':  skipped_ids,
+                    'skip_reasons': skip_reasons,
                 },
             }
         except Exception as exc:
