@@ -2087,4 +2087,165 @@ If Odoo itself throws an unhandled exception, the response will have:
 
 ---
 
+## 11. User Presence (Real-time Online / AFK / Offline)
+
+### Overview
+
+Status is determined by **server-side thresholds** and automatically broadcast via the bus. The FE never polls.
+
+| Status | Meaning | Server rule |
+|--------|---------|-------------|
+| `online` | Pinged within the last **2 min** | |
+| `afk` | No ping for **2–5 min** (or explicit `set_status`) | |
+| `offline` | No ping for **>5 min**, or explicit disconnect | |
+
+A cron runs every **2 minutes** to auto-broadcast stale transitions even when no API is being called.
+
+---
+
+### Routes
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/api/crm/presence/subscribe` | App load — mark online, return full snapshot |
+| POST | `/api/crm/presence/ping` | Keepalive — call every **30 s** |
+| POST | `/api/crm/presence/disconnect` | Tab/app close — mark offline immediately |
+| POST | `/api/crm/presence/set_status` | Explicit AFK or status message |
+| POST | `/api/crm/presence/me` | Own record only |
+| POST | `/api/crm/presence/users` | On-demand full snapshot (fallback) |
+
+---
+
+### Bus channel
+
+```
+Channel name: "crm_presence"
+Event type:   "crm.user.presence.changed"
+
+Payload:
+{
+  "user_id":      42,
+  "user_name":    "Alice",
+  "user_email":   "alice@example.com",
+  "avatar_url":   "/web/image/res.users/42/avatar_128",
+  "status":       "online" | "afk" | "offline",
+  "status_message": "",
+  "last_seen_at": "2026-05-17T15:10:00"
+}
+```
+
+---
+
+### Canonical integration (copy-paste ready)
+
+```js
+// ─────────────────────────────────────────────────────────────────────
+// usePresence.js  —  full production implementation
+// ─────────────────────────────────────────────────────────────────────
+
+let currentStatus = 'offline'  // BUG-FIX 1: must be initialised from subscribe()
+                                //   and kept in sync via bus events — never assume 'online'
+let lastActivity  = Date.now()
+const AFK_MS      = 3 * 60 * 1000   // 3 minutes idle → AFK
+
+// cleanup handles (call cleanup() on logout)
+let pingInterval, idleInterval
+const activityListeners = []
+
+// ── 1. on app load ─────────────────────────────────────────────────
+async function initPresence(bus) {
+  const res = await api.post('/api/crm/presence/subscribe')
+  if (res.success) {
+    currentStatus = res.data.me.status         // BUG-FIX 1: seed from subscribe snapshot
+    renderAllUsers(res.data.users)             // initial render
+  }
+
+  // ── 2. bus: react to any user's status change ───────────────────
+  bus.on('crm.user.presence.changed', (payload) => {
+    if (payload.user_id === MY_USER_ID) {
+      currentStatus = payload.status           // BUG-FIX 1: keep in sync
+    }
+    updateUserStatus(payload.user_id, payload.status)
+  })
+
+  // ── 3. keepalive every 30 s ─────────────────────────────────────
+  pingInterval = setInterval(() => api.post('/api/crm/presence/ping'), 30_000)
+
+  // ── 4. idle detection every 30 s ────────────────────────────────
+  idleInterval = setInterval(() => {
+    const isIdle = Date.now() - lastActivity > AFK_MS
+    // BUG-FIX 2: AFK condition is pure idle-time only.
+    //   isTabHidden alone has too many false positives (multi-monitor, alt-tab, etc.)
+    //   Use: isIdle           — fires after 3 min of no input (recommended)
+    //   Or:  isIdle && isTabHidden — stricter, requires BOTH conditions simultaneously
+    if (isIdle && currentStatus === 'online') {
+      api.post('/api/crm/presence/set_status', { status: 'afk' })
+    }
+  }, 30_000)
+
+  // ── 5. activity events reset the idle timer ─────────────────────
+  const onActivity = debounce(() => {
+    lastActivity = Date.now()
+    if (currentStatus !== 'online') {
+      api.post('/api/crm/presence/ping')       // resumes → back to online
+    }
+  }, 2000)
+
+  ;['mousemove', 'keydown', 'click', 'scroll', 'touchstart'].forEach(ev => {
+    window.addEventListener(ev, onActivity, { passive: true })
+    activityListeners.push({ ev, fn: onActivity })
+  })
+
+  // ── 6. on bus reconnect, re-announce presence ───────────────────
+  bus.on('reconnect', () => {
+    api.post('/api/crm/presence/ping')         // let server know we are back
+  })
+
+  // ── 7. on tab/app close, mark offline immediately ───────────────
+  window.addEventListener('beforeunload', () => {
+    navigator.sendBeacon(
+      '/api/crm/presence/disconnect',
+      new Blob(
+        [JSON.stringify({ jsonrpc: '2.0', method: 'call', id: 1, params: {} })],
+        { type: 'application/json' }
+      )
+    )
+  })
+}
+
+// ── cleanup on logout ───────────────────────────────────────────────
+function cleanupPresence() {
+  clearInterval(pingInterval)
+  clearInterval(idleInterval)
+  activityListeners.forEach(({ ev, fn }) =>
+    window.removeEventListener(ev, fn)
+  )
+  // tell server now, don't wait for beforeunload
+  api.post('/api/crm/presence/disconnect')
+}
+```
+
+---
+
+### Status display
+
+```
+online  → 🟢  green dot
+afk     → 🟡  yellow dot
+offline → ⚫  grey dot
+```
+
+---
+
+### Common mistakes to avoid
+
+| Wrong | Right |
+|-------|-------|
+| `isIdle \|\| isTabHidden` → AFK | `isIdle` alone — tab-hidden alone has too many false positives |
+| `currentStatus = 'online'` hardcoded | Seed from `subscribe()` snapshot; keep in sync via bus events |
+| Ping every 120 s | Ping every **30 s** — offline detection kicks in at 5 min (10 missed pings) |
+| No cleanup on logout | Call `cleanupPresence()` so ping loops and listeners don't outlive the session |
+
+---
+
 *This document covers all endpoints as of 2026-05-17. Generated from live source code.*
