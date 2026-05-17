@@ -1517,7 +1517,7 @@ Call once per app session.
 
 ### `POST /api/crm/localsend/devices/heartbeat`
 
-Call every **30 seconds** while app is open. Triggers auto-retry of queued transfers when device transitions offline → online.
+Call every **30 seconds** while app is open. Triggers auto-retry of `available`/`failed` transfers when device transitions offline → online.
 
 ```json
 { "params": { "lan_ip": "192.168.116.228" } }
@@ -1577,22 +1577,22 @@ Manually register a device (admin/manager use).
 ```
 
 **Behavior:**
-1. Always creates transfer record and sends bus notification to receiver with `download_url`
+1. Always creates transfer record and sends bus notification to receiver with `download_url` (includes `access_token` — no login required)
 2. If `send_now=true`: attempts LocalSend P2P push
    - LocalSend open → `status: "sent"` + `localsend.transfer.sent` event
-   - LocalSend closed → `status: "queued"` + `localsend.transfer.available` event with `download_url`
-3. File is always downloadable via `download_url` regardless of LocalSend status
+   - LocalSend closed → `status: "available"` + `localsend.transfer.available` event with `download_url`
+3. File is **always** downloadable via `download_url` regardless of LocalSend status — `access_token` in URL means no Odoo session needed
 
-**Response:**
+**Response (LocalSend open):**
 
 ```json
 {
   "success": true,
   "data": {
     "id": 4,
-    "status": "queued",
-    "download_url": "/web/content/379001?download=true",
-    "preview_url": "/web/content/379001",
+    "status": "sent",
+    "download_url": "/web/content/379001?access_token=4843d30571864e48aee66c26c921eedc&download=true",
+    "preview_url":  "/web/content/379001?access_token=4843d30571864e48aee66c26c921eedc",
     "target_device_url": "http://192.168.116.228:53317",
     "file_name": "photo.jpg",
     "file_size": 324524,
@@ -1600,6 +1600,23 @@ Manually register a device (admin/manager use).
   }
 }
 ```
+
+**Response (LocalSend not running — graceful fallback):**
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": 4,
+    "status": "available",
+    "error_message": "LocalSend app is not running on Umar CTO's Device (192.168.116.228:53317). The file is available for download from the app.",
+    "download_url": "/web/content/379001?access_token=4843d30571864e48aee66c26c921eedc&download=true",
+    "preview_url":  "/web/content/379001?access_token=4843d30571864e48aee66c26c921eedc"
+  }
+}
+```
+
+> `success: true` even when LocalSend is not running. `status: "available"` is not an error — the file is ready to download.
 
 ### `POST /api/crm/localsend/transfers/list`
 

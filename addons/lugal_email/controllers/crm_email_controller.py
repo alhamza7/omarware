@@ -470,6 +470,184 @@ class CrmEmailController(http.Controller):
         except Exception as exc:
             return _crm_error(exc, 'subscribe')
 
+    @http.route('/api/crm/email/messages/bulk_trash',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def bulk_move_to_trash(self, message_ids=None, **kwargs):
+        """Move multiple messages to the trash folder in one call.
+
+        Only messages owned by the caller that are NOT already in trash are moved.
+        Already-trashed, not-found, and foreign-owner messages are skipped and
+        reported in ``skipped_ids`` with a reason.
+
+        Params (JSON-RPC):
+          message_ids: list[int]  — max 1000 per call, required.
+
+        Response:
+          {
+            "success": true,
+            "data": {
+              "trashed_ids":  [1, 2],
+              "skipped_ids":  [3],
+              "skip_reasons": { "3": "already_in_trash|not_found|wrong_owner|already_deleted" },
+              "unread_counts": { "<account_id>": <int> }
+            }
+          }
+        """
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+            if not message_ids or not isinstance(message_ids, list):
+                return {'success': False, 'error': 'message_ids must be a non-empty list'}
+            if len(message_ids) > 1000:
+                return {'success': False, 'error': 'message_ids may not exceed 1000 per request'}
+
+            user_accounts = request.env['lugal.email.account'].sudo().search([
+                ('user_id', '=', uid),
+                ('is_deleted', '=', False),
+                ('is_active', '=', True),
+            ])
+            user_account_ids = set(user_accounts.ids)
+
+            Msg = request.env['lugal.email.message'].sudo()
+            msgs = Msg.browse(message_ids)
+
+            trashed_ids  = []
+            skipped_ids  = []
+            skip_reasons = {}
+
+            for m in msgs:
+                if not m.exists():
+                    skipped_ids.append(m.id)
+                    skip_reasons[str(m.id)] = 'not_found'
+                elif m.is_deleted:
+                    skipped_ids.append(m.id)
+                    skip_reasons[str(m.id)] = 'already_deleted'
+                elif m.account_id.id not in user_account_ids:
+                    skipped_ids.append(m.id)
+                    skip_reasons[str(m.id)] = 'wrong_owner'
+                elif m.folder == 'trash':
+                    skipped_ids.append(m.id)
+                    skip_reasons[str(m.id)] = 'already_in_trash'
+                else:
+                    trashed_ids.append(m.id)
+
+            if trashed_ids:
+                to_trash = Msg.browse(trashed_ids)
+                affected_accounts = to_trash.mapped('account_id')
+                to_trash.write({'folder': 'trash'})
+            else:
+                affected_accounts = Msg.browse()
+
+            unread_counts = {
+                str(acc.id): _refresh_account_unread_count(acc)
+                for acc in affected_accounts
+            }
+
+            return {
+                'success': True,
+                'data': {
+                    'trashed_ids':  trashed_ids,
+                    'skipped_ids':  skipped_ids,
+                    'skip_reasons': skip_reasons,
+                    'unread_counts': unread_counts,
+                },
+            }
+        except Exception as exc:
+            return _crm_error(exc, 'bulk_move_to_trash')
+
+    @http.route('/api/crm/email/messages/bulk_restore',
+                type='jsonrpc', auth='none', csrf=False, methods=['POST'])
+    def bulk_restore_from_trash(self, message_ids=None, restore_to=None, **kwargs):
+        """Restore multiple messages from trash back to their original folder.
+
+        Params (JSON-RPC):
+          message_ids: list[int]  — max 1000 per call, required.
+          restore_to:  str        — target folder: "inbox" (default) | "sent" | "archive"
+
+        Response:
+          {
+            "success": true,
+            "data": {
+              "restored_ids": [1, 2],
+              "skipped_ids":  [3],
+              "skip_reasons": { "3": "not_in_trash|not_found|wrong_owner|already_deleted" },
+              "unread_counts": { "<account_id>": <int> }
+            }
+          }
+        """
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {'success': False, 'error': 'Unauthorized'}
+            if not message_ids or not isinstance(message_ids, list):
+                return {'success': False, 'error': 'message_ids must be a non-empty list'}
+            if len(message_ids) > 1000:
+                return {'success': False, 'error': 'message_ids may not exceed 1000 per request'}
+
+            _VALID_FOLDERS = {'inbox', 'sent', 'archive', 'drafts'}
+            target_folder = (restore_to or 'inbox').lower()
+            if target_folder not in _VALID_FOLDERS:
+                return {
+                    'success': False,
+                    'error': 'restore_to must be one of: %s' % ', '.join(sorted(_VALID_FOLDERS)),
+                }
+
+            user_accounts = request.env['lugal.email.account'].sudo().search([
+                ('user_id', '=', uid),
+                ('is_deleted', '=', False),
+                ('is_active', '=', True),
+            ])
+            user_account_ids = set(user_accounts.ids)
+
+            Msg = request.env['lugal.email.message'].sudo()
+            msgs = Msg.browse(message_ids)
+
+            restored_ids = []
+            skipped_ids  = []
+            skip_reasons = {}
+
+            for m in msgs:
+                if not m.exists():
+                    skipped_ids.append(m.id)
+                    skip_reasons[str(m.id)] = 'not_found'
+                elif m.is_deleted:
+                    skipped_ids.append(m.id)
+                    skip_reasons[str(m.id)] = 'already_deleted'
+                elif m.account_id.id not in user_account_ids:
+                    skipped_ids.append(m.id)
+                    skip_reasons[str(m.id)] = 'wrong_owner'
+                elif m.folder != 'trash':
+                    skipped_ids.append(m.id)
+                    skip_reasons[str(m.id)] = 'not_in_trash'
+                else:
+                    restored_ids.append(m.id)
+
+            if restored_ids:
+                to_restore = Msg.browse(restored_ids)
+                affected_accounts = to_restore.mapped('account_id')
+                to_restore.write({'folder': target_folder})
+            else:
+                affected_accounts = Msg.browse()
+
+            unread_counts = {
+                str(acc.id): _refresh_account_unread_count(acc)
+                for acc in affected_accounts
+            }
+
+            return {
+                'success': True,
+                'data': {
+                    'restored_ids': restored_ids,
+                    'skipped_ids':  skipped_ids,
+                    'skip_reasons': skip_reasons,
+                    'restore_to':   target_folder,
+                    'unread_counts': unread_counts,
+                },
+            }
+        except Exception as exc:
+            return _crm_error(exc, 'bulk_restore_from_trash')
+
     @http.route('/api/crm/email/messages/bulk_delete',
                 type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def bulk_permanent_delete(self, message_ids=None, **kwargs):

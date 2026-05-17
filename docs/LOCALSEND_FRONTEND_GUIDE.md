@@ -13,12 +13,12 @@ The LocalSend integration lets users send files to each other inside the CRM bro
 Sender (browser)
   └─→ POST /transfers/create
         │
-        ├─→ ① Bus notification → receiver (download_url always included)
+        ├─→ ① Bus notification → receiver (download_url always included + access_token)
         │
         └─→ ② LocalSend TCP push attempted
-              ├─ App open  → status: "sent"  + bus "localsend.transfer.sent"
-              └─ App closed → status: "queued" + bus "localsend.transfer.available"
-                              (file still available via download_url)
+              ├─ App open    → status: "sent"      + bus "localsend.transfer.sent"
+              └─ App closed  → status: "available" + bus "localsend.transfer.available"
+                               (file immediately downloadable via download_url — no login required)
 ```
 
 ---
@@ -163,7 +163,7 @@ Call **every 30 seconds** while the app is open.
 
 **Why it matters:**
 - Keeps `is_online = true` in the database
-- If the device was previously marked offline (missed heartbeats), coming back online **automatically retries all queued transfers** targeting this device
+- If the device was previously marked offline (missed heartbeats), coming back online **automatically retries all `available` / `queued` / `failed` transfers** targeting this device
 
 **Request:**
 
@@ -336,7 +336,7 @@ Connect to `ws://<server>:8076/websocket` and subscribe to channel `localsend_us
 {
   "transfer_id": 4,
   "name": "photo.jpg",
-  "status": "queued",
+  "status": "available",
   "source_user_id": 52,
   "source_user_name": "Ahmed",
   "target_user_id": 32,
@@ -344,14 +344,14 @@ Connect to `ws://<server>:8076/websocket` and subscribe to channel `localsend_us
   "file_name": "photo.jpg",
   "file_size": 324524,
   "mime_type": "image/jpeg",
-  "download_url": "/web/content/379001?download=true",
-  "preview_url": "/web/content/379001",
+  "download_url": "/web/content/379001?access_token=4843d30571864e48aee66c26c921eedc&download=true",
+  "preview_url": "/web/content/379001?access_token=4843d30571864e48aee66c26c921eedc",
   "error_message": "",
   "message": "Ahmed sent you 'photo.jpg'. You can download it now."
 }
 ```
 
-> **`download_url`** is always present in every event. Use it to show a download button to the receiver.
+> **`download_url`** is always present in every event and includes an **`access_token`** — the link works directly in any browser without an Odoo session or login.
 
 ---
 
@@ -468,11 +468,11 @@ POST /api/crm/localsend/transfers/create
 
 **What happens internally:**
 
-1. Transfer record created with `status: "queued"`
-2. **Bus notification sent immediately to receiver** with `download_url` — the receiver can already download it
+1. Transfer record created with `status: "draft"` → immediately changes
+2. **Bus notification sent immediately to receiver** with `download_url` (with `access_token`) — the receiver can already download it
 3. If `send_now: true`: LocalSend TCP push attempted
    - App open → `status: "sent"`, bus event `localsend.transfer.sent`
-   - App closed → stays `status: "queued"`, bus event `localsend.transfer.available` (file still downloadable)
+   - App closed → `status: "available"`, bus event `localsend.transfer.available` (file immediately downloadable)
 
 **Response (LocalSend succeeded):**
 
@@ -482,8 +482,8 @@ POST /api/crm/localsend/transfers/create
   "data": {
     "id": 4,
     "status": "sent",
-    "download_url": "/web/content/379001?download=true",
-    "preview_url": "/web/content/379001",
+    "download_url": "/web/content/379001?access_token=4843d30571864e48aee66c26c921eedc&download=true",
+    "preview_url": "/web/content/379001?access_token=4843d30571864e48aee66c26c921eedc",
     "file_name": "photo.jpg",
     "file_size": 324524,
     "mime_type": "image/jpeg",
@@ -501,19 +501,19 @@ POST /api/crm/localsend/transfers/create
   "success": true,
   "data": {
     "id": 4,
-    "status": "queued",
+    "status": "available",
     "error_message": "LocalSend app is not running on Umar CTO's Device (192.168.116.228:53317). The file is available for download from the app.",
-    "download_url": "/web/content/379001?download=true",
-    "preview_url": "/web/content/379001"
+    "download_url": "/web/content/379001?access_token=4843d30571864e48aee66c26c921eedc&download=true",
+    "preview_url": "/web/content/379001?access_token=4843d30571864e48aee66c26c921eedc"
   }
 }
 ```
 
-> **`success: true`** even when LocalSend is not running — the file was queued and the receiver was notified. This is not an error.
+> **`success: true`** even when LocalSend is not running — the file is `available` for browser download and the receiver was notified. This is **not** an error.
 
 ---
 
-### Retrying a queued transfer
+### Retrying an available/failed transfer
 
 If the receiver later opens LocalSend, the heartbeat auto-retries automatically. But you can also retry manually:
 
@@ -545,7 +545,7 @@ await api.post(`/api/crm/localsend/transfers/${payload.transfer_id}/downloaded`)
 
 ```http
 POST /api/crm/localsend/transfers/list
-{ "params": { "direction": "received", "status": "queued" } }
+{ "params": { "direction": "received", "status": "available" } }
 ```
 
 Then use `item.download_url` from each item.
@@ -573,15 +573,16 @@ Good for images, PDFs shown in `<img>` or `<iframe>`.
 | Status | Meaning | Suggested FE Display |
 |--------|---------|----------------------|
 | `draft` | Created but not yet sent | Internal — usually transient |
-| `queued` | LocalSend not reachable; waiting for retry | 📥 Show **Download** button + "File available" |
+| `available` | LocalSend not reachable; file is on Odoo and **immediately downloadable** | 📥 Show **Download** button + "File available" |
 | `sending` | LocalSend push in progress | ⏳ Spinner |
-| `sent` | Delivered via LocalSend P2P | ✅ "Delivered via LocalSend" |
-| `available` | File on Odoo server, downloadable | 📥 Show **Download** button |
+| `sent` | Delivered directly via LocalSend P2P | ✅ "Delivered via LocalSend" |
 | `downloaded` | Receiver confirmed browser download | ✅ "Downloaded by receiver" |
 | `failed` | Unrecoverable error | ❌ Show error + Retry button |
 | `cancelled` | Cancelled by sender | — |
 
-> For `queued` and `available` — always show `download_url`. The file is ready.
+> **`queued`** is an internal/legacy status — you should not normally see it. All graceful fallbacks now set `available`.
+
+> For `available` and `sent` — always show `download_url`. The file is ready. `download_url` includes an `access_token` and works in any browser without login.
 
 ---
 
@@ -590,7 +591,7 @@ Good for images, PDFs shown in `<img>` or `<iframe>`.
 | Endpoint | Description |
 |----------|-------------|
 | `POST /api/crm/localsend/devices/register` | Register this browser session's device |
-| `POST /api/crm/localsend/devices/heartbeat` | Keep-alive every 30s; auto-retries queued transfers |
+| `POST /api/crm/localsend/devices/heartbeat` | Keep-alive every 30s; auto-retries `available`/`failed` transfers |
 | `POST /api/crm/localsend/devices/list` | List registered devices |
 | `POST /api/crm/localsend/devices/<id>/ping` | TCP check — is LocalSend app running on that device? |
 | `POST /api/crm/localsend/devices/create` | Manually create a device record (admin use) |
@@ -612,7 +613,7 @@ Every transfer API response and bus event payload includes these fields:
 {
   "id": 4,
   "name": "photo.jpg",
-  "status": "queued",
+  "status": "available",
 
   "source_user_id": 52,
   "source_user_name": "Ahmed",
@@ -632,8 +633,8 @@ Every transfer API response and bus event payload includes these fields:
   "file_size": 324524,
   "mime_type": "image/jpeg",
 
-  "download_url": "/web/content/379001?download=true",
-  "preview_url": "/web/content/379001",
+  "download_url": "/web/content/379001?access_token=4843d30571864e48aee66c26c921eedc&download=true",
+  "preview_url":  "/web/content/379001?access_token=4843d30571864e48aee66c26c921eedc",
 
   "error_message": "",
   "localsend_session_id": "",
@@ -643,6 +644,8 @@ Every transfer API response and bus event payload includes these fields:
   "created_at": "2026-05-17T08:44:17.232540"
 }
 ```
+
+> **`download_url`** and **`preview_url`** include a permanent `access_token` — paste them directly into an `<a href>` or `window.location.href`. No Odoo login required.
 
 ---
 
@@ -727,15 +730,15 @@ class LocalSendService {
       send_now:       true,
     });
 
-    if (!resp.success && resp.data?.status !== 'queued') {
+    if (!resp.success && resp.data?.status !== 'available') {
       throw new Error(resp.error);
     }
 
-    // Always return download_url — usable even if LocalSend failed
+    // Always return download_url — includes access_token, works without login
     return {
       transferId:  resp.data.id,
-      status:      resp.data.status,
-      downloadUrl: resp.data.download_url,
+      status:      resp.data.status,  // "sent" | "available"
+      downloadUrl: resp.data.download_url,  // already has ?access_token=...
     };
   }
 
@@ -875,7 +878,8 @@ fileInput.addEventListener('change', async (e) => {
   if (result.status === 'sent') {
     showToast('File delivered via LocalSend!');
   } else {
-    showToast('File queued — receiver will be notified to download.');
+    // status === 'available' — file is on server, receiver was notified
+    showToast('File available — receiver can download from the browser.');
   }
   console.log('File always accessible at:', result.downloadUrl);
 });
@@ -885,14 +889,17 @@ fileInput.addEventListener('change', async (e) => {
 
 ## FAQ
 
-**Q: The transfer says "queued" instead of "sent" — is that an error?**  
-No. It means the LocalSend app was not running on the receiver's device. The file is already on the Odoo server and the receiver got a notification with a `download_url`. They can download it immediately from the browser.
+**Q: The transfer says `"available"` instead of `"sent"` — is that an error?**  
+No. It means the LocalSend app was not running on the receiver's device. The file is already on the Odoo server and the receiver got a bus notification with a `download_url` (including access token). They can download it immediately from the browser — no login needed.
 
-**Q: When will the transfer auto-retry?**  
-When the receiver's device calls `/devices/heartbeat` after having been offline. This happens automatically when the LocalSend native app is opened (it sends heartbeats) or when the CRM app is reopened in the browser.
+**Q: When will the transfer auto-retry via LocalSend?**  
+When the receiver's device calls `/devices/heartbeat` after having been offline. The heartbeat auto-retries all transfers in `available` / `failed` status targeting that device. This happens when the LocalSend native app is opened (it sends heartbeats) or when the CRM is reopened in the browser.
 
 **Q: What if the receiver never downloads the file?**  
-The file remains in `status: "queued"` or `"available"`. The sender can resend a reminder or retry via `/transfers/<id>/retry`. The file stays accessible via `download_url` indefinitely (as long as it's not deleted from Odoo).
+The file stays in `status: "available"`. The sender can resend a reminder or retry via `/transfers/<id>/retry`. The file stays accessible via `download_url` indefinitely (as long as it's not deleted from Odoo).
+
+**Q: Do I need an Odoo session to use `download_url`?**  
+No. The URL includes a permanent `access_token` parameter. You can paste it directly in a browser, put it in an `<a href>`, or trigger it with `window.location.href`. No authentication required.
 
 **Q: How do I get the receiver's `target_user_id`?**  
 From `/api/crm/users/list` — search by name or email and use the `id` field.
