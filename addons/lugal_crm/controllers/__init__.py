@@ -25,6 +25,7 @@ from . import supply_extra_api_controller
 from . import supply_attachment_api
 from . import supply_chat_controller
 from . import supply_stories_controller
+from . import presence_controller
 from . import task_controller
 from . import ticket_controller
 from . import upload_controller

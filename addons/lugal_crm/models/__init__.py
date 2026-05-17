@@ -2,6 +2,7 @@
 from . import crm_attendance
 from . import crm_permission_template
 from . import crm_user_permission
+from . import crm_user_presence
 from . import crm_audit_log
 from . import crm_branch
 from . import crm_call

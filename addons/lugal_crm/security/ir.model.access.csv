@@ -33,3 +33,4 @@ access_lugal_supply_payment_user,lugal.supply.payment user,model_lugal_supply_pa
 access_lugal_supply_budget_allocation_user,lugal.supply.budget.allocation user,model_lugal_supply_budget_allocation,base.group_user,1,1,1,1
 access_lugal_supply_inventory_minmax_user,lugal.supply.inventory.minmax user,model_lugal_supply_inventory_minmax,base.group_user,1,1,1,1
 access_lugal_supply_workflow_approval_line_user,lugal.supply.workflow.approval.line user,model_lugal_supply_workflow_approval_line,base.group_user,1,1,1,1
+access_lugal_crm_user_presence_user,lugal.crm.user.presence user,model_lugal_crm_user_presence,base.group_user,1,1,1,1
