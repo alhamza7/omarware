@@ -79,25 +79,41 @@ class UserController(http.Controller):
         List CRM system users.
 
         Optional filters:
-          branch_id — filter to users assigned to a specific branch
-          role      — filter by CRM role: agent | supervisor | manager | general_manager | qa_auditor | qa_supervisor
-          active    — default True; pass False to include deactivated accounts
-          limit / offset — pagination
+          branch_id  — filter to users assigned to a specific branch
+          role       — filter by CRM role: agent | supervisor | manager | general_manager | qa_auditor | qa_supervisor
+          active     — default True; pass False to include deactivated accounts
+          search     — partial match on name or email/login
+          page / per_page — pagination (alternative to limit/offset)
+          limit / offset  — pagination (raw)
         """
         try:
             if not ensure_jwt_user_id():
                 return {'success': False, 'error': 'Unauthorized'}
 
-            # Get CRM users via group.user_ids (Odoo 19: groups_id domain search is not allowed)
-            crm_group = request.env.ref('lugal_crm.group_lugal_crm_agent', raise_if_not_found=False)
-            if crm_group:
-                base_users = crm_group.sudo().user_ids.filtered(lambda u: u.active == active)
-            else:
-                base_users = request.env['res.users'].sudo().search(
-                    [('active', '=', active), ('share', '=', False)]
-                )
+            # Collect unique user IDs across ALL CRM role groups so that
+            # supervisors, managers, GMs and QA roles are included.
+            _ALL_CRM_GROUPS = [
+                'lugal_crm.group_lugal_crm_agent',
+                'lugal_crm.group_lugal_crm_supervisor',
+                'lugal_crm.group_lugal_crm_manager',
+                'lugal_crm.group_lugal_crm_general_manager',
+                'lugal_crm.group_lugal_crm_qa',
+                'lugal_crm.group_lugal_crm_qa_supervisor',
+            ]
+            crm_user_ids = set()
+            for gref in _ALL_CRM_GROUPS:
+                grp = request.env.ref(gref, raise_if_not_found=False)
+                if grp:
+                    crm_user_ids.update(grp.sudo().user_ids.ids)
 
-            # Role filter via group membership
+            active_flag = bool(active) if not isinstance(active, bool) else active
+            search = (kwargs.get('search') or '').strip()
+
+            domain = [('id', 'in', list(crm_user_ids)), ('active', '=', active_flag), ('share', '=', False)]
+            if search:
+                domain += ['|', ('name', 'ilike', search), ('login', 'ilike', search)]
+
+            # Role filter via group membership (applied after ORM search)
             role_group_map = {
                 'agent':           'lugal_crm.group_lugal_crm_agent',
                 'supervisor':      'lugal_crm.group_lugal_crm_supervisor',
@@ -106,28 +122,41 @@ class UserController(http.Controller):
                 'qa_auditor':      'lugal_crm.group_lugal_crm_qa',
                 'qa_supervisor':   'lugal_crm.group_lugal_crm_qa_supervisor',
             }
-            if role and role in role_group_map:
-                grp = request.env.ref(role_group_map[role], raise_if_not_found=False)
-                if grp:
-                    base_users = base_users.filtered(lambda u: u in grp.user_ids)
 
-            total = len(base_users)
-            # Pagination
-            offset_val = int(offset)
-            limit_val  = int(limit)
-            users = base_users.sorted('name')[offset_val: offset_val + limit_val]
+            Users = request.env['res.users'].sudo()
+            all_users = Users.search(domain, order='name asc')
+
+            if role and role in role_group_map:
+                role_grp = request.env.ref(role_group_map[role], raise_if_not_found=False)
+                if role_grp:
+                    allowed_ids = set(role_grp.sudo().user_ids.ids)
+                    all_users = all_users.filtered(lambda u: u.id in allowed_ids)
+
             if branch_id:
                 branch = request.env['lugal.crm.branch'].browse(int(branch_id))
                 if branch.exists():
-                    users = users.filtered(lambda u: u in branch.user_ids)
+                    branch_user_ids = set(branch.user_ids.ids)
+                    all_users = all_users.filtered(lambda u: u.id in branch_user_ids)
+
+            total = len(all_users)
+
+            # Support both page/per_page and limit/offset
+            page     = int(kwargs.get('page') or 1)
+            per_page = int(kwargs.get('per_page') or limit or 100)
+            per_page = min(200, max(1, per_page))
+            page     = max(1, page)
+            offset_val = (page - 1) * per_page
+            users = all_users[offset_val: offset_val + per_page]
 
             return {
                 'success': True,
                 'data': {
-                    'items': [_user_to_dict(u) for u in users],
-                    'total': total,
-                    'limit': int(limit),
-                    'offset': int(offset),
+                    'items':    [_user_to_dict(u) for u in users],
+                    'total':    total,
+                    'page':     page,
+                    'per_page': per_page,
+                    'limit':    per_page,
+                    'offset':   offset_val,
                 },
             }
         except Exception as e:

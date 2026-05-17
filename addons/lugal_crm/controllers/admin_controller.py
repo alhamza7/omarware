@@ -1168,16 +1168,26 @@ class CrmAdminController(http.Controller):
 
                     # Layer 3 — individual overrides
                     'individual_overrides': {
-                        'found':             bool(override_rec),
+                        'found':              bool(override_rec),
                         'job_title_override': override_rec.job_title_override if override_rec else None,
-                        'overrides':         override_rec.get_overrides() if override_rec else {},
-                        'admin_notes':       override_rec.admin_notes if override_rec else '',
-                        'last_modified_by':  override_rec.last_modified_by.name if override_rec and override_rec.last_modified_by else '',
-                        'last_modified_at':  override_rec.last_modified_at.isoformat() if override_rec and override_rec.last_modified_at else None,
+                        'overrides':          override_rec.get_overrides() if override_rec else {},
+                        'route_visibility':   override_rec.get_route_visibility() if override_rec else {},
+                        'admin_notes':        override_rec.admin_notes if override_rec else '',
+                        'last_modified_by':   override_rec.last_modified_by.name if override_rec and override_rec.last_modified_by else '',
+                        'last_modified_at':   override_rec.last_modified_at.isoformat() if override_rec and override_rec.last_modified_at else None,
                     },
 
-                    # Final merged result
+                    # Final merged result — what the user actually experiences
                     'effective_permissions': _get_effective_permissions(user),
+
+                    # Flat route → bool visibility map (use this for FE navigation)
+                    'routes': _compute_route_visibility(
+                        _filter_to_fe_schema(_get_effective_permissions(user)),
+                        _get_effective_route_visibility(user),
+                    ),
+
+                    # The explicit route overrides saved for this user (all sources merged)
+                    'route_visibility': _get_effective_route_visibility(user),
                 },
             }
         except Exception as e:
