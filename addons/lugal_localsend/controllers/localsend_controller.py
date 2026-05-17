@@ -759,3 +759,112 @@ class LocalSendCrmController(http.Controller):
             _logger.exception("localsend_transfer_cancel failed")
             return {"success": False, "error": str(exc), "data": None}
 
+    # ── File upload ─────────────────────────────────────────────────────────────
+    # Odoo's default MAX_CONTENT_LENGTH is 128 MiB.  LocalSend needs 2 GiB.
+    # This endpoint stores the file as an ir.attachment and returns attachment_id
+    # which the FE then passes to /transfers/create.
+
+    _LOCALSEND_MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024   # 2 GiB
+
+    @http.route(
+        "/api/crm/localsend/upload",
+        type="http",
+        auth="none",
+        methods=["POST", "OPTIONS"],
+        csrf=False,
+        save_session=False,
+        cors="*",
+        max_content_length=2 * 1024 * 1024 * 1024,  # 2 GiB — overrides Odoo's default 128 MiB
+    )
+    def localsend_upload_file(self, **kwargs):
+        """
+        Upload a file for LocalSend transfer (up to 2 GiB).
+
+        Stores the file as an ir.attachment owned by the caller and returns
+        the attachment_id to pass to /api/crm/localsend/transfers/create.
+
+        Request:  multipart/form-data
+          file   — the file to upload (required, field name: 'file')
+
+        Response:
+          {
+            "success": true,
+            "data": {
+              "attachment_id": 123,
+              "filename":      "report.pdf",
+              "mime_type":     "application/pdf",
+              "file_size":     2048000
+            }
+          }
+        """
+        import mimetypes as _mimetypes
+        import json as _json
+
+        def _resp(body, status=200):
+            return request.make_response(
+                _json.dumps(body),
+                headers=[("Content-Type", "application/json")],
+                status=status,
+            )
+
+        if request.httprequest.method == "OPTIONS":
+            return _resp({})
+
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return _resp({"success": False, "error": "Unauthorized"}, 401)
+
+            uploaded = (
+                request.httprequest.files.get("file")
+                or request.httprequest.files.get("files")
+            )
+            if not uploaded:
+                return _resp({"success": False, "error": "No file provided. Use field name: file"}, 400)
+
+            # When 'files' is a multi-file field take the first entry
+            if hasattr(uploaded, "getlist"):
+                uploaded = uploaded.getlist()[0] if uploaded.getlist() else None
+            if not uploaded:
+                return _resp({"success": False, "error": "No file provided"}, 400)
+
+            data = uploaded.read()
+            if len(data) > self._LOCALSEND_MAX_FILE_BYTES:
+                limit_gb = self._LOCALSEND_MAX_FILE_BYTES / (1024 ** 3)
+                return _resp(
+                    {"success": False, "error": f"File exceeds the {limit_gb:.0f} GiB limit"},
+                    400,
+                )
+
+            filename = uploaded.filename or "upload"
+            mime = (
+                uploaded.mimetype
+                or _mimetypes.guess_type(filename)[0]
+                or "application/octet-stream"
+            )
+
+            import base64 as _b64
+            attachment = request.env["ir.attachment"].sudo().create({
+                "name":       filename,
+                "datas":      _b64.b64encode(data).decode("ascii"),
+                "mimetype":   mime,
+                "res_model":  "res.users",
+                "res_id":     uid,
+                "public":     False,
+            })
+
+            return _resp({
+                "success": True,
+                "data": {
+                    "attachment_id": attachment.id,
+                    "filename":      attachment.name,
+                    "mime_type":     attachment.mimetype or mime,
+                    "file_size":     len(data),
+                },
+            })
+
+        except Exception as exc:
+            _logger.exception("localsend_upload_file failed")
+            request.env.cr.rollback()
+            return _resp({"success": False, "error": str(exc)}, 500)
+

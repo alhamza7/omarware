@@ -15,7 +15,7 @@ _logger = logging.getLogger(__name__)
 
 def _user_to_dict(user, include_branch=True):
     """Serialize a res.users record to a CRM-safe dict."""
-    # Resolve CRM role from group membership (Odoo 19: use _has_group for sudo context)
+    # Resolve CRM role from group membership
     role = 'none'
     try:
         if user.has_group('lugal_crm.group_lugal_crm_general_manager'):
@@ -33,18 +33,41 @@ def _user_to_dict(user, include_branch=True):
     except Exception:
         pass
 
+    # job_title: Odoo stores this as 'function' on res.partner (hr module not required)
+    job_title = ''
+    try:
+        job_title = user.partner_id.function or ''
+    except Exception:
+        pass
+
+    # department / work_phone / work_email — only available when hr module is installed
+    department = ''
+    work_phone = ''
+    work_email = ''
+    try:
+        if hasattr(user, 'employee_id') and user.employee_id:
+            department  = user.employee_id.department_id.name or '' if user.employee_id.department_id else ''
+            work_phone  = user.employee_id.work_phone or ''
+            work_email  = user.employee_id.work_email or ''
+    except Exception:
+        pass
+
     data = {
-        'id': user.id,
-        'name': user.name,
-        'login': user.login,
-        'email': user.partner_id.email or '',
-        'phone': user.partner_id.phone or '',
-        'mobile': user.partner_id.mobile or '',
-        'lang': user.lang or 'en_US',
-        'tz': user.tz or 'UTC',
-        'active': user.active,
-        'role': role,
-        'avatar_url': f'/web/image/res.users/{user.id}/avatar_128',
+        'id':          user.id,
+        'name':        user.name,
+        'login':       user.login,
+        'email':       user.partner_id.email or '',
+        'phone':       user.partner_id.phone or '',
+        'mobile':      user.partner_id.mobile or '',
+        'lang':        user.lang or 'en_US',
+        'tz':          user.tz or 'UTC',
+        'active':      user.active,
+        'role':        role,
+        'avatar_url':  f'/web/image/res.users/{user.id}/avatar_128',
+        'job_title':   job_title,
+        'department':  department,
+        'work_phone':  work_phone,
+        'work_email':  work_email,
     }
 
     if include_branch:
@@ -223,19 +246,24 @@ class UserController(http.Controller):
 
     @http.route('/api/crm/users/me/update', type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def update_me(self, name=None, phone=None, mobile=None, email=None,
-                  lang=None, tz=None, signature=None, avatar_128=None, **kwargs):
+                  lang=None, tz=None, signature=None, avatar_128=None,
+                  job_title=None, work_phone=None, work_email=None,
+                  **kwargs):
         """
         Update the currently authenticated user's own profile.
 
         Accepted fields (all optional — only supplied fields are changed):
           name        — display name
-          phone       — work phone
+          phone       — work phone (partner)
           mobile      — mobile number
           email       — email address
           lang        — language code  e.g. 'en_US', 'ar_001'
           tz          — timezone       e.g. 'Asia/Riyadh'
           signature   — email signature HTML
           avatar_128  — base64-encoded profile picture
+          job_title   — job title (stored via hr.employee)
+          work_phone  — work phone from employee record
+          work_email  — work email from employee record
         """
         try:
             uid = ensure_jwt_user_id()
@@ -248,6 +276,7 @@ class UserController(http.Controller):
 
             user_vals    = {}
             partner_vals = {}
+            employee_vals = {}
 
             if name is not None:
                 user_vals['name'] = name.strip()
@@ -257,6 +286,9 @@ class UserController(http.Controller):
                 user_vals['tz'] = tz
             if signature is not None:
                 user_vals['signature'] = signature
+            if job_title is not None:
+                # job_title maps to 'function' on res.partner (Odoo's Job Position field, no hr module needed)
+                partner_vals['function'] = job_title.strip()
             if avatar_128 is not None:
                 try:
                     import base64 as _b64
@@ -281,10 +313,17 @@ class UserController(http.Controller):
             if email is not None:
                 partner_vals['email'] = email.strip().lower()
 
+            if work_phone is not None:
+                employee_vals['work_phone'] = work_phone
+            if work_email is not None:
+                employee_vals['work_email'] = work_email.strip().lower()
+
             if user_vals:
                 user.write(user_vals)
             if partner_vals:
                 user.partner_id.write(partner_vals)
+            if employee_vals and hasattr(user, 'employee_id') and user.employee_id:
+                user.employee_id.write(employee_vals)
 
             return {'success': True, 'data': _user_to_dict(user)}
         except Exception as e:
