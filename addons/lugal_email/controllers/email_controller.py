@@ -319,28 +319,38 @@ def _refresh_account_unread_count(account):
 def _propagate_read_to_sent_copies(env, message_id, read_at):
     """
     When a recipient marks an inbox message as read, find the matching sent-folder
-    copy (same RFC 2822 Message-ID) in any Lugal account and mark it read too.
+    copy (same RFC 2822 Message-ID) in any Lugal account and stamp:
 
-    This is what drives is_read/read_at on *sent* messages — they track whether the
-    recipient has read the message, not whether the sender opened their own copy.
+      - recipient_read_at  → exposed in the sent-folder API as the moment the
+                             recipient actually opened the email
+      - is_read = True     → clears the sender's sent-folder unread badge
+      - read_at            → kept in sync for backward compatibility
+
+    The search gate is `recipient_read_at IS NULL` (not `is_read=False`) so
+    that we still stamp recipient_read_at even when is_read was set to True
+    earlier by an unrelated path (IMAP \\Seen sync, manual mark, etc.).
+    Without this, the sender's API always returned recipient_read_at=null
+    even after the recipient genuinely read the message.
     """
-    if not message_id:
+    if not message_id or not read_at:
         return
     try:
         sent_copies = env['lugal.email.message'].sudo().search([
             ('message_id', '=', message_id),
-            ('is_read', '=', False),
             ('is_deleted', '=', False),
+            ('recipient_read_at', '=', False),
         ])
         sent_copies = sent_copies.filtered(lambda msg: _is_sent_folder(msg.folder))
         if sent_copies:
             sent_copies.with_context(lugal_recipient_read=True).write({
                 'is_read': True,
                 'read_at': read_at,
+                'recipient_read_at': read_at,
             })
             _logger.info(
-                '_propagate_read_to_sent_copies: marked %d sent copy(s) read '
-                'for message_id=%s', len(sent_copies), message_id,
+                '_propagate_read_to_sent_copies: stamped recipient_read_at on '
+                '%d sent copy(s) for message_id=%s at %s',
+                len(sent_copies), message_id, read_at,
             )
     except Exception as exc:
         _logger.warning(

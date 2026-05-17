@@ -21,6 +21,12 @@ from odoo.http import request, Response
 from ._auth import ensure_jwt_user_id
 from ._error import crm_error
 
+# Used to stamp recipient_read_at on the sender's sent-folder copy when this
+# user marks an email (or all emails) as read via the notifications endpoint.
+from odoo.addons.lugal_email.controllers.email_controller import (
+    _propagate_read_to_sent_copies,
+)
+
 _logger = logging.getLogger(__name__)
 
 # Riyadh = UTC+3, no DST
@@ -350,8 +356,33 @@ class CrmNotificationsController(http.Controller):
                     ] + notification_folder_domain)
 
                 if msgs:
+                    # Capture state BEFORE write so we know which rows actually
+                    # transitioned unread → read on THIS call, and remember each
+                    # one's RFC-2822 Message-ID for sent-copy propagation.
+                    from odoo import fields as _odoo_fields
+                    _newly_read = [
+                        (m.id, m.message_id, m.read_at)
+                        for m in msgs
+                        if not m.is_read and m.message_id
+                    ]
                     msgs.write({'is_read': True})
                     email_marked = len(msgs)
+                    # Propagate the recipient-read timestamp to the senders'
+                    # sent copies so /api/lugal/email/sync?folder=sent shows
+                    # recipient_read_at correctly.
+                    _now = _odoo_fields.Datetime.now()
+                    for _mid, _msg_rfc_id, _prior_read_at in _newly_read:
+                        try:
+                            _propagate_read_to_sent_copies(
+                                request.env,
+                                _msg_rfc_id,
+                                _prior_read_at or _now,
+                            )
+                        except Exception as _prop_exc:
+                            _logger.warning(
+                                'mark_read: recipient_read_at propagation failed '
+                                'msg=%s: %s', _mid, _prop_exc,
+                            )
                     for acc in Acc.browse(acc_ids):
                         unread_count = EmailMsg.search_count([
                             ('account_id', '=', acc.id),
