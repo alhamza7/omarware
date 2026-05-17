@@ -27,6 +27,9 @@ status
 odoo/filestore
 filestore_local/
 filestore_ws/
+data/filestore/
+data/sessions/
+odoo_simple_nohup.out
 
 # Python virtual environments
 venv/
