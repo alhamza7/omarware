@@ -368,14 +368,16 @@ class SupplyStoriesController(http.Controller):
             # Authors don't count as viewers of their own story
             if story.author_id.id != uid and uid not in story.viewer_ids.ids:
                 story.write({'viewer_ids': [(4, uid)]})
-                now = _dt.datetime.now(_RIYADH_TZ)
-                viewed_at_iso = now.isoformat(timespec='seconds')
+                # Use naive UTC for Odoo storage; format with +03:00 offset for API response
+                now_utc = _dt.datetime.utcnow()
+                now_display = now_utc.replace(tzinfo=timezone.utc).astimezone(_RIYADH_TZ)
+                viewed_at_iso = now_display.isoformat(timespec='seconds')
 
-                # Persist the view receipt with timestamp
+                # Persist the view receipt with timestamp (naive UTC — Odoo requirement)
                 ViewReceipt = request.env['lugal.supply.story.view.receipt'].sudo()
                 existing = ViewReceipt.search([('story_id', '=', story.id), ('user_id', '=', uid)], limit=1)
                 if not existing:
-                    ViewReceipt.create({'story_id': story.id, 'user_id': uid, 'viewed_at': now})
+                    ViewReceipt.create({'story_id': story.id, 'user_id': uid, 'viewed_at': now_utc})
 
                 # Notify the author
                 try:
