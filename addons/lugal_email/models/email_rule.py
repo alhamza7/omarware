@@ -245,8 +245,17 @@ class LugalEmailRule(models.Model):
                 _logger.warning('Email rule action %r failed: %s', action, _e)
 
         if write_vals:
+            # Use a savepoint so that a DB-level constraint violation (e.g.
+            # (account_id, imap_uid, folder) unique index when the destination
+            # folder was already synced independently) does NOT leave the outer
+            # PostgreSQL transaction in an aborted state.  Without this, the
+            # caught exception silently corrupts the parent savepoint in
+            # _upsert_batch, causing the entire message insert to be rolled
+            # back and the IMAP max-uid cursor to stall — emails end up re-
+            # appearing in inbox on every sync.
             try:
-                msg_record.write(write_vals)
+                with self.env.cr.savepoint():
+                    msg_record.write(write_vals)
                 if msg_record.account_id and (
                     'folder' in write_vals or 'is_read' in write_vals
                 ):
@@ -258,7 +267,8 @@ class LugalEmailRule(models.Model):
                     ])
                     msg_record.account_id.sudo().write({'unread_count': unread_count})
             except Exception as _e:
-                _logger.warning('Email rule write failed: %s', _e)
+                _logger.warning('Email rule write failed for msg %s: %s',
+                                getattr(msg_record, 'id', '?'), _e)
 
         # Fire IMAP moves after the DB write
         for move in _imap_moves:
@@ -272,12 +282,14 @@ class LugalEmailRule(models.Model):
             except Exception as _me:
                 _logger.warning('Email rule IMAP move failed: %s', _me)
 
-        # Audit
+        # Audit — use savepoint so a concurrent write failure doesn't
+        # abort the caller's transaction.
         try:
-            self.write({
-                'last_triggered_at': fields.Datetime.now(),
-                'trigger_count':     self.trigger_count + 1,
-            })
+            with self.env.cr.savepoint():
+                self.write({
+                    'last_triggered_at': fields.Datetime.now(),
+                    'trigger_count':     self.trigger_count + 1,
+                })
         except Exception:
             pass
 
@@ -289,12 +301,9 @@ class LugalEmailRule(models.Model):
     def apply_inbox_rules(self, msg_record, msg_vals: dict):
         """Run all active rules for the message owner against a freshly-imported message.
 
-        IMPORTANT: Rules only fire when the message is in the inbox folder.
-        This prevents:
-          1. Rules re-firing on messages already moved to custom folders
-          2. New emails being immediately swept out of inbox before the FE
-             can display them (which was causing the "notifications show but
-             inbox is empty" bug)
+        Rules only fire when the message is landing in the inbox folder.
+        This prevents rules from re-firing on messages already moved to custom
+        folders by a previous rule pass.
 
         msg_vals: plain dict with the same keys as the create() vals dict.
         """
@@ -303,16 +312,30 @@ class LugalEmailRule(models.Model):
         # trigger move rules — they are already where they belong.
         current_folder = (msg_vals.get('folder') or '').lower().strip()
         if current_folder not in _RULE_SOURCE_FOLDERS:
+            _logger.debug(
+                'apply_inbox_rules: skipping msg %s — folder=%r not in rule source folders',
+                getattr(msg_record, 'id', '?'), current_folder,
+            )
             return
 
         account_id = msg_vals.get('account_id')
         if not account_id:
+            _logger.debug('apply_inbox_rules: skipping msg %s — no account_id in vals',
+                          getattr(msg_record, 'id', '?'))
             return
 
         acc = self.env['lugal.email.account'].sudo().browse(account_id)
         if not acc.exists():
+            _logger.debug('apply_inbox_rules: skipping msg %s — account %s not found',
+                          getattr(msg_record, 'id', '?'), account_id)
             return
         owner_uid = acc.user_id.id
+        if not owner_uid:
+            _logger.debug(
+                'apply_inbox_rules: skipping msg %s — account %s has no user_id',
+                getattr(msg_record, 'id', '?'), account_id,
+            )
+            return
 
         # Augment vals with a real attachment sentinel.  This must not default
         # to False blindly, otherwise attachment rules never match during IMAP
@@ -330,12 +353,172 @@ class LugalEmailRule(models.Model):
             ('account_id', '=', False),
         ], order='sequence asc, id asc')
 
+        if not rules:
+            _logger.debug(
+                'apply_inbox_rules: no active rules found for user_id=%s account_id=%s',
+                owner_uid, account_id,
+            )
+            return
+
+        _logger.debug(
+            'apply_inbox_rules: evaluating %d rule(s) for msg %s '
+            '(from=%r folder=%r)',
+            len(rules), getattr(msg_record, 'id', '?'),
+            msg_vals_aug.get('from_address', ''), current_folder,
+        )
+
         for rule in rules:
             try:
                 if rule._matches(msg_vals_aug):
+                    _logger.debug(
+                        'apply_inbox_rules: rule %s matched msg %s — applying actions',
+                        rule.id, getattr(msg_record, 'id', '?'),
+                    )
                     should_stop = rule._apply_actions(msg_record)
                     if should_stop:
                         break
             except Exception as _e:
                 _logger.warning('Email rule %s evaluation error: %s', rule.id, _e)
-# TODO: remove - cherry-pick marker
+
+    # ── Retroactive apply for all inbound messages of a user ───────────────────
+
+    @api.model
+    def apply_all_rules_for_user(self, user_id, account_id=None, limit=10000):
+        """Retroactively apply all active move-rules for a user to their inbound mail.
+
+        Processes messages in ALL inbound folders (inbox + custom) so emails
+        already sitting in the wrong folder also get re-sorted.
+
+        Args:
+            user_id:    res.users id of the target user.
+            account_id: optional — restrict to a single lugal.email.account.
+            limit:      max messages to scan (default 10000).
+
+        Returns:
+            dict with keys: matched, moved, skipped, rules_considered.
+        """
+        Rule = self.sudo()
+        Msg  = self.env['lugal.email.message'].sudo()
+
+        rule_domain = [('user_id', '=', user_id), ('is_active', '=', True)]
+        msg_domain  = [
+            ('account_id.user_id', '=', user_id),
+            ('folder', 'not in', ['sent', 'drafts', 'trash', 'spam']),
+            ('is_deleted', '=', False),
+        ]
+        if account_id:
+            aid = int(account_id)
+            rule_domain.append(('account_id', '=', aid))
+            msg_domain.append(('account_id',  '=', aid))
+
+        rules = Rule.search(rule_domain, order='sequence asc, id asc')
+        move_rules = rules.filtered(lambda r: any(
+            act.get('action') == 'move_folder' and (act.get('value') or '').strip()
+            for act in (self._safe_json(r.actions_json))
+        ))
+
+        if not move_rules:
+            _logger.info(
+                'apply_all_rules_for_user: no active move-rules for user_id=%s', user_id,
+            )
+            return {'matched': 0, 'moved': 0, 'skipped': 0, 'rules_considered': 0}
+
+        matched = moved = skipped = 0
+        affected_accounts = self.env['lugal.email.account'].sudo().browse()
+
+        for msg in Msg.search(msg_domain, order='date desc, id desc', limit=limit):
+            msg_vals = {
+                'from_address':  msg.from_address or '',
+                'to_addresses':  msg.to_addresses or '',
+                'cc_addresses':  msg.cc_addresses or '',
+                'bcc_addresses': msg.bcc_addresses or '',
+                'subject':       msg.subject or '',
+                'body_text':     msg.body_text or '',
+                'has_attachments': self._message_has_attachments(msg),
+                'is_important':  msg.is_important,
+                'is_read':       msg.is_read,
+                'is_starred':    msg.is_starred,
+                'folder':        msg.folder or '',
+                'account_id':    msg.account_id.id,
+            }
+            for rule in move_rules:
+                try:
+                    if not rule._matches(msg_vals):
+                        continue
+
+                    # Determine destination folder
+                    dest = next(
+                        (
+                            act.get('value', '').strip()
+                            for act in self._safe_json(rule.actions_json)
+                            if act.get('action') == 'move_folder'
+                            and (act.get('value') or '').strip()
+                        ),
+                        None,
+                    )
+                    if not dest:
+                        continue
+
+                    # Skip if already in the correct folder branch
+                    cur = (msg.folder or '').strip()
+                    already_there = (
+                        cur == dest
+                        or cur.startswith(dest + '.')
+                        or cur.startswith(dest + '/')
+                    )
+                    if already_there:
+                        if rule.stop_processing:
+                            break
+                        continue
+
+                    matched += 1
+                    before_folder = msg.folder
+                    affected_accounts |= msg.account_id
+                    rule._apply_actions(msg)
+                    msg.invalidate_recordset()
+                    if msg.folder != before_folder:
+                        moved += 1
+                        _logger.info(
+                            'apply_all_rules_for_user: moved msg %s '
+                            '(%r) %r → %r via rule %s',
+                            msg.id, msg.subject, before_folder, msg.folder, rule.id,
+                        )
+                    if rule.stop_processing:
+                        break
+                except Exception as exc:
+                    skipped += 1
+                    _logger.warning(
+                        'apply_all_rules_for_user: rule %s / msg %s failed: %s',
+                        rule.id, msg.id, exc,
+                    )
+                    break
+
+        # Refresh unread counts
+        for acc in affected_accounts:
+            unread = Msg.search_count([
+                ('account_id', '=', acc.id),
+                ('folder', 'not in', ['sent', 'drafts', 'trash', 'spam']),
+                ('is_read', '=', False),
+                ('is_deleted', '=', False),
+            ])
+            acc.write({'unread_count': unread})
+
+        _logger.info(
+            'apply_all_rules_for_user: user_id=%s rules=%d '
+            'matched=%d moved=%d skipped=%d',
+            user_id, len(move_rules), matched, moved, skipped,
+        )
+        return {
+            'matched': matched,
+            'moved': moved,
+            'skipped': skipped,
+            'rules_considered': len(move_rules),
+        }
+
+    @staticmethod
+    def _safe_json(raw):
+        """Parse a JSON field, returning [] on any error."""
+        try:
+            return json.loads(raw or '[]') or []
+        except Exception:
+            return []

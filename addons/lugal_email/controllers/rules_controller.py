@@ -557,6 +557,43 @@ class EmailRulesController(http.Controller):
         except Exception as exc:
             return _json_err(str(exc), 500)
 
+    # ── Apply ALL rules for current user retroactively ────────────────────────
+
+    @http.route('/api/lugal/email/rules/apply_all_for_account', type='http',
+                auth='none', csrf=False, methods=['POST', 'OPTIONS'])
+    def rules_apply_all_for_account(self, **kwargs):
+        """Apply all active move-rules for the authenticated user to all their
+        inbound messages (inbox + custom folders).
+
+        Optional JSON body:
+          { "account_id": <int>  }   — restrict to one account
+
+        Returns:
+          { matched, moved, skipped, rules_considered }
+        """
+        if request.httprequest.method == 'OPTIONS':
+            return _json_ok({})
+        uid = _ensure_jwt()
+        if not uid:
+            return _json_err('Unauthorized', 401)
+        try:
+            body       = json.loads(request.httprequest.data or '{}')
+            account_id = body.get('account_id')
+            if account_id:
+                acc = request.env['lugal.email.account'].sudo().browse(int(account_id))
+                if not acc.exists() or acc.user_id.id != uid:
+                    return _json_err('Account not found', 404)
+
+            result = request.env['lugal.email.rule'].sudo().apply_all_rules_for_user(
+                uid,
+                account_id=int(account_id) if account_id else None,
+            )
+            request.env.cr.commit()
+            return _json_ok(result)
+        except Exception as exc:
+            _logger.exception('rules_apply_all_for_account failed uid=%s', uid)
+            return _json_err(str(exc), 500)
+
     # ── Dry-run test ──────────────────────────────────────────────────────────
 
     @http.route('/api/lugal/email/rules/<int:rule_id>/test', type='http', auth='none', csrf=False,
