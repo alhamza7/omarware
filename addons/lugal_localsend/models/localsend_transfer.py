@@ -92,6 +92,33 @@ class LugalLocalSendTransfer(models.Model):
     def action_cancel(self):
         self.write({"status": "cancelled", "finished_at": fields.Datetime.now()})
 
+    def _notify_via_bus(self, event_type: str, extra: dict = None):
+        """
+        Push a bus notification to the relevant user(s) for this transfer.
+        Uses the localsend_user.<uid> channel the FE should subscribe to.
+        Swallows all exceptions so it never crashes the calling flow.
+        """
+        payload = {
+            "transfer_id":       self.id,
+            "name":              self.name or "",
+            "status":            self.status,
+            "source_user_id":    self.source_user_id.id if self.source_user_id else None,
+            "source_user_name":  self.source_user_id.name if self.source_user_id else "",
+            "target_user_id":    self.target_user_id.id if self.target_user_id else None,
+            "target_user_name":  self.target_user_id.name if self.target_user_id else "",
+            "file_name":         self.attachment_id.name if self.attachment_id else "",
+            "file_size":         self.file_size or 0,
+            "mime_type":         self.mime_type or "",
+            "error_message":     self.error_message or "",
+            **(extra or {}),
+        }
+        Bus = self.env["bus.bus"].sudo()
+        for uid in {self.source_user_id.id, self.target_user_id.id} - {False, None}:
+            try:
+                Bus._sendone("localsend_user.%d" % uid, event_type, payload)
+            except Exception as exc:
+                _logger.debug("localsend bus notify failed uid=%s: %s", uid, exc)
+
     def _preflight_device_check(self, device, timeout=5):
         """
         Quick TCP-level reachability probe before the full LocalSend handshake.
@@ -137,6 +164,7 @@ class LugalLocalSendTransfer(models.Model):
                 "finished_at": fields.Datetime.now(),
                 "error_message": preflight_err,
             })
+            self._notify_via_bus("localsend.transfer.failed", {"error_message": preflight_err})
             raise UserError(preflight_err)
 
         self.write({"status": "sending", "started_at": fields.Datetime.now(), "error_message": False})
@@ -223,6 +251,7 @@ class LugalLocalSendTransfer(models.Model):
                     "error_message": False,
                 }
             )
+            self._notify_via_bus("localsend.transfer.sent")
         except error.HTTPError as exc:
             body = ""
             try:
@@ -232,6 +261,7 @@ class LugalLocalSendTransfer(models.Model):
             msg = "LocalSend HTTP %s at %s — %s" % (exc.code, prepare_url, body or exc.reason)
             _logger.warning("localsend transfer %s failed: %s", self.id, msg)
             self.write({"status": "failed", "finished_at": fields.Datetime.now(), "error_message": msg})
+            self._notify_via_bus("localsend.transfer.failed", {"error_message": msg})
             raise UserError(msg)
         except UserError:
             raise
@@ -241,4 +271,5 @@ class LugalLocalSendTransfer(models.Model):
             )
             _logger.exception("localsend transfer %s failed", self.id)
             self.write({"status": "failed", "finished_at": fields.Datetime.now(), "error_message": msg})
+            self._notify_via_bus("localsend.transfer.failed", {"error_message": msg})
             raise UserError(msg)

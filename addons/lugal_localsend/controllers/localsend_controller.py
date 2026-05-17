@@ -197,10 +197,32 @@ class LocalSendCrmController(http.Controller):
             ip = _effective_lan_ip(**kwargs)
             device = _resolve_sender_device(request.env, uid)
             if device:
+                was_online = device.is_online
                 vals = {"is_online": True, "last_seen": fields.Datetime.now()}
                 if ip and device.ip_address != ip:
                     vals["ip_address"] = ip
                 device.write(vals)
+
+                # If the device just came back online, auto-retry any queued transfers
+                # that were targeting this device.
+                if not was_online:
+                    pending = request.env["lugal.localsend.transfer"].sudo().search([
+                        ("target_device_id", "=", device.id),
+                        ("status", "in", ["queued", "failed"]),
+                    ], limit=10, order="create_date asc")
+                    if pending:
+                        _logger.info(
+                            "localsend heartbeat: device %s back online — retrying %d queued transfer(s)",
+                            device.id, len(pending),
+                        )
+                        for t in pending:
+                            try:
+                                t._send_via_localsend()
+                            except Exception as exc:
+                                _logger.warning(
+                                    "localsend auto-retry transfer %s failed: %s", t.id, exc
+                                )
+
                 return {"success": True, "data": _serialize_device(device)}
             return {"success": False, "error": "No device registered for this user", "data": None}
         except Exception as exc:
@@ -522,6 +544,16 @@ class LocalSendCrmController(http.Controller):
                         "error": str(send_exc),
                         "data": self._serialize_transfer(transfer),
                     }
+            else:
+                # Queue the transfer and notify the target user via bus so their
+                # FE can prompt them to open LocalSend.
+                transfer.write({"status": "queued"})
+                transfer._notify_via_bus(
+                    "localsend.transfer.pending",
+                    {"message": "%s wants to send you a file (%s). Please open LocalSend to receive it." % (
+                        transfer.source_user_id.name or "Someone", transfer.name or "a file"
+                    )},
+                )
 
             return {"success": True, "data": self._serialize_transfer(transfer)}
         except Exception as exc:
@@ -582,7 +614,43 @@ class LocalSendCrmController(http.Controller):
             return {"success": False, "error": str(exc), "data": None}
 
     @http.route(
-        "/api/crm/localsend/transfers/<int:transfer_id>/send",
+        "/api/crm/localsend/transfers/<int:transfer_id>/retry",
+        type="jsonrpc",
+        auth="none",
+        csrf=False,
+        methods=["POST"],
+    )
+    def localsend_transfer_retry(self, transfer_id, **kwargs):
+        """Retry a failed transfer. Resets status to 'queued' then attempts to send."""
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {"success": False, "error": "Unauthorized", "data": None}
+
+            t = request.env["lugal.localsend.transfer"].sudo().browse(transfer_id).exists()
+            if not t:
+                return {"success": False, "error": "Transfer not found", "data": None}
+            if t.source_user_id.id != uid and not _is_localsend_manager(request.env):
+                return {"success": False, "error": "Forbidden", "data": None}
+            if t.status not in ("failed", "queued", "draft"):
+                return {
+                    "success": False,
+                    "error": "Only failed/queued/draft transfers can be retried (current: %s)" % t.status,
+                    "data": None,
+                }
+
+            t.write({"status": "queued", "error_message": False})
+            try:
+                t._send_via_localsend()
+            except Exception as send_exc:
+                return {"success": False, "error": str(send_exc), "data": self._serialize_transfer(t)}
+
+            return {"success": True, "data": self._serialize_transfer(t)}
+        except Exception as exc:
+            _logger.exception("localsend_transfer_retry failed")
+            return {"success": False, "error": str(exc), "data": None}
+
+    @http.route(
         type="jsonrpc",
         auth="none",
         csrf=False,
