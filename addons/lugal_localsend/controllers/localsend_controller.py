@@ -442,9 +442,10 @@ class LocalSendCrmController(http.Controller):
     # ------------------------------------------------------------------
 
     def _serialize_transfer(self, t):
-        ip   = t.target_device_id.ip_address if t.target_device_id else ""
-        port = int(t.target_device_id.port or 53317) if t.target_device_id else 53317
+        ip    = t.target_device_id.ip_address if t.target_device_id else ""
+        port  = int(t.target_device_id.port or 53317) if t.target_device_id else 53317
         proto = (t.target_device_id.protocol or "http") if t.target_device_id else "http"
+        att_id = t.attachment_id.id if t.attachment_id else None
         return {
             "id":                   t.id,
             "name":                 t.name or "",
@@ -460,10 +461,13 @@ class LocalSendCrmController(http.Controller):
             "target_device_ip":     ip,
             "target_device_port":   port,
             "target_device_url":    "%s://%s:%s" % (proto, ip, port) if ip else "",
-            "attachment_id":        t.attachment_id.id if t.attachment_id else None,
+            "attachment_id":        att_id,
             "file_name":            t.attachment_id.name if t.attachment_id else "",
             "file_size":            t.file_size or 0,
             "mime_type":            t.mime_type or "",
+            # Browser-accessible download URL — always present regardless of LocalSend status
+            "download_url":         "/web/content/%d?download=true" % att_id if att_id else "",
+            "preview_url":          "/web/content/%d" % att_id if att_id else "",
             "error_message":        t.error_message or "",
             "localsend_session_id": t.localsend_session_id or "",
             "started_at":           t.started_at.isoformat() if t.started_at else None,
@@ -479,7 +483,11 @@ class LocalSendCrmController(http.Controller):
         methods=["POST"],
     )
     def localsend_transfer_create(self, **kwargs):
-        """Create a LocalSend transfer record and optionally trigger sending immediately.
+        """Create a transfer and immediately make the file available for download.
+
+        The file is stored on Odoo as an ir.attachment — the receiver can always
+        download it from the browser via download_url without any LocalSend app.
+        LocalSend push is attempted as an optional fast-path.
 
         Required params:
           target_user_id   — recipient user ID
@@ -487,8 +495,10 @@ class LocalSendCrmController(http.Controller):
 
         Optional params:
           target_device_id — specific device ID for the recipient (auto-resolved if omitted)
-          name             — human-readable label for the transfer
-          send_now         — true/false (default true) — trigger the send immediately
+          name             — human-readable label
+          send_now         — true/false (default true)
+                             true:  attempt LocalSend push immediately
+                             false: mark queued only (auto-retry on next heartbeat)
         """
         try:
             uid = ensure_jwt_user_id()
@@ -515,7 +525,6 @@ class LocalSendCrmController(http.Controller):
             if not target_device:
                 return {"success": False, "error": err or "Target device not found", "data": None}
 
-            # Verify attachment belongs to caller (or caller is manager)
             att = env["ir.attachment"].sudo().browse(attachment_id).exists()
             if not att:
                 return {"success": False, "error": "Attachment not found", "data": None}
@@ -529,31 +538,34 @@ class LocalSendCrmController(http.Controller):
                 "source_device_id": sender_device.id,
                 "target_device_id": target_device.id,
                 "attachment_id":    attachment_id,
-                "status":           "draft",
+                "status":           "queued",
             })
 
+            sender = env["res.users"].sudo().browse(uid)
+
+            # ── Always notify the target user FIRST with a download URL ──────
+            # This guarantees the receiver can get the file from the browser
+            # regardless of whether LocalSend is installed or running.
+            transfer._notify_via_bus(
+                "localsend.transfer.available",
+                {
+                    "delivery_method": "pending",
+                    "message": "%s sent you '%s'. You can download it now." % (
+                        sender.name or "Someone", transfer.name or "a file",
+                    ),
+                },
+            )
+
+            # ── Optionally attempt LocalSend push ─────────────────────────────
             send_now = str(kwargs.get("send_now", "true")).lower() not in ("false", "0", "no")
             if send_now:
+                # _send_via_localsend will NOT raise on connection-refused —
+                # it falls back gracefully to status=queued and emits another bus event.
                 try:
                     transfer._send_via_localsend()
                 except Exception as send_exc:
-                    # Transfer record is already updated to failed by _send_via_localsend
-                    _logger.warning("localsend_transfer_create: send failed: %s", send_exc)
-                    return {
-                        "success": False,
-                        "error": str(send_exc),
-                        "data": self._serialize_transfer(transfer),
-                    }
-            else:
-                # Queue the transfer and notify the target user via bus so their
-                # FE can prompt them to open LocalSend.
-                transfer.write({"status": "queued"})
-                transfer._notify_via_bus(
-                    "localsend.transfer.pending",
-                    {"message": "%s wants to send you a file (%s). Please open LocalSend to receive it." % (
-                        transfer.source_user_id.name or "Someone", transfer.name or "a file"
-                    )},
-                )
+                    # Only hard errors (missing attachment, UserError) reach here.
+                    _logger.warning("localsend_transfer_create send_exc: %s", send_exc)
 
             return {"success": True, "data": self._serialize_transfer(transfer)}
         except Exception as exc:
@@ -572,7 +584,7 @@ class LocalSendCrmController(http.Controller):
 
         Optional params:
           direction  — 'sent' | 'received' | 'all' (default 'all')
-          status     — filter by status (draft/queued/sending/sent/failed/cancelled)
+          status     — filter by status
           limit      — max records (default 50)
           offset     — skip N records (default 0)
         """
@@ -614,50 +626,14 @@ class LocalSendCrmController(http.Controller):
             return {"success": False, "error": str(exc), "data": None}
 
     @http.route(
-        "/api/crm/localsend/transfers/<int:transfer_id>/retry",
-        type="jsonrpc",
-        auth="none",
-        csrf=False,
-        methods=["POST"],
-    )
-    def localsend_transfer_retry(self, transfer_id, **kwargs):
-        """Retry a failed transfer. Resets status to 'queued' then attempts to send."""
-        try:
-            uid = ensure_jwt_user_id()
-            if not uid:
-                return {"success": False, "error": "Unauthorized", "data": None}
-
-            t = request.env["lugal.localsend.transfer"].sudo().browse(transfer_id).exists()
-            if not t:
-                return {"success": False, "error": "Transfer not found", "data": None}
-            if t.source_user_id.id != uid and not _is_localsend_manager(request.env):
-                return {"success": False, "error": "Forbidden", "data": None}
-            if t.status not in ("failed", "queued", "draft"):
-                return {
-                    "success": False,
-                    "error": "Only failed/queued/draft transfers can be retried (current: %s)" % t.status,
-                    "data": None,
-                }
-
-            t.write({"status": "queued", "error_message": False})
-            try:
-                t._send_via_localsend()
-            except Exception as send_exc:
-                return {"success": False, "error": str(send_exc), "data": self._serialize_transfer(t)}
-
-            return {"success": True, "data": self._serialize_transfer(t)}
-        except Exception as exc:
-            _logger.exception("localsend_transfer_retry failed")
-            return {"success": False, "error": str(exc), "data": None}
-
-    @http.route(
+        "/api/crm/localsend/transfers/<int:transfer_id>/send",
         type="jsonrpc",
         auth="none",
         csrf=False,
         methods=["POST"],
     )
     def localsend_transfer_send(self, transfer_id, **kwargs):
-        """Trigger (or re-trigger) the actual LocalSend file push for an existing transfer."""
+        """Trigger (or re-trigger) the LocalSend file push for an existing transfer."""
         try:
             uid = ensure_jwt_user_id()
             if not uid:
@@ -680,6 +656,75 @@ class LocalSendCrmController(http.Controller):
             return {"success": False, "error": str(exc), "data": None}
 
     @http.route(
+        "/api/crm/localsend/transfers/<int:transfer_id>/retry",
+        type="jsonrpc",
+        auth="none",
+        csrf=False,
+        methods=["POST"],
+    )
+    def localsend_transfer_retry(self, transfer_id, **kwargs):
+        """Retry a queued/available/failed transfer via LocalSend."""
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {"success": False, "error": "Unauthorized", "data": None}
+
+            t = request.env["lugal.localsend.transfer"].sudo().browse(transfer_id).exists()
+            if not t:
+                return {"success": False, "error": "Transfer not found", "data": None}
+            if t.source_user_id.id != uid and not _is_localsend_manager(request.env):
+                return {"success": False, "error": "Forbidden", "data": None}
+            if t.status not in ("failed", "queued", "available", "draft"):
+                return {
+                    "success": False,
+                    "error": "Cannot retry transfer with status '%s'" % t.status,
+                    "data": None,
+                }
+
+            t.write({"status": "queued", "error_message": False})
+            try:
+                t._send_via_localsend()
+            except Exception as send_exc:
+                return {"success": False, "error": str(send_exc), "data": self._serialize_transfer(t)}
+
+            return {"success": True, "data": self._serialize_transfer(t)}
+        except Exception as exc:
+            _logger.exception("localsend_transfer_retry failed")
+            return {"success": False, "error": str(exc), "data": None}
+
+    @http.route(
+        "/api/crm/localsend/transfers/<int:transfer_id>/downloaded",
+        type="jsonrpc",
+        auth="none",
+        csrf=False,
+        methods=["POST"],
+    )
+    def localsend_transfer_downloaded(self, transfer_id, **kwargs):
+        """
+        Receiver calls this endpoint after downloading the file from the browser.
+        Marks the transfer as 'downloaded' and notifies the sender.
+        """
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {"success": False, "error": "Unauthorized", "data": None}
+
+            t = request.env["lugal.localsend.transfer"].sudo().browse(transfer_id).exists()
+            if not t:
+                return {"success": False, "error": "Transfer not found", "data": None}
+            if t.target_user_id.id != uid and not _is_localsend_manager(request.env):
+                return {"success": False, "error": "Forbidden — only the recipient can confirm download", "data": None}
+            if t.status in ("sent", "downloaded", "cancelled"):
+                return {"success": True, "data": self._serialize_transfer(t)}
+
+            t.write({"status": "downloaded", "finished_at": fields.Datetime.now()})
+            t._notify_via_bus("localsend.transfer.downloaded")
+            return {"success": True, "data": self._serialize_transfer(t)}
+        except Exception as exc:
+            _logger.exception("localsend_transfer_downloaded failed")
+            return {"success": False, "error": str(exc), "data": None}
+
+    @http.route(
         "/api/crm/localsend/transfers/<int:transfer_id>/cancel",
         type="jsonrpc",
         auth="none",
@@ -698,11 +743,13 @@ class LocalSendCrmController(http.Controller):
                 return {"success": False, "error": "Transfer not found", "data": None}
             if t.source_user_id.id != uid and not _is_localsend_manager(request.env):
                 return {"success": False, "error": "Forbidden", "data": None}
-            if t.status in ("sent", "cancelled"):
-                return {"success": False, "error": f"Cannot cancel a transfer with status '{t.status}'", "data": None}
+            if t.status in ("sent", "downloaded", "cancelled"):
+                return {"success": False, "error": "Cannot cancel a transfer with status '%s'" % t.status, "data": None}
 
             t.action_cancel()
+            t._notify_via_bus("localsend.transfer.cancelled")
             return {"success": True, "data": self._serialize_transfer(t)}
         except Exception as exc:
             _logger.exception("localsend_transfer_cancel failed")
             return {"success": False, "error": str(exc), "data": None}
+

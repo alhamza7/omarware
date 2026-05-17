@@ -25,11 +25,11 @@
             <form>
                 <header>
                     <button name="action_queue" type="object" string="Queue" class="btn-primary" invisible="status != 'draft'"/>
-                    <button name="action_send_now" type="object" string="Send Now" class="btn-primary" invisible="status in ['sending','sent','cancelled']"/>
-                    <button name="action_mark_sent" type="object" string="Mark Sent" class="btn-success" invisible="status in ['sent','failed','cancelled']"/>
-                    <button name="action_mark_failed" type="object" string="Mark Failed" class="btn-secondary" invisible="status in ['sent','failed','cancelled']"/>
-                    <button name="action_cancel" type="object" string="Cancel" invisible="status in ['sent','failed','cancelled']"/>
-                    <field name="status" widget="statusbar"/>
+                    <button name="action_send_now" type="object" string="Send via LocalSend" class="btn-primary" invisible="status in ['sending','sent','downloaded','cancelled']"/>
+                    <button name="action_mark_sent" type="object" string="Mark Sent" class="btn-success" invisible="status in ['sent','downloaded','failed','cancelled']"/>
+                    <button name="action_mark_failed" type="object" string="Mark Failed" class="btn-secondary" invisible="status in ['sent','downloaded','failed','cancelled']"/>
+                    <button name="action_cancel" type="object" string="Cancel" invisible="status in ['sent','downloaded','failed','cancelled']"/>
+                    <field name="status" widget="statusbar" statusbar_visible="draft,queued,available,sent,downloaded"/>
                 </header>
                 <sheet>
                     <group>

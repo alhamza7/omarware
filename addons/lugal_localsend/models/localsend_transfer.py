@@ -59,11 +59,13 @@ class LugalLocalSendTransfer(models.Model):
     mime_type = fields.Char(related="attachment_id.mimetype", store=True)
     status = fields.Selection(
         [
-            ("draft", "Draft"),
-            ("queued", "Queued"),
-            ("sending", "Sending"),
-            ("sent", "Sent"),
-            ("failed", "Failed"),
+            ("draft",     "Draft"),
+            ("queued",    "Queued – Awaiting Receiver"),
+            ("sending",   "Sending via LocalSend"),
+            ("sent",      "Sent via LocalSend"),
+            ("available", "Available for Download"),
+            ("downloaded","Downloaded"),
+            ("failed",    "Failed"),
             ("cancelled", "Cancelled"),
         ],
         default="draft",
@@ -92,24 +94,60 @@ class LugalLocalSendTransfer(models.Model):
     def action_cancel(self):
         self.write({"status": "cancelled", "finished_at": fields.Datetime.now()})
 
+    # ──────────────────────────────────────────────────────────────────────────
+    # Download URL helpers
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _download_url(self):
+        """
+        Return the Odoo download URL for this transfer's attachment.
+        The browser can download the file directly via this URL without
+        requiring LocalSend to be installed.
+        """
+        if not self.attachment_id:
+            return ""
+        return "/web/content/%d?download=true" % self.attachment_id.id
+
+    def _preview_url(self):
+        """Inline view URL (no download=true, good for images/PDFs in-browser)."""
+        if not self.attachment_id:
+            return ""
+        return "/web/content/%d" % self.attachment_id.id
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Bus notifications
+    # ──────────────────────────────────────────────────────────────────────────
+
     def _notify_via_bus(self, event_type: str, extra: dict = None):
         """
-        Push a bus notification to the relevant user(s) for this transfer.
-        Uses the localsend_user.<uid> channel the FE should subscribe to.
-        Swallows all exceptions so it never crashes the calling flow.
+        Push a real-time notification to both sender and receiver.
+
+        FE subscription channel:  localsend_user.<uid>
+        Events emitted:
+          localsend.transfer.available  — file ready to download from Odoo
+          localsend.transfer.sent       — file delivered via LocalSend
+          localsend.transfer.failed     — unrecoverable failure
+          localsend.transfer.queued     — queued for retry when LocalSend opens
+          localsend.transfer.downloaded — receiver confirmed download
+          localsend.transfer.cancelled  — transfer cancelled
+
+        Every payload always includes download_url so the FE can provide a
+        fallback download button even when LocalSend is unavailable.
         """
         payload = {
-            "transfer_id":       self.id,
-            "name":              self.name or "",
-            "status":            self.status,
-            "source_user_id":    self.source_user_id.id if self.source_user_id else None,
-            "source_user_name":  self.source_user_id.name if self.source_user_id else "",
-            "target_user_id":    self.target_user_id.id if self.target_user_id else None,
-            "target_user_name":  self.target_user_id.name if self.target_user_id else "",
-            "file_name":         self.attachment_id.name if self.attachment_id else "",
-            "file_size":         self.file_size or 0,
-            "mime_type":         self.mime_type or "",
-            "error_message":     self.error_message or "",
+            "transfer_id":    self.id,
+            "name":           self.name or "",
+            "status":         self.status,
+            "source_user_id": self.source_user_id.id if self.source_user_id else None,
+            "source_user_name": self.source_user_id.name if self.source_user_id else "",
+            "target_user_id": self.target_user_id.id if self.target_user_id else None,
+            "target_user_name": self.target_user_id.name if self.target_user_id else "",
+            "file_name":      self.attachment_id.name if self.attachment_id else "",
+            "file_size":      self.file_size or 0,
+            "mime_type":      self.mime_type or "",
+            "download_url":   self._download_url(),
+            "preview_url":    self._preview_url(),
+            "error_message":  self.error_message or "",
             **(extra or {}),
         }
         Bus = self.env["bus.bus"].sudo()
@@ -119,13 +157,14 @@ class LugalLocalSendTransfer(models.Model):
             except Exception as exc:
                 _logger.debug("localsend bus notify failed uid=%s: %s", uid, exc)
 
+    # ──────────────────────────────────────────────────────────────────────────
+    # Connectivity check
+    # ──────────────────────────────────────────────────────────────────────────
+
     def _preflight_device_check(self, device, timeout=5):
         """
         Quick TCP-level reachability probe before the full LocalSend handshake.
         Returns (ok: bool, error_msg: str | None).
-        Connects to the device's IP+port with a short timeout to detect
-        'connection refused' or 'host unreachable' before spending time on
-        a full prepare-upload round trip.
         """
         import socket
         ip   = device.ip_address or ""
@@ -138,34 +177,58 @@ class LugalLocalSendTransfer(models.Model):
             return True, None
         except ConnectionRefusedError:
             return False, (
-                "Cannot reach %s (%s port %s): connection refused. "
-                "Make sure the LocalSend app is open and set to receive on that device."
+                "LocalSend app is not running on %s (%s:%s). "
+                "The file is available for download from the app."
                 % (device.name or "device", ip, port)
             )
         except OSError as exc:
             return False, (
-                "Cannot reach %s (%s port %s): %s. "
-                "Check the device is online and on the same network as the server."
+                "Cannot reach %s (%s:%s): %s"
                 % (device.name or "device", ip, port, exc)
             )
 
+    # ──────────────────────────────────────────────────────────────────────────
+    # Send via LocalSend (optional fast-path)
+    # ──────────────────────────────────────────────────────────────────────────
+
     def _send_via_localsend(self):
+        """
+        Attempt to push the file directly to the target device via LocalSend v2.
+
+        If LocalSend is not reachable the transfer is set to 'queued' (NOT failed)
+        and a bus notification is sent with a download_url so the receiver can
+        still get the file from the browser.  The transfer will be retried
+        automatically when the target device next calls /devices/heartbeat.
+        """
         self.ensure_one()
         if not self.attachment_id or not self.target_device_id:
             raise UserError("Attachment and target device are required.")
         if not self.attachment_id.datas:
             raise UserError("Attachment has no binary data.")
 
-        # Pre-flight: verify target device is actually reachable before proceeding
+        # Pre-flight: if target device is not reachable, fall back gracefully.
         reachable, preflight_err = self._preflight_device_check(self.target_device_id)
         if not reachable:
             self.write({
-                "status": "failed",
-                "finished_at": fields.Datetime.now(),
+                "status": "queued",       # NOT failed — file still downloadable
                 "error_message": preflight_err,
             })
-            self._notify_via_bus("localsend.transfer.failed", {"error_message": preflight_err})
-            raise UserError(preflight_err)
+            # Notify receiver: file is available for download + queued for retry
+            self._notify_via_bus(
+                "localsend.transfer.available",
+                {
+                    "delivery_method": "download",
+                    "message": (
+                        "%s sent you '%s'. Download it now or it will be "
+                        "delivered automatically when LocalSend is opened."
+                    ) % (
+                        self.source_user_id.name or "Someone",
+                        self.attachment_id.name or "a file",
+                    ),
+                },
+            )
+            # No exception raised — this is a graceful fallback, not an error.
+            return
 
         self.write({"status": "sending", "started_at": fields.Datetime.now(), "error_message": False})
 
@@ -203,9 +266,6 @@ class LugalLocalSendTransfer(models.Model):
         target_ip    = self.target_device_id.ip_address
         target_port  = self.target_device_id.port or 53317
         base_url = "%s://%s:%s/api/localsend/v2" % (target_proto, target_ip, target_port)
-        # PIN is disabled for direct transfers — require_pin is always False
-        # for auto-registered devices.  Manual devices that still have require_pin
-        # set will use the stored pin_code.
         pin = (self.target_device_id.pin_code or "").strip() if self.target_device_id.require_pin else ""
         prepare_url = base_url + "/prepare-upload"
         if pin:
@@ -221,8 +281,7 @@ class LugalLocalSendTransfer(models.Model):
             with _localsend_urlopen(prepare_req, 30, target_proto) as resp:
                 if resp.status == 204:
                     raise UserError(
-                        "LocalSend returned 204 (no transfer / finished). "
-                        "Check receiver accepts files and PIN if enabled."
+                        "LocalSend returned 204 — receiver declined or finished."
                     )
                 prepare_resp_raw = resp.read().decode("utf-8") or "{}"
             prepare_resp = json.loads(prepare_resp_raw)
@@ -243,15 +302,16 @@ class LugalLocalSendTransfer(models.Model):
             with _localsend_urlopen(upload_req, 120, target_proto):
                 pass
 
-            self.write(
-                {
-                    "status": "sent",
-                    "localsend_session_id": session_id,
-                    "finished_at": fields.Datetime.now(),
-                    "error_message": False,
-                }
+            self.write({
+                "status": "sent",
+                "localsend_session_id": session_id,
+                "finished_at": fields.Datetime.now(),
+                "error_message": False,
+            })
+            self._notify_via_bus(
+                "localsend.transfer.sent",
+                {"delivery_method": "localsend"},
             )
-            self._notify_via_bus("localsend.transfer.sent")
         except error.HTTPError as exc:
             body = ""
             try:
@@ -260,16 +320,20 @@ class LugalLocalSendTransfer(models.Model):
                 body = ""
             msg = "LocalSend HTTP %s at %s — %s" % (exc.code, prepare_url, body or exc.reason)
             _logger.warning("localsend transfer %s failed: %s", self.id, msg)
-            self.write({"status": "failed", "finished_at": fields.Datetime.now(), "error_message": msg})
-            self._notify_via_bus("localsend.transfer.failed", {"error_message": msg})
-            raise UserError(msg)
+            self.write({"status": "queued", "error_message": msg})
+            self._notify_via_bus(
+                "localsend.transfer.available",
+                {"delivery_method": "download", "error_message": msg},
+            )
         except UserError:
             raise
         except Exception as exc:
-            msg = "LocalSend transfer to %s (%s:%s) failed: %s" % (
+            msg = "LocalSend push to %s (%s:%s) failed: %s" % (
                 self.target_device_id.name or "device", target_ip, target_port, exc
             )
             _logger.exception("localsend transfer %s failed", self.id)
-            self.write({"status": "failed", "finished_at": fields.Datetime.now(), "error_message": msg})
-            self._notify_via_bus("localsend.transfer.failed", {"error_message": msg})
-            raise UserError(msg)
+            self.write({"status": "queued", "error_message": msg})
+            self._notify_via_bus(
+                "localsend.transfer.available",
+                {"delivery_method": "download", "error_message": msg},
+            )
