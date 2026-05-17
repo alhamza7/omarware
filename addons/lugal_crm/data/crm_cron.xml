@@ -35,5 +35,16 @@
             <field name="active">True</field>
         </record>
 
+        <!-- Cron: Mark stale user presence (online→afk→offline) and broadcast via bus every 2 min -->
+        <record id="cron_mark_stale_presence" model="ir.cron">
+            <field name="name">Lugal CRM: Mark Stale User Presence</field>
+            <field name="model_id" ref="model_lugal_crm_user_presence"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_mark_stale_presence()</field>
+            <field name="interval_number">2</field>
+            <field name="interval_type">minutes</field>
+            <field name="active">True</field>
+        </record>
+
     </data>
 </odoo>

@@ -3,36 +3,43 @@
 CRM User Presence API — WebSocket-first design
 -----------------------------------------------
 
-The FE never polls.  Here is the complete flow:
+The FE never polls.  Complete flow:
 
-  1. App loads  →  POST /presence/subscribe
-                   • Marks caller as online
-                   • Returns FULL snapshot of all users' current status
-                   • Server broadcasts caller's new status to all via bus
+  1. App loads   →  POST /presence/subscribe
+                    • Marks caller as online
+                    • Returns FULL snapshot of all users
+                    • Server broadcasts new status to all via bus
 
-  2. App open   →  subscribe to bus channel  "crm_presence"
-                   • Receive  crm.user.presence.changed  whenever ANY user changes status
-                   • Update local state immediately — no API call needed
+  2. Bus open    →  subscribe to channel "crm_presence"
+                    • Event: crm.user.presence.changed
+                    • Update local state — NO further API calls needed
 
-  3. Keep-alive →  POST /presence/ping  every  120 s  (2 min)
-                   • Just keeps the "online" window alive
-                   • Returns only the caller's own record (cheap)
-                   • Status auto-downgrades server-side:
-                       online  →  afk     after 5 min without a ping
-                       afk     →  offline after 60 min without a ping
+  3. Keep-alive  →  POST /presence/ping  every  30 s
+                    • Keeps "online" window alive
+                    • Server cron (every 2 min) auto-broadcasts stale transitions
 
-  4. Tab close  →  POST /presence/disconnect  (in  window.beforeunload)
-                   • Marks caller as offline immediately
-                   • Server broadcasts to all
+  4. Idle detect →  FE: no activity for 3 min → POST /presence/set_status {status:"afk"}
+                    FE: activity resumes      → POST /presence/ping (back to online)
+
+  5. Tab hidden  →  visibilitychange + idle timer → set_status afk
+
+  6. Tab close   →  POST /presence/disconnect  (beforeunload via sendBeacon)
+                    • Marks offline immediately, broadcasts to all
+
+Thresholds (server-enforced, cron-broadcast)
+--------------------------------------------
+  online   — pinged within the last 2 minutes
+  afk      — pinged between 2 and 5 minutes ago (or explicit set_status)
+  offline  — no ping for more than 5 minutes   (or explicit disconnect)
 
 Routes
 ------
-  POST /api/crm/presence/subscribe    — connect & get full snapshot (call once on load)
-  POST /api/crm/presence/ping         — keepalive every 2 min (lightweight)
+  POST /api/crm/presence/subscribe    — connect & get full snapshot
+  POST /api/crm/presence/ping         — keepalive every 30 s
   POST /api/crm/presence/disconnect   — mark offline on tab close
-  POST /api/crm/presence/users        — on-demand snapshot (optional, FE normally uses bus)
-  POST /api/crm/presence/me           — get own record
-  POST /api/crm/presence/set_status   — manually set afk / status message
+  POST /api/crm/presence/set_status   — set afk / status message
+  POST /api/crm/presence/users        — on-demand snapshot (fallback)
+  POST /api/crm/presence/me           — own record only
 """
 
 import logging
@@ -196,7 +203,7 @@ class PresenceController(http.Controller):
                 type='jsonrpc', auth='none', csrf=False, methods=['POST'])
     def presence_ping(self, status_message=None, **kwargs):
         """
-        Keepalive — call every 120 seconds while the app is open.
+        Keepalive — call every 30 seconds while the app is open and user is active.
 
         Only updates last_seen_at and broadcasts if the status changed.
         Returns only the caller's own record (no full user list).

@@ -5,9 +5,15 @@ lugal.crm.user.presence
 Tracks real-time online/AFK/offline status for CRM users.
 
 Status rules (server-computed):
-  online   — last_seen_at within the past 5 minutes
-  afk      — last_seen_at between 5 minutes and 1 hour ago
-  offline  — last_seen_at older than 1 hour OR never pinged
+  online   — last_seen_at within the past 2 minutes
+  afk      — last_seen_at between 2 and 5 minutes ago
+  offline  — last_seen_at older than 5 minutes OR never pinged
+
+These thresholds align with a 30-second FE ping interval:
+  - 4 missed pings (2 min)  → online → afk
+  - 10 missed pings (5 min) → afk   → offline
+
+A cron job runs every 2 minutes to auto-broadcast stale transitions.
 """
 
 import datetime as _dt
@@ -16,8 +22,8 @@ from datetime import timezone
 from odoo import models, fields, api
 
 # Thresholds (in minutes)
-ONLINE_THRESHOLD_MIN = 5
-AFK_THRESHOLD_MIN    = 60
+ONLINE_THRESHOLD_MIN = 2   # last ping within 2 min  → online
+AFK_THRESHOLD_MIN    = 5   # last ping within 5 min  → afk
 
 
 class CrmUserPresence(models.Model):
@@ -137,6 +143,7 @@ class CrmUserPresence(models.Model):
         """
         Cron-callable: recalculate status for all records and emit bus events
         when a user transitions online→afk or afk→offline.
+        Runs every 2 minutes via ir.cron.
         """
         all_records = self.search([('status', '!=', 'offline')])
         for rec in all_records:
@@ -144,6 +151,11 @@ class CrmUserPresence(models.Model):
             if new_status != rec.status:
                 rec.status = new_status
                 self._broadcast_status(rec)
+
+    @api.model
+    def _cron_mark_stale_presence(self):
+        """Entry point for the ir.cron — marks stale presences and broadcasts."""
+        self.mark_stale()
 
     def _broadcast_status(self, record):
         """Push a bus event so all clients know a user's status changed."""
