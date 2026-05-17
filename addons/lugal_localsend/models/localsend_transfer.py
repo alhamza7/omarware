@@ -98,20 +98,37 @@ class LugalLocalSendTransfer(models.Model):
     # Download URL helpers
     # ──────────────────────────────────────────────────────────────────────────
 
+    def _get_attachment_access_token(self):
+        """
+        Return (or generate) the access_token for this transfer's attachment.
+        The token allows unauthenticated browser download — no Odoo session required.
+        """
+        att = self.attachment_id.sudo()
+        if not att:
+            return ""
+        if not att.access_token:
+            att.generate_access_token()
+        return att.access_token or ""
+
     def _download_url(self):
         """
-        Return the Odoo download URL for this transfer's attachment.
-        The browser can download the file directly via this URL without
-        requiring LocalSend to be installed.
+        Return the Odoo download URL for this transfer's attachment including
+        an access_token so the browser can download without an active Odoo session.
         """
         if not self.attachment_id:
             return ""
+        token = self._get_attachment_access_token()
+        if token:
+            return "/web/content/%d?access_token=%s&download=true" % (self.attachment_id.id, token)
         return "/web/content/%d?download=true" % self.attachment_id.id
 
     def _preview_url(self):
-        """Inline view URL (no download=true, good for images/PDFs in-browser)."""
+        """Inline view URL with access_token (good for images/PDFs in-browser)."""
         if not self.attachment_id:
             return ""
+        token = self._get_attachment_access_token()
+        if token:
+            return "/web/content/%d?access_token=%s" % (self.attachment_id.id, token)
         return "/web/content/%d" % self.attachment_id.id
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -210,10 +227,10 @@ class LugalLocalSendTransfer(models.Model):
         reachable, preflight_err = self._preflight_device_check(self.target_device_id)
         if not reachable:
             self.write({
-                "status": "queued",       # NOT failed — file still downloadable
+                "status": "available",    # file is ready for browser download
                 "error_message": preflight_err,
             })
-            # Notify receiver: file is available for download + queued for retry
+            # Notify receiver: file is available for download + will retry via heartbeat
             self._notify_via_bus(
                 "localsend.transfer.available",
                 {
@@ -320,7 +337,7 @@ class LugalLocalSendTransfer(models.Model):
                 body = ""
             msg = "LocalSend HTTP %s at %s — %s" % (exc.code, prepare_url, body or exc.reason)
             _logger.warning("localsend transfer %s failed: %s", self.id, msg)
-            self.write({"status": "queued", "error_message": msg})
+            self.write({"status": "available", "error_message": msg})
             self._notify_via_bus(
                 "localsend.transfer.available",
                 {"delivery_method": "download", "error_message": msg},
@@ -332,7 +349,7 @@ class LugalLocalSendTransfer(models.Model):
                 self.target_device_id.name or "device", target_ip, target_port, exc
             )
             _logger.exception("localsend transfer %s failed", self.id)
-            self.write({"status": "queued", "error_message": msg})
+            self.write({"status": "available", "error_message": msg})
             self._notify_via_bus(
                 "localsend.transfer.available",
                 {"delivery_method": "download", "error_message": msg},

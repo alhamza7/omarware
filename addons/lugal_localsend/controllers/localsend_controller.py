@@ -203,12 +203,12 @@ class LocalSendCrmController(http.Controller):
                     vals["ip_address"] = ip
                 device.write(vals)
 
-                # If the device just came back online, auto-retry any queued transfers
+                # If the device just came back online, auto-retry any available/queued/failed transfers
                 # that were targeting this device.
                 if not was_online:
                     pending = request.env["lugal.localsend.transfer"].sudo().search([
                         ("target_device_id", "=", device.id),
-                        ("status", "in", ["queued", "failed"]),
+                        ("status", "in", ["available", "queued", "failed"]),
                     ], limit=10, order="create_date asc")
                     if pending:
                         _logger.info(
@@ -446,6 +446,12 @@ class LocalSendCrmController(http.Controller):
         port  = int(t.target_device_id.port or 53317) if t.target_device_id else 53317
         proto = (t.target_device_id.protocol or "http") if t.target_device_id else "http"
         att_id = t.attachment_id.id if t.attachment_id else None
+        # Generate / reuse access token so the URL works without an Odoo session
+        download_url = ""
+        preview_url  = ""
+        if att_id:
+            download_url = t._download_url()
+            preview_url  = t._preview_url()
         return {
             "id":                   t.id,
             "name":                 t.name or "",
@@ -465,9 +471,9 @@ class LocalSendCrmController(http.Controller):
             "file_name":            t.attachment_id.name if t.attachment_id else "",
             "file_size":            t.file_size or 0,
             "mime_type":            t.mime_type or "",
-            # Browser-accessible download URL — always present regardless of LocalSend status
-            "download_url":         "/web/content/%d?download=true" % att_id if att_id else "",
-            "preview_url":          "/web/content/%d" % att_id if att_id else "",
+            # access_token-signed URLs — work in the browser without an Odoo session
+            "download_url":         download_url,
+            "preview_url":          preview_url,
             "error_message":        t.error_message or "",
             "localsend_session_id": t.localsend_session_id or "",
             "started_at":           t.started_at.isoformat() if t.started_at else None,
