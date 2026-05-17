@@ -85,7 +85,40 @@ class CrmMarquee(models.Model):
             _logger.exception('[Marquee] bus push failed for id=%s', self.id)
 
     # ------------------------------------------------------------------ #
-    @api.model_create_multi
+    @api.model
+    def _cron_fire_scheduled_events(self):
+        """
+        Called every minute by ir.cron.
+        1. Fire 'crm.marquee.activated' for marquees whose starts_at just passed
+           (became active in the last 2 minutes). This is needed when a marquee
+           was created with a future starts_at — the initial crm.marquee.new event
+           fired at creation time but the FE couldn't show it yet.
+        2. Fire 'crm.marquee.expired' for marquees whose expires_at just passed
+           (expired in the last 2 minutes). This lets the FE remove the marquee
+           automatically without any user action.
+        """
+        import datetime as _dt
+        now         = fields.Datetime.now()
+        window_ago  = now - _dt.timedelta(minutes=2)
+
+        # Marquees that just became active
+        activating = self.search([
+            ('starts_at',  '>=', window_ago),
+            ('starts_at',  '<=', now),
+            ('expires_at', '>=', now),
+        ])
+        for rec in activating:
+            rec._push_to_all_users('crm.marquee.activated')
+            _logger.info('[Marquee Cron] activated id=%s starts_at=%s', rec.id, rec.starts_at)
+
+        # Marquees that just expired
+        expiring = self.search([
+            ('expires_at', '>=', window_ago),
+            ('expires_at', '<=', now),
+        ])
+        for rec in expiring:
+            rec._push_to_all_users('crm.marquee.expired')
+            _logger.info('[Marquee Cron] expired id=%s expires_at=%s', rec.id, rec.expires_at)
     def create(self, vals_list):
         records = super().create(vals_list)
         for rec in records:

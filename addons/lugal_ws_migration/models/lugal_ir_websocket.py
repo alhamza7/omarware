@@ -154,6 +154,12 @@ class LugalIrWebsocket(models.AbstractModel):
         # Global stories broadcast channel
         result.append('supply_stories')
 
+        # CRM marquee / announcements broadcast — all authenticated users
+        result.append('crm_broadcast')
+
+        # CRM presence updates — all authenticated users
+        result.append('crm_presence')
+
         _logger.debug(
             '[WS] Channel list built for uid=%s at %.3f (%d channels)',
             uid, time.time(), len(result),

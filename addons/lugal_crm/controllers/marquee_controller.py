@@ -14,6 +14,7 @@ DELETE /api/crm/marquee/<id>           – Admin: hard-delete
 """
 
 import logging
+import datetime as _dt
 from odoo import http, fields
 from odoo.http import request
 
@@ -38,8 +39,42 @@ def _json_err(msg, code=400):
 def _require_admin(uid):
     """Return True when the user has at least manager-level access."""
     user = request.env['res.users'].sudo().browse(uid)
-    # Odoo internal admin or anyone in group_system
     return user.has_group('base.group_system') or user._is_admin()
+
+
+def _parse_dt(value):
+    """
+    Parse an ISO-8601 datetime string (with or without timezone offset) into a
+    naive UTC datetime suitable for Odoo Datetime fields.
+
+    Accepts:
+      "2026-05-17 18:00:00"         → treated as UTC
+      "2026-05-17T18:00:00"         → treated as UTC
+      "2026-05-17T21:00:00+03:00"   → converted to UTC (18:00)
+      "2026-05-17T18:00:00Z"        → UTC
+      datetime object (tz-aware or naive)  → normalised to naive UTC
+    Returns naive datetime (UTC) or None if value is falsy.
+    """
+    if not value:
+        return None
+    if isinstance(value, _dt.datetime):
+        if value.tzinfo is not None:
+            return value.astimezone(_dt.timezone.utc).replace(tzinfo=None)
+        return value
+    # String path — try dateutil first (handles all ISO-8601 variants)
+    try:
+        from dateutil import parser as _dparser
+        dt = _dparser.isoparse(value)
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(_dt.timezone.utc).replace(tzinfo=None)
+        return dt
+    except Exception:
+        pass
+    # Fallback: Odoo's own parser (handles "YYYY-MM-DD HH:MM:SS" only)
+    try:
+        return fields.Datetime.from_string(value)
+    except Exception:
+        raise ValueError(f"Cannot parse datetime: {value!r}. Use ISO-8601, e.g. 2026-05-17T18:00:00+03:00")
 
 
 # ---------------------------------------------------------------------------
@@ -72,13 +107,12 @@ class MarqueeController(http.Controller):
                 return _json_err('expires_at is required (ISO-8601 UTC)')
 
             Marquee = request.env['lugal.crm.marquee'].sudo()
-            now_dt  = fields.Datetime.now()
 
             vals = {
                 'message':    message,
                 'message_ar': message_ar or '',
-                'expires_at': fields.Datetime.from_string(expires_at) if isinstance(expires_at, str) else expires_at,
-                'starts_at':  fields.Datetime.from_string(starts_at)  if isinstance(starts_at, str)  else (starts_at or now_dt),
+                'expires_at': _parse_dt(expires_at),
+                'starts_at':  _parse_dt(starts_at) if starts_at else fields.Datetime.now(),
                 'bg_color':   bg_color or '#1E3A5F',
                 'text_color': text_color or '#FFFFFF',
                 'speed':      int(speed or 60),
@@ -172,9 +206,9 @@ class MarqueeController(http.Controller):
             if text_color is not None: vals['text_color'] = text_color
             if speed      is not None: vals['speed']      = int(speed)
             if starts_at  is not None:
-                vals['starts_at'] = fields.Datetime.from_string(starts_at) if isinstance(starts_at, str) else starts_at
+                vals['starts_at'] = _parse_dt(starts_at)
             if expires_at is not None:
-                vals['expires_at'] = fields.Datetime.from_string(expires_at) if isinstance(expires_at, str) else expires_at
+                vals['expires_at'] = _parse_dt(expires_at)
 
             if not vals:
                 return _json_err('Nothing to update')
