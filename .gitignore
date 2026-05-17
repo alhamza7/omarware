@@ -92,8 +92,9 @@ pos-detailed-test/
 pos-fixed-test/
 pos-test-screenshots/
 
-# Logs directory
-logs/
+# patch backup files
+*.bak.*
+*.bak
 
 # Spreadsheet/office temp files
 ~$*
