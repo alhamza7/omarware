@@ -92,12 +92,52 @@ class LugalLocalSendTransfer(models.Model):
     def action_cancel(self):
         self.write({"status": "cancelled", "finished_at": fields.Datetime.now()})
 
+    def _preflight_device_check(self, device, timeout=5):
+        """
+        Quick TCP-level reachability probe before the full LocalSend handshake.
+        Returns (ok: bool, error_msg: str | None).
+        Connects to the device's IP+port with a short timeout to detect
+        'connection refused' or 'host unreachable' before spending time on
+        a full prepare-upload round trip.
+        """
+        import socket
+        ip   = device.ip_address or ""
+        port = int(device.port or 53317)
+        if not ip:
+            return False, "Device has no IP address stored."
+        try:
+            with socket.create_connection((ip, port), timeout=timeout):
+                pass
+            return True, None
+        except ConnectionRefusedError:
+            return False, (
+                "Cannot reach %s (%s port %s): connection refused. "
+                "Make sure the LocalSend app is open and set to receive on that device."
+                % (device.name or "device", ip, port)
+            )
+        except OSError as exc:
+            return False, (
+                "Cannot reach %s (%s port %s): %s. "
+                "Check the device is online and on the same network as the server."
+                % (device.name or "device", ip, port, exc)
+            )
+
     def _send_via_localsend(self):
         self.ensure_one()
         if not self.attachment_id or not self.target_device_id:
             raise UserError("Attachment and target device are required.")
         if not self.attachment_id.datas:
             raise UserError("Attachment has no binary data.")
+
+        # Pre-flight: verify target device is actually reachable before proceeding
+        reachable, preflight_err = self._preflight_device_check(self.target_device_id)
+        if not reachable:
+            self.write({
+                "status": "failed",
+                "finished_at": fields.Datetime.now(),
+                "error_message": preflight_err,
+            })
+            raise UserError(preflight_err)
 
         self.write({"status": "sending", "started_at": fields.Datetime.now(), "error_message": False})
 
@@ -132,11 +172,9 @@ class LugalLocalSendTransfer(models.Model):
         }
 
         target_proto = self.target_device_id.protocol or "http"
-        base_url = "%s://%s:%s/api/localsend/v2" % (
-            target_proto,
-            self.target_device_id.ip_address,
-            self.target_device_id.port or 53317,
-        )
+        target_ip    = self.target_device_id.ip_address
+        target_port  = self.target_device_id.port or 53317
+        base_url = "%s://%s:%s/api/localsend/v2" % (target_proto, target_ip, target_port)
         # PIN is disabled for direct transfers — require_pin is always False
         # for auto-registered devices.  Manual devices that still have require_pin
         # set will use the stored pin_code.
@@ -191,12 +229,16 @@ class LugalLocalSendTransfer(models.Model):
                 body = exc.read().decode("utf-8")
             except Exception:
                 body = ""
-            msg = "LocalSend HTTP error %s %s" % (exc.code, body or exc.reason)
+            msg = "LocalSend HTTP %s at %s — %s" % (exc.code, prepare_url, body or exc.reason)
             _logger.warning("localsend transfer %s failed: %s", self.id, msg)
             self.write({"status": "failed", "finished_at": fields.Datetime.now(), "error_message": msg})
             raise UserError(msg)
+        except UserError:
+            raise
         except Exception as exc:
-            msg = "LocalSend transfer failed: %s" % exc
+            msg = "LocalSend transfer to %s (%s:%s) failed: %s" % (
+                self.target_device_id.name or "device", target_ip, target_port, exc
+            )
             _logger.exception("localsend transfer %s failed", self.id)
             self.write({"status": "failed", "finished_at": fields.Datetime.now(), "error_message": msg})
             raise UserError(msg)

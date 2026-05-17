@@ -294,6 +294,83 @@ class LocalSendCrmController(http.Controller):
     # ------------------------------------------------------------------
 
     @http.route(
+        "/api/crm/localsend/devices/<int:device_id>/ping",
+        type="jsonrpc",
+        auth="none",
+        csrf=False,
+        methods=["POST"],
+    )
+    def localsend_device_ping(self, device_id, **kwargs):
+        """
+        Test TCP reachability of a specific device.
+
+        Returns whether the device is currently reachable at its stored IP/port
+        (i.e., whether LocalSend is running and accepting connections).
+        Also updates the ``is_online`` flag on the device.
+
+        Optional params:
+          timeout  — TCP connect timeout in seconds (default 5, max 15)
+        """
+        import socket
+        try:
+            uid = ensure_jwt_user_id()
+            if not uid:
+                return {"success": False, "error": "Unauthorized", "data": None}
+
+            device = request.env["lugal.localsend.device"].sudo().browse(device_id).exists()
+            if not device:
+                return {"success": False, "error": "Device not found", "data": None}
+
+            ip   = device.ip_address or ""
+            port = int(device.port or _DEFAULT_PORT)
+            timeout = min(15, max(1, int(kwargs.get("timeout") or 5)))
+
+            if not ip:
+                return {
+                    "success": False,
+                    "error": "Device has no IP address stored.",
+                    "data": {"device_id": device_id, "reachable": False},
+                }
+
+            reachable = False
+            reason    = ""
+            try:
+                with socket.create_connection((ip, port), timeout=timeout):
+                    reachable = True
+            except ConnectionRefusedError:
+                reason = "Connection refused — LocalSend app is likely not running on the device."
+            except socket.timeout:
+                reason = "Timed out after %ss — device may be offline or on a different network." % timeout
+            except OSError as exc:
+                reason = str(exc)
+
+            # Keep the is_online flag in sync
+            device.write({
+                "is_online": reachable,
+                **({"last_seen": fields.Datetime.now()} if reachable else {}),
+            })
+
+            result = {
+                "device_id":   device_id,
+                "device_name": device.name or "",
+                "ip_address":  ip,
+                "port":        port,
+                "reachable":   reachable,
+                "reason":      reason,
+            }
+            if reachable:
+                return {"success": True, "data": result}
+            return {
+                "success": False,
+                "error": "Device not reachable: %s" % reason,
+                "data":  result,
+            }
+        except Exception as exc:
+            _logger.exception("localsend_device_ping failed")
+            return {"success": False, "error": str(exc), "data": None}
+
+
+    @http.route(
         "/api/crm/localsend/devices/create",
         type="jsonrpc",
         auth="none",
@@ -343,6 +420,9 @@ class LocalSendCrmController(http.Controller):
     # ------------------------------------------------------------------
 
     def _serialize_transfer(self, t):
+        ip   = t.target_device_id.ip_address if t.target_device_id else ""
+        port = int(t.target_device_id.port or 53317) if t.target_device_id else 53317
+        proto = (t.target_device_id.protocol or "http") if t.target_device_id else "http"
         return {
             "id":                   t.id,
             "name":                 t.name or "",
@@ -355,6 +435,9 @@ class LocalSendCrmController(http.Controller):
             "source_device_name":   t.source_device_id.name if t.source_device_id else "",
             "target_device_id":     t.target_device_id.id if t.target_device_id else None,
             "target_device_name":   t.target_device_id.name if t.target_device_id else "",
+            "target_device_ip":     ip,
+            "target_device_port":   port,
+            "target_device_url":    "%s://%s:%s" % (proto, ip, port) if ip else "",
             "attachment_id":        t.attachment_id.id if t.attachment_id else None,
             "file_name":            t.attachment_id.name if t.attachment_id else "",
             "file_size":            t.file_size or 0,
